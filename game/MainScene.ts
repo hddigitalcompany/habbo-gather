@@ -11,6 +11,11 @@ import Phaser from "phaser";
  *   - scene.upsertRemotePlayer(...) -> chamado quando um jogador remoto se move/entra
  *   - scene.removeRemotePlayer(id)  -> chamado quando um jogador remoto sai
  *   - scene.getLocalPosition()      -> lido para calcular distância/proximidade
+ *
+ * Cada avatar é composto por DUAS sprites empilhadas: "avatar-skin" (pele,
+ * cabelo, rosto, sapato — sempre igual pra todo mundo) e "avatar-clothes"
+ * (tronco, braços, pernas — recebe um tint com a cor do jogador). Assim a
+ * cor de identificação de cada jogador só pinta a roupa, não a cabeça toda.
  */
 export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -34,9 +39,13 @@ export default class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.spritesheet("avatar", "/assets/avatar.png", {
-      frameWidth: 48,
-      frameHeight: 48,
+    this.load.spritesheet("avatar-skin", "/assets/avatar_skin.png", {
+      frameWidth: 72,
+      frameHeight: 72,
+    });
+    this.load.spritesheet("avatar-clothes", "/assets/avatar_clothes.png", {
+      frameWidth: 72,
+      frameHeight: 72,
     });
     this.load.image("room", "/assets/room.png");
   }
@@ -58,7 +67,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private createAnimations() {
-    if (this.anims.exists("walk-down")) return;
+    if (this.anims.exists("walk-down-skin")) return;
     const dirs: Array<[string, number]> = [
       ["down", 0],
       ["left", 4],
@@ -66,12 +75,14 @@ export default class MainScene extends Phaser.Scene {
       ["up", 12],
     ];
     for (const [dir, start] of dirs) {
-      this.anims.create({
-        key: `walk-${dir}`,
-        frames: this.anims.generateFrameNumbers("avatar", { start, end: start + 3 }),
-        frameRate: 8,
-        repeat: -1,
-      });
+      for (const layer of ["skin", "clothes"] as const) {
+        this.anims.create({
+          key: `walk-${dir}-${layer}`,
+          frames: this.anims.generateFrameNumbers(`avatar-${layer}`, { start, end: start + 3 }),
+          frameRate: 8,
+          repeat: -1,
+        });
+      }
     }
   }
 
@@ -81,11 +92,14 @@ export default class MainScene extends Phaser.Scene {
     color: string,
     name: string
   ): Phaser.GameObjects.Container {
-    const sprite = this.add.sprite(0, 0, "avatar", 0);
-    sprite.setTint(Phaser.Display.Color.HexStringToColor(color).color);
+    // a pele fica embaixo, sem tint (sempre a mesma cor pra todo mundo)
+    const skinSprite = this.add.sprite(0, 0, "avatar-skin", 0);
+    // a roupa fica em cima, com o tint da cor do jogador
+    const clothesSprite = this.add.sprite(0, 0, "avatar-clothes", 0);
+    clothesSprite.setTint(Phaser.Display.Color.HexStringToColor(color).color);
 
     const label = this.add
-      .text(0, -34, name, {
+      .text(0, -46, name, {
         fontSize: "11px",
         color: "#ffffff",
         fontFamily: "monospace",
@@ -94,11 +108,26 @@ export default class MainScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const container = this.add.container(x, y, [sprite, label]);
+    const container = this.add.container(x, y, [skinSprite, clothesSprite, label]);
     container.setSize(48, 48);
-    container.setData("sprite", sprite);
+    container.setData("skinSprite", skinSprite);
+    container.setData("clothesSprite", clothesSprite);
     container.setData("label", label);
     return container;
+  }
+
+  private playWalk(container: Phaser.GameObjects.Container, dir: "down" | "left" | "right" | "up") {
+    const skinSprite = container.getData("skinSprite") as Phaser.GameObjects.Sprite;
+    const clothesSprite = container.getData("clothesSprite") as Phaser.GameObjects.Sprite;
+    skinSprite.anims.play(`walk-${dir}-skin`, true);
+    clothesSprite.anims.play(`walk-${dir}-clothes`, true);
+  }
+
+  private stopWalk(container: Phaser.GameObjects.Container) {
+    const skinSprite = container.getData("skinSprite") as Phaser.GameObjects.Sprite;
+    const clothesSprite = container.getData("clothesSprite") as Phaser.GameObjects.Sprite;
+    skinSprite.anims.stop();
+    clothesSprite.anims.stop();
   }
 
   update(_time: number, delta: number) {
@@ -114,8 +143,6 @@ export default class MainScene extends Phaser.Scene {
     if (up) vy -= 1;
     if (down) vy += 1;
 
-    const sprite = this.localContainer.getData("sprite") as Phaser.GameObjects.Sprite;
-
     if (vx !== 0 || vy !== 0) {
       const len = Math.hypot(vx, vy);
       vx /= len;
@@ -129,12 +156,12 @@ export default class MainScene extends Phaser.Scene {
       this.localContainer.setPosition(nx, ny);
 
       if (Math.abs(vx) > Math.abs(vy)) {
-        sprite.anims.play(vx > 0 ? "walk-right" : "walk-left", true);
+        this.playWalk(this.localContainer, vx > 0 ? "right" : "left");
       } else {
-        sprite.anims.play(vy > 0 ? "walk-down" : "walk-up", true);
+        this.playWalk(this.localContainer, vy > 0 ? "down" : "up");
       }
     } else {
-      sprite.anims.stop();
+      this.stopWalk(this.localContainer);
     }
 
     if (_time - this.lastSent > 50) {
@@ -149,23 +176,23 @@ export default class MainScene extends Phaser.Scene {
       container = this.createAvatar(x, y, color, name);
       this.remoteContainers.set(id, container);
     } else {
-      const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
       const dx = x - container.x;
       const dy = y - container.y;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 1) {
-        sprite.anims.play(dx > 0 ? "walk-right" : "walk-left", true);
+        this.playWalk(container, dx > 0 ? "right" : "left");
       } else if (Math.abs(dy) > 1) {
-        sprite.anims.play(dy > 0 ? "walk-down" : "walk-up", true);
+        this.playWalk(container, dy > 0 ? "down" : "up");
       } else {
-        sprite.anims.stop();
+        this.stopWalk(container);
       }
+      const target = container;
       this.tweens.add({
         targets: container,
         x,
         y,
         duration: 90,
         ease: "Linear",
-        onComplete: () => sprite.anims.stop(),
+        onComplete: () => this.stopWalk(target),
       });
     }
   }
