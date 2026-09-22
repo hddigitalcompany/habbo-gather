@@ -14,7 +14,7 @@ type ChatMessage = { id: string; text: string; ts: number };
 const PROXIMITY_CONNECT = 160;
 const PROXIMITY_DISCONNECT = 220;
 
-const PARTYKIT_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST || "127.0.0.1:1999";
+const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
 
 export default function GameRoom() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -208,7 +208,7 @@ export default function GameRoom() {
         };
       });
 
-      const socket = new PartySocket({ host: PARTYKIT_HOST, room: "sala-principal" });
+      const socket = new PartySocket({ host: REALTIME_HOST, room: "sala-principal" });
       socketRef.current = socket;
 
       socket.addEventListener("open", () => setStatus("Conectado"));

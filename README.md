@@ -59,10 +59,17 @@ Se quiser mexer na arte, o script que gera o piso e o avatar está em
 python3 scripts/generate_assets.py
 ```
 
-## Deploy (quando formos publicar de verdade)
+## Deploy
 
 - O site (Next.js) vai pro Vercel, do mesmo jeito que o Painel Pessoal.
-- O servidor multiplayer (pasta `party/`) é publicado à parte com
-  `npm run deploy:party` (usa o PartyKit, que roda na Cloudflare).
+- O servidor multiplayer (pasta `server/`, um servidor Node.js + WebSocket
+  simples) é publicado à parte, no Render (plano gratuito), conectado
+  direto no repositório do GitHub.
+- Depois de publicar o servidor no Render, configure a variável de ambiente
+  `NEXT_PUBLIC_REALTIME_HOST` no Vercel apontando pro host que o Render deu
+  (ex: `habbo-gather-realtime.onrender.com`, sem `https://` na frente).
 
-Isso ainda não foi feito nesta etapa — é um dos próximos passos.
+Observação: as pastas `party/` e o arquivo `partykit.json` são de uma
+tentativa anterior (usando PartyKit/Cloudflare) que esbarrou numa
+incompatibilidade recente da própria Cloudflare com contas gratuitas. Não
+são mais usados — o servidor atual é o `server/index.js`.
