@@ -36,10 +36,10 @@ draw.rectangle([rug_x0, rug_y0, rug_x1, rug_y1], fill=RUG)
 draw.rectangle([rug_x0, rug_y0, rug_x1, rug_y1], outline=RUG_BORDER, width=4)
 
 # planta (esquerda)
-px, py = 80, 160
-draw.rectangle([px - 4, py + 30, px + 20, py + 50], fill=(90, 60, 40))
+px_, py_ = 80, 160
+draw.rectangle([px_ - 4, py_ + 30, px_ + 20, py_ + 50], fill=(90, 60, 40))
 for dx, dy in [(-14, -10), (0, -24), (14, -10), (-6, -18), (8, -18)]:
-    draw.ellipse([px + dx, py + dy, px + dx + 22, py + dy + 22], fill=(40, 120, 70))
+    draw.ellipse([px_ + dx, py_ + dy, px_ + dx + 22, py_ + dy + 22], fill=(40, 120, 70))
 
 # mesa (direita)
 tx, ty = 640, 200
@@ -50,53 +50,106 @@ draw.rectangle([tx + 24, ty + 12, tx + 34, ty + 50], fill=(80, 55, 32))
 room.save(os.path.join(OUT_DIR, "room.png"))
 
 # ---------- SPRITESHEET DO AVATAR ----------
-FRAME = 32
-sheet = Image.new("RGBA", (FRAME * 4, FRAME * 4), (0, 0, 0, 0))
+# Estilo pixel art "blocado" (grade lógica pequena, escalada sem suavização —
+# igual ao jeito que os avatares do Habbo são desenhados: cabeça grande,
+# corpo pequeno, contornos nítidos).
+GRID = 16              # grade lógica: 16x16 "pixels" por frame
+SCALE = 3               # cada pixel lógico vira um quadrado de 3x3 pixels reais
+FRAME = GRID * SCALE    # 48x48 por frame
 
-BODY = (235, 230, 245, 255)
-OUTLINE = (25, 20, 35, 255)
-SHOE = (30, 25, 40, 255)
-EYE = (20, 15, 30, 255)
+BODY_LIGHT = (240, 240, 245, 255)   # lado claro do corpo/cabeça — recebe a cor do jogador
+BODY_SHADOW = (176, 176, 188, 255)  # lado sombra — fica uma versão mais escura da mesma cor
+HAIR = (42, 32, 27, 255)
+EYE = (20, 16, 25, 255)
+SHOE = (32, 25, 36, 255)
 
 
-def draw_avatar(canvas, ox, oy, direction, frame_idx):
-    d = ImageDraw.Draw(canvas)
-    bob = [0, -1, 0, 1][frame_idx % 4]
-    leg_offset = [4, 0, -4, 0][frame_idx % 4]
+def new_grid():
+    return [[None] * GRID for _ in range(GRID)]
 
-    cx = ox + FRAME // 2
-    head_r = 7
-    head_y = oy + 10 + bob
 
-    d.rectangle(
-        [cx - 6, oy + 24 + bob, cx - 2, oy + 29 + bob + (2 if leg_offset > 0 else 0)],
-        fill=SHOE,
-    )
-    d.rectangle(
-        [cx + 2, oy + 24 + bob, cx + 6, oy + 29 + bob + (2 if leg_offset < 0 else 0)],
-        fill=SHOE,
-    )
+def fill(grid, x0, y0, x1, y1, color):
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1 + 1):
+            if 0 <= x < GRID and 0 <= y < GRID:
+                grid[y][x] = color
 
-    d.rounded_rectangle(
-        [cx - 8, oy + 15 + bob, cx + 8, oy + 26 + bob], radius=4, fill=BODY, outline=OUTLINE, width=1
-    )
 
-    d.ellipse([cx - head_r, head_y - head_r, cx + head_r, head_y + head_r], fill=BODY, outline=OUTLINE, width=1)
+def dot(grid, x, y, color):
+    if 0 <= x < GRID and 0 <= y < GRID:
+        grid[y][x] = color
 
-    if direction == "down":
-        d.point([(cx - 3, head_y - 1), (cx + 3, head_y - 1)], fill=EYE)
+
+def build_frame(direction, step):
+    """step 0/2 = parado, 1/3 = meio-passo (pernas e braços alternando)."""
+    g = new_grid()
+
+    # cabeça (grande, estilo chibi) — metade direita sombreada pra dar volume
+    fill(g, 4, 1, 11, 8, BODY_LIGHT)
+    fill(g, 8, 1, 11, 8, BODY_SHADOW)
+    for cx, cy in [(4, 1), (11, 1), (4, 8), (11, 8)]:
+        dot(g, cx, cy, None)  # arredonda os 4 cantos da cabeça
+
+    # cabelo
+    fill(g, 4, 0, 11, 2, HAIR)
+    dot(g, 4, 0, None)
+    dot(g, 11, 0, None)
+    fill(g, 4, 3, 4, 4, HAIR)   # costeleta esquerda
+    fill(g, 11, 3, 11, 4, HAIR)  # costeleta direita
+
+    if direction == "up":
+        # de costas: cabelo cobre mais a cabeça, sem rosto
+        fill(g, 4, 3, 11, 5, HAIR)
+    elif direction == "down":
+        dot(g, 6, 5, EYE)
+        dot(g, 9, 5, EYE)
     elif direction == "left":
-        d.point([(cx - 4, head_y - 1)], fill=EYE)
+        dot(g, 6, 5, EYE)
     elif direction == "right":
-        d.point([(cx + 4, head_y - 1)], fill=EYE)
-    # "up" = de costas, sem rosto
+        dot(g, 9, 5, EYE)
+
+    # tronco
+    fill(g, 4, 9, 11, 12, BODY_LIGHT)
+    fill(g, 8, 9, 11, 12, BODY_SHADOW)
+
+    # braços — balançam alternadamente durante o passo
+    arm_l = 1 if step == 1 else 0
+    arm_r = 1 if step == 3 else 0
+    fill(g, 3, 9 + arm_l, 3, 11 + arm_l, BODY_LIGHT)
+    fill(g, 12, 9 + arm_r, 12, 11 + arm_r, BODY_SHADOW)
+
+    # pernas — uma "encolhe" (perna levantada) enquanto anda
+    left_fwd = step == 1
+    right_fwd = step == 3
+    leg_l_bottom = 14 if right_fwd else 15
+    leg_r_bottom = 14 if left_fwd else 15
+
+    fill(g, 5, 13, 6, leg_l_bottom, BODY_LIGHT)
+    fill(g, 9, 13, 10, leg_r_bottom, BODY_SHADOW)
+
+    # sapatos
+    fill(g, 5, leg_l_bottom, 6, leg_l_bottom, SHOE)
+    fill(g, 9, leg_r_bottom, 10, leg_r_bottom, SHOE)
+
+    return g
 
 
+def rasterize(grid):
+    img = Image.new("RGBA", (FRAME, FRAME), (0, 0, 0, 0))
+    for y in range(GRID):
+        for x in range(GRID):
+            color = grid[y][x]
+            if color:
+                img.paste(color, (x * SCALE, y * SCALE, x * SCALE + SCALE, y * SCALE + SCALE))
+    return img
+
+
+sheet = Image.new("RGBA", (FRAME * 4, FRAME * 4), (0, 0, 0, 0))
 for row, direction in enumerate(["down", "left", "right", "up"]):
     for col in range(4):
-        ox, oy = col * FRAME, row * FRAME
-        draw_avatar(sheet, ox, oy, direction, col)
+        frame_img = rasterize(build_frame(direction, col))
+        sheet.paste(frame_img, (col * FRAME, row * FRAME), frame_img)
 
 sheet.save(os.path.join(OUT_DIR, "avatar.png"))
 
-print("Assets gerados em", OUT_DIR)
+print("Assets gerados em", OUT_DIR, f"(avatar: {FRAME}x{FRAME} por frame)")

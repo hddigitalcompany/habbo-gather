@@ -35,8 +35,8 @@ export default class MainScene extends Phaser.Scene {
 
   preload() {
     this.load.spritesheet("avatar", "/assets/avatar.png", {
-      frameWidth: 32,
-      frameHeight: 32,
+      frameWidth: 48,
+      frameHeight: 48,
     });
     this.load.image("room", "/assets/room.png");
   }
@@ -85,7 +85,7 @@ export default class MainScene extends Phaser.Scene {
     sprite.setTint(Phaser.Display.Color.HexStringToColor(color).color);
 
     const label = this.add
-      .text(0, -26, name, {
+      .text(0, -34, name, {
         fontSize: "11px",
         color: "#ffffff",
         fontFamily: "monospace",
@@ -95,7 +95,7 @@ export default class MainScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const container = this.add.container(x, y, [sprite, label]);
-    container.setSize(32, 32);
+    container.setSize(48, 48);
     container.setData("sprite", sprite);
     container.setData("label", label);
     return container;
