@@ -1,0 +1,29 @@
+{
+  "name": "habbo-gather",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev:next": "next dev",
+    "dev:party": "partykit dev",
+    "dev": "concurrently -n next,party -c blue,magenta \"npm:dev:next\" \"npm:dev:party\"",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "deploy:party": "partykit deploy"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "phaser": "^3.80.0",
+    "partysocket": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.0",
+    "partykit": "^0.0.100",
+    "concurrently": "^8.2.0"
+  }
+}
