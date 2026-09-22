@@ -177,7 +177,11 @@ export default function GameRoom() {
       }
     }
 
-    async function init() {
+    // Pede câmera/microfone SEM travar o resto: a sala e o multiplayer sobem
+    // imediatamente (abaixo), e o vídeo local entra assim que (e se) o
+    // navegador liberar a permissão — mesmo que a pessoa demore ou nunca
+    // responda ao aviso.
+    async function requestMedia() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
@@ -189,10 +193,21 @@ export default function GameRoom() {
         }
         localStreamRef.current = stream;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+        // se algum peer já tinha conectado por proximidade antes da câmera
+        // liberar, adiciona as tracks agora nas conexões já abertas.
+        peersRef.current.forEach((pc) => {
+          stream.getTracks().forEach((track) => {
+            const alreadyAdded = pc.getSenders().some((s) => s.track === track);
+            if (!alreadyAdded) pc.addTrack(track, stream);
+          });
+        });
       } catch (e) {
         console.warn("Sem acesso a câmera/microfone — seguindo só com posição/chat.", e);
       }
+    }
 
+    function init() {
       if (!containerRef.current || destroyed) return;
 
       const config = createGameConfig(containerRef.current);
@@ -221,6 +236,9 @@ export default function GameRoom() {
           console.warn("Mensagem inválida do servidor", e);
         }
       });
+
+      // câmera/microfone rodam à parte, sem bloquear nada acima
+      requestMedia();
     }
 
     init();
