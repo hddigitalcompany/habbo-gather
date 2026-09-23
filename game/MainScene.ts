@@ -332,7 +332,10 @@ export default class MainScene extends Phaser.Scene {
     const pos = furnitureWorldPos(furniture);
     this.localActivity = "sentado";
     this.seatedAt = furniture;
-    this.localContainer.setPosition(pos.x, pos.y + (furniture.seatOffsetY ?? 0));
+    this.localContainer.setPosition(
+      pos.x + (furniture.seatOffsetX ?? 0),
+      pos.y + (furniture.seatOffsetY ?? 0)
+    );
     // a pose sentada segue a direção que o móvel "olha" (facing), não a
     // direção que o jogador estava andando antes de sentar
     this.localContainer.setData("dir", furniture.facing);

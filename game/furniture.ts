@@ -27,6 +27,11 @@ export interface FurnitureDef {
    * Negativo = avatar sobe (senta na altura do assento); ainda é uma
    * estimativa visual, ajustar depois de ver renderizado. */
   seatOffsetY?: number;
+  /** mesma ideia, no eixo horizontal -- usado principalmente nas poses
+   * de lado, pra jogar o boneco um pouco mais "pra frente" (na direção
+   * que ele tá olhando) dentro do assento em vez de ficar centralizado
+   * exatamente em cima do pé do móvel. */
+  seatOffsetX?: number;
 }
 
 /**
@@ -57,42 +62,51 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
 // 4 poltronas de teste, uma virada pra cada direção -- pra validar as 4
 // artes (frente/lado esq/lado dir/costas) juntas na sala de uma vez.
 // Posição definitiva vem depois, junto com o resto da mobília da sala.
-// ~16% da altura, reescalado pro tamanho atual da poltrona (~72x76) --
-// estimativa
-const POLTRONA_SEAT_OFFSET_Y = -12;
+//
+// O ajuste de encaixe (seatOffsetY/X) é DIFERENTE por direção -- não dá
+// mais pra usar um valor único pras 4: de frente/costas o boneco tava
+// subindo demais (perto do valor antigo -12), então baixa quase pro
+// zero; de lado ele tava baixo demais, então sobe mais que antes, e
+// ganha um empurrão horizontal (seatOffsetX) na direção que a poltrona
+// olha, pra não ficar sentado bem no meio do "pé" do móvel.
+const SEAT_Y_FRENTE_COSTAS = -4;
+const SEAT_Y_LADO = -18;
+const SEAT_X_LADO = 6;
 
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {
     id: "poltrona-1",
     type: "poltrona",
     col: 9,
-    row: 6, // desceu (era 5) -- pedido do usuário
+    row: 6,
     facing: "down",
-    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+    seatOffsetY: SEAT_Y_FRENTE_COSTAS,
   },
   {
     id: "poltrona-2",
     type: "poltrona",
-    col: 3, // veio mais pro centro (era 2) -- pedido do usuário
-    row: 1, // subiu (era 2) -- pedido do usuário
+    col: 3,
+    row: 1,
     facing: "left",
-    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+    seatOffsetY: SEAT_Y_LADO,
+    seatOffsetX: -SEAT_X_LADO,
   },
   {
     id: "poltrona-3",
     type: "poltrona",
-    col: 9, // veio mais pro centro (era 10) -- pedido do usuário
-    row: 1, // subiu (era 2) -- pedido do usuário
+    col: 9,
+    row: 1,
     facing: "right",
-    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+    seatOffsetY: SEAT_Y_LADO,
+    seatOffsetX: SEAT_X_LADO,
   },
   {
     id: "poltrona-4",
     type: "poltrona",
     col: 5,
-    row: 2, // desceu (era 1) -- pedido do usuário
+    row: 2,
     facing: "up",
-    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+    seatOffsetY: SEAT_Y_FRENTE_COSTAS,
   },
 ];
 
