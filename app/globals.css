@@ -349,6 +349,132 @@ body {
   background: #9376ff;
 }
 
+.profile-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  border-radius: 12px;
+}
+
+.profile-card {
+  position: relative;
+  width: 260px;
+  max-width: 85%;
+  background: #16101f;
+  border: 1px solid #3a2a55;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.profile-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #f5f0ff;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.profile-close:hover {
+  opacity: 1;
+}
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.profile-color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.profile-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.edit-character-btn {
+  margin-top: 10px;
+  width: 100%;
+  background: #7c5cff;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  padding: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.edit-character-btn:hover {
+  background: #9376ff;
+}
+
+.character-editor {
+  margin-top: 12px;
+  border-top: 1px solid #2f2245;
+  padding-top: 10px;
+}
+
+.character-editor h3 {
+  font-size: 12px;
+  margin: 0 0 8px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.hair-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hair-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: #0d0715;
+  border: 2px solid #2f2245;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.hair-option:hover {
+  border-color: #3a2a55;
+}
+
+.hair-option.selected {
+  border-color: #7c5cff;
+}
+
+.hair-thumb {
+  display: block;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.hair-label {
+  font-size: 10px;
+  color: #f5f0ff;
+  opacity: 0.85;
+}
+
 .loading {
   display: flex;
   align-items: center;

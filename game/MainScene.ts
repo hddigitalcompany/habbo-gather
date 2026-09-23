@@ -12,6 +12,7 @@ import {
   blockingFurnitureAt,
 } from "./furniture";
 import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS } from "./grid";
+import { HAIR_CATALOG, DEFAULT_HAIR_ID } from "./customization";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -126,6 +127,13 @@ type LayerKey = (typeof LAYER_DRAW_ORDER)[number];
  * "adicionar" um item, basta trocar o `null` pelo nome do arquivo (já
  * processado pelo pipeline de chroma-key/normalização) em
  * `public/assets/`.
+ *
+ * "cabelo" é DIFERENTE das outras -- não é mais um arquivo único, e sim
+ * um CATÁLOGO de opções (ver game/customization.ts / HAIR_CATALOG),
+ * porque dá pra trocar de penteado ao vivo (editor de personagem, ver
+ * setLocalHairId). O valor `null` aqui continua só pra manter o record
+ * completo/tipado -- a arte de cabelo de verdade é carregada à parte,
+ * ver preload() e createAvatar().
  */
 const LAYER_TEXTURE_FILE: Record<LayerKey, string | null> = {
   base: "avatar_visual1.png",
@@ -141,6 +149,11 @@ const LAYER_TEXTURE_FILE: Record<LayerKey, string | null> = {
 /** Chave da textura no Phaser pra uma camada (ex: "cabelo" -> "avatar-cabelo"). */
 function layerTextureKey(layer: LayerKey): string {
   return `avatar-${layer}`;
+}
+
+/** Chave da textura no Phaser pra UMA OPÇÃO de cabelo do catálogo (ver HAIR_CATALOG). */
+function hairTextureKey(hairId: string): string {
+  return `avatar-cabelo-${hairId}`;
 }
 
 // profundidade (z-order): a "fronteira" de um móvel é a borda de CIMA da
@@ -245,6 +258,9 @@ export default class MainScene extends Phaser.Scene {
   /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido no editor, pra React manter a lista/código em dia. */
   onDraftChange?: (items: FurnitureDef[]) => void;
 
+  /** Definido de fora (GameRoom.tsx) -- chamado ao clicar em QUALQUER avatar (local ou remoto), pra abrir o card de perfil. */
+  onAvatarClick?: (info: { playerId: string; isLocal: boolean; name: string; color: string }) => void;
+
   constructor() {
     super("main");
   }
@@ -255,6 +271,7 @@ export default class MainScene extends Phaser.Scene {
     // chegar -- ver createAvatar, que também só desenha as camadas
     // carregadas).
     for (const layer of LAYER_DRAW_ORDER) {
+      if (layer === "cabelo") continue; // carregado abaixo, ver HAIR_CATALOG
       const file = LAYER_TEXTURE_FILE[layer];
       if (!file) continue;
       this.load.spritesheet(layerTextureKey(layer), `/assets/${file}`, {
@@ -267,6 +284,18 @@ export default class MainScene extends Phaser.Scene {
         // frame de outra pose "grudado" junto, principalmente entre poses
         // adjacentes na folha (ex: perna de "passo" aparecendo junto com a
         // pose do lado).
+        spacing: 2,
+      });
+    }
+
+    // cada opção de cabelo do catálogo é o SEU PRÓPRIO spritesheet (mesmo
+    // layout de frames do base) -- carrega todas de uma vez (não só a
+    // escolhida agora) pra trocar ao vivo sem precisar recarregar nada
+    // (ver setLocalHairId, chamado pelo editor de personagem).
+    for (const opt of HAIR_CATALOG) {
+      this.load.spritesheet(hairTextureKey(opt.id), `/assets/${opt.file}`, {
+        frameWidth: FRAME_W,
+        frameHeight: FRAME_H,
         spacing: 2,
       });
     }
@@ -303,7 +332,14 @@ export default class MainScene extends Phaser.Scene {
     }) as Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
 
     const spawn = tileToWorld(6, 4);
-    this.localContainer = this.createAvatar(spawn.x, spawn.y, this.localColor, this.localName);
+    this.localContainer = this.createAvatar(
+      spawn.x,
+      spawn.y,
+      this.localColor,
+      this.localName,
+      true,
+      "local"
+    );
 
     this.drawEditGrid();
     this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
@@ -334,13 +370,33 @@ export default class MainScene extends Phaser.Scene {
     x: number,
     y: number,
     color: string,
-    name: string
+    name: string,
+    isLocal: boolean,
+    playerId: string
   ): Phaser.GameObjects.Container {
     // uma Sprite por camada EQUIPADA (só as que já têm arte carregada em
     // LAYER_TEXTURE_FILE), empilhadas na ordem de LAYER_DRAW_ORDER --
     // todas na mesma posição/frame, então de longe parecem um boneco só.
+    // "cabelo" é especial: sempre entra (tem catálogo de verdade agora,
+    // ver HAIR_CATALOG), começando na opção padrão -- guarda a própria
+    // Sprite à parte (hairSprite) pra dar pra trocar de textura DEPOIS
+    // sem recriar o boneco inteiro (ver setLocalHairId).
     const layerSprites: Phaser.GameObjects.Sprite[] = [];
+    let hairSprite: Phaser.GameObjects.Sprite | null = null;
     for (const layer of LAYER_DRAW_ORDER) {
+      if (layer === "cabelo") {
+        const sprite = this.add.sprite(
+          0,
+          AVATAR_FOOT_OFFSET_Y,
+          hairTextureKey(DEFAULT_HAIR_ID),
+          WALK_FRAMES.down[0]
+        );
+        sprite.setOrigin(0.5, 1);
+        sprite.setScale(AVATAR_SCALE);
+        layerSprites.push(sprite);
+        hairSprite = sprite;
+        continue;
+      }
       if (!LAYER_TEXTURE_FILE[layer]) continue;
       const sprite = this.add.sprite(0, AVATAR_FOOT_OFFSET_Y, layerTextureKey(layer), WALK_FRAMES.down[0]);
       // origem embaixo-centro: o "pé" do boneco fica no (0,0) do
@@ -361,13 +417,44 @@ export default class MainScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const container = this.add.container(x, y, [...layerSprites, label]);
-    container.setSize(layerSprites[0].displayWidth, layerSprites[0].displayHeight);
+    const dispW = layerSprites[0].displayWidth;
+    const dispH = layerSprites[0].displayHeight;
+    container.setSize(dispW, dispH);
     container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
     container.setData("label", label);
     container.setData("dir", "down" as Direction);
     container.setData("stepToggle", false);
+    container.setData("hairSprite", hairSprite);
+    container.setData("hairId", DEFAULT_HAIR_ID);
+    container.setData("playerId", playerId);
+    container.setData("isLocal", isLocal);
+
+    // clicável (card de perfil, ver onAvatarClick) -- a área de clique
+    // precisa ser um retângulo próprio porque as sprites são ancoradas
+    // embaixo-centro (origem 0.5,1) com um offset vertical
+    // (AVATAR_FOOT_OFFSET_Y), então o boneco visualmente ocupa uma faixa
+    // ACIMA e ao redor do (0,0) do container, não abaixo/à direita dele
+    // (que é a área padrão que setInteractive() usaria sem essa forma
+    // customizada).
+    const hitArea = new Phaser.Geom.Rectangle(-dispW / 2, AVATAR_FOOT_OFFSET_Y - dispH, dispW, dispH);
+    container.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+    if (container.input) container.input.cursor = "pointer";
+    container.on("pointerdown", () => {
+      this.onAvatarClick?.({ playerId, isLocal, name, color });
+    });
+
     return container;
+  }
+
+  /** Troca o penteado do jogador LOCAL ao vivo (ver HAIR_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
+  setLocalHairId(hairId: string) {
+    if (!this.localContainer) return;
+    const sprite = this.localContainer.getData("hairSprite") as Phaser.GameObjects.Sprite | null;
+    if (!sprite) return;
+    const currentFrame = sprite.frame.name;
+    sprite.setTexture(hairTextureKey(hairId), currentFrame);
+    this.localContainer.setData("hairId", hairId);
   }
 
   /**
@@ -564,7 +651,7 @@ export default class MainScene extends Phaser.Scene {
   upsertRemotePlayer(id: string, x: number, y: number, color: string, name: string) {
     let container = this.remoteContainers.get(id);
     if (!container) {
-      container = this.createAvatar(x, y, color, name);
+      container = this.createAvatar(x, y, color, name, false, id);
       this.remoteContainers.set(id, container);
     } else {
       const dx = x - container.x;
@@ -695,8 +782,28 @@ export default class MainScene extends Phaser.Scene {
    * por móvel FIXO (ROOM_FURNITURE) não faz nada -- esses não são
    * editáveis por aqui.
    */
+  /** Verdadeiro se o clique caiu em cima de QUALQUER avatar (local ou remoto) -- usado pra não colocar/remover móvel do editor por baixo de um clique que era pra abrir o card de perfil (ver onAvatarClick). */
+  private isPointerOnAnyAvatar(pointer: Phaser.Input.Pointer): boolean {
+    const containers: (Phaser.GameObjects.Container | undefined)[] = [
+      this.localContainer,
+      ...this.remoteContainers.values(),
+    ];
+    for (const c of containers) {
+      if (!c) continue;
+      const hitArea = c.input?.hitArea as Phaser.Geom.Rectangle | undefined;
+      if (!hitArea) continue;
+      // containers não têm rotação/escala própria aqui -- ponto local é
+      // só a diferença direto, sem precisar de matriz de transformação
+      const localX = pointer.x - c.x;
+      const localY = pointer.y - c.y;
+      if (Phaser.Geom.Rectangle.Contains(hitArea, localX, localY)) return true;
+    }
+    return false;
+  }
+
   private handleEditPointerDown(pointer: Phaser.Input.Pointer) {
     if (!this.editMode) return;
+    if (this.isPointerOnAnyAvatar(pointer)) return;
     const { col, row } = worldToTile(pointer.x, pointer.y);
     if (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS) return;
 

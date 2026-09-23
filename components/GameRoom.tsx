@@ -9,6 +9,7 @@ import MainScene from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
+import { HAIR_CATALOG, DEFAULT_HAIR_ID } from "@/game/customization";
 
 type RemotePlayer = { id: string; x: number; y: number; name: string; color: string };
 type ChatMessage = { id: string; text: string; ts: number };
@@ -50,6 +51,20 @@ export default function GameRoom() {
   const [selectedCatalogIndex, setSelectedCatalogIndex] = useState<number | null>(null);
   const [draftItems, setDraftItems] = useState<FurnitureDef[]>([]);
   const [copied, setCopied] = useState(false);
+
+  // --- card de perfil / editor de personagem -- abre clicando em
+  // QUALQUER avatar (ver onAvatarClick na MainScene); "editar
+  // personagem" só aparece quando é o SEU (isLocal). Por enquanto só
+  // cabelo é editável, escolha fica só nesta sessão (não sincroniza pra
+  // outros jogadores nem salva -- ver HAIR_CATALOG). ---
+  const [profileCard, setProfileCard] = useState<{
+    playerId: string;
+    isLocal: boolean;
+    name: string;
+    color: string;
+  } | null>(null);
+  const [editingCharacter, setEditingCharacter] = useState(false);
+  const [selectedHairId, setSelectedHairId] = useState(DEFAULT_HAIR_ID);
 
   useEffect(() => {
     let destroyed = false;
@@ -234,6 +249,10 @@ export default function GameRoom() {
           checkProximity();
         };
         scene.onDraftChange = (items) => setDraftItems(items);
+        scene.onAvatarClick = (info) => {
+          setProfileCard(info);
+          setEditingCharacter(false);
+        };
       });
 
       const socket = new PartySocket({ host: REALTIME_HOST, room: "sala-principal" });
@@ -327,10 +346,31 @@ export default function GameRoom() {
 
   const generatedCode = useMemo(() => generateFurnitureCode(draftItems), [draftItems]);
 
+  function closeProfileCard() {
+    setProfileCard(null);
+    setEditingCharacter(false);
+  }
+
+  function selectHair(hairId: string) {
+    setSelectedHairId(hairId);
+    sceneRef.current?.setLocalHairId(hairId);
+  }
+
   return (
     <div className="room-and-editor">
       <div className="room-wrapper">
         <div ref={containerRef} className="phaser-container" />
+
+        {profileCard && (
+          <ProfileCard
+            info={profileCard}
+            editing={editingCharacter}
+            onToggleEdit={() => setEditingCharacter((v) => !v)}
+            onClose={closeProfileCard}
+            selectedHairId={selectedHairId}
+            onSelectHair={selectHair}
+          />
+        )}
 
         <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
 
@@ -454,6 +494,87 @@ function EditPanel({
       <button className="copy-btn" onClick={onCopyCode}>
         {copied ? "Copiado!" : "Copiar código"}
       </button>
+    </div>
+  );
+}
+
+// tamanho de exibição da miniatura de cabelo (recorte do frame 0 -- "de
+// frente parado" -- do spritesheet, ver game/customization.ts). O
+// spritesheet inteiro tem 1614x522px (grade 8x2, frame 200x260, ver
+// FRAME_W/FRAME_H em MainScene.ts); a miniatura escala o sheet TODO
+// (via background-size) e usa background-position pra mostrar só o
+// canto onde o frame 0 fica (0,0) -- não precisa de nenhum arquivo novo.
+const HAIR_THUMB_W = 64;
+const HAIR_THUMB_H = 83.2; // mantém a proporção 200:260 do frame
+const HAIR_SHEET_W = 1614;
+const HAIR_SHEET_H = 522;
+
+function ProfileCard({
+  info,
+  editing,
+  onToggleEdit,
+  onClose,
+  selectedHairId,
+  onSelectHair,
+}: {
+  info: { playerId: string; isLocal: boolean; name: string; color: string };
+  editing: boolean;
+  onToggleEdit: () => void;
+  onClose: () => void;
+  selectedHairId: string;
+  onSelectHair: (id: string) => void;
+}) {
+  const thumbScale = HAIR_THUMB_W / 200;
+
+  return (
+    <div className="profile-backdrop" onClick={onClose}>
+      <div className="profile-card" onClick={(e) => e.stopPropagation()}>
+        <button className="profile-close" onClick={onClose} title="Fechar">
+          ✕
+        </button>
+
+        <div className="profile-header">
+          <span className="profile-color-dot" style={{ background: info.color }} />
+          <span className="profile-name">{info.name}</span>
+        </div>
+        {!info.isLocal && <p className="edit-hint">Jogador da sala.</p>}
+
+        {info.isLocal && (
+          <>
+            <button className="edit-character-btn" onClick={onToggleEdit}>
+              {editing ? "Fechar edição" : "Editar personagem"}
+            </button>
+
+            {editing && (
+              <div className="character-editor">
+                <h3>Cabelo</h3>
+                <div className="hair-picker">
+                  {HAIR_CATALOG.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className={selectedHairId === opt.id ? "hair-option selected" : "hair-option"}
+                      onClick={() => onSelectHair(opt.id)}
+                      title={opt.label}
+                    >
+                      <span
+                        className="hair-thumb"
+                        style={{
+                          width: HAIR_THUMB_W,
+                          height: HAIR_THUMB_H,
+                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundPosition: "0 0",
+                          backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
+                        }}
+                      />
+                      <span className="hair-label">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
