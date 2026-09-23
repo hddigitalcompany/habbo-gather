@@ -17,6 +17,7 @@ export interface HairOption {
 
 export const HAIR_CATALOG: HairOption[] = [
   { id: "ondulado", label: "Cabelinho pra trás", file: "cabelo_1.png" },
+  { id: "vorcarinho-do-roi", label: "Vorcarinho do Rói", file: "cabelo_3.png" },
 ];
 
 export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
