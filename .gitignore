@@ -4,3 +4,9 @@ node_modules
 .env.local
 .DS_Store
 *.log
+
+# dados de runtime do servidor de chat (server/chatStore.js) -- histórico
+# de conversas + arquivos enviados no chat, gerados no servidor rodando,
+# não fazem parte do código
+/data
+/uploads

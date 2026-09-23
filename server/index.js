@@ -11,7 +11,7 @@
 //   move    -> { type: "move", id, x, y }
 //   leave   -> { type: "leave", id }
 //   signal  -> { type: "signal", from, data }   (relay de WebRTC)
-//   chat    -> { type: "chat", id, text }
+//   chat    -> { type: "chat", id, text }        (chat da SALA, todo mundo vê)
 //   profile -> { type: "profile", id, name, status, instagram, bio, photoUrl }
 //              (card de perfil -- ver ProfileCard em GameRoom.tsx; "role"
 //              NÃO entra aqui, é só o servidor que atribui, ver PROFILE_FIELDS)
@@ -19,10 +19,43 @@
 //              (botões de interação do card de OUTRO jogador -- "Disponível?"
 //              / "Chamar até você" / "Enviar mensagem" -- relay privado, só
 //              pro alvo, vira um toast do lado de quem recebe)
+//
+// Chat de VERDADE (conversa direta/grupo, histórico, foto/arquivo/áudio)
+// -- ver server/chatStore.js pra persistência e o comentário logo antes
+// de PROFILE_FIELDS pra por que usa "userId" (persistente) em vez do id
+// de conexão (que troca a cada reconexão):
+//   identify         -> cliente->servidor, primeira coisa mandada na conexão:
+//                        { type: "identify", userId }
+//   chat:list        -> cliente->servidor: { type: "chat:list" }
+//                        servidor->cliente: { type: "chat:conversations", conversations }
+//   chat:open        -> cliente->servidor: { type: "chat:open", conversationId }
+//                        servidor->cliente: { type: "chat:history", conversationId, messages }
+//   chat:create_direct -> cliente->servidor: { type: "chat:create_direct", targetUserId }
+//   chat:create_group  -> cliente->servidor: { type: "chat:create_group", name, participantIds }
+//   chat:rename_group  -> cliente->servidor: { type: "chat:rename_group", conversationId, name }
+//   (create_direct/create_group/rename_group respondem, pra CADA participante
+//   online, com) -> { type: "chat:conversation", conversation }
+//   chat:send        -> cliente->servidor: { type: "chat:send", conversationId, text?, attachment?, kind? }
+//                        servidor->participantes online: { type: "chat:message", conversationId, message }
+//
+// Upload de foto/arquivo/áudio do chat NÃO vai pelo WebSocket (ficaria
+// pesado no JSON) -- vai por HTTP simples nesse mesmo servidor:
+//   POST /upload?filename=<nome>   (corpo = bytes crus do arquivo, Content-Type = mime)
+//     -> 200 { url, name, size, mime }  (url relativa, ver GET abaixo)
+//   GET  /uploads/<arquivo>        -> serve o arquivo salvo
 
 import { createServer } from "http";
 import { randomUUID } from "crypto";
 import { WebSocketServer } from "ws";
+import { createWriteStream, createReadStream, existsSync, mkdirSync } from "fs";
+import { unlink } from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
+import * as chatStore from "./chatStore.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
+if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const PORT = process.env.PORT || 1999;
 
@@ -56,6 +89,44 @@ function broadcast(room, data, excludeId) {
   }
 }
 
+// --- identidade persistente pro CHAT (ver comentário grande lá em cima) ---
+// userId -> Set<ws> -- uma pessoa pode ter mais de uma aba/dispositivo
+// aberta ao mesmo tempo, todas recebem as mensagens.
+const connectionsByUserId = new Map();
+
+function registerUserConnection(userId, ws) {
+  let set = connectionsByUserId.get(userId);
+  if (!set) {
+    set = new Set();
+    connectionsByUserId.set(userId, set);
+  }
+  set.add(ws);
+}
+
+function unregisterUserConnection(userId, ws) {
+  const set = connectionsByUserId.get(userId);
+  if (!set) return;
+  set.delete(ws);
+  if (set.size === 0) connectionsByUserId.delete(userId);
+}
+
+function sendToUser(userId, data) {
+  const set = connectionsByUserId.get(userId);
+  if (!set) return;
+  const msg = JSON.stringify(data);
+  for (const ws of set) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+
+/** Manda a versão "enriquecida" (com participantes/preview) de UMA
+ * conversa específica pro dono de um userId -- usado depois de criar/
+ * renomear, cada participante vê a lista atualizar sozinha. */
+function sendConversationTo(userId, conversationId) {
+  const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conversationId);
+  if (enriched) sendToUser(userId, { type: "chat:conversation", conversation: enriched });
+}
+
 // campos do card de perfil que o PRÓPRIO jogador manda (ver mensagem
 // "profile" acima) -- "role" fica de fora de propósito: é o único campo
 // "setado pelo administrador" que o pedido descreve, e como ainda não
@@ -63,10 +134,12 @@ function broadcast(room, data, excludeId) {
 // (PROFILE_ROLE_PLACEHOLDER) que o cliente mostra como somente-leitura.
 const PROFILE_FIELDS = ["name", "status", "instagram", "bio", "photoUrl"];
 const PROFILE_ROLE_PLACEHOLDER = "";
-// tamanho máx de uma mensagem (principalmente a foto, que vai como
-// data-URL) -- generoso o bastante pra uma foto pequena comprimida no
-// cliente (ver compressPhotoToDataUrl em GameRoom.tsx), mas evita que
-// alguém trave a sala mandando um payload gigante.
+// tamanho máx de uma mensagem (principalmente a foto de PERFIL, que vai
+// como data-URL) -- generoso o bastante pra uma foto pequena comprimida
+// no cliente (ver compressPhotoToDataUrl em GameRoom.tsx), mas evita que
+// alguém trave a sala mandando um payload gigante. Anexos de CHAT não
+// passam por aqui -- ver upload HTTP lá em cima, só a URL entra na
+// mensagem WS, que é pequena.
 const MAX_MESSAGE_BYTES = 900_000;
 
 function pickProfileFields(player) {
@@ -75,8 +148,148 @@ function pickProfileFields(player) {
   return out;
 }
 
+function syncChatUser(player) {
+  if (!player.userId) return;
+  chatStore.upsertUser(player.userId, {
+    name: player.name,
+    color: player.color,
+    photoUrl: player.photoUrl,
+  });
+}
+
+// --- upload de arquivo do chat: HTTP simples (sem multipart, o corpo
+// inteiro do POST já É o arquivo) -- ver comentário grande no topo. ---
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB, dá pra foto/áudio curto/PDF pequeno
+
+const MIME_BY_EXT = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain; charset=utf-8",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".webm": "audio/webm",
+  ".m4a": "audio/mp4",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".zip": "application/zip",
+};
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
+
+function handleUpload(req, res, url) {
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_UPLOAD_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Arquivo muito grande (máx 20MB)");
+    return;
+  }
+
+  const filenameParam = (url.searchParams.get("filename") || "arquivo").slice(0, 200);
+  const ext = path.extname(filenameParam).slice(0, 12);
+  const diskName = `${randomUUID()}${ext}`;
+  const diskPath = path.join(UPLOAD_DIR, diskName);
+  const writeStream = createWriteStream(diskPath);
+
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > MAX_UPLOAD_BYTES && !aborted) {
+      aborted = true;
+      writeStream.destroy();
+      unlink(diskPath).catch(() => {});
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Arquivo muito grande (máx 20MB)");
+      }
+      req.destroy();
+    }
+  });
+
+  req.on("error", () => {
+    writeStream.destroy();
+  });
+
+  req.pipe(writeStream);
+
+  writeStream.on("finish", () => {
+    if (aborted) return;
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        url: `/uploads/${diskName}`,
+        name: filenameParam,
+        size: received,
+        mime: req.headers["content-type"] || "",
+      })
+    );
+  });
+
+  writeStream.on("error", (e) => {
+    console.error("Falha ao salvar upload", e);
+    if (!res.headersSent) {
+      res.writeHead(500, corsHeaders());
+      res.end("Erro ao salvar arquivo");
+    }
+  });
+}
+
+function handleServeUpload(req, res, pathname) {
+  // path.basename corta qualquer "../" -- só deixa pegar arquivo direto
+  // de dentro de UPLOAD_DIR, nunca escapar pra outra pasta.
+  const safeName = path.basename(pathname);
+  const filePath = path.join(UPLOAD_DIR, safeName);
+  if (!filePath.startsWith(UPLOAD_DIR) || !existsSync(filePath)) {
+    res.writeHead(404, corsHeaders());
+    res.end("Não encontrado");
+    return;
+  }
+  const ext = path.extname(safeName).toLowerCase();
+  const mime = MIME_BY_EXT[ext] || "application/octet-stream";
+  res.writeHead(200, {
+    ...corsHeaders(),
+    "Content-Type": mime,
+    "Cache-Control": "public, max-age=31536000, immutable",
+  });
+  createReadStream(filePath).pipe(res);
+}
+
 const httpServer = createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, corsHeaders());
+    res.end();
+    return;
+  }
+
+  const url = new URL(req.url ?? "/", "http://localhost");
+
+  if (req.method === "POST" && url.pathname === "/upload") {
+    handleUpload(req, res, url);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/uploads/")) {
+    handleServeUpload(req, res, url.pathname);
+    return;
+  }
+
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
   res.end("Servidor multiplayer do habbo-gather está no ar.\n");
 });
 
@@ -93,6 +306,11 @@ wss.on("connection", (ws, req) => {
   const color = COLORS[Math.floor(Math.random() * COLORS.length)];
   const player = {
     id,
+    // userId "de verdade" (persistente, ver identify) só chega DEPOIS
+    // da conexão abrir -- até lá cai de volta pro id da conexão, então
+    // o chat ainda funciona (só não mantém histórico entre reconexões)
+    // mesmo se o cliente nunca mandar identify.
+    userId: id,
     x: 360 + Math.floor(Math.random() * 5) * 20,
     y: 480 + Math.floor(Math.random() * 3) * 20,
     name: `Visitante-${id.slice(0, 4)}`,
@@ -105,6 +323,7 @@ wss.on("connection", (ws, req) => {
   };
 
   room.set(id, { ws, player });
+  registerUserConnection(player.userId, ws);
 
   ws.send(
     JSON.stringify({
@@ -127,6 +346,32 @@ wss.on("connection", (ws, req) => {
     }
 
     switch (data?.type) {
+      case "identify": {
+        // troca o userId "provisório" (= id da conexão) pelo PERSISTENTE
+        // que o cliente guarda no localStorage -- ver getOrCreateUserId
+        // em GameRoom.tsx. Sem isso o histórico de chat reiniciaria do
+        // zero a cada F5.
+        const newUserId =
+          typeof data.userId === "string" && data.userId.trim() ? data.userId.trim().slice(0, 80) : id;
+        if (newUserId !== player.userId) {
+          unregisterUserConnection(player.userId, ws);
+          player.userId = newUserId;
+          registerUserConnection(player.userId, ws);
+          // "join" (mandado pro resto da sala no exato instante em que a
+          // conexão abriu, ver embaixo) sempre sai ANTES desse "identify"
+          // chegar (é round-trip de rede, o outro é local/síncrono) --
+          // nesse momento o player.userId de todo mundo ainda tá com o
+          // valor provisório (= id da conexão). Sem avisar a sala da
+          // troca, quem já tava na sala ficaria pra sempre com o userId
+          // ERRADO desse jogador (ver remotePlayersRef em GameRoom.tsx),
+          // e uma conversa direta iniciada CONTRA ele usaria um id que
+          // muda a cada reconexão -- exatamente o problema que o
+          // "userId" persistente existe pra evitar.
+          broadcast(room, { type: "identity", id, userId: player.userId }, id);
+        }
+        syncChatUser(player);
+        break;
+      }
       case "move": {
         player.x = data.x;
         player.y = data.y;
@@ -155,6 +400,7 @@ wss.on("connection", (ws, req) => {
           const max = field === "photoUrl" ? 400_000 : field === "bio" ? 280 : 80;
           player[field] = data[field].slice(0, max);
         }
+        syncChatUser(player);
         broadcast(room, { type: "profile", id, ...pickProfileFields(player) });
         break;
       }
@@ -171,11 +417,84 @@ wss.on("connection", (ws, req) => {
         }
         break;
       }
+
+      // --- chat de verdade: direta/grupo, histórico, foto/arquivo/áudio
+      // (ver comentário grande no topo do arquivo e server/chatStore.js) ---
+      case "chat:list": {
+        const conversations = chatStore.listConversationsForUser(player.userId);
+        ws.send(JSON.stringify({ type: "chat:conversations", conversations }));
+        break;
+      }
+      case "chat:open": {
+        if (typeof data.conversationId !== "string") break;
+        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
+        const messages = chatStore.getMessages(data.conversationId);
+        ws.send(JSON.stringify({ type: "chat:history", conversationId: data.conversationId, messages }));
+        break;
+      }
+      case "chat:create_direct": {
+        if (typeof data.targetUserId !== "string" || !data.targetUserId) break;
+        if (data.targetUserId === player.userId) break;
+        const conv = chatStore.getOrCreateDirectConversation(player.userId, data.targetUserId);
+        sendConversationTo(player.userId, conv.id);
+        sendConversationTo(data.targetUserId, conv.id);
+        break;
+      }
+      case "chat:create_group": {
+        if (!Array.isArray(data.participantIds)) break;
+        const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
+        if (participantIds.length === 0) break;
+        const conv = chatStore.createGroupConversation({
+          name: data.name,
+          participantIds,
+          createdBy: player.userId,
+        });
+        for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+        break;
+      }
+      case "chat:rename_group": {
+        if (typeof data.conversationId !== "string" || typeof data.name !== "string") break;
+        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
+        const conv = chatStore.renameGroupConversation(data.conversationId, data.name);
+        if (!conv) break;
+        for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+        break;
+      }
+      case "chat:send": {
+        if (typeof data.conversationId !== "string") break;
+        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
+        const text = typeof data.text === "string" ? data.text.slice(0, 2000) : "";
+        const attachment =
+          data.attachment && typeof data.attachment === "object"
+            ? {
+                url: data.attachment.url,
+                name: data.attachment.name,
+                size: data.attachment.size,
+                mime: data.attachment.mime,
+              }
+            : null;
+        if (!text.trim() && !attachment) break;
+        const kind = !attachment ? "text" : data.kind === "audio" ? "audio" : data.kind === "image" ? "image" : "file";
+        const msg = chatStore.addMessage(data.conversationId, {
+          senderId: player.userId,
+          senderName: player.name,
+          kind,
+          text,
+          attachment,
+        });
+        if (!msg) break;
+        const conv = chatStore.getConversation(data.conversationId);
+        for (const uid of conv.participantIds) {
+          sendToUser(uid, { type: "chat:message", conversationId: data.conversationId, message: msg });
+        }
+        break;
+      }
     }
   });
 
   ws.on("close", () => {
     room.delete(id);
+    unregisterUserConnection(player.userId, ws);
     broadcast(room, { type: "leave", id });
     if (room.size === 0) rooms.delete(roomId);
   });

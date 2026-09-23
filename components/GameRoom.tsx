@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
@@ -46,9 +46,61 @@ function statusColorFor(status: string | undefined): string {
   return STATUS_DOT_COLORS[(status as ProfileStatus) ?? "online"] ?? STATUS_DOT_COLORS.online;
 }
 
-type RemotePlayer = { id: string; x: number; y: number; color: string } & RemoteProfile;
+// userId = identidade PERSISTENTE (ver getOrCreateUserId), diferente do
+// "id" de conexão (novo a cada reconexão) -- é o que o chat direto/
+// grupo usa pra saber quem é quem entre uma visita e outra (ver
+// comentário grande em server/index.js).
+type RemotePlayer = { id: string; userId: string; x: number; y: number; color: string } & RemoteProfile;
 type ChatMessage = { id: string; text: string; ts: number };
 type Toast = { id: string; text: string };
+
+// --- chat de verdade (direta/grupo/histórico/anexos) -- ver comentário
+// grande no topo de server/index.js e server/chatStore.js pro protocolo
+// e a persistência. Tudo isso é SEPARADO do chat de sala (chatLog/
+// chatInput/sendChat, mais simples e sem histórico) só que os dois
+// aparecem juntos na mesma gaveta (ver ChatDrawer) -- "Sala" é só mais
+// uma entrada na lista de conversas, mesmo não sendo uma de verdade.
+type ChatAttachmentKind = "image" | "file" | "audio";
+type ChatAttachment = { url: string; name: string; size: number; mime: string };
+type ChatMsgKind = "text" | ChatAttachmentKind;
+type ChatMsg = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  kind: ChatMsgKind;
+  text: string;
+  attachment: ChatAttachment | null;
+  ts: number;
+};
+type ConversationParticipant = { id: string; name: string; color: string; photoUrl: string };
+type Conversation = {
+  id: string;
+  kind: "direct" | "group";
+  name: string | null;
+  participantIds: string[];
+  participants: ConversationParticipant[]; // só os OUTROS, sem mim
+  updatedAt: number;
+  lastMessage: { senderId: string; senderName: string; kind: ChatMsgKind; text: string; ts: number } | null;
+};
+
+/** Nome pra mostrar de uma conversa: nome do grupo se tiver, senão o
+ * nome do outro participante (direta) -- usado na lista E no cabeçalho
+ * da conversa aberta. */
+function conversationDisplayName(conv: Conversation): string {
+  if (conv.kind === "group") return conv.name || "Grupo sem nome";
+  return conv.participants[0]?.name || "Sem nome";
+}
+
+/** Texto curto de preview pra lista de conversas -- mensagens com anexo
+ * não têm texto (ou só uma legenda opcional), então mostra um rótulo
+ * pelo tipo em vez de deixar a prévia em branco. */
+function previewText(last: { kind: ChatMsgKind; text: string }): string {
+  if (last.kind === "text") return last.text;
+  if (last.kind === "image") return "📷 Foto";
+  if (last.kind === "audio") return "🎤 Áudio";
+  return "📎 Arquivo";
+}
 
 // extrai só os campos de perfil de um objeto maior (player do socket,
 // ou um remoteProfiles[id] anterior mesclado com um update parcial) --
@@ -74,6 +126,28 @@ function loadSavedProfile(): Partial<ProfileFields> {
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
+  }
+}
+
+// identidade PERSISTENTE do chat -- NÃO é login de verdade, só um id
+// salvo no localStorage do navegador (igual o profile acima), gerado
+// uma vez e reusado pra sempre NESSE navegador. É o que faz o
+// histórico de conversa direta/grupo sobreviver a um F5 -- sem isso,
+// cada reconexão pro servidor pareceria uma pessoa nova (ver "userId"
+// vs "id" de conexão no comentário grande em server/index.js).
+const USER_ID_STORAGE_KEY = "habbo-gather-user-id";
+
+function getOrCreateUserId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let id = window.localStorage.getItem(USER_ID_STORAGE_KEY);
+    if (!id) {
+      id = crypto.randomUUID?.() ?? `u-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      window.localStorage.setItem(USER_ID_STORAGE_KEY, id);
+    }
+    return id;
+  } catch {
+    return `u-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 }
 
@@ -114,6 +188,42 @@ const PROXIMITY_CONNECT = 160;
 const PROXIMITY_DISCONNECT = 220;
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
+// mesmo host do WebSocket, só que em HTTP -- pro upload de foto/arquivo/
+// áudio do chat (ver POST /upload em server/index.js) e pra montar a URL
+// completa de um anexo já enviado (o servidor manda só o caminho
+// relativo, tipo "/uploads/xxx", ver ChatAttachment).
+const REALTIME_HTTP_BASE =
+  (typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http") +
+  `://${REALTIME_HOST}`;
+
+function attachmentUrl(path: string): string {
+  return path.startsWith("http") ? path : `${REALTIME_HTTP_BASE}${path}`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatChatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Manda o arquivo pro servidor (bytes crus no corpo, ver POST /upload
+ * em server/index.js -- nada de multipart, mais simples dos dois
+ * lados) e devolve a URL/nome/tamanho/mime já prontos pra entrar numa
+ * mensagem de chat como anexo. */
+async function uploadChatFile(file: Blob, filename: string): Promise<ChatAttachment> {
+  const res = await fetch(`${REALTIME_HTTP_BASE}/upload?filename=${encodeURIComponent(filename)}`, {
+    method: "POST",
+    headers: { "Content-Type": (file as File).type || "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`upload falhou (${res.status})`);
+  return (await res.json()) as ChatAttachment;
+}
 
 export default function GameRoom() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -139,6 +249,30 @@ export default function GameRoom() {
   >({});
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
+
+  // --- chat de verdade (direta/grupo/histórico/anexo) -- ver os tipos
+  // Conversation/ChatMsg lá em cima e o comentário grande em
+  // server/index.js. myUserId é estável (localStorage), calculado uma
+  // vez só (useMemo com deps vazias). activeConversationId===null
+  // representa a pseudo-conversa "Sala" (o chatLog/chatInput de cima,
+  // sem histórico/anexo -- ver comentário em ChatDrawer). ---
+  const myUserId = useMemo(() => getOrCreateUserId(), []);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatView, setChatView] = useState<"list" | "thread" | "new">("list");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMsg[]>>({});
+  const [chatComposerText, setChatComposerText] = useState("");
+  const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
+  const [newConvName, setNewConvName] = useState("");
+  const [renamingGroup, setRenamingGroup] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState("");
+  const [recordingAudio, setRecordingAudio] = useState(false);
+  const [sendingAttachment, setSendingAttachment] = useState(false);
+  const autoOpenNextConversationRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
 
   // --- card de perfil: MEUS campos (editáveis) e os dos OUTROS
   // jogadores (sincronizados pelo servidor, ver mensagem "profile" em
@@ -373,6 +507,13 @@ export default function GameRoom() {
           statusColorFor(p?.status)
         );
         checkProximity();
+      } else if (data.type === "identity") {
+        // corrige o userId "provisório" que veio junto do join desse
+        // jogador (ver comentário grande no "identify" em server/
+        // index.js) -- sem isso, uma conversa direta iniciada com ele
+        // usaria um id que muda a cada reconexão dele.
+        const p = remotePlayersRef.current.get(data.id);
+        if (p) p.userId = data.userId;
       } else if (data.type === "leave") {
         remotePlayersRef.current.delete(data.id);
         scene?.removeRemotePlayer(data.id);
@@ -381,6 +522,44 @@ export default function GameRoom() {
         handleSignal(data.from, data.data);
       } else if (data.type === "chat") {
         setChatLog((prev) => [...prev.slice(-49), { id: data.id, text: data.text, ts: Date.now() }]);
+      } else if (data.type === "chat:conversations") {
+        const list = (data.conversations as Conversation[]).slice().sort((a, b) => b.updatedAt - a.updatedAt);
+        setConversations(list);
+      } else if (data.type === "chat:conversation") {
+        const conv = data.conversation as Conversation;
+        setConversations((prev) => {
+          const rest = prev.filter((c) => c.id !== conv.id);
+          return [conv, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
+        });
+        // se FOI EU que acabei de criar essa conversa (ver
+        // startDirectWith/submitCreateGroup), abre ela direto -- os
+        // outros participantes só recebem essa mensagem pra aparecer
+        // na LISTA deles, sem abrir sozinha.
+        if (autoOpenNextConversationRef.current) {
+          autoOpenNextConversationRef.current = false;
+          setActiveConversationId(conv.id);
+          setChatView("thread");
+          socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: conv.id }));
+        }
+      } else if (data.type === "chat:history") {
+        setMessagesByConv((prev) => ({ ...prev, [data.conversationId]: data.messages }));
+      } else if (data.type === "chat:message") {
+        const msg = data.message as ChatMsg;
+        setMessagesByConv((prev) => ({
+          ...prev,
+          [data.conversationId]: [...(prev[data.conversationId] ?? []), msg],
+        }));
+        setConversations((prev) => {
+          const idx = prev.findIndex((c) => c.id === data.conversationId);
+          if (idx === -1) return prev;
+          const updated: Conversation = {
+            ...prev[idx],
+            updatedAt: msg.ts,
+            lastMessage: { senderId: msg.senderId, senderName: msg.senderName, kind: msg.kind, text: msg.text, ts: msg.ts },
+          };
+          const rest = prev.filter((c) => c.id !== data.conversationId);
+          return [updated, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
+        });
       }
     }
 
@@ -445,7 +624,13 @@ export default function GameRoom() {
       const socket = new PartySocket({ host: REALTIME_HOST, room: "sala-principal" });
       socketRef.current = socket;
 
-      socket.addEventListener("open", () => setStatus("Conectado"));
+      socket.addEventListener("open", () => {
+        setStatus("Conectado");
+        // identidade persistente pro chat direto/grupo (ver comentário
+        // em getOrCreateUserId) + já pede a lista de conversas salvas.
+        socket.send(JSON.stringify({ type: "identify", userId: myUserId }));
+        socket.send(JSON.stringify({ type: "chat:list" }));
+      });
       socket.addEventListener("close", () => setStatus("Desconectado"));
       socket.addEventListener("error", () => setStatus("Erro de conexão"));
       socket.addEventListener("message", (evt) => {
@@ -546,6 +731,118 @@ export default function GameRoom() {
     if (!text) return;
     socketRef.current?.send(JSON.stringify({ type: "chat", text }));
     setChatInput("");
+  }
+
+  // --- chat de verdade (direta/grupo) -- ver tipos Conversation/ChatMsg
+  // lá em cima. "Sala" (activeConversationId === null) continua usando
+  // sendChat/chatLog de cima, sem histórico nem anexo -- ver comentário
+  // em ChatDrawer sobre esse limite intencional. ---
+
+  function openConversation(id: string | null) {
+    setActiveConversationId(id);
+    setChatView("thread");
+    if (id !== null && !messagesByConv[id]) {
+      socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: id }));
+    }
+  }
+
+  function startDirectWith(targetUserId: string) {
+    autoOpenNextConversationRef.current = true;
+    socketRef.current?.send(JSON.stringify({ type: "chat:create_direct", targetUserId }));
+    setNewConvSelection([]);
+    setNewConvName("");
+  }
+
+  function submitNewConversation() {
+    if (newConvSelection.length === 0) return;
+    if (newConvSelection.length === 1 && !newConvName.trim()) {
+      startDirectWith(newConvSelection[0]);
+      return;
+    }
+    autoOpenNextConversationRef.current = true;
+    socketRef.current?.send(
+      JSON.stringify({
+        type: "chat:create_group",
+        name: newConvName.trim(),
+        participantIds: newConvSelection,
+      })
+    );
+    setNewConvSelection([]);
+    setNewConvName("");
+  }
+
+  function toggleNewConvSelection(userId: string) {
+    setNewConvSelection((prev) => (prev.includes(userId) ? prev.filter((x) => x !== userId) : [...prev, userId]));
+  }
+
+  function submitRenameGroup() {
+    const name = groupNameDraft.trim();
+    if (!activeConversationId || !name) return;
+    socketRef.current?.send(
+      JSON.stringify({ type: "chat:rename_group", conversationId: activeConversationId, name })
+    );
+    setRenamingGroup(false);
+  }
+
+  function sendActiveChatMessage() {
+    const text = chatComposerText.trim();
+    if (!text) return;
+    if (activeConversationId === null) {
+      socketRef.current?.send(JSON.stringify({ type: "chat", text }));
+    } else {
+      socketRef.current?.send(
+        JSON.stringify({ type: "chat:send", conversationId: activeConversationId, text })
+      );
+    }
+    setChatComposerText("");
+  }
+
+  async function sendChatAttachment(file: Blob, filename: string, kind: ChatAttachmentKind) {
+    if (!activeConversationId) return; // "Sala" não tem anexo, ver comentário acima
+    setSendingAttachment(true);
+    try {
+      const attachment = await uploadChatFile(file, filename);
+      socketRef.current?.send(
+        JSON.stringify({ type: "chat:send", conversationId: activeConversationId, attachment, kind })
+      );
+    } catch (e) {
+      console.warn("Falha ao enviar anexo no chat", e);
+    } finally {
+      setSendingAttachment(false);
+    }
+  }
+
+  function handleChatFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
+  }
+
+  async function startVoiceRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
+        if (blob.size > 0) sendChatAttachment(blob, `gravacao-${Date.now()}.webm`, "audio");
+        setRecordingAudio(false);
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setRecordingAudio(true);
+    } catch (e) {
+      console.warn("Sem acesso ao microfone pra gravar áudio", e);
+    }
+  }
+
+  function stopVoiceRecording() {
+    mediaRecorderRef.current?.stop();
   }
 
   function toggleEditMode() {
@@ -696,9 +993,17 @@ export default function GameRoom() {
     socketRef.current?.send(JSON.stringify({ type: "poke", to: targetId, kind }));
   }
 
-  function sendMessageTo(targetId: string, targetName: string) {
+  function sendMessageTo(targetId: string) {
     sendPoke(targetId, "message");
-    setChatInput((prev) => (prev ? prev : `@${targetName} `));
+    // "Enviar mensagem" no card de outro jogador abre (ou cria) a
+    // conversa DIRETA de verdade com ele, já na gaveta de chat -- ver
+    // startDirectWith. targetId ali é o id de CONEXÃO (profileCard.
+    // playerId); o chat usa o userId PERSISTENTE, ver remotePlayersRef.
+    const targetUserId = remotePlayersRef.current.get(targetId)?.userId;
+    if (targetUserId) {
+      startDirectWith(targetUserId);
+      setChatOpen(true);
+    }
     closeProfileCard();
   }
 
@@ -727,9 +1032,7 @@ export default function GameRoom() {
             onMeasuredHeight={setProfileCardHeight}
             onAskAvailable={() => sendPoke(profileCard.playerId, "available")}
             onCallOver={() => sendPoke(profileCard.playerId, "call")}
-            onSendMessage={() =>
-              sendMessageTo(profileCard.playerId, remoteProfiles[profileCard.playerId]?.name || "alguém")
-            }
+            onSendMessage={() => sendMessageTo(profileCard.playerId)}
           />
         )}
 
@@ -783,13 +1086,56 @@ export default function GameRoom() {
           >
             <ScreenIcon active={screenOn} />
           </button>
+          <button
+            className={chatOpen ? "av-btn on" : "av-btn"}
+            onClick={() => setChatOpen((v) => !v)}
+            title={chatOpen ? "Fechar chat" : "Abrir chat"}
+          >
+            <ChatIcon />
+          </button>
         </div>
 
-        <ChatPanel
-          log={chatLog}
-          value={chatInput}
-          onChange={setChatInput}
-          onSend={sendChat}
+        {chatOpen && (
+          <ChatDrawer
+            view={chatView}
+            onChangeView={setChatView}
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            onOpenConversation={openConversation}
+            messages={activeConversationId === null ? [] : messagesByConv[activeConversationId] ?? []}
+            roomChatLog={chatLog}
+            myUserId={myUserId}
+            onlinePlayers={Array.from(remotePlayersRef.current.values())}
+            newConvSelection={newConvSelection}
+            onToggleNewConvSelection={toggleNewConvSelection}
+            newConvName={newConvName}
+            onChangeNewConvName={setNewConvName}
+            onSubmitNewConversation={submitNewConversation}
+            renamingGroup={renamingGroup}
+            onStartRenameGroup={(currentName) => {
+              setGroupNameDraft(currentName);
+              setRenamingGroup(true);
+            }}
+            onCancelRenameGroup={() => setRenamingGroup(false)}
+            groupNameDraft={groupNameDraft}
+            onChangeGroupNameDraft={setGroupNameDraft}
+            onSubmitRenameGroup={submitRenameGroup}
+            composerText={activeConversationId === null ? chatInput : chatComposerText}
+            onChangeComposerText={activeConversationId === null ? setChatInput : setChatComposerText}
+            onSendComposer={activeConversationId === null ? sendChat : sendActiveChatMessage}
+            onPickFile={() => chatFileInputRef.current?.click()}
+            sendingAttachment={sendingAttachment}
+            recordingAudio={recordingAudio}
+            onStartRecording={startVoiceRecording}
+            onStopRecording={stopVoiceRecording}
+            onClose={() => setChatOpen(false)}
+          />
+        )}
+        <input
+          ref={chatFileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={handleChatFileChange}
         />
       </div>
 
@@ -1405,37 +1751,455 @@ function RemoteVideoTile({
   );
 }
 
-function ChatPanel({
-  log,
-  value,
-  onChange,
-  onSend,
+// Gaveta de chat "de verdade" -- Sala (nearby, sem histórico, ver
+// comentário nos tipos lá em cima) + conversas diretas/grupo com
+// histórico persistido no servidor + foto/arquivo/áudio. Tamanho FIXO
+// (ver .chat-drawer em globals.css) independente da tela (lista/nova
+// conversa/conversa aberta) -- mesma lógica já usada no card de
+// perfil, pra não ficar pulando de tamanho.
+function ChatDrawer({
+  view,
+  onChangeView,
+  conversations,
+  activeConversationId,
+  onOpenConversation,
+  messages,
+  roomChatLog,
+  myUserId,
+  onlinePlayers,
+  newConvSelection,
+  onToggleNewConvSelection,
+  newConvName,
+  onChangeNewConvName,
+  onSubmitNewConversation,
+  renamingGroup,
+  onStartRenameGroup,
+  onCancelRenameGroup,
+  groupNameDraft,
+  onChangeGroupNameDraft,
+  onSubmitRenameGroup,
+  composerText,
+  onChangeComposerText,
+  onSendComposer,
+  onPickFile,
+  sendingAttachment,
+  recordingAudio,
+  onStartRecording,
+  onStopRecording,
+  onClose,
 }: {
-  log: ChatMessage[];
-  value: string;
-  onChange: (v: string) => void;
-  onSend: () => void;
+  view: "list" | "thread" | "new";
+  onChangeView: (v: "list" | "thread" | "new") => void;
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  onOpenConversation: (id: string | null) => void;
+  messages: ChatMsg[];
+  roomChatLog: ChatMessage[];
+  myUserId: string;
+  onlinePlayers: RemotePlayer[];
+  newConvSelection: string[];
+  onToggleNewConvSelection: (userId: string) => void;
+  newConvName: string;
+  onChangeNewConvName: (v: string) => void;
+  onSubmitNewConversation: () => void;
+  renamingGroup: boolean;
+  onStartRenameGroup: (currentName: string) => void;
+  onCancelRenameGroup: () => void;
+  groupNameDraft: string;
+  onChangeGroupNameDraft: (v: string) => void;
+  onSubmitRenameGroup: () => void;
+  composerText: string;
+  onChangeComposerText: (v: string) => void;
+  onSendComposer: () => void;
+  onPickFile: () => void;
+  sendingAttachment: boolean;
+  recordingAudio: boolean;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onClose: () => void;
 }) {
+  const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
+  const isRoom = activeConversationId === null;
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages.length, roomChatLog.length, view]);
+
+  // dedupe por userId -- se alguém tiver 2 abas abertas, ainda aparece
+  // uma vez só na lista de "quem tá na sala" (ver onlinePlayers).
+  const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
+
   return (
-    <div className="chat-panel">
-      <div className="chat-log">
-        {log.map((m, i) => (
-          <div key={i} className="chat-line">
-            <strong>{m.id.slice(0, 4)}:</strong> {m.text}
+    <div className="chat-drawer">
+      {view === "list" && (
+        <>
+          <div className="chat-drawer-header">
+            <h3>Chat</h3>
+            <div className="chat-drawer-header-actions">
+              <button className="chat-icon-btn" title="Nova conversa" onClick={() => onChangeView("new")}>
+                <PlusIcon />
+              </button>
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
           </div>
-        ))}
-      </div>
-      <div className="chat-input-row">
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSend();
-          }}
-          placeholder="Digite uma mensagem..."
-        />
-        <button onClick={onSend}>Enviar</button>
-      </div>
+          <div className="chat-conv-list">
+            <button className="chat-conv-item" onClick={() => onOpenConversation(null)}>
+              <span className="chat-conv-avatar chat-conv-avatar-room">
+                <RoomIcon />
+              </span>
+              <span className="chat-conv-info">
+                <span className="chat-conv-name">Sala</span>
+                <span className="chat-conv-preview">
+                  {roomChatLog.length > 0
+                    ? roomChatLog[roomChatLog.length - 1].text
+                    : "Conversa com todo mundo por perto"}
+                </span>
+              </span>
+            </button>
+            {conversations.map((c) => (
+              <button key={c.id} className="chat-conv-item" onClick={() => onOpenConversation(c.id)}>
+                <span
+                  className="chat-conv-avatar"
+                  style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
+                >
+                  {c.kind === "group" ? <GroupIcon /> : conversationDisplayName(c).slice(0, 1).toUpperCase()}
+                </span>
+                <span className="chat-conv-info">
+                  <span className="chat-conv-name">{conversationDisplayName(c)}</span>
+                  <span className="chat-conv-preview">
+                    {c.lastMessage
+                      ? `${c.lastMessage.senderId === myUserId ? "Você: " : ""}${previewText(c.lastMessage)}`
+                      : "Nenhuma mensagem ainda"}
+                  </span>
+                </span>
+              </button>
+            ))}
+            {conversations.length === 0 && (
+              <p className="chat-empty-hint">Clique em + pra começar uma conversa direta ou em grupo.</p>
+            )}
+          </div>
+        </>
+      )}
+
+      {view === "new" && (
+        <>
+          <div className="chat-drawer-header">
+            <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeView("list")}>
+              <BackIcon />
+            </button>
+            <h3>Nova conversa</h3>
+            <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+              <CloseIcon />
+            </button>
+          </div>
+          <div className="chat-new-conv-body">
+            {pickable.length === 0 ? (
+              <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
+            ) : (
+              <div className="chat-picker-list">
+                {pickable.map((p) => (
+                  <label key={p.userId} className="chat-picker-item">
+                    <input
+                      type="checkbox"
+                      checked={newConvSelection.includes(p.userId)}
+                      onChange={() => onToggleNewConvSelection(p.userId)}
+                    />
+                    <span className="chat-conv-avatar" style={{ background: p.color }}>
+                      {(p.name || "?").slice(0, 1).toUpperCase()}
+                    </span>
+                    <span>{p.name || "Sem nome"}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {newConvSelection.length > 1 && (
+              <label className="chat-field">
+                <span>Nome do grupo</span>
+                <input
+                  value={newConvName}
+                  onChange={(e) => onChangeNewConvName(e.target.value)}
+                  placeholder="Ex: Galera do room"
+                  maxLength={60}
+                />
+              </label>
+            )}
+            <button
+              className="chat-primary-btn"
+              disabled={newConvSelection.length === 0}
+              onClick={onSubmitNewConversation}
+            >
+              {newConvSelection.length > 1 ? "Criar grupo" : "Iniciar conversa"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {view === "thread" && (
+        <>
+          <div className="chat-drawer-header">
+            <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeView("list")}>
+              <BackIcon />
+            </button>
+            {isRoom ? (
+              <h3>Sala</h3>
+            ) : renamingGroup ? (
+              <input
+                className="chat-rename-input"
+                value={groupNameDraft}
+                autoFocus
+                maxLength={60}
+                onChange={(e) => onChangeGroupNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onSubmitRenameGroup();
+                  if (e.key === "Escape") onCancelRenameGroup();
+                }}
+              />
+            ) : (
+              <h3>{activeConv ? conversationDisplayName(activeConv) : ""}</h3>
+            )}
+            <div className="chat-drawer-header-actions">
+              {!isRoom && activeConv?.kind === "group" && !renamingGroup && (
+                <button
+                  className="chat-icon-btn"
+                  title="Renomear grupo"
+                  onClick={() => onStartRenameGroup(activeConv.name || "")}
+                >
+                  <PencilIcon />
+                </button>
+              )}
+              {!isRoom && renamingGroup && (
+                <button className="chat-icon-btn" title="Salvar nome" onClick={onSubmitRenameGroup}>
+                  <CheckIcon />
+                </button>
+              )}
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+
+          {!isRoom && activeConv?.kind === "group" && (
+            <div className="chat-group-members">{activeConv.participants.map((p) => p.name || "?").join(", ")}</div>
+          )}
+
+          <div className="chat-messages" ref={scrollRef}>
+            {isRoom
+              ? roomChatLog.map((m, i) => (
+                  <div key={i} className="chat-message">
+                    <span className="chat-message-sender">{m.id.slice(0, 4)}</span>
+                    <div className="chat-bubble">{m.text}</div>
+                  </div>
+                ))
+              : messages.map((m) => (
+                  <ChatMessageRow
+                    key={m.id}
+                    msg={m}
+                    own={m.senderId === myUserId}
+                    showSenderName={m.senderId !== myUserId && activeConv?.kind === "group"}
+                  />
+                ))}
+            {!isRoom && messages.length === 0 && (
+              <p className="chat-empty-hint">Nenhuma mensagem ainda -- diga oi!</p>
+            )}
+          </div>
+
+          <div className="chat-composer">
+            {!isRoom && (
+              <>
+                <button
+                  className="chat-composer-btn"
+                  title="Anexar foto/arquivo"
+                  onClick={onPickFile}
+                  disabled={sendingAttachment || recordingAudio}
+                >
+                  <AttachIcon />
+                </button>
+                <button
+                  className={recordingAudio ? "chat-composer-btn recording" : "chat-composer-btn"}
+                  title={recordingAudio ? "Parar e enviar áudio" : "Gravar áudio"}
+                  onClick={recordingAudio ? onStopRecording : onStartRecording}
+                >
+                  {recordingAudio ? <StopIcon /> : <MicIcon off={false} />}
+                </button>
+              </>
+            )}
+            <input
+              className="chat-composer-input"
+              value={composerText}
+              onChange={(e) => onChangeComposerText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onSendComposer();
+              }}
+              placeholder={recordingAudio ? "Gravando áudio..." : "Digite uma mensagem..."}
+              disabled={recordingAudio}
+            />
+            <button className="chat-composer-btn primary" title="Enviar" onClick={onSendComposer}>
+              <SendIcon />
+            </button>
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function ChatMessageRow({ msg, own, showSenderName }: { msg: ChatMsg; own: boolean; showSenderName: boolean }) {
+  return (
+    <div className={own ? "chat-message own" : "chat-message"}>
+      {showSenderName && <span className="chat-message-sender">{msg.senderName || "Alguém"}</span>}
+      <div className="chat-bubble">
+        {msg.kind === "text" && <span>{msg.text}</span>}
+        {msg.kind === "image" && msg.attachment && (
+          <a href={attachmentUrl(msg.attachment.url)} target="_blank" rel="noreferrer">
+            <img className="chat-attachment-image" src={attachmentUrl(msg.attachment.url)} alt={msg.attachment.name} />
+          </a>
+        )}
+        {msg.kind === "audio" && msg.attachment && (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <audio className="chat-attachment-audio" controls src={attachmentUrl(msg.attachment.url)} />
+        )}
+        {msg.kind === "file" && msg.attachment && (
+          <a
+            className="chat-attachment-file"
+            href={attachmentUrl(msg.attachment.url)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <FileIcon />
+            <span className="chat-attachment-file-info">
+              <span className="chat-attachment-file-name">{msg.attachment.name}</span>
+              <span className="chat-attachment-file-size">{formatFileSize(msg.attachment.size)}</span>
+            </span>
+          </a>
+        )}
+        {msg.text && msg.kind !== "text" && <div className="chat-attachment-caption">{msg.text}</div>}
+      </div>
+      <span className="chat-message-time">{formatChatTime(msg.ts)}</span>
+    </div>
+  );
+}
+
+// --- ícones do chat, mesmo estilo linha-fina dos ícones da av-bar ---
+
+function ChatIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H9l-4.2 3.2a.5.5 0 0 1-.8-.4V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M5 5l14 14M19 5 5 19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M15 5 8 12l7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="m5 13 4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function AttachIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M16.5 6.5 8.9 14.1a3 3 0 0 0 4.24 4.24l7.6-7.6a5 5 0 0 0-7.07-7.07l-7.6 7.6a7 7 0 0 0 9.9 9.9"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 12 20 4l-6.5 16-3-6.5L4 12Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function GroupIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <circle cx="9" cy="9" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="17" cy="9" r="2.6" stroke="currentColor" strokeWidth="1.5" opacity="0.75" />
+      <path d="M15.2 12.3A4.6 4.6 0 0 1 20.5 16.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.75" />
+    </svg>
+  );
+}
+
+function RoomIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <path
+        d="m4 11 8-6.5L20 11M6 9.5V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3.5V8h4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
   );
 }
