@@ -151,9 +151,12 @@ function layerTextureKey(layer: LayerKey): string {
 // no MEIO de um passo (andando continuamente) -- e não só quando ele já
 // terminou de chegar.
 //
-// furnitureWorldPos() ancora o móvel na BASE do tile dele (ver
-// furniture.ts) -- a borda de CIMA da fileira fica 1 tile inteiro acima
-// disso.
+// IMPORTANTE: a fronteira usa a FILEIRA LÓGICA do móvel (f.row), não a
+// posição visual dele (furnitureWorldPos, que pode ter um baseOffsetY
+// de ajuste fino -- ver furniture.ts) -- assim reposicionar a arte pra
+// ficar bonita não muda em que tile a troca de profundidade acontece,
+// que continua sendo sempre a borda entre a fileira de cima e a
+// fileira onde o móvel está ancorado (col/row).
 const DEPTH_FURNITURE_ROW_HEIGHT = TILE;
 
 // exceção: móveis "flat" (tapete, por exemplo -- sem altura de verdade,
@@ -162,9 +165,9 @@ const DEPTH_FURNITURE_ROW_HEIGHT = TILE;
 // profundidade -- ver FurnitureDef.flat em furniture.ts.
 const DEPTH_FLAT_FURNITURE = -1_000_000;
 
-/** Profundidade de um móvel a partir da posição já ancorada na base (furnitureWorldPos) -- ver comentário acima. */
-function furnitureDepthForBasePos(pos: { y: number }): number {
-  return pos.y - DEPTH_FURNITURE_ROW_HEIGHT;
+/** Fronteira de profundidade de um móvel a partir da FILEIRA lógica dele (não da posição visual) -- ver comentário acima. */
+function furnitureDepthForRow(row: number): number {
+  return tileToWorld(0, row).y + TILE / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
 }
 
 // móveis "de vidro" (FurnitureDef.transparent) desenham com essa opacidade
@@ -172,7 +175,7 @@ function furnitureDepthForBasePos(pos: { y: number }): number {
 // pela mesma profundidade acima) continua parcialmente visível através.
 const GLASS_ALPHA = 0.55;
 
-/** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForBasePos(). */
+/** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForRow(). */
 function avatarDepthForY(y: number): number {
   return y;
 }
@@ -264,7 +267,7 @@ export default class MainScene extends Phaser.Scene {
       this.add
         .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
         .setOrigin(0.5, 1)
-        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForBasePos(pos))
+        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
         .setAlpha(f.transparent ? GLASS_ALPHA : 1);
     }
 
@@ -388,7 +391,7 @@ export default class MainScene extends Phaser.Scene {
     // sai na frente naturalmente, sentado "visível" sobre o móvel.
     this.localContainer.setDepth(
       furniture.facing === "up"
-        ? furnitureDepthForBasePos(pos) - 1
+        ? furnitureDepthForRow(furniture.row) - 1
         : avatarDepthForY(this.localContainer.y)
     );
   }

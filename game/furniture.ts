@@ -43,6 +43,15 @@ export interface FurnitureDef {
    * MainScene.ts), pra quem ficar por trás dele (boneco, outro móvel)
    * continuar visível através, em vez de totalmente escondido. */
   transparent?: boolean;
+  /** ajuste fino (px) da posição-âncora do móvel (onde a arte "pousa",
+   * ver furnitureWorldPos) -- por padrão ela fica na BORDA DE BAIXO do
+   * tile (ancorada embaixo, ver furnitureWorldPos). Negativo SOBE o
+   * móvel em relação a essa base; só reposiciona, não muda o tamanho da
+   * arte. Não afeta o tile lógico (col/row) usado pra grade, travamento
+   * de passagem ou a fronteira de profundidade (ver
+   * furnitureDepthForRow em MainScene.ts, que usa row direto, não essa
+   * posição visual). */
+  baseOffsetY?: number;
 }
 
 /**
@@ -124,6 +133,13 @@ const SEAT_Y_FRENTE_COSTAS = -4 - 14;
 const SEAT_Y_LADO = -18 - 14;
 const SEAT_X_LADO = 12;
 
+// divisória de vidro: sobe meio tile em relação à base padrão (que fica
+// na borda de baixo do tile) -- ou seja, a base dela passa a ficar
+// exatamente na METADE do tile (mesmo ponto onde o boneco anda
+// ancorado), não mais encostada no chão. Só reposiciona -- o tamanho da
+// arte continua o mesmo (ver build/process do vidro, não mudou).
+const VIDRO_BASE_OFFSET_Y = -TILE / 2;
+
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {
     id: "poltrona-1",
@@ -171,6 +187,7 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     row: 4,
     facing: "down",
     transparent: true,
+    baseOffsetY: VIDRO_BASE_OFFSET_Y,
   },
   // segundo teste: vidro um tile ABAIXO da poltrona-1, na mesma coluna
   // (reto/alinhado com ela) -- valida a profundidade quando o overflow
@@ -183,6 +200,7 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     row: 7,
     facing: "down",
     transparent: true,
+    baseOffsetY: VIDRO_BASE_OFFSET_Y,
   },
 ];
 
@@ -203,5 +221,5 @@ export function furnitureWorldPos(f: FurnitureDef) {
   // tile por CIMA (altura normalmente > 1 tile), só não pro lado nem
   // pra baixo -- isso é o overflow esperado, como no Habbo.
   const center = tileToWorld(f.col, f.row);
-  return { x: center.x, y: center.y + TILE / 2 };
+  return { x: center.x, y: center.y + TILE / 2 + (f.baseOffsetY ?? 0) };
 }
