@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
 import PartySocket from "partysocket";
-import MainScene from "@/game/MainScene";
+import MainScene, { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
@@ -575,6 +575,23 @@ export default function GameRoom() {
   const [selectedCatalogIndex, setSelectedCatalogIndex] = useState<number | null>(null);
   const [draftItems, setDraftItems] = useState<FurnitureDef[]>([]);
   const [copied, setCopied] = useState(false);
+
+  // --- controles de câmera do mapa ("estilo Gather" -- zoom +/- e
+  // centralizar, ver MapControls logo abaixo) -- só espelha o zoom
+  // atual da câmera (MainScene.zoomIn/zoomOut já limitam o valor, ver
+  // MIN_ZOOM_LEVEL/MAX_ZOOM_LEVEL) pra desabilitar os botões no teto.
+  const [mapZoom, setMapZoom] = useState(MIN_ZOOM_LEVEL);
+  function handleZoomIn() {
+    const zoom = sceneRef.current?.zoomIn();
+    if (zoom !== undefined) setMapZoom(zoom);
+  }
+  function handleZoomOut() {
+    const zoom = sceneRef.current?.zoomOut();
+    if (zoom !== undefined) setMapZoom(zoom);
+  }
+  function handleRecenterCamera() {
+    sceneRef.current?.recenterCamera();
+  }
 
   // --- card de perfil / editor de personagem -- abre clicando em
   // QUALQUER avatar (ver onAvatarClick na MainScene); "editar
@@ -2040,6 +2057,31 @@ export default function GameRoom() {
           </button>
         </div>
 
+        <div className="map-controls">
+          <button className="map-recenter-btn" onClick={handleRecenterCamera} title="Centralizar no meu personagem">
+            <TargetIcon />
+          </button>
+          <div className="map-zoom-control">
+            <button
+              className="map-zoom-btn"
+              onClick={handleZoomIn}
+              disabled={mapZoom >= MAX_ZOOM_LEVEL}
+              title="Aproximar"
+            >
+              <PlusIcon />
+            </button>
+            <div className="map-zoom-divider" />
+            <button
+              className="map-zoom-btn"
+              onClick={handleZoomOut}
+              disabled={mapZoom <= MIN_ZOOM_LEVEL}
+              title="Afastar"
+            >
+              <MinusIcon />
+            </button>
+          </div>
+        </div>
+
         <div className="av-bar">
           <button
             className={micOn ? "av-btn" : "av-btn off"}
@@ -2841,6 +2883,35 @@ function BrushIcon() {
 // --- ícones da barra de áudio/câmera/tela (linha fina, estilo
 // SF Symbols/Feather -- ver .av-bar em globals.css pro visual "vidro
 // fosco" ao redor deles) ---
+
+/** Ícone de mira/GPS do botão "centralizar" do MapControls (ver
+ * handleRecenterCamera) -- mesmo estilo linha-fina dos ícones da av-bar. */
+function TargetIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="6" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+// PlusIcon já existe mais abaixo no arquivo (usado nos botões de
+// anexo/participante) -- mesmo SVG, reaproveitado aqui pro "+" do zoom
+// em vez de duplicar.
+
+function MinusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function MicIcon({ off }: { off: boolean }) {
   return (

@@ -248,6 +248,23 @@ const STAND_COOLDOWN_MS = 350;
 // tempo pra andar UM quadrado (grade tile a tile, não pixel livre)
 const STEP_DURATION_MS = 180;
 
+// zoom da câmera (controles "estilo Gather" no canto do mapa, ver
+// MapControls em GameRoom.tsx) -- 1 é o zoom padrão, que já mostra a
+// sala inteira (mesmo comportamento de sempre, ver game/config.ts:
+// resolução interna 800x600 == GRID_ORIGIN/GRID_COLS/GRID_ROWS
+// ocupando toda a área visível), então não faz sentido zoom < 1 (só
+// sobraria fundo vazio nas bordas). Exportado pra GameRoom.tsx habilitar/
+// desabilitar os botões "+"/"-" no limite, sem duplicar o número aqui.
+export const MIN_ZOOM_LEVEL = 1;
+export const MAX_ZOOM_LEVEL = 2;
+const ZOOM_STEP = 0.25;
+
+// mesma resolução interna do jogo (ver width/height em game/config.ts) --
+// é o limite de scroll da câmera (setBounds), pra não deixar
+// pan/zoom mostrar área fora da sala.
+const CAMERA_WORLD_W = 800;
+const CAMERA_WORLD_H = 600;
+
 export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
@@ -290,6 +307,14 @@ export default class MainScene extends Phaser.Scene {
   localColor = "#5c9bff";
   localName = "Você";
   localStatusColor = "#4fd97a";
+
+  // --- câmera (zoom/arrastar pra olhar ao redor, ver MapControls em
+  // GameRoom.tsx: botão de centralizar + zoom "+"/"-") -- arrastar fica
+  // DESLIGADO durante o editor de espaço (this.editMode), senão brigaria
+  // com o clique/arrasto de colocar móvel (ver handleEditPointerDown).
+  private isPanningCamera = false;
+  private panStart = { x: 0, y: 0 };
+  private panStartScroll = { x: 0, y: 0 };
 
   // --- editor de espaço ("Editar espaço", ver setEditMode) ---------
   // itens colocados pelo editor ainda não são "de verdade" (não entram
@@ -453,8 +478,22 @@ export default class MainScene extends Phaser.Scene {
     this.drawEditGrid();
     this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
 
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.handleEditPointerMove(pointer));
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handleEditPointerDown(pointer));
+    // câmera começa igual sempre foi (zoom 1, sala inteira visível) --
+    // setBounds só define até onde dá pra arrastar/dar zoom sem mostrar
+    // área fora da sala (ver CAMERA_WORLD_W/H).
+    this.cameras.main.setBounds(0, 0, CAMERA_WORLD_W, CAMERA_WORLD_H);
+    this.cameras.main.setZoom(MIN_ZOOM_LEVEL);
+
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      this.handleEditPointerMove(pointer);
+      this.handleCameraPan(pointer);
+    });
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.handleEditPointerDown(pointer);
+      this.startCameraPan(pointer);
+    });
+    this.input.on("pointerup", () => this.stopCameraPan());
+    this.input.on("pointerupoutside", () => this.stopCameraPan());
   }
 
   /**
@@ -815,6 +854,64 @@ export default class MainScene extends Phaser.Scene {
     } else {
       this.input.keyboard?.enableGlobalCapture();
     }
+  }
+
+  // --- câmera: zoom + arrastar pra olhar ao redor (botões em
+  // MapControls, GameRoom.tsx) -------------------------------------
+
+  /** Começa a arrastar a câmera com o mouse -- ignorado durante o editor
+   * de espaço (o pointerdown ali já é pra colocar/selecionar móvel). */
+  private startCameraPan(pointer: Phaser.Input.Pointer) {
+    if (this.editMode) return;
+    this.isPanningCamera = true;
+    this.panStart = { x: pointer.x, y: pointer.y };
+    this.panStartScroll = { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY };
+  }
+
+  private handleCameraPan(pointer: Phaser.Input.Pointer) {
+    if (!this.isPanningCamera || !pointer.isDown) return;
+    // divide pelo zoom -- arrastar 1px de MOUSE precisa mover mais de
+    // 1px de MUNDO quando a câmera tá afastada (zoom baixo) e menos
+    // quando tá aproximada (zoom alto), senão o boneco "foge" ou "gruda"
+    // no cursor dependendo do zoom atual.
+    const zoom = this.cameras.main.zoom;
+    const dx = (pointer.x - this.panStart.x) / zoom;
+    const dy = (pointer.y - this.panStart.y) / zoom;
+    this.cameras.main.setScroll(this.panStartScroll.x - dx, this.panStartScroll.y - dy);
+  }
+
+  private stopCameraPan() {
+    this.isPanningCamera = false;
+  }
+
+  /** Aplica um novo zoom mantendo o mesmo PONTO CENTRAL da câmera --
+   * setZoom sozinho "puxa" a visão pro canto 0,0 do mundo, o que dá um
+   * pulo feio na tela toda vez que aperta "+"/"-". */
+  private applyZoom(nextZoom: number) {
+    const clamped = Phaser.Math.Clamp(nextZoom, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+    const cam = this.cameras.main;
+    const centerX = cam.worldView.centerX;
+    const centerY = cam.worldView.centerY;
+    cam.setZoom(clamped);
+    cam.centerOn(centerX, centerY);
+    return clamped;
+  }
+
+  /** Botão "+" do MapControls -- devolve o zoom já aplicado (limitado),
+   * pra GameRoom.tsx saber quando desabilitar o botão no teto. */
+  zoomIn(): number {
+    return this.applyZoom(this.cameras.main.zoom + ZOOM_STEP);
+  }
+
+  /** Botão "-" do MapControls -- mesma ideia, limitado no piso. */
+  zoomOut(): number {
+    return this.applyZoom(this.cameras.main.zoom - ZOOM_STEP);
+  }
+
+  /** Botão de centralizar (ícone de mira) do MapControls -- volta a
+   * câmera pro boneco local, SEM mudar o zoom atual (igual o Gather). */
+  recenterCamera() {
+    this.cameras.main.centerOn(this.localContainer.x, this.localContainer.y);
   }
 
   /** Tecla de direção pressionada agora, só uma por vez (sem diagonal). */

@@ -145,6 +145,98 @@ body {
   background: #7c5cff !important;
 }
 
+/* Controles de câmera do mapa ("estilo Gather": centralizar + zoom
+   "+"/"-", ver MapControls/TargetIcon/PlusIcon/MinusIcon em
+   GameRoom.tsx e zoomIn/zoomOut/recenterCamera em MainScene.ts) --
+   dois elementos flutuantes independentes (não uma barra só), mesma
+   pegada de vidro fosco da .av-bar, empilhados no canto inferior
+   direito, ACIMA do botão "Editar espaço" (.controls, bottom:12px +
+   40px de altura = topo em 52px -> aqui começa em 64px pra sobrar um
+   respiro de 12px entre os dois). */
+.map-controls {
+  position: absolute;
+  bottom: 64px;
+  right: 16px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.map-recenter-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(40, 34, 56, 0.55);
+  color: #f5f0ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.map-recenter-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.map-recenter-btn:active {
+  transform: scale(0.94);
+}
+
+.map-zoom-control {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(40, 34, 56, 0.55);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  overflow: hidden;
+}
+
+.map-zoom-btn {
+  width: 44px;
+  height: 38px;
+  border: none;
+  background: transparent;
+  color: #f5f0ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.map-zoom-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.map-zoom-btn:active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.map-zoom-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.map-zoom-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
 /* Barra de áudio/câmera/tela -- pegada "vidro fosco" estilo Apple
    (control center / dynamic island): pill translúcida com blur,
    flutuando com margem em todos os lados (dock-like), ver
