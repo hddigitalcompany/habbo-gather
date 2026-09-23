@@ -146,21 +146,21 @@ body {
 }
 
 /* Barra de áudio/câmera/tela -- pegada "vidro fosco" estilo Apple
-   (control center / dynamic island): pill translúcida com blur, fixa
-   embaixo à esquerda, ver MicIcon/CamIcon/ScreenIcon em GameRoom.tsx. */
+   (control center / dynamic island): pill translúcida com blur,
+   flutuando com margem em todos os lados (dock-like), ver
+   MicIcon/CamIcon/ScreenIcon em GameRoom.tsx. */
 .av-bar {
   position: absolute;
-  bottom: 0;
+  bottom: 16px;
   left: 16px;
   z-index: 6;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 7px;
-  border-radius: 999px 999px 0 0;
+  border-radius: 999px;
   background: rgba(40, 34, 56, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-bottom: none;
   box-shadow:
     0 10px 30px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -218,7 +218,7 @@ body {
    rola. */
 .chat-drawer {
   position: absolute;
-  bottom: 66px;
+  bottom: 82px;
   left: 16px;
   z-index: 7;
   width: 340px;
