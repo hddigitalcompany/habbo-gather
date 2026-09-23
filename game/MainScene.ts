@@ -1,4 +1,6 @@
-import Phaser from "phaser";
+// ver comentário em game/config.ts -- import default do phaser quebra
+// no bundle do navegador, precisa ser namespace import
+import * as Phaser from "phaser";
 import {
   ROOM_FURNITURE,
   FurnitureDef,

@@ -1,4 +1,10 @@
-import Phaser from "phaser";
+// import default (`import Phaser from "phaser"`) quebra no bundle do
+// navegador: o build ESM do pacote ("dist/phaser.esm.js", que o
+// webpack/Next.js prefere) só exporta tudo NOMEADO, sem "export
+// default" -- dava "phaser does not contain a default export" ao vivo
+// no Chrome mesmo com o tsc passando limpo. Import de namespace (* as)
+// resolve, já que Phaser.Scene, Phaser.AUTO etc. são todos named exports.
+import * as Phaser from "phaser";
 import MainScene from "./MainScene";
 
 export function createGameConfig(

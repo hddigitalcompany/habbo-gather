@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Phaser from "phaser";
+// ver comentário em game/config.ts -- import default do phaser quebra
+// no bundle do navegador, precisa ser namespace import
+import * as Phaser from "phaser";
 import PartySocket from "partysocket";
 import MainScene from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
