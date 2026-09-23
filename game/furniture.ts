@@ -1,4 +1,4 @@
-import { tileToWorld, Direction } from "./grid";
+import { tileToWorld, Direction, TILE } from "./grid";
 
 /**
  * Móveis da sala, posicionados em coordenada de TILE (não pixel) pra
@@ -111,5 +111,14 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
 ];
 
 export function furnitureWorldPos(f: FurnitureDef) {
-  return tileToWorld(f.col, f.row);
+  // tileToWorld() dá o CENTRO do tile -- é onde o boneco anda ancorado
+  // (origin bottom-center dele fica bem no meio do quadrado, ver
+  // MainScene). O móvel é diferente: ele precisa ficar "dentro do tile,
+  // alinhado embaixo" (o pé/base encostando na borda debaixo do
+  // quadrado, não flutuando no meio dele) -- por isso ancora meio tile
+  // ABAIXO do centro, na borda inferior. Ele ainda pode ultrapassar o
+  // tile por CIMA (altura normalmente > 1 tile), só não pro lado nem
+  // pra baixo -- isso é o overflow esperado, como no Habbo.
+  const center = tileToWorld(f.col, f.row);
+  return { x: center.x, y: center.y + TILE / 2 };
 }
