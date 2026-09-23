@@ -61,8 +61,8 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
   {
     id: "poltrona-1",
     type: "poltrona",
-    col: 14,
-    row: 8,
+    col: 9,
+    row: 5,
     facing: "down",
     seatOffsetY: -30,
   },

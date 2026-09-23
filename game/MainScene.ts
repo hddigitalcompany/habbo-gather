@@ -219,7 +219,7 @@ export default class MainScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
 
-    const spawn = tileToWorld(9, 9);
+    const spawn = tileToWorld(6, 4);
     this.localContainer = this.createAvatar(spawn.x, spawn.y, this.localColor, this.localName);
   }
 

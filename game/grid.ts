@@ -8,13 +8,22 @@
 
 export type Direction = "down" | "left" | "right" | "up";
 
-export const TILE = 40;
+// TILE era 40px -- muito pequeno perto da mobília nova (poltrona tem uns
+// 150-175px de largura): o "quadradinho" (base/footprint de 1 tile) que
+// o avatar anda e onde o móvel se ancora precisa ser um pedaço mais
+// generoso do chão, senão fica difícil de ler onde cada coisa realmente
+// "está". Móvel/boneco continuam podendo ultrapassar visualmente a
+// própria casinha (principalmente pra cima, por causa da altura) --
+// isso é normal, é como funciona no Habbo -- só a base em si que
+// precisava ficar maior.
+export const TILE = 60;
 
-// mesma área jogável que o bounds em pixel usava antes (40..760, 108..570)
+// mesma área jogável em pixel que antes (40..760, 108..528ish), só que
+// com tiles maiores -> menos quadrados, cada um maior.
 export const GRID_ORIGIN_X = 40;
 export const GRID_ORIGIN_Y = 108;
-export const GRID_COLS = 18; // colunas 0..18 (19 posições) -> x: 40..760
-export const GRID_ROWS = 11; // linhas 0..11 (12 posições)  -> y: 108..548
+export const GRID_COLS = 12; // colunas 0..12 (13 posições) -> x: 40..760
+export const GRID_ROWS = 7; // linhas 0..7 (8 posições)     -> y: 108..528
 
 export function tileToWorld(col: number, row: number) {
   return { x: GRID_ORIGIN_X + col * TILE, y: GRID_ORIGIN_Y + row * TILE };
