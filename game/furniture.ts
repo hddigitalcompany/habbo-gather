@@ -69,8 +69,14 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
 // zero; de lado ele tava baixo demais, então sobe mais que antes, e
 // ganha um empurrão horizontal (seatOffsetX) na direção que a poltrona
 // olha, pra não ficar sentado bem no meio do "pé" do móvel.
-const SEAT_Y_FRENTE_COSTAS = -4;
-const SEAT_Y_LADO = -18;
+// -14 aqui compensa o AVATAR_FOOT_OFFSET_Y (ver MainScene.ts) -- as
+// sprites do boneco agora são desenhadas 14px mais pra baixo dentro do
+// próprio container (só isso resolve o "pé não fica centralizado" ao
+// caminhar), mas isso empurraria o boneco sentado junto -- subtrai os
+// mesmos 14px aqui pra ele continuar encaixado na poltrona do jeito que
+// já tinha sido aprovado.
+const SEAT_Y_FRENTE_COSTAS = -4 - 14;
+const SEAT_Y_LADO = -18 - 14;
 const SEAT_X_LADO = 12;
 
 export const ROOM_FURNITURE: FurnitureDef[] = [

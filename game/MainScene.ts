@@ -64,6 +64,16 @@ const FRAME_H = 260;
 // deixa ele com uns 90px de altura em tela (tamanho aprovado)
 const AVATAR_SCALE = 0.43;
 
+// o container do boneco fica ancorado no CENTRO do tile (tileToWorld) --
+// isso é o que worldToTile/clampTile/movimento usam pra saber em que
+// tile ele está, não pode mudar. Só que desenhar o "pé" (origem das
+// sprites) bem EM CIMA desse ponto (offset 0) deixava o boneco com os
+// pés "flutuando" no meio do quadrado visualmente -- por isso as
+// sprites (e o label do nome) são desenhadas com um offset PRA BAIXO
+// dentro do container: puramente visual, não mexe na posição lógica
+// usada pro grid/colisão/sentar.
+const AVATAR_FOOT_OFFSET_Y = 14;
+
 // [parado, passoA, passoB] -- passoA/passoB alternam a cada passo dado
 // (ver playWalk), não por tempo -- assim funciona igual pra um pulo de
 // um quadrado só ou pra caminhada contínua.
@@ -253,7 +263,7 @@ export default class MainScene extends Phaser.Scene {
     const layerSprites: Phaser.GameObjects.Sprite[] = [];
     for (const layer of LAYER_DRAW_ORDER) {
       if (!LAYER_TEXTURE_FILE[layer]) continue;
-      const sprite = this.add.sprite(0, 0, layerTextureKey(layer), WALK_FRAMES.down[0]);
+      const sprite = this.add.sprite(0, AVATAR_FOOT_OFFSET_Y, layerTextureKey(layer), WALK_FRAMES.down[0]);
       // origem embaixo-centro: o "pé" do boneco fica no (0,0) do
       // container, que é a posição lógica dele na sala (chão)
       sprite.setOrigin(0.5, 1);
@@ -262,7 +272,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     const label = this.add
-      .text(0, -layerSprites[0].displayHeight - 8, name, {
+      .text(0, AVATAR_FOOT_OFFSET_Y - layerSprites[0].displayHeight - 8, name, {
         fontSize: "11px",
         color: "#ffffff",
         fontFamily: "monospace",
