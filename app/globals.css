@@ -729,17 +729,110 @@ body {
   max-height: 640px;
 }
 
-.profile-edit-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 18px 8px;
-}
-
+/* título e abas de categoria ficam FIXOS (fora da área que rola) --
+   só a lista de itens + cores (ver .profile-edit-scroll) muda de
+   tamanho por dentro, o card em volta nunca muda. */
 .profile-edit-title {
   font-size: 15px;
   font-weight: 700;
-  margin: 0 0 14px;
+  margin: 0;
+  padding: 20px 18px 4px;
   color: #f5f0ff;
+  flex-shrink: 0;
+}
+
+.edit-category-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 18px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #2f2245;
+  /* esconde a barra de rolagem horizontal mas mantém o scroll (a lista
+     de categorias vai crescer -- óculos, barba, camisa... -- e nem
+     sempre cabe tudo numa linha só na largura do card) */
+  scrollbar-width: none;
+}
+
+.edit-category-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.edit-category-tab {
+  flex-shrink: 0;
+  background: #0d0715;
+  border: 1px solid #2f2245;
+  border-radius: 999px;
+  color: #cfc4e6;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.edit-category-tab:hover {
+  border-color: #3a2a55;
+  color: #f5f0ff;
+}
+
+.edit-category-tab.selected {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #ffffff;
+}
+
+.edit-category-empty {
+  padding: 30px 4px;
+  text-align: center;
+  color: #a99fc2;
+  font-size: 13px;
+}
+
+.profile-edit-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px 8px;
+}
+
+.color-picker {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #2f2245;
+}
+
+.color-picker-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #cfc4e6;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+
+.color-picker-empty {
+  font-size: 12px;
+  color: #a99fc2;
+}
+
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #2f2245;
+  cursor: pointer;
+  padding: 0;
+}
+
+.color-swatch:hover {
+  border-color: #7c5cff;
 }
 
 .profile-edit-actions {

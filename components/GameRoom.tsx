@@ -9,7 +9,12 @@ import MainScene from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
-import { HAIR_CATALOG, DEFAULT_HAIR_ID } from "@/game/customization";
+import {
+  HAIR_CATALOG,
+  DEFAULT_HAIR_ID,
+  CUSTOMIZATION_CATEGORIES,
+  CustomizationCategoryId,
+} from "@/game/customization";
 
 // "focus/ausente/online" -- ver caixinha de status no ProfileCard.
 type ProfileStatus = "online" | "away" | "focus";
@@ -26,6 +31,20 @@ type ProfileFields = {
 };
 
 type RemoteProfile = ProfileFields & { role: string };
+
+// cor da bolinha de status -- usada tanto no card de perfil (ver
+// STATUS_OPTIONS mais abaixo) quanto no nome do boneco DENTRO do jogo
+// (ver MainScene.setNameplate/setLocalProfile/upsertRemotePlayer) -- um
+// lugar só pra não desalinhar as duas pontas.
+const STATUS_DOT_COLORS: Record<ProfileStatus, string> = {
+  online: "#4fd97a",
+  away: "#9a9aa5",
+  focus: "#f5c542",
+};
+
+function statusColorFor(status: string | undefined): string {
+  return STATUS_DOT_COLORS[(status as ProfileStatus) ?? "online"] ?? STATUS_DOT_COLORS.online;
+}
 
 type RemotePlayer = { id: string; x: number; y: number; color: string } & RemoteProfile;
 type ChatMessage = { id: string; text: string; ts: number };
@@ -158,6 +177,10 @@ export default function GameRoom() {
   } | null>(null);
   const [editingCharacter, setEditingCharacter] = useState(false);
   const [selectedHairId, setSelectedHairId] = useState(DEFAULT_HAIR_ID);
+  // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
+  // controla o que aparece NA LISTA, o card em si não muda de tamanho
+  // trocando de aba (ver .profile-edit-scroll, rolagem interna).
+  const [editorCategory, setEditorCategory] = useState<CustomizationCategoryId>("cabelo");
 
   useEffect(() => {
     let destroyed = false;
@@ -277,7 +300,7 @@ export default function GameRoom() {
           nextProfiles[p.id] = pickRemoteProfile(p);
           if (p.id === data.selfId) continue;
           remotePlayersRef.current.set(p.id, p);
-          scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name);
+          scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name, statusColorFor(p.status));
         }
         setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
 
@@ -301,7 +324,7 @@ export default function GameRoom() {
         const p: RemotePlayer = data.player;
         remotePlayersRef.current.set(p.id, p);
         setRemoteProfiles((prev) => ({ ...prev, [p.id]: pickRemoteProfile(p) }));
-        scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name);
+        scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name, statusColorFor(p.status));
       } else if (data.type === "profile") {
         const existing = remotePlayersRef.current.get(data.id);
         if (existing) Object.assign(existing, data);
@@ -310,7 +333,14 @@ export default function GameRoom() {
           [data.id]: pickRemoteProfile({ ...prev[data.id], ...data }),
         }));
         if (typeof data.name === "string" && existing) {
-          scene?.upsertRemotePlayer(data.id, existing.x, existing.y, existing.color, data.name);
+          scene?.upsertRemotePlayer(
+            data.id,
+            existing.x,
+            existing.y,
+            existing.color,
+            data.name,
+            statusColorFor(existing.status)
+          );
         }
       } else if (data.type === "poke") {
         const text =
@@ -333,7 +363,8 @@ export default function GameRoom() {
           data.x,
           data.y,
           p?.color ?? "#888888",
-          p?.name ?? "?"
+          p?.name ?? "?",
+          statusColorFor(p?.status)
         );
         checkProximity();
       } else if (data.type === "leave") {
@@ -387,6 +418,13 @@ export default function GameRoom() {
       game.events.once(Phaser.Core.Events.READY, () => {
         const scene = game.scene.getScene("main") as MainScene;
         sceneRef.current = scene;
+        // nome/status do card de perfil (ver useEffect logo abaixo, que
+        // cobre trocas DEPOIS que a cena já tá pronta) -- aqui só o
+        // valor inicial, pra não esperar o próximo render pra aparecer.
+        scene.setLocalProfile(
+          myProfileRef.current.name || "Você",
+          statusColorFor(myProfileRef.current.status)
+        );
         scene.onLocalMove = (x, y) => {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
           checkProximity();
@@ -544,6 +582,15 @@ export default function GameRoom() {
 
   const generatedCode = useMemo(() => generateFurnitureCode(draftItems), [draftItems]);
 
+  // reflete nome/status do MEU card ao vivo no boneco dentro do jogo
+  // (nome + bolinha de status, ver setNameplate/setLocalProfile na
+  // MainScene) -- roda de novo toda vez que um dos dois campos muda no
+  // card. O valor inicial (cena ainda não existia nesse primeiro
+  // render) já é coberto no game.events.once(READY, ...) lá em cima.
+  useEffect(() => {
+    sceneRef.current?.setLocalProfile(myProfile.name || "Você", statusColorFor(myProfile.status));
+  }, [myProfile.name, myProfile.status]);
+
   // enquanto QUALQUER campo de texto da UI (nome/bio/insta do card,
   // chat) estiver focado, trava o WASD/setas pro boneco não andar
   // sozinho enquanto a pessoa digita (ver setMovementLocked na
@@ -587,6 +634,7 @@ export default function GameRoom() {
   const hairBeforeEditRef = useRef(selectedHairId);
   function startEditingCharacter() {
     hairBeforeEditRef.current = selectedHairId;
+    setEditorCategory("cabelo");
     setEditingCharacter(true);
   }
   function cancelEditingCharacter() {
@@ -658,6 +706,8 @@ export default function GameRoom() {
             onClose={closeProfileCard}
             selectedHairId={selectedHairId}
             onSelectHair={selectHair}
+            editorCategory={editorCategory}
+            onSelectCategory={setEditorCategory}
             onAskAvailable={() => sendPoke(profileCard.playerId, "available")}
             onCallOver={() => sendPoke(profileCard.playerId, "call")}
             onSendMessage={() =>
@@ -830,9 +880,9 @@ const HAIR_SHEET_W = 1614;
 const HAIR_SHEET_H = 522;
 
 const STATUS_OPTIONS: { id: ProfileStatus; label: string; dot: string }[] = [
-  { id: "online", label: "Online", dot: "#4fd97a" },
-  { id: "away", label: "Ausente", dot: "#9a9aa5" },
-  { id: "focus", label: "Foco", dot: "#f5c542" },
+  { id: "online", label: "Online", dot: STATUS_DOT_COLORS.online },
+  { id: "away", label: "Ausente", dot: STATUS_DOT_COLORS.away },
+  { id: "focus", label: "Foco", dot: STATUS_DOT_COLORS.focus },
 ];
 
 function statusMeta(status: ProfileStatus) {
@@ -867,6 +917,8 @@ function ProfileCard({
   onClose,
   selectedHairId,
   onSelectHair,
+  editorCategory,
+  onSelectCategory,
   onAskAvailable,
   onCallOver,
   onSendMessage,
@@ -883,6 +935,8 @@ function ProfileCard({
   onClose: () => void;
   selectedHairId: string;
   onSelectHair: (id: string) => void;
+  editorCategory: CustomizationCategoryId;
+  onSelectCategory: (id: CustomizationCategoryId) => void;
   onAskAvailable: () => void;
   onCallOver: () => void;
   onSendMessage: () => void;
@@ -896,38 +950,87 @@ function ProfileCard({
   const status = statusMeta(fields.status);
   const displayName = fields.name || (info.isLocal ? "Sem nome ainda" : "Visitante");
 
-  // "Editar meu personagem" toma o card INTEIRO (só o seletor de
-  // cabelo + Cancelar/Salvar) em vez de aparecer espremido junto com
-  // os campos de nome/status/bio -- ver onStartEdit/onCancelEdit.
+  // "Editar meu personagem" toma o card INTEIRO (categorias + itens +
+  // Cancelar/Salvar) em vez de aparecer espremido junto com os campos
+  // de nome/status/bio -- ver onStartEdit/onCancelEdit. Título e abas
+  // de categoria ficam FIXOS no topo, Cancelar/Salvar fixos embaixo;
+  // só a lista de itens (e as cores do item selecionado) rola por
+  // dentro -- assim o card nunca muda de tamanho trocando de categoria
+  // ou categoria com mais/menos itens (ver .profile-card.editing).
   if (editing) {
+    const selectedHairOption = HAIR_CATALOG.find((opt) => opt.id === selectedHairId);
     return (
       <div className="profile-backdrop" onClick={onClose}>
         <div className="profile-card editing" onClick={(e) => e.stopPropagation()}>
-          <div className="profile-edit-scroll">
-            <h3 className="profile-edit-title">Editar meu personagem</h3>
-            <div className="hair-picker">
-              {HAIR_CATALOG.map((opt) => (
-                <button
-                  key={opt.id}
-                  className={selectedHairId === opt.id ? "hair-option selected" : "hair-option"}
-                  onClick={() => onSelectHair(opt.id)}
-                  title={opt.label}
-                >
-                  <span
-                    className="hair-thumb"
-                    style={{
-                      width: HAIR_THUMB_W,
-                      height: HAIR_THUMB_H,
-                      backgroundImage: `url(/assets/${opt.file})`,
-                      backgroundPosition: "0 0",
-                      backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
-                    }}
-                  />
-                  <span className="hair-label">{opt.label}</span>
-                </button>
-              ))}
-            </div>
+          <h3 className="profile-edit-title">Editar meu personagem</h3>
+
+          <div className="edit-category-tabs">
+            {CUSTOMIZATION_CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                className={editorCategory === cat.id ? "edit-category-tab selected" : "edit-category-tab"}
+                onClick={() => onSelectCategory(cat.id)}
+              >
+                {cat.label}
+              </button>
+            ))}
           </div>
+
+          <div className="profile-edit-scroll">
+            {editorCategory === "cabelo" ? (
+              <>
+                <div className="hair-picker">
+                  {HAIR_CATALOG.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className={selectedHairId === opt.id ? "hair-option selected" : "hair-option"}
+                      onClick={() => onSelectHair(opt.id)}
+                      title={opt.label}
+                    >
+                      <span
+                        className="hair-thumb"
+                        style={{
+                          width: HAIR_THUMB_W,
+                          height: HAIR_THUMB_H,
+                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundPosition: "0 0",
+                          backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
+                        }}
+                      />
+                      <span className="hair-label">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* cores do item selecionado -- espaço já reservado,
+                    ver ColorOption em game/customization.ts; o
+                    Douglas ainda vai mandar as opções de cor de cada
+                    item, até lá mostra "Em breve" no lugar */}
+                {selectedHairOption && (
+                  <div className="color-picker">
+                    <span className="color-picker-label">Cores de &quot;{selectedHairOption.label}&quot;</span>
+                    {selectedHairOption.colors && selectedHairOption.colors.length > 0 ? (
+                      <div className="color-swatches">
+                        {selectedHairOption.colors.map((c) => (
+                          <button
+                            key={c.id}
+                            className="color-swatch"
+                            style={{ background: c.hex }}
+                            title={c.label}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="color-picker-empty">Em breve</span>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="edit-category-empty">Em breve</div>
+            )}
+          </div>
+
           <div className="profile-edit-actions">
             <button className="profile-action-btn" onClick={onCancelEdit}>
               Cancelar

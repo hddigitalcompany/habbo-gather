@@ -206,6 +206,12 @@ const EDIT_UI_DEPTH = 10_000_000;
 const EDIT_HOVER_COLOR_FREE = 0x59d97a;
 const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
 
+// bolinha de status (foco/ausente/online) ao lado do nome, dentro do
+// jogo -- a COR vem sempre de fora (GameRoom.tsx, ver STATUS_COLORS),
+// pra não duplicar a paleta aqui; a cena só sabe desenhar um círculo.
+const STATUS_DOT_RADIUS = 4;
+const STATUS_DOT_GAP = 5;
+
 type Activity = "idle" | "sentado";
 
 // depois de levantar (por movimento), ignora o auto-sentar por um
@@ -250,6 +256,7 @@ export default class MainScene extends Phaser.Scene {
 
   localColor = "#5c9bff";
   localName = "Você";
+  localStatusColor = "#4fd97a";
 
   // --- editor de espaço ("Editar espaço", ver setEditMode) ---------
   // itens colocados pelo editor ainda não são "de verdade" (não entram
@@ -347,7 +354,8 @@ export default class MainScene extends Phaser.Scene {
       this.localColor,
       this.localName,
       true,
-      "local"
+      "local",
+      this.localStatusColor
     );
 
     this.drawEditGrid();
@@ -381,7 +389,8 @@ export default class MainScene extends Phaser.Scene {
     color: string,
     name: string,
     isLocal: boolean,
-    playerId: string
+    playerId: string,
+    statusColor: string = "#4fd97a"
   ): Phaser.GameObjects.Container {
     // uma Sprite por camada EQUIPADA (só as que já têm arte carregada em
     // LAYER_TEXTURE_FILE), empilhadas na ordem de LAYER_DRAW_ORDER --
@@ -425,19 +434,32 @@ export default class MainScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const container = this.add.container(x, y, [...layerSprites, label]);
+    // bolinha de status: fica à esquerda do nome, o par inteiro
+    // (bolinha + espaço + texto) centralizado sobre o boneco -- ver
+    // layoutNameplate, chamado aqui embaixo e de novo toda vez que o
+    // nome muda (setNameplate).
+    const statusDot = this.add.circle(
+      0,
+      label.y,
+      STATUS_DOT_RADIUS,
+      Phaser.Display.Color.HexStringToColor(statusColor).color
+    );
+
+    const container = this.add.container(x, y, [...layerSprites, label, statusDot]);
     const dispW = layerSprites[0].displayWidth;
     const dispH = layerSprites[0].displayHeight;
     container.setSize(dispW, dispH);
     container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
     container.setData("label", label);
+    container.setData("statusDot", statusDot);
     container.setData("dir", "down" as Direction);
     container.setData("stepToggle", false);
     container.setData("hairSprite", hairSprite);
     container.setData("hairId", DEFAULT_HAIR_ID);
     container.setData("playerId", playerId);
     container.setData("isLocal", isLocal);
+    this.layoutNameplate(label, statusDot);
 
     // clicável (card de perfil, ver onAvatarClick) -- a área de clique
     // precisa ser um retângulo próprio porque as sprites são ancoradas
@@ -454,6 +476,37 @@ export default class MainScene extends Phaser.Scene {
     });
 
     return container;
+  }
+
+  /**
+   * Reposiciona a bolinha de status + o texto do nome como UM grupo só,
+   * centralizado sobre o boneco (em vez de cada um centralizado por
+   * si) -- precisa ser recalculado toda vez que o texto do nome muda,
+   * porque a largura do label muda junto.
+   */
+  private layoutNameplate(label: Phaser.GameObjects.Text, dot: Phaser.GameObjects.Arc) {
+    const groupWidth = STATUS_DOT_RADIUS * 2 + STATUS_DOT_GAP + label.width;
+    const left = -groupWidth / 2;
+    dot.setPosition(left + STATUS_DOT_RADIUS, label.y);
+    label.setOrigin(0, 0.5);
+    label.setX(left + STATUS_DOT_RADIUS * 2 + STATUS_DOT_GAP);
+  }
+
+  /** Atualiza nome + cor da bolinha de status de um boneco já existente (local ou remoto), sem recriar nada. */
+  private setNameplate(container: Phaser.GameObjects.Container, name: string, statusColor: string) {
+    const label = container.getData("label") as Phaser.GameObjects.Text | undefined;
+    const dot = container.getData("statusDot") as Phaser.GameObjects.Arc | undefined;
+    if (!label || !dot) return;
+    if (label.text !== name) label.setText(name);
+    dot.setFillStyle(Phaser.Display.Color.HexStringToColor(statusColor).color);
+    this.layoutNameplate(label, dot);
+  }
+
+  /** Chamado de fora (GameRoom.tsx) toda vez que MEU nome ou status muda no card de perfil, pra refletir ao vivo no boneco dentro do jogo. */
+  setLocalProfile(name: string, statusColor: string) {
+    this.localName = name;
+    this.localStatusColor = statusColor;
+    if (this.localContainer) this.setNameplate(this.localContainer, name, statusColor);
   }
 
   /** Troca o penteado do jogador LOCAL ao vivo (ver HAIR_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
@@ -677,12 +730,20 @@ export default class MainScene extends Phaser.Scene {
     this.reportPosition(_time);
   }
 
-  upsertRemotePlayer(id: string, x: number, y: number, color: string, name: string) {
+  upsertRemotePlayer(
+    id: string,
+    x: number,
+    y: number,
+    color: string,
+    name: string,
+    statusColor: string = "#4fd97a"
+  ) {
     let container = this.remoteContainers.get(id);
     if (!container) {
-      container = this.createAvatar(x, y, color, name, false, id);
+      container = this.createAvatar(x, y, color, name, false, id, statusColor);
       this.remoteContainers.set(id, container);
     } else {
+      this.setNameplate(container, name, statusColor);
       const dx = x - container.x;
       const dy = y - container.y;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 1) {
