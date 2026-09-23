@@ -106,6 +106,24 @@ export async function loadFrame(filePath, label, referenceDirRelative) {
     .toBuffer();
 }
 
+// buffer cacheado (uma promise só, reusada) de um frame 200x260
+// totalmente transparente -- usado pelos itens que não têm arte de
+// "costas" (barba, óculos: não dá pra ver de trás mesmo, não faz
+// sentido pedir esse arquivo pro Douglas) pra preencher os frames de
+// "up" (ver POSE_KEY_BLANK/FRAME_SLOTS em syncBeardAssets.mjs e
+// syncAccessoryAssets.mjs) sem precisar de nenhum arquivo de origem.
+let _blankFramePromise = null;
+export function blankFrame() {
+  if (!_blankFramePromise) {
+    _blankFramePromise = sharp({
+      create: { width: FRAME_W, height: FRAME_H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    })
+      .png()
+      .toBuffer();
+  }
+  return _blankFramePromise;
+}
+
 /** Monta o PNG final (grade 8x2) a partir de {poseKey: buffer} + a lista ordenada de 15 poseKeys (um por frame, ver FRAME_SLOTS em cada pipeline). */
 export async function composeSheet(frameBuffersByPose, frameSlots) {
   const composites = [];

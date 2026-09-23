@@ -14,6 +14,10 @@ import {
   DEFAULT_HAIR_ID,
   SKIN_CATALOG,
   DEFAULT_SKIN_ID,
+  BEARD_CATALOG,
+  DEFAULT_BEARD_ID,
+  ACCESSORY_CATALOG,
+  DEFAULT_ACCESSORY_ID,
   CUSTOMIZATION_CATEGORIES,
   CustomizationCategoryId,
 } from "@/game/customization";
@@ -594,6 +598,12 @@ export default function GameRoom() {
   // ao lado do boneco no topo do editor (ver AvatarPreviewWrap), não
   // dentro da grade de categorias.
   const [selectedSkinId, setSelectedSkinId] = useState(DEFAULT_SKIN_ID);
+  // barba e acessório: MESMO esquema do cabelo (id do item + cor
+  // opcional dentro dele, ver comentário em selectedHairColorId acima).
+  const [selectedBeardId, setSelectedBeardId] = useState(DEFAULT_BEARD_ID);
+  const [selectedBeardColorId, setSelectedBeardColorId] = useState<string | null>(null);
+  const [selectedAccessoryId, setSelectedAccessoryId] = useState(DEFAULT_ACCESSORY_ID);
+  const [selectedAccessoryColorId, setSelectedAccessoryColorId] = useState<string | null>(null);
   // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
@@ -1752,19 +1762,51 @@ export default function GameRoom() {
     sceneRef.current?.setLocalSkinId(skinId);
   }
 
+  // barba e acessório: mesmo par de funções do cabelo (troca de
+  // item/estilo reseta a cor escolhida; trocar só a cor mantém o
+  // item/estilo atual).
+  function selectBeard(beardId: string) {
+    setSelectedBeardId(beardId);
+    setSelectedBeardColorId(null);
+    sceneRef.current?.setLocalBeardId(beardId);
+  }
+  function selectBeardColor(colorId: string) {
+    setSelectedBeardColorId(colorId);
+    sceneRef.current?.setLocalBeardId(colorId);
+  }
+  function selectAccessory(accessoryId: string) {
+    setSelectedAccessoryId(accessoryId);
+    setSelectedAccessoryColorId(null);
+    sceneRef.current?.setLocalAccessoryId(accessoryId);
+  }
+  function selectAccessoryColor(colorId: string) {
+    setSelectedAccessoryColorId(colorId);
+    sceneRef.current?.setLocalAccessoryId(colorId);
+  }
+
   // "Editar meu personagem" agora toma o card INTEIRO (nada de ficar
   // espremido embaixo dos campos de nome/bio junto -- ver ProfileCard)
   // e sai com Cancelar/Salvar de verdade: Cancelar volta cabelo+cor+tom
-  // de pele pro que tava ANTES de abrir o editor (guardado aqui),
-  // Salvar só fecha (a troca em si já foi aplicada ao vivo a cada
-  // clique no picker, ver selectHair/selectHairColor/selectSkin).
+  // de pele+barba+acessório pro que tava ANTES de abrir o editor
+  // (guardado aqui), Salvar só fecha (a troca em si já foi aplicada ao
+  // vivo a cada clique no picker, ver selectHair/selectHairColor/
+  // selectSkin/selectBeard/selectBeardColor/selectAccessory/
+  // selectAccessoryColor).
   const hairBeforeEditRef = useRef(selectedHairId);
   const hairColorBeforeEditRef = useRef(selectedHairColorId);
   const skinBeforeEditRef = useRef(selectedSkinId);
+  const beardBeforeEditRef = useRef(selectedBeardId);
+  const beardColorBeforeEditRef = useRef(selectedBeardColorId);
+  const accessoryBeforeEditRef = useRef(selectedAccessoryId);
+  const accessoryColorBeforeEditRef = useRef(selectedAccessoryColorId);
   function startEditingCharacter() {
     hairBeforeEditRef.current = selectedHairId;
     hairColorBeforeEditRef.current = selectedHairColorId;
     skinBeforeEditRef.current = selectedSkinId;
+    beardBeforeEditRef.current = selectedBeardId;
+    beardColorBeforeEditRef.current = selectedBeardColorId;
+    accessoryBeforeEditRef.current = selectedAccessoryId;
+    accessoryColorBeforeEditRef.current = selectedAccessoryColorId;
     setEditorCategory("cabelo");
     setEditingCharacter(true);
   }
@@ -1776,6 +1818,12 @@ export default function GameRoom() {
     sceneRef.current?.setLocalHairId(hairColorBeforeEditRef.current ?? hairBeforeEditRef.current);
     setSelectedSkinId(skinBeforeEditRef.current);
     sceneRef.current?.setLocalSkinId(skinBeforeEditRef.current);
+    setSelectedBeardId(beardBeforeEditRef.current);
+    setSelectedBeardColorId(beardColorBeforeEditRef.current);
+    sceneRef.current?.setLocalBeardId(beardColorBeforeEditRef.current ?? beardBeforeEditRef.current);
+    setSelectedAccessoryId(accessoryBeforeEditRef.current);
+    setSelectedAccessoryColorId(accessoryColorBeforeEditRef.current);
+    sceneRef.current?.setLocalAccessoryId(accessoryColorBeforeEditRef.current ?? accessoryBeforeEditRef.current);
     setEditingCharacter(false);
   }
   function saveEditingCharacter() {
@@ -1945,6 +1993,14 @@ export default function GameRoom() {
             onSelectHairColor={selectHairColor}
             selectedSkinId={selectedSkinId}
             onSelectSkin={selectSkin}
+            selectedBeardId={selectedBeardId}
+            onSelectBeard={selectBeard}
+            selectedBeardColorId={selectedBeardColorId}
+            onSelectBeardColor={selectBeardColor}
+            selectedAccessoryId={selectedAccessoryId}
+            onSelectAccessory={selectAccessory}
+            selectedAccessoryColorId={selectedAccessoryColorId}
+            onSelectAccessoryColor={selectAccessoryColor}
             editorCategory={editorCategory}
             onSelectCategory={setEditorCategory}
             measuredHeight={profileCardHeight}
@@ -2201,6 +2257,14 @@ function ProfileCard({
   onSelectHairColor,
   selectedSkinId,
   onSelectSkin,
+  selectedBeardId,
+  onSelectBeard,
+  selectedBeardColorId,
+  onSelectBeardColor,
+  selectedAccessoryId,
+  onSelectAccessory,
+  selectedAccessoryColorId,
+  onSelectAccessoryColor,
   editorCategory,
   onSelectCategory,
   measuredHeight,
@@ -2225,6 +2289,14 @@ function ProfileCard({
   onSelectHairColor: (id: string) => void;
   selectedSkinId: string;
   onSelectSkin: (id: string) => void;
+  selectedBeardId: string;
+  onSelectBeard: (id: string) => void;
+  selectedBeardColorId: string | null;
+  onSelectBeardColor: (id: string) => void;
+  selectedAccessoryId: string;
+  onSelectAccessory: (id: string) => void;
+  selectedAccessoryColorId: string | null;
+  onSelectAccessoryColor: (id: string) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
   measuredHeight: number | null;
@@ -2281,6 +2353,18 @@ function ProfileCard({
       : undefined;
     const effectiveHairFile = selectedColorOption?.file ?? selectedHairOption?.file;
     const selectedSkinOption = SKIN_CATALOG.find((opt) => opt.id === selectedSkinId) ?? SKIN_CATALOG[0];
+    // barba/acessório: mesmo cálculo de "arquivo efetivo" do cabelo
+    // (cor escolhida dentro do item, se houver).
+    const selectedBeardOption = BEARD_CATALOG.find((opt) => opt.id === selectedBeardId);
+    const selectedBeardColorOption = selectedBeardColorId
+      ? selectedBeardOption?.colors?.find((c) => c.id === selectedBeardColorId)
+      : undefined;
+    const effectiveBeardFile = selectedBeardColorOption?.file ?? selectedBeardOption?.file;
+    const selectedAccessoryOption = ACCESSORY_CATALOG.find((opt) => opt.id === selectedAccessoryId);
+    const selectedAccessoryColorOption = selectedAccessoryColorId
+      ? selectedAccessoryOption?.colors?.find((c) => c.id === selectedAccessoryColorId)
+      : undefined;
+    const effectiveAccessoryFile = selectedAccessoryColorOption?.file ?? selectedAccessoryOption?.file;
     const colorSwatchScale = COLOR_SWATCH_W / 200;
     return (
       <div className="profile-backdrop" onClick={onClose}>
@@ -2307,11 +2391,35 @@ function ProfileCard({
                   backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                 }}
               />
+              {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
+                  barba fica ATRÁS do cabelo, óculos fica NA FRENTE de
+                  tudo -- "nenhuma(o)" é um arquivo transparente, então
+                  sempre renderiza (sem condicional), só não aparece nada. */}
+              {effectiveBeardFile && (
+                <span
+                  className="avatar-preview-layer"
+                  style={{
+                    backgroundImage: `url(/assets/${effectiveBeardFile})`,
+                    backgroundPosition: "0 0",
+                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                  }}
+                />
+              )}
               {effectiveHairFile && (
                 <span
                   className="avatar-preview-layer"
                   style={{
                     backgroundImage: `url(/assets/${effectiveHairFile})`,
+                    backgroundPosition: "0 0",
+                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                  }}
+                />
+              )}
+              {effectiveAccessoryFile && (
+                <span
+                  className="avatar-preview-layer"
+                  style={{
+                    backgroundImage: `url(/assets/${effectiveAccessoryFile})`,
                     backgroundPosition: "0 0",
                     backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                   }}
@@ -2403,6 +2511,110 @@ function ProfileCard({
                               backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
                             }}
                             onClick={() => onSelectHairColor(c.id)}
+                            title={c.label}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="color-picker-empty">Em breve</span>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : editorCategory === "barba" ? (
+              <>
+                <div className="hair-picker">
+                  {BEARD_CATALOG.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className={selectedBeardId === opt.id ? "hair-option selected" : "hair-option"}
+                      onClick={() => onSelectBeard(opt.id)}
+                      title={opt.label}
+                    >
+                      <span
+                        className="hair-thumb"
+                        style={{
+                          width: HAIR_THUMB_W,
+                          height: HAIR_THUMB_H,
+                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundPosition: "0 0",
+                          backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
+                        }}
+                      />
+                      <span className="hair-label">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedBeardOption && selectedBeardOption.id !== "nenhuma" && (
+                  <div className="color-picker">
+                    <span className="color-picker-label">Cores de &quot;{selectedBeardOption.label}&quot;</span>
+                    {selectedBeardOption.colors && selectedBeardOption.colors.length > 0 ? (
+                      <div className="color-swatches">
+                        {selectedBeardOption.colors.map((c) => (
+                          <button
+                            key={c.id}
+                            className={selectedBeardColorId === c.id ? "color-swatch selected" : "color-swatch"}
+                            style={{
+                              width: COLOR_SWATCH_W,
+                              height: COLOR_SWATCH_H,
+                              backgroundImage: `url(/assets/${c.file})`,
+                              backgroundPosition: "0 0",
+                              backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
+                            }}
+                            onClick={() => onSelectBeardColor(c.id)}
+                            title={c.label}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="color-picker-empty">Em breve</span>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : editorCategory === "acessorio" ? (
+              <>
+                <div className="hair-picker">
+                  {ACCESSORY_CATALOG.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className={selectedAccessoryId === opt.id ? "hair-option selected" : "hair-option"}
+                      onClick={() => onSelectAccessory(opt.id)}
+                      title={opt.label}
+                    >
+                      <span
+                        className="hair-thumb"
+                        style={{
+                          width: HAIR_THUMB_W,
+                          height: HAIR_THUMB_H,
+                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundPosition: "0 0",
+                          backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
+                        }}
+                      />
+                      <span className="hair-label">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedAccessoryOption && selectedAccessoryOption.id !== "nenhum" && (
+                  <div className="color-picker">
+                    <span className="color-picker-label">Cores de &quot;{selectedAccessoryOption.label}&quot;</span>
+                    {selectedAccessoryOption.colors && selectedAccessoryOption.colors.length > 0 ? (
+                      <div className="color-swatches">
+                        {selectedAccessoryOption.colors.map((c) => (
+                          <button
+                            key={c.id}
+                            className={selectedAccessoryColorId === c.id ? "color-swatch selected" : "color-swatch"}
+                            style={{
+                              width: COLOR_SWATCH_W,
+                              height: COLOR_SWATCH_H,
+                              backgroundImage: `url(/assets/${c.file})`,
+                              backgroundPosition: "0 0",
+                              backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
+                            }}
+                            onClick={() => onSelectAccessoryColor(c.id)}
                             title={c.label}
                           />
                         ))}

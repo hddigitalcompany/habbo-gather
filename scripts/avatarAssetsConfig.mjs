@@ -1,15 +1,18 @@
 // Configuração compartilhada pelos scripts de sincronização de arte do
-// avatar (cabelo e tom de pele/corpo base) -- principalmente ONDE ficam
-// as pastas de origem.
+// avatar (cabelo, tom de pele/corpo base, barba, acessório) --
+// principalmente ONDE ficam as pastas de origem.
 //
 // Por padrão essas pastas ficam DENTRO do projeto (assets-source/cabelo/,
-// assets-source/avatar/), mas podem apontar pra qualquer pasta fora dele
-// -- por exemplo uma pasta no Documentos onde você já organiza tudo --
-// criando um arquivo avatar-assets.local.json na raiz do projeto com:
+// assets-source/avatar/, assets-source/barba/, assets-source/acessorio/),
+// mas podem apontar pra qualquer pasta fora dele -- por exemplo uma
+// pasta no Documentos onde você já organiza tudo -- criando um arquivo
+// avatar-assets.local.json na raiz do projeto com:
 //
 //   {
 //     "cabeloSourceRoot": "/caminho/completo/pra/pasta/Cabelos",
-//     "avatarSkinSourceRoot": "/caminho/completo/pra/pasta/Avatar"
+//     "avatarSkinSourceRoot": "/caminho/completo/pra/pasta/Avatar",
+//     "barbaSourceRoot": "/caminho/completo/pra/pasta/Barba",
+//     "acessorioSourceRoot": "/caminho/completo/pra/pasta/Acessório"
 //   }
 //
 // Esse arquivo fica de fora do git (ver .gitignore) porque o caminho é
@@ -43,3 +46,11 @@ export const CABELO_SRC_ROOT = cfg.cabeloSourceRoot
 export const AVATAR_SKIN_SRC_ROOT = cfg.avatarSkinSourceRoot
   ? cfg.avatarSkinSourceRoot
   : path.join(ROOT, "assets-source", "avatar");
+
+export const BARBA_SRC_ROOT = cfg.barbaSourceRoot
+  ? cfg.barbaSourceRoot
+  : path.join(ROOT, "assets-source", "barba");
+
+export const ACESSORIO_SRC_ROOT = cfg.acessorioSourceRoot
+  ? cfg.acessorioSourceRoot
+  : path.join(ROOT, "assets-source", "acessorio");

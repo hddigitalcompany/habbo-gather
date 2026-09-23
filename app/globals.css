@@ -1832,7 +1832,7 @@ body {
   font-size: 15px;
   font-weight: 700;
   margin: 0;
-  padding: 20px 18px 4px;
+  padding: 14px 18px 4px;
   color: #f5f0ff;
   flex-shrink: 0;
 }
@@ -1845,13 +1845,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 18px;
-  padding: 4px 18px 10px;
+  gap: 14px;
+  padding: 2px 18px 6px;
   flex-shrink: 0;
 }
 
+/* flex-shrink:0 é o que importa aqui -- sem isso, com o seletor de tom
+   de pele do lado (flex:1) disputando espaço na mesma linha, o
+   flexbox comprimia o boneco pra caber (tamanho errado, ver
+   AVATAR_PREVIEW_W/H em GameRoom.tsx -- o boneco tem que ficar SEMPRE
+   nesse tamanho, quem sobra/falta espaço é o seletor de tom de pele). */
 .avatar-preview {
   position: relative;
+  flex-shrink: 0;
   image-rendering: pixelated;
 }
 

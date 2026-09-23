@@ -93,11 +93,67 @@ export const SKIN_CATALOG: SkinOption[] = [
 export const DEFAULT_SKIN_ID = SKIN_CATALOG[0].id;
 
 /**
+ * Barba (camada "barba") -- MESMO esquema do cabelo (estilo com cores
+ * aninhadas vira `colors`, ver scripts/syncBeardAssets.mjs), mas só 3
+ * poses de verdade (sem "costas" -- não dá pra ver a barba de trás da
+ * cabeça, o frame de "up" fica transparente). "Nenhuma" é a opção
+ * padrão/manual (arquivo transparente, ver public/assets/
+ * barba_nenhuma.png) -- diferente do cabelo, nem todo mundo tem barba.
+ */
+export interface BeardOption {
+  id: string;
+  label: string;
+  file: string;
+  colors?: ColorOption[];
+}
+
+// gerado automaticamente -- ver scripts/syncBeardAssets.mjs, NÃO editar
+// esse import nem o arquivo dele à mão. Diferente do cabelo, não existe
+// nenhuma barba manual pré-existente pra "receber" cores por nome de
+// pasta -- toda barba com estilo/cor aninhados já vem com `colors`
+// dentro do próprio item gerado.
+import { GENERATED_BEARD_CATALOG } from "./beardCatalog.generated";
+
+export const BEARD_CATALOG: BeardOption[] = [
+  { id: "nenhuma", label: "Nenhuma", file: "barba_nenhuma.png" },
+  ...GENERATED_BEARD_CATALOG,
+];
+
+export const DEFAULT_BEARD_ID = BEARD_CATALOG[0].id;
+
+/**
+ * Acessório (camada "oculos") -- mesmo esquema da barba (3 poses, sem
+ * costas, "Nenhum" é a opção padrão). O nome da categoria/camada
+ * ("acessorio"/"oculos") já existia antes desse catálogo (ver
+ * CUSTOMIZATION_CATEGORIES/LAYER_DRAW_ORDER em MainScene.ts) -- por
+ * enquanto só óculos, mas qualquer acessório de rosto/cabeça pode entrar
+ * na mesma pasta de origem (ver scripts/syncAccessoryAssets.mjs).
+ */
+export interface AccessoryOption {
+  id: string;
+  label: string;
+  file: string;
+  colors?: ColorOption[];
+}
+
+// gerado automaticamente -- ver scripts/syncAccessoryAssets.mjs, NÃO
+// editar esse import nem o arquivo dele à mão.
+import { GENERATED_ACCESSORY_CATALOG } from "./accessoryCatalog.generated";
+
+export const ACCESSORY_CATALOG: AccessoryOption[] = [
+  { id: "nenhum", label: "Nenhum", file: "acessorio_nenhum.png" },
+  ...GENERATED_ACCESSORY_CATALOG,
+];
+
+export const DEFAULT_ACCESSORY_ID = ACCESSORY_CATALOG[0].id;
+
+/**
  * Categorias do editor de personagem ("Editar meu personagem", ver
- * ProfileCard em GameRoom.tsx). Só "cabelo" tem itens de verdade por
- * enquanto -- as outras ficam com a aba visível e um "em breve" no
- * lugar da grade, prontas pra quando a arte de cada uma chegar, sem
- * precisar mexer no card em si (tamanho fixo, rolagem interna).
+ * ProfileCard em GameRoom.tsx). Cabelo, tom de pele, barba e acessório
+ * já têm itens de verdade -- as outras ficam com a aba visível e um
+ * "em breve" no lugar da grade, prontas pra quando a arte de cada uma
+ * chegar, sem precisar mexer no card em si (tamanho fixo, rolagem
+ * interna).
  */
 export type CustomizationCategoryId =
   | "cabelo"

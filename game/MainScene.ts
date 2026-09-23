@@ -12,7 +12,16 @@ import {
   blockingFurnitureAt,
 } from "./furniture";
 import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS } from "./grid";
-import { HAIR_CATALOG, DEFAULT_HAIR_ID, SKIN_CATALOG, DEFAULT_SKIN_ID } from "./customization";
+import {
+  HAIR_CATALOG,
+  DEFAULT_HAIR_ID,
+  SKIN_CATALOG,
+  DEFAULT_SKIN_ID,
+  BEARD_CATALOG,
+  DEFAULT_BEARD_ID,
+  ACCESSORY_CATALOG,
+  DEFAULT_ACCESSORY_ID,
+} from "./customization";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -128,13 +137,14 @@ type LayerKey = (typeof LAYER_DRAW_ORDER)[number];
  * processado pelo pipeline de chroma-key/normalização) em
  * `public/assets/`.
  *
- * "cabelo" e "base" são DIFERENTES das outras -- não são mais um
- * arquivo único, e sim um CATÁLOGO de opções (ver game/customization.ts
- * / HAIR_CATALOG e SKIN_CATALOG), porque dá pra trocar de penteado/tom
- * de pele ao vivo (editor de personagem, ver setLocalHairId/
- * setLocalSkinId). O valor `null` aqui continua só pra manter o record
- * completo/tipado -- a arte de cabelo e de tom de pele de verdade é
- * carregada à parte, ver preload() e createAvatar().
+ * "cabelo", "base", "barba" e "oculos" são DIFERENTES das outras -- não
+ * são mais um arquivo único, e sim um CATÁLOGO de opções (ver
+ * game/customization.ts / HAIR_CATALOG, SKIN_CATALOG, BEARD_CATALOG,
+ * ACCESSORY_CATALOG), porque dá pra trocar ao vivo (editor de
+ * personagem, ver setLocalHairId/setLocalSkinId/setLocalBeardId/
+ * setLocalAccessoryId). O valor `null` aqui continua só pra manter o
+ * record completo/tipado -- a arte de verdade é carregada à parte, ver
+ * preload() e createAvatar().
  */
 const LAYER_TEXTURE_FILE: Record<LayerKey, string | null> = {
   base: null,
@@ -160,6 +170,16 @@ function hairTextureKey(hairId: string): string {
 /** Chave da textura no Phaser pra UM TOM de pele do catálogo (ver SKIN_CATALOG). */
 function skinTextureKey(skinId: string): string {
   return `avatar-base-${skinId}`;
+}
+
+/** Chave da textura no Phaser pra UMA OPÇÃO de barba do catálogo (ver BEARD_CATALOG). */
+function beardTextureKey(beardId: string): string {
+  return `avatar-barba-${beardId}`;
+}
+
+/** Chave da textura no Phaser pra UMA OPÇÃO de acessório do catálogo (ver ACCESSORY_CATALOG). */
+function accessoryTextureKey(accessoryId: string): string {
+  return `avatar-oculos-${accessoryId}`;
 }
 
 // profundidade (z-order): a "fronteira" de um móvel é a borda de CIMA da
@@ -302,6 +322,8 @@ export default class MainScene extends Phaser.Scene {
     for (const layer of LAYER_DRAW_ORDER) {
       if (layer === "cabelo") continue; // carregado abaixo, ver HAIR_CATALOG
       if (layer === "base") continue; // carregado abaixo, ver SKIN_CATALOG
+      if (layer === "barba") continue; // carregado abaixo, ver BEARD_CATALOG
+      if (layer === "oculos") continue; // carregado abaixo, ver ACCESSORY_CATALOG
       const file = LAYER_TEXTURE_FILE[layer];
       if (!file) continue;
       this.load.spritesheet(layerTextureKey(layer), `/assets/${file}`, {
@@ -351,6 +373,39 @@ export default class MainScene extends Phaser.Scene {
         frameHeight: FRAME_H,
         spacing: 2,
       });
+    }
+
+    // barba e acessório: mesmo esquema de cabelo (catálogo + cores
+    // aninhadas, ver BEARD_CATALOG/ACCESSORY_CATALOG) -- inclui a opção
+    // "Nenhuma(o)" (arquivo transparente), que também é só mais um
+    // spritesheet normal pro Phaser, sem tratamento especial.
+    for (const beard of BEARD_CATALOG) {
+      this.load.spritesheet(beardTextureKey(beard.id), `/assets/${beard.file}`, {
+        frameWidth: FRAME_W,
+        frameHeight: FRAME_H,
+        spacing: 2,
+      });
+      for (const color of beard.colors ?? []) {
+        this.load.spritesheet(beardTextureKey(color.id), `/assets/${color.file}`, {
+          frameWidth: FRAME_W,
+          frameHeight: FRAME_H,
+          spacing: 2,
+        });
+      }
+    }
+    for (const accessory of ACCESSORY_CATALOG) {
+      this.load.spritesheet(accessoryTextureKey(accessory.id), `/assets/${accessory.file}`, {
+        frameWidth: FRAME_W,
+        frameHeight: FRAME_H,
+        spacing: 2,
+      });
+      for (const color of accessory.colors ?? []) {
+        this.load.spritesheet(accessoryTextureKey(color.id), `/assets/${color.file}`, {
+          frameWidth: FRAME_W,
+          frameHeight: FRAME_H,
+          spacing: 2,
+        });
+      }
     }
     this.load.image("room", "/assets/room.png");
 
@@ -432,14 +487,20 @@ export default class MainScene extends Phaser.Scene {
     // uma Sprite por camada EQUIPADA (só as que já têm arte carregada em
     // LAYER_TEXTURE_FILE), empilhadas na ordem de LAYER_DRAW_ORDER --
     // todas na mesma posição/frame, então de longe parecem um boneco só.
-    // "cabelo" e "base" são especiais: sempre entram (têm catálogo de
-    // verdade agora, ver HAIR_CATALOG/SKIN_CATALOG), começando na opção
-    // padrão -- guardam a própria Sprite à parte (hairSprite/skinSprite)
-    // pra dar pra trocar de textura DEPOIS sem recriar o boneco inteiro
-    // (ver setLocalHairId/setLocalSkinId).
+    // "cabelo", "base", "barba" e "oculos" são especiais: sempre entram
+    // (têm catálogo de verdade agora, ver HAIR_CATALOG/SKIN_CATALOG/
+    // BEARD_CATALOG/ACCESSORY_CATALOG), começando na opção padrão --
+    // guardam a própria Sprite à parte (hairSprite/skinSprite/
+    // beardSprite/accessorySprite) pra dar pra trocar de textura DEPOIS
+    // sem recriar o boneco inteiro (ver setLocalHairId/setLocalSkinId/
+    // setLocalBeardId/setLocalAccessoryId). "Nenhuma(o)" (barba/
+    // acessório) é só mais uma opção do catálogo (arquivo transparente),
+    // não precisa de tratamento diferente aqui.
     const layerSprites: Phaser.GameObjects.Sprite[] = [];
     let hairSprite: Phaser.GameObjects.Sprite | null = null;
     let skinSprite: Phaser.GameObjects.Sprite | null = null;
+    let beardSprite: Phaser.GameObjects.Sprite | null = null;
+    let accessorySprite: Phaser.GameObjects.Sprite | null = null;
     for (const layer of LAYER_DRAW_ORDER) {
       if (layer === "cabelo") {
         const sprite = this.add.sprite(
@@ -465,6 +526,32 @@ export default class MainScene extends Phaser.Scene {
         sprite.setScale(AVATAR_SCALE);
         layerSprites.push(sprite);
         skinSprite = sprite;
+        continue;
+      }
+      if (layer === "barba") {
+        const sprite = this.add.sprite(
+          0,
+          AVATAR_FOOT_OFFSET_Y,
+          beardTextureKey(DEFAULT_BEARD_ID),
+          WALK_FRAMES.down[0]
+        );
+        sprite.setOrigin(0.5, 1);
+        sprite.setScale(AVATAR_SCALE);
+        layerSprites.push(sprite);
+        beardSprite = sprite;
+        continue;
+      }
+      if (layer === "oculos") {
+        const sprite = this.add.sprite(
+          0,
+          AVATAR_FOOT_OFFSET_Y,
+          accessoryTextureKey(DEFAULT_ACCESSORY_ID),
+          WALK_FRAMES.down[0]
+        );
+        sprite.setOrigin(0.5, 1);
+        sprite.setScale(AVATAR_SCALE);
+        layerSprites.push(sprite);
+        accessorySprite = sprite;
         continue;
       }
       if (!LAYER_TEXTURE_FILE[layer]) continue;
@@ -511,6 +598,10 @@ export default class MainScene extends Phaser.Scene {
     container.setData("hairId", DEFAULT_HAIR_ID);
     container.setData("skinSprite", skinSprite);
     container.setData("skinId", DEFAULT_SKIN_ID);
+    container.setData("beardSprite", beardSprite);
+    container.setData("beardId", DEFAULT_BEARD_ID);
+    container.setData("accessorySprite", accessorySprite);
+    container.setData("accessoryId", DEFAULT_ACCESSORY_ID);
     container.setData("playerId", playerId);
     container.setData("isLocal", isLocal);
     this.layoutNameplate(label, statusDot);
@@ -587,6 +678,26 @@ export default class MainScene extends Phaser.Scene {
     const currentFrame = sprite.frame.name;
     sprite.setTexture(skinTextureKey(skinId), currentFrame);
     this.localContainer.setData("skinId", skinId);
+  }
+
+  /** Troca a barba do jogador LOCAL ao vivo (ver BEARD_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
+  setLocalBeardId(beardId: string) {
+    if (!this.localContainer) return;
+    const sprite = this.localContainer.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
+    if (!sprite) return;
+    const currentFrame = sprite.frame.name;
+    sprite.setTexture(beardTextureKey(beardId), currentFrame);
+    this.localContainer.setData("beardId", beardId);
+  }
+
+  /** Troca o acessório do jogador LOCAL ao vivo (ver ACCESSORY_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
+  setLocalAccessoryId(accessoryId: string) {
+    if (!this.localContainer) return;
+    const sprite = this.localContainer.getData("accessorySprite") as Phaser.GameObjects.Sprite | null;
+    if (!sprite) return;
+    const currentFrame = sprite.frame.name;
+    sprite.setTexture(accessoryTextureKey(accessoryId), currentFrame);
+    this.localContainer.setData("accessoryId", accessoryId);
   }
 
   /**
