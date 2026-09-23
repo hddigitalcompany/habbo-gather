@@ -29,6 +29,7 @@ export default function GameRoom() {
   const sceneRef = useRef<MainScene | null>(null);
   const socketRef = useRef<PartySocket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const connectedPeersRef = useRef<Set<string>>(new Set());
@@ -36,6 +37,7 @@ export default function GameRoom() {
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  const [screenOn, setScreenOn] = useState(false);
   const [status, setStatus] = useState("Conectando...");
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteMeta, setRemoteMeta] = useState<
@@ -81,6 +83,14 @@ export default function GameRoom() {
       const localStream = localStreamRef.current;
       if (localStream) {
         localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      }
+      // se já tava compartilhando tela quando esse peer entrou em
+      // proximidade (ver toggleScreenShare), manda a tela pra ele
+      // também, não a câmera.
+      const screenTrack = screenStreamRef.current?.getVideoTracks()[0];
+      if (screenTrack) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        sender?.replaceTrack(screenTrack);
       }
 
       pc.ontrack = (event) => {
@@ -279,6 +289,7 @@ export default function GameRoom() {
       destroyed = true;
       gameRef.current?.destroy(true);
       socketRef.current?.close();
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       peersRef.current.forEach((pc) => pc.close());
       peersRef.current.clear();
@@ -297,6 +308,60 @@ export default function GameRoom() {
     if (!stream) return;
     stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
     setCamOn((v) => !v);
+  }
+
+  // Compartilhar tela: em vez de mandar uma track de vídeo A MAIS (o que
+  // exigiria renegociar a chamada com cada peer, ver createPeerConnection
+  // -- essa base não trata "negotiationneeded"), TROCA a track de vídeo
+  // que já tá saindo pra cada peer (replaceTrack -- mesmo "slot", sem
+  // precisar de nova oferta/resposta). Some da tela = volta pra câmera.
+  async function toggleScreenShare() {
+    if (screenOn) {
+      stopScreenShare();
+      return;
+    }
+
+    let display: MediaStream;
+    try {
+      display = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    } catch (e) {
+      console.warn("Compartilhamento de tela cancelado/negado", e);
+      return;
+    }
+
+    const screenTrack = display.getVideoTracks()[0];
+    if (!screenTrack) return;
+
+    screenStreamRef.current = display;
+    // se a pessoa parar o compartilhamento pelo controle NATIVO do
+    // navegador (não pelo nosso botão), volta pra câmera sozinho.
+    screenTrack.onended = () => stopScreenShare();
+
+    peersRef.current.forEach((pc) => {
+      const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+      sender?.replaceTrack(screenTrack);
+    });
+
+    if (localVideoRef.current) localVideoRef.current.srcObject = display;
+    setScreenOn(true);
+  }
+
+  function stopScreenShare() {
+    const display = screenStreamRef.current;
+    if (display) {
+      display.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
+
+    const camStream = localStreamRef.current;
+    const camTrack = camStream?.getVideoTracks()[0];
+    peersRef.current.forEach((pc) => {
+      const sender = pc.getSenders().find((s) => s.track?.kind === "video" || s.track === null);
+      if (camTrack) sender?.replaceTrack(camTrack);
+    });
+
+    if (localVideoRef.current) localVideoRef.current.srcObject = camStream ?? null;
+    setScreenOn(false);
   }
 
   function sendChat() {
@@ -390,11 +455,29 @@ export default function GameRoom() {
           >
             🛠️ {editMode ? "Sair da edição" : "Editar espaço"}
           </button>
-          <button onClick={toggleMic} title="Microfone">
-            {micOn ? "🎤" : "🔇"}
+        </div>
+
+        <div className="av-bar">
+          <button
+            className={micOn ? "av-btn" : "av-btn off"}
+            onClick={toggleMic}
+            title={micOn ? "Desligar microfone" : "Ligar microfone"}
+          >
+            <MicIcon off={!micOn} />
           </button>
-          <button onClick={toggleCam} title="Câmera">
-            {camOn ? "📷" : "🚫"}
+          <button
+            className={camOn ? "av-btn" : "av-btn off"}
+            onClick={toggleCam}
+            title={camOn ? "Desligar câmera" : "Ligar câmera"}
+          >
+            <CamIcon off={!camOn} />
+          </button>
+          <button
+            className={screenOn ? "av-btn on" : "av-btn"}
+            onClick={toggleScreenShare}
+            title={screenOn ? "Parar de compartilhar tela" : "Compartilhar tela"}
+          >
+            <ScreenIcon active={screenOn} />
           </button>
         </div>
 
@@ -576,6 +659,66 @@ function ProfileCard({
         )}
       </div>
     </div>
+  );
+}
+
+// --- ícones da barra de áudio/câmera/tela (linha fina, estilo
+// SF Symbols/Feather -- ver .av-bar em globals.css pro visual "vidro
+// fosco" ao redor deles) ---
+
+function MicIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      {off && (
+        <line x1="4.5" y1="4" x2="19.5" y2="20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      )}
+    </svg>
+  );
+}
+
+function CamIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="6.5" width="12.5" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="m15.5 10.8 4.4-2.6a.8.8 0 0 1 1.2.7v6.2a.8.8 0 0 1-1.2.7l-4.4-2.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      {off && (
+        <line x1="4.5" y1="4" x2="19.5" y2="20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      )}
+    </svg>
+  );
+}
+
+function ScreenIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4.5" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8.5 20h7M12 16.5V20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      {active && (
+        <path
+          d="M12 13.2V8m0 0-2.2 2.2M12 8l2.2 2.2"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
   );
 }
 

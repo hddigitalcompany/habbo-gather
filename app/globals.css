@@ -55,16 +55,17 @@ body {
 
 .local-video {
   position: absolute;
-  bottom: 12px;
-  left: 12px;
+  bottom: 74px;
+  left: 16px;
   width: 120px;
   height: 90px;
-  border-radius: 8px;
-  border: 2px solid #7c5cff;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
   object-fit: cover;
   background: #000;
   z-index: 5;
   transform: scaleX(-1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 .remote-videos {
@@ -147,6 +148,71 @@ body {
 
 .edit-toggle-btn.active {
   background: #7c5cff !important;
+}
+
+/* Barra de áudio/câmera/tela -- pegada "vidro fosco" estilo Apple
+   (control center / dynamic island): pill translúcida com blur, fixa
+   embaixo à esquerda, ver MicIcon/CamIcon/ScreenIcon em GameRoom.tsx. */
+.av-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 999px;
+  background: rgba(40, 34, 56, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+}
+
+.av-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f0ff;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
+}
+
+.av-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.av-btn:active {
+  transform: scale(0.94);
+}
+
+/* mic/câmera desligados -- vermelho suave, igual Gather/Meet/etc */
+.av-btn.off {
+  background: rgba(255, 69, 69, 0.85);
+  color: #fff;
+}
+
+.av-btn.off:hover {
+  background: rgba(255, 69, 69, 0.95);
+}
+
+/* compartilhamento de tela ATIVO -- destaque na cor de marca, não vermelho
+   (não é um estado "de erro", é uma ação em andamento) */
+.av-btn.on {
+  background: #7c5cff;
+  color: #fff;
+}
+
+.av-btn.on:hover {
+  background: #8c6dff;
 }
 
 .chat-panel {
