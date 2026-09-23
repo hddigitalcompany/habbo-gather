@@ -4,12 +4,14 @@ import * as Phaser from "phaser";
 import {
   ROOM_FURNITURE,
   FurnitureDef,
+  FurnitureType,
+  FurnitureCatalogEntry,
+  FURNITURE_ART,
   furnitureWorldPos,
   furnitureTextureKey,
-  furnitureArtFile,
   blockingFurnitureAt,
 } from "./furniture";
-import { clampTile, tileToWorld, worldToTile, Direction, TILE } from "./grid";
+import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS } from "./grid";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -180,6 +182,17 @@ function avatarDepthForY(y: number): number {
   return y;
 }
 
+// grade e highlight do editor de espaço (ver setEditMode) sempre por
+// CIMA de tudo (móvel, boneco) -- é UI de edição, não faz parte da
+// cena "de verdade".
+const EDIT_UI_DEPTH = 10_000_000;
+
+// cor do highlight de hover no editor: verde = tile livre (dá pra
+// colocar), vermelho = ocupado (tile já tem âncora de outro móvel --
+// clicar ali remove o item em vez de colocar um novo).
+const EDIT_HOVER_COLOR_FREE = 0x59d97a;
+const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
+
 type Activity = "idle" | "sentado";
 
 // depois de levantar (por movimento), ignora o auto-sentar por um
@@ -216,6 +229,22 @@ export default class MainScene extends Phaser.Scene {
   localColor = "#5c9bff";
   localName = "Você";
 
+  // --- editor de espaço ("Editar espaço", ver setEditMode) ---------
+  // itens colocados pelo editor ainda não são "de verdade" (não entram
+  // em ROOM_FURNITURE nem salvam em lugar nenhum) -- é um RASCUNHO só
+  // desta sessão, que o editor mostra como código TS pra colar à mão
+  // em furniture.ts (ver game/furnitureCodegen.ts). Por isso ficam à
+  // parte de ROOM_FURNITURE, num Map próprio (id -> definição/sprite).
+  private editMode = false;
+  private selectedCatalogEntry: FurnitureCatalogEntry | null = null;
+  private draftFurniture: Map<string, FurnitureDef> = new Map();
+  private draftSprites: Map<string, Phaser.GameObjects.Image> = new Map();
+  private gridGraphics?: Phaser.GameObjects.Graphics;
+  private hoverGraphics?: Phaser.GameObjects.Graphics;
+
+  /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido no editor, pra React manter a lista/código em dia. */
+  onDraftChange?: (items: FurnitureDef[]) => void;
+
   constructor() {
     super("main");
   }
@@ -243,17 +272,18 @@ export default class MainScene extends Phaser.Scene {
     }
     this.load.image("room", "/assets/room.png");
 
-    // carrega a arte de cada móvel: uma imagem por tipo+direção (ex:
-    // "poltrona" virada "left" usa poltrona_lado_esq.png), uma vez só
-    // por combinação mesmo que vários móveis repitam tipo/direção.
-    const loadedFurniture = new Set<string>();
-    for (const f of ROOM_FURNITURE) {
-      const key = furnitureTextureKey(f.type, f.facing);
-      if (loadedFurniture.has(key)) continue;
-      loadedFurniture.add(key);
-      const file = furnitureArtFile(f.type, f.facing);
-      if (!file) continue;
-      this.load.image(key, `/assets/${file}`);
+    // carrega a arte de TODA combinação tipo+direção que existe em
+    // FURNITURE_ART (não só as que ROOM_FURNITURE já usa) -- assim o
+    // editor de espaço (ver setEditMode/paleta) consegue colocar
+    // qualquer item do catálogo na hora, mesmo um que ainda não
+    // apareça em nenhum móvel fixo da sala.
+    for (const type of Object.keys(FURNITURE_ART) as FurnitureType[]) {
+      const artByFacing = FURNITURE_ART[type];
+      for (const facing of Object.keys(artByFacing) as Direction[]) {
+        const file = artByFacing[facing];
+        if (!file) continue;
+        this.load.image(furnitureTextureKey(type, facing), `/assets/${file}`);
+      }
     }
   }
 
@@ -261,14 +291,7 @@ export default class MainScene extends Phaser.Scene {
     this.add.image(400, 300, "room").setOrigin(0.5);
 
     for (const f of ROOM_FURNITURE) {
-      // origem embaixo-centro, igual ao avatar: a posição do móvel é o
-      // pontinho onde ele "toca o chão", alinhado ao tile dele
-      const pos = furnitureWorldPos(f);
-      this.add
-        .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
-        .setOrigin(0.5, 1)
-        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
-        .setAlpha(f.transparent ? GLASS_ALPHA : 1);
+      this.addFurnitureSprite(f);
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -281,6 +304,30 @@ export default class MainScene extends Phaser.Scene {
 
     const spawn = tileToWorld(6, 4);
     this.localContainer = this.createAvatar(spawn.x, spawn.y, this.localColor, this.localName);
+
+    this.drawEditGrid();
+    this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
+
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.handleEditPointerMove(pointer));
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handleEditPointerDown(pointer));
+  }
+
+  /**
+   * Cria (ou recria) a imagem de UM móvel na cena, já com origem,
+   * profundidade e transparência certas -- usado tanto pros móveis
+   * fixos (ROOM_FURNITURE, no create()) quanto pros itens "rascunho"
+   * colocados pelo editor de espaço (ver placeDraftFurniture), pra
+   * garantir que os dois renderizam exatamente igual.
+   */
+  private addFurnitureSprite(f: FurnitureDef): Phaser.GameObjects.Image {
+    // origem embaixo-centro, igual ao avatar: a posição do móvel é o
+    // pontinho onde ele "toca o chão", alinhado ao tile dele
+    const pos = furnitureWorldPos(f);
+    return this.add
+      .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
+      .setOrigin(0.5, 1)
+      .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
+      .setAlpha(f.transparent ? GLASS_ALPHA : 1);
   }
 
   private createAvatar(
@@ -556,5 +603,126 @@ export default class MainScene extends Phaser.Scene {
 
   getLocalPosition() {
     return { x: this.localContainer.x, y: this.localContainer.y };
+  }
+
+  // ------------------------------------------------------------------
+  // Editor de espaço -- API pública chamada de fora (GameRoom.tsx),
+  // igual ao onLocalMove/upsertRemotePlayer já existentes.
+  // ------------------------------------------------------------------
+
+  /** Liga/desliga o modo de edição (mostra/esconde a grade, some com a seleção da paleta). Os itens já colocados continuam na cena dos dois jeitos. */
+  setEditMode(active: boolean) {
+    this.editMode = active;
+    this.selectedCatalogEntry = null;
+    this.gridGraphics?.setVisible(active);
+    if (!active) this.hoverGraphics?.setVisible(false);
+  }
+
+  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). */
+  selectCatalogEntry(entry: FurnitureCatalogEntry | null) {
+    this.selectedCatalogEntry = entry;
+  }
+
+  getDraftFurnitureList(): FurnitureDef[] {
+    return Array.from(this.draftFurniture.values());
+  }
+
+  removeDraftFurniture(id: string) {
+    this.draftSprites.get(id)?.destroy();
+    this.draftSprites.delete(id);
+    this.draftFurniture.delete(id);
+    this.onDraftChange?.(this.getDraftFurnitureList());
+  }
+
+  clearDraftFurniture() {
+    for (const sprite of this.draftSprites.values()) sprite.destroy();
+    this.draftSprites.clear();
+    this.draftFurniture.clear();
+    this.onDraftChange?.(this.getDraftFurnitureList());
+  }
+
+  /** Desenha o contorno de TODO tile colocável (mesmos limites que clampTile usa pro boneco) -- só visível durante o modo de edição. */
+  private drawEditGrid() {
+    const g = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
+    g.lineStyle(1, 0xffffff, 0.25);
+    for (let col = 0; col <= GRID_COLS; col++) {
+      for (let row = 0; row <= GRID_ROWS; row++) {
+        const { x, y } = tileToWorld(col, row);
+        g.strokeRect(x - TILE / 2, y - TILE / 2, TILE, TILE);
+      }
+    }
+    this.gridGraphics = g;
+  }
+
+  /** Item (fixo OU rascunho) já ancorado nesse tile, se houver -- editor não deixa empilhar dois móveis na mesma âncora (evita duas sprites sobrepostas confundindo o preview). */
+  private anyFurnitureAt(col: number, row: number): boolean {
+    if (ROOM_FURNITURE.some((f) => f.col === col && f.row === row)) return true;
+    for (const f of this.draftFurniture.values()) {
+      if (f.col === col && f.row === row) return true;
+    }
+    return false;
+  }
+
+  private draftIdAt(col: number, row: number): string | null {
+    for (const [id, f] of this.draftFurniture.entries()) {
+      if (f.col === col && f.row === row) return id;
+    }
+    return null;
+  }
+
+  private handleEditPointerMove(pointer: Phaser.Input.Pointer) {
+    if (!this.editMode || !this.hoverGraphics) return;
+    const { col, row } = worldToTile(pointer.x, pointer.y);
+    const inBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
+    if (!inBounds) {
+      this.hoverGraphics.setVisible(false);
+      return;
+    }
+    const occupied = this.anyFurnitureAt(col, row);
+    const { x, y } = tileToWorld(col, row);
+    this.hoverGraphics
+      .clear()
+      .fillStyle(occupied ? EDIT_HOVER_COLOR_OCCUPIED : EDIT_HOVER_COLOR_FREE, 0.35)
+      .fillRect(x - TILE / 2, y - TILE / 2, TILE, TILE)
+      .setVisible(true);
+  }
+
+  /**
+   * Clique num tile durante o modo de edição: se o tile já tem um item
+   * RASCUNHO (colocado nesta sessão), remove ele -- senão, se tiver um
+   * item da paleta selecionado e o tile estiver livre (sem móvel fixo
+   * nem rascunho), coloca uma cópia nova ali. Clicar num tile ocupado
+   * por móvel FIXO (ROOM_FURNITURE) não faz nada -- esses não são
+   * editáveis por aqui.
+   */
+  private handleEditPointerDown(pointer: Phaser.Input.Pointer) {
+    if (!this.editMode) return;
+    const { col, row } = worldToTile(pointer.x, pointer.y);
+    if (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS) return;
+
+    const draftId = this.draftIdAt(col, row);
+    if (draftId) {
+      this.removeDraftFurniture(draftId);
+      return;
+    }
+
+    const entry = this.selectedCatalogEntry;
+    if (!entry || this.anyFurnitureAt(col, row)) return;
+
+    const id = `${entry.type}-draft-${Date.now()}-${Math.round(Math.random() * 999)}`;
+    const def: FurnitureDef = {
+      id,
+      type: entry.type,
+      col,
+      row,
+      facing: entry.facing,
+      seatOffsetY: entry.seatOffsetY,
+      seatOffsetX: entry.seatOffsetX,
+      baseOffsetY: entry.baseOffsetY,
+    };
+    const sprite = this.addFurnitureSprite(def);
+    this.draftFurniture.set(id, def);
+    this.draftSprites.set(id, sprite);
+    this.onDraftChange?.(this.getDraftFurnitureList());
   }
 }

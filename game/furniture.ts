@@ -129,16 +129,53 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
 // caminhar), mas isso empurraria o boneco sentado junto -- subtrai os
 // mesmos 14px aqui pra ele continuar encaixado na poltrona do jeito que
 // já tinha sido aprovado.
-const SEAT_Y_FRENTE_COSTAS = -4 - 14;
-const SEAT_Y_LADO = -18 - 14;
-const SEAT_X_LADO = 12;
+export const SEAT_Y_FRENTE_COSTAS = -4 - 14;
+export const SEAT_Y_LADO = -18 - 14;
+export const SEAT_X_LADO = 12;
 
 // divisória de vidro: sobe meio tile em relação à base padrão (que fica
 // na borda de baixo do tile) -- ou seja, a base dela passa a ficar
 // exatamente na METADE do tile (mesmo ponto onde o boneco anda
 // ancorado), não mais encostada no chão. Só reposiciona -- o tamanho da
 // arte continua o mesmo (ver build/process do vidro, não mudou).
-const VIDRO_BASE_OFFSET_Y = -TILE / 2;
+export const VIDRO_BASE_OFFSET_Y = -TILE / 2;
+
+/**
+ * Catálogo de opções que aparecem na paleta do editor (botão "Editar
+ * espaço", ver MainScene.ts / GameRoom.tsx) -- uma entrada por
+ * combinação tipo+direção que faz sentido colocar. Cada entrada já leva
+ * os MESMOS ajustes finos (seatOffsetY/X, baseOffsetY) usados nos itens
+ * fixos de ROOM_FURNITURE acima, pra um item colocado pelo editor
+ * renderizar/sentar exatamente igual a um item escrito à mão.
+ */
+export interface FurnitureCatalogEntry {
+  type: FurnitureType;
+  facing: Direction;
+  label: string;
+  seatOffsetY?: number;
+  seatOffsetX?: number;
+  baseOffsetY?: number;
+}
+
+export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
+  { type: "poltrona", facing: "down", label: "Poltrona (frente)", seatOffsetY: SEAT_Y_FRENTE_COSTAS },
+  { type: "poltrona", facing: "up", label: "Poltrona (costas)", seatOffsetY: SEAT_Y_FRENTE_COSTAS },
+  {
+    type: "poltrona",
+    facing: "left",
+    label: "Poltrona (lado esq.)",
+    seatOffsetY: SEAT_Y_LADO,
+    seatOffsetX: -SEAT_X_LADO,
+  },
+  {
+    type: "poltrona",
+    facing: "right",
+    label: "Poltrona (lado dir.)",
+    seatOffsetY: SEAT_Y_LADO,
+    seatOffsetX: SEAT_X_LADO,
+  },
+  { type: "vidro", facing: "down", label: "Vidro (divisória)", baseOffsetY: VIDRO_BASE_OFFSET_Y },
+];
 
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {

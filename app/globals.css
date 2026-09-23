@@ -26,6 +26,13 @@ body {
   opacity: 0.85;
 }
 
+.room-and-editor {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 14px;
+}
+
 .room-wrapper {
   position: relative;
   width: 800px;
@@ -130,6 +137,18 @@ body {
   background: #3d2a5c;
 }
 
+.edit-toggle-btn {
+  width: auto !important;
+  border-radius: 20px !important;
+  padding: 0 14px;
+  font-size: 13px !important;
+  white-space: nowrap;
+}
+
+.edit-toggle-btn.active {
+  background: #7c5cff !important;
+}
+
 .chat-panel {
   margin-top: 10px;
   width: 100%;
@@ -188,6 +207,146 @@ body {
   font-size: 12px;
   opacity: 0.6;
   text-align: center;
+}
+
+.edit-panel {
+  width: 280px;
+  max-width: 100%;
+  max-height: 600px;
+  overflow-y: auto;
+  background: #16101f;
+  border: 1px solid #2f2245;
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 13px;
+}
+
+.edit-panel h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+.edit-panel h3 {
+  font-size: 12px;
+  margin: 16px 0 8px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.edit-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.edit-hint code {
+  background: #2a1d40;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.palette-btn {
+  background: #2a1d40;
+  border: 1px solid #3a2a55;
+  border-radius: 6px;
+  color: #f5f0ff;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.palette-btn:hover {
+  background: #3d2a5c;
+}
+
+.palette-btn.selected {
+  background: #7c5cff;
+  border-color: #9376ff;
+}
+
+.draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.draft-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: #0d0715;
+  border: 1px solid #2f2245;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.draft-list button {
+  background: none;
+  border: none;
+  color: #d95959;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.clear-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: #3a1f2a;
+  border: 1px solid #5c2a3d;
+  border-radius: 6px;
+  color: #ff9db0;
+  padding: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clear-btn:hover {
+  background: #4a2836;
+}
+
+.code-box {
+  width: 100%;
+  height: 160px;
+  background: #0d0715;
+  border: 1px solid #2f2245;
+  border-radius: 6px;
+  color: #a68bff;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 8px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.copy-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: #7c5cff;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  padding: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.copy-btn:hover {
+  background: #9376ff;
 }
 
 .loading {

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
 import PartySocket from "partysocket";
 import MainScene from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
+import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
+import { generateFurnitureCode } from "@/game/furnitureCodegen";
 
 type RemotePlayer = { id: string; x: number; y: number; name: string; color: string };
 type ChatMessage = { id: string; text: string; ts: number };
@@ -40,6 +42,14 @@ export default function GameRoom() {
   >({});
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
+
+  // --- editor de espaço ("Editar espaço") -- modo dev: só posiciona
+  // visualmente e gera o código pra colar em furniture.ts, não salva
+  // nada sozinho (ver game/furnitureCodegen.ts) ---
+  const [editMode, setEditMode] = useState(false);
+  const [selectedCatalogIndex, setSelectedCatalogIndex] = useState<number | null>(null);
+  const [draftItems, setDraftItems] = useState<FurnitureDef[]>([]);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let destroyed = false;
@@ -223,6 +233,7 @@ export default function GameRoom() {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
           checkProximity();
         };
+        scene.onDraftChange = (items) => setDraftItems(items);
       });
 
       const socket = new PartySocket({ host: REALTIME_HOST, room: "sala-principal" });
@@ -276,35 +287,173 @@ export default function GameRoom() {
     setChatInput("");
   }
 
+  function toggleEditMode() {
+    const next = !editMode;
+    setEditMode(next);
+    setSelectedCatalogIndex(null);
+    sceneRef.current?.setEditMode(next);
+  }
+
+  function selectCatalog(index: number) {
+    // clicar de novo no mesmo item da paleta DESSELECIONA (sai do "modo
+    // colocar"), igual clicar um toggle
+    const next = selectedCatalogIndex === index ? null : index;
+    setSelectedCatalogIndex(next);
+    sceneRef.current?.selectCatalogEntry(next === null ? null : FURNITURE_CATALOG[next]);
+  }
+
+  function removeDraftItem(id: string) {
+    sceneRef.current?.removeDraftFurniture(id);
+  }
+
+  function clearDraftItems() {
+    sceneRef.current?.clearDraftFurniture();
+  }
+
+  async function copyGeneratedCode() {
+    try {
+      await navigator.clipboard.writeText(generatedCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.warn("Não deu pra copiar pro clipboard", e);
+    }
+  }
+
+  function catalogLabelFor(item: FurnitureDef): string {
+    const entry = FURNITURE_CATALOG.find((c) => c.type === item.type && c.facing === item.facing);
+    return entry?.label ?? `${item.type} (${item.facing})`;
+  }
+
+  const generatedCode = useMemo(() => generateFurnitureCode(draftItems), [draftItems]);
+
   return (
-    <div className="room-wrapper">
-      <div ref={containerRef} className="phaser-container" />
+    <div className="room-and-editor">
+      <div className="room-wrapper">
+        <div ref={containerRef} className="phaser-container" />
 
-      <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
+        <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
 
-      <div className="remote-videos">
-        {Object.entries(remoteStreams).map(([id, stream]) => (
-          <RemoteVideoTile key={id} stream={stream} meta={remoteMeta[id]} />
+        <div className="remote-videos">
+          {Object.entries(remoteStreams).map(([id, stream]) => (
+            <RemoteVideoTile key={id} stream={stream} meta={remoteMeta[id]} />
+          ))}
+        </div>
+
+        <div className="status-badge">{status}</div>
+
+        <div className="controls">
+          <button
+            className={editMode ? "edit-toggle-btn active" : "edit-toggle-btn"}
+            onClick={toggleEditMode}
+            title="Editar espaço"
+          >
+            🛠️ {editMode ? "Sair da edição" : "Editar espaço"}
+          </button>
+          <button onClick={toggleMic} title="Microfone">
+            {micOn ? "🎤" : "🔇"}
+          </button>
+          <button onClick={toggleCam} title="Câmera">
+            {camOn ? "📷" : "🚫"}
+          </button>
+        </div>
+
+        <ChatPanel
+          log={chatLog}
+          value={chatInput}
+          onChange={setChatInput}
+          onSend={sendChat}
+        />
+      </div>
+
+      {editMode && (
+        <EditPanel
+          selectedCatalogIndex={selectedCatalogIndex}
+          onSelectCatalog={selectCatalog}
+          draftItems={draftItems}
+          catalogLabelFor={catalogLabelFor}
+          onRemoveItem={removeDraftItem}
+          onClearAll={clearDraftItems}
+          generatedCode={generatedCode}
+          onCopyCode={copyGeneratedCode}
+          copied={copied}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditPanel({
+  selectedCatalogIndex,
+  onSelectCatalog,
+  draftItems,
+  catalogLabelFor,
+  onRemoveItem,
+  onClearAll,
+  generatedCode,
+  onCopyCode,
+  copied,
+}: {
+  selectedCatalogIndex: number | null;
+  onSelectCatalog: (index: number) => void;
+  draftItems: FurnitureDef[];
+  catalogLabelFor: (item: FurnitureDef) => string;
+  onRemoveItem: (id: string) => void;
+  onClearAll: () => void;
+  generatedCode: string;
+  onCopyCode: () => void;
+  copied: boolean;
+}) {
+  return (
+    <div className="edit-panel">
+      <h2>Editar espaço</h2>
+      <p className="edit-hint">
+        Escolha um item abaixo e clique num quadrado livre da sala pra colocar.
+        Clique num item já colocado (borda vermelha ao passar o mouse) pra
+        remover. Isso ainda não salva sozinho — copie o código no fim e cole
+        em <code>ROOM_FURNITURE</code>.
+      </p>
+
+      <div className="palette">
+        {FURNITURE_CATALOG.map((entry, i) => (
+          <button
+            key={i}
+            className={selectedCatalogIndex === i ? "palette-btn selected" : "palette-btn"}
+            onClick={() => onSelectCatalog(i)}
+          >
+            {entry.label}
+          </button>
         ))}
       </div>
 
-      <div className="status-badge">{status}</div>
-
-      <div className="controls">
-        <button onClick={toggleMic} title="Microfone">
-          {micOn ? "🎤" : "🔇"}
+      <h3>Itens colocados ({draftItems.length})</h3>
+      {draftItems.length === 0 ? (
+        <p className="edit-hint">Nenhum item colocado ainda.</p>
+      ) : (
+        <ul className="draft-list">
+          {draftItems.map((item) => (
+            <li key={item.id}>
+              <span>
+                {catalogLabelFor(item)} — col {item.col}, row {item.row}
+              </span>
+              <button onClick={() => onRemoveItem(item.id)} title="Remover">
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {draftItems.length > 0 && (
+        <button className="clear-btn" onClick={onClearAll}>
+          Limpar tudo
         </button>
-        <button onClick={toggleCam} title="Câmera">
-          {camOn ? "📷" : "🚫"}
-        </button>
-      </div>
+      )}
 
-      <ChatPanel
-        log={chatLog}
-        value={chatInput}
-        onChange={setChatInput}
-        onSend={sendChat}
-      />
+      <h3>Código pra colar em furniture.ts</h3>
+      <textarea readOnly value={generatedCode} className="code-box" spellCheck={false} />
+      <button className="copy-btn" onClick={onCopyCode}>
+        {copied ? "Copiado!" : "Copiar código"}
+      </button>
     </div>
   );
 }
