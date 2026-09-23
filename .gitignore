@@ -10,3 +10,8 @@ node_modules
 # não fazem parte do código
 /data
 /uploads
+
+# aponta a pasta de origem das artes de cabelo pra fora do projeto (ver
+# scripts/avatarAssetsConfig.mjs) -- caminho específico da máquina, não
+# faz sentido versionar
+/avatar-assets.local.json

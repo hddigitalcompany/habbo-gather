@@ -31,9 +31,16 @@ export interface HairOption {
   colors?: ColorOption[];
 }
 
+// itens gerados automaticamente a partir de assets-source/cabelo/ -- ver
+// scripts/syncAvatarAssets.mjs (roda sozinho junto com `npm run dev`).
+// NÃO editar esse import nem o arquivo dele à mão, ele é reescrito toda
+// vez que a pasta muda.
+import { GENERATED_HAIR_CATALOG } from "./customizationCatalog.generated";
+
 export const HAIR_CATALOG: HairOption[] = [
   { id: "ondulado", label: "Cabelinho pra trás", file: "cabelo_1.png" },
   { id: "vorcarinho-do-roi", label: "Vorcarinho do Rói", file: "cabelo_3.png" },
+  ...GENERATED_HAIR_CATALOG,
 ];
 
 export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;

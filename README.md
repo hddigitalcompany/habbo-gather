@@ -50,6 +50,36 @@ recente).
    aba** (ou uma aba anônima) também em `http://localhost:3000`, e mova os
    dois avatares um perto do outro.
 
+## Adicionar cabelo novo (sem mexer em código)
+
+Pra colocar um penteado novo no jogo, crie uma pasta dentro de
+`assets-source/cabelo/` com o nome do item e 4 imagens dentro, cada uma
+com **200x260px** (use os arquivos em `assets-source/cabelo/_referencia/`
+como fundo/guia no seu editor de imagem, pra alinhar certinho com a
+cabeça do avatar):
+
+```
+assets-source/cabelo/cabelinho-pra-tras-loiro/
+  frente.png
+  lado_esq.png   (ou lado-esq.png)
+  lado_dir.png   (ou lado-dir.png)
+  costas.png
+```
+
+Com `npm run dev` rodando, isso é sincronizado sozinho (processo "assets"
+no terminal) assim que você salva a pasta -- o item já aparece no editor
+de personagem do jogo, sem precisar rodar nada nem mandar as imagens por
+aqui. Se quiser um nome de exibição diferente do nome da pasta, adicione
+um arquivo `label.txt` dentro da pasta com o nome desejado.
+
+Pra rodar a sincronização manualmente (sem o `npm run dev` aberto):
+
+```
+npm run sync-assets
+```
+
+(ver `scripts/syncAvatarAssets.mjs` pra como funciona por dentro.)
+
 ## Regenerar os assets (arte placeholder)
 
 Se quiser mexer na arte, o script que gera o piso e o avatar está em

@@ -5,7 +5,9 @@
   "scripts": {
     "dev:next": "next dev",
     "dev:server": "node server/index.js",
-    "dev": "concurrently -n next,server -c blue,magenta \"npm:dev:next\" \"npm:dev:server\"",
+    "dev:assets": "node scripts/watchAvatarAssets.mjs",
+    "dev": "concurrently -n next,server,assets -c blue,magenta,green \"npm:dev:next\" \"npm:dev:server\" \"npm:dev:assets\"",
+    "sync-assets": "node scripts/syncAvatarAssets.mjs",
     "build": "next build",
     "start": "next start",
     "start:server": "node server/index.js",
@@ -24,6 +26,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "typescript": "^5.5.0",
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "sharp": "^0.33.5"
   }
 }
