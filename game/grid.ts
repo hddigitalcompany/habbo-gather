@@ -6,6 +6,8 @@
  * precisar de raio de proximidade.
  */
 
+export type Direction = "down" | "left" | "right" | "up";
+
 export const TILE = 40;
 
 // mesma área jogável que o bounds em pixel usava antes (40..760, 108..570)

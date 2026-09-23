@@ -1,6 +1,12 @@
 import Phaser from "phaser";
-import { ROOM_FURNITURE, FurnitureDef, furnitureWorldPos } from "./furniture";
-import { clampTile, tileToWorld, worldToTile } from "./grid";
+import {
+  ROOM_FURNITURE,
+  FurnitureDef,
+  furnitureWorldPos,
+  furnitureTextureKey,
+  furnitureArtFile,
+} from "./furniture";
+import { clampTile, tileToWorld, worldToTile, Direction } from "./grid";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -45,7 +51,7 @@ import { clampTile, tileToWorld, worldToTile } from "./grid";
  *
  * Sentar é AUTOMÁTICO por móvel (ver game/furniture.ts), não por tecla:
  * o avatar só senta quando PARA totalmente em cima do tile de um móvel
- * tipo "chair" (não é mais raio de proximidade enquanto anda perto —
+ * sentável (não é mais raio de proximidade enquanto anda perto —
  * só dispara quando ele efetivamente chega e fica parado ali). Anda de
  * novo (qualquer tecla de direção) e levanta sozinho.
  */
@@ -65,8 +71,6 @@ const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number, num
   right: [6, 7, 8],
   up: [9, 10, 11],
 };
-
-type Direction = "down" | "left" | "right" | "up";
 
 // sentado tem uma pose por direção -- ainda falta a de "costas" (essa
 // leva só trouxe frente/esquerda/direita), então sentar virado pra
@@ -183,13 +187,17 @@ export default class MainScene extends Phaser.Scene {
     }
     this.load.image("room", "/assets/room.png");
 
-    // carrega a arte de cada móvel (uma vez por textureKey, mesmo que
-    // vários móveis usem a mesma imagem)
-    const loaded = new Set<string>();
+    // carrega a arte de cada móvel: uma imagem por tipo+direção (ex:
+    // "poltrona" virada "left" usa poltrona_lado_esq.png), uma vez só
+    // por combinação mesmo que vários móveis repitam tipo/direção.
+    const loadedFurniture = new Set<string>();
     for (const f of ROOM_FURNITURE) {
-      if (loaded.has(f.textureKey)) continue;
-      loaded.add(f.textureKey);
-      this.load.image(f.textureKey, `/assets/${f.textureKey}.png`);
+      const key = furnitureTextureKey(f.type, f.facing);
+      if (loadedFurniture.has(key)) continue;
+      loadedFurniture.add(key);
+      const file = furnitureArtFile(f.type, f.facing);
+      if (!file) continue;
+      this.load.image(key, `/assets/${file}`);
     }
   }
 
@@ -200,7 +208,7 @@ export default class MainScene extends Phaser.Scene {
       // origem embaixo-centro, igual ao avatar: a posição do móvel é o
       // pontinho onde ele "toca o chão", alinhado ao tile dele
       const pos = furnitureWorldPos(f);
-      this.add.image(pos.x, pos.y, f.textureKey).setOrigin(0.5, 1);
+      this.add.image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing)).setOrigin(0.5, 1);
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -320,7 +328,7 @@ export default class MainScene extends Phaser.Scene {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
     for (const f of ROOM_FURNITURE) {
-      if (f.type === "chair" && f.col === col && f.row === row) return f;
+      if (f.col === col && f.row === row) return f;
     }
     return null;
   }
