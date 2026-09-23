@@ -12,7 +12,7 @@ import { tileToWorld, Direction, TILE } from "./grid";
  * viradas pro lado certo em vez de usar sempre a mesma arte de frente.
  */
 
-export type FurnitureType = "poltrona";
+export type FurnitureType = "poltrona" | "vidro";
 
 export interface FurnitureDef {
   id: string;
@@ -39,6 +39,10 @@ export interface FurnitureDef {
    * pra móveis com overflow de altura (poltrona etc.) -- esses usam a
    * profundidade dinâmica normal. */
   flat?: boolean;
+  /** móvel "de vidro" -- desenhado com transparência (ver GLASS_ALPHA em
+   * MainScene.ts), pra quem ficar por trás dele (boneco, outro móvel)
+   * continuar visível através, em vez de totalmente escondido. */
+  transparent?: boolean;
 }
 
 /**
@@ -52,6 +56,13 @@ export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, stri
     left: "poltrona_lado_esq.png",
     right: "poltrona_lado_dir.png",
     up: "poltrona_costas.png",
+  },
+  // painel de vidro -- não senta, não tem direção (mesma arte pras 4,
+  // cai sempre no fallback "down", ver furnitureArtFile). Item alto de
+  // teste (2 tiles de altura exatos, largura sem vazar o tile) pra
+  // validar a profundidade dinâmica + a transparência juntas.
+  vidro: {
+    down: "vidro.png",
   },
 };
 
@@ -120,6 +131,17 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     row: 2,
     facing: "up",
     seatOffsetY: SEAT_Y_FRENTE_COSTAS,
+  },
+  // painel de vidro de teste -- item alto (2 tiles de altura exatos) em
+  // área livre, pra validar a troca de profundidade (andar por cima
+  // dele desce por trás) e a transparência (ver através dele) juntas.
+  {
+    id: "vidro-teste-1",
+    type: "vidro",
+    col: 1,
+    row: 4,
+    facing: "down",
+    transparent: true,
   },
 ];
 

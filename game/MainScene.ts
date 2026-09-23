@@ -166,6 +166,11 @@ function furnitureDepthForBasePos(pos: { y: number }): number {
   return pos.y - DEPTH_FURNITURE_ROW_HEIGHT;
 }
 
+// móveis "de vidro" (FurnitureDef.transparent) desenham com essa opacidade
+// em vez de opacos -- quem fica por trás (boneco, outro móvel, ordenado
+// pela mesma profundidade acima) continua parcialmente visível através.
+const GLASS_ALPHA = 0.55;
+
 /** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForBasePos(). */
 function avatarDepthForY(y: number): number {
   return y;
@@ -258,7 +263,8 @@ export default class MainScene extends Phaser.Scene {
       this.add
         .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
         .setOrigin(0.5, 1)
-        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForBasePos(pos));
+        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForBasePos(pos))
+        .setAlpha(f.transparent ? GLASS_ALPHA : 1);
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -395,7 +401,10 @@ export default class MainScene extends Phaser.Scene {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
     for (const f of ROOM_FURNITURE) {
-      if (f.col === col && f.row === row) return f;
+      // só "poltrona" é sentável -- vidro (e outros móveis de decoração
+      // que forem chegando) não deve disparar o auto-sentar só por o
+      // boneco parar em cima do tile dele.
+      if (f.type === "poltrona" && f.col === col && f.row === row) return f;
     }
     return null;
   }
