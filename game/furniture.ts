@@ -71,7 +71,7 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
 // olha, pra não ficar sentado bem no meio do "pé" do móvel.
 const SEAT_Y_FRENTE_COSTAS = -4;
 const SEAT_Y_LADO = -18;
-const SEAT_X_LADO = 6;
+const SEAT_X_LADO = 12;
 
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {
