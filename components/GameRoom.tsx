@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
@@ -181,6 +181,12 @@ export default function GameRoom() {
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
   const [editorCategory, setEditorCategory] = useState<CustomizationCategoryId>("cabelo");
+  // altura MEDIDA de verdade do card de perfil (versão base, com
+  // foto+campos) -- a versão de edição usa esse mesmo valor (ver
+  // .profile-card.editing style inline), pra nunca ter um tamanho
+  // diferente entre as duas telas. Medido ao vivo (ResizeObserver) em
+  // vez de um número fixo chutado, ver ProfileCard.
+  const [profileCardHeight, setProfileCardHeight] = useState<number | null>(null);
 
   useEffect(() => {
     let destroyed = false;
@@ -591,6 +597,15 @@ export default function GameRoom() {
     sceneRef.current?.setLocalProfile(myProfile.name || "Você", statusColorFor(myProfile.status));
   }, [myProfile.name, myProfile.status]);
 
+  // enquanto o card de perfil (base OU editando) está aberto, o jogo
+  // ignora clique em qualquer boneco -- sem isso, um clique na UI do
+  // React que por algum motivo "vaze" pro canvas por baixo (ex: algum
+  // elemento do card fora da área esperada) reabre/reseta o card sem
+  // querer, que era o sintoma de "algumas abas voltam pro perfil".
+  useEffect(() => {
+    sceneRef.current?.setAvatarClicksLocked(!!profileCard);
+  }, [profileCard]);
+
   // enquanto QUALQUER campo de texto da UI (nome/bio/insta do card,
   // chat) estiver focado, trava o WASD/setas pro boneco não andar
   // sozinho enquanto a pessoa digita (ver setMovementLocked na
@@ -708,6 +723,8 @@ export default function GameRoom() {
             onSelectHair={selectHair}
             editorCategory={editorCategory}
             onSelectCategory={setEditorCategory}
+            measuredHeight={profileCardHeight}
+            onMeasuredHeight={setProfileCardHeight}
             onAskAvailable={() => sendPoke(profileCard.playerId, "available")}
             onCallOver={() => sendPoke(profileCard.playerId, "call")}
             onSendMessage={() =>
@@ -879,6 +896,13 @@ const HAIR_THUMB_H = 83.2; // mantém a proporção 200:260 do frame
 const HAIR_SHEET_W = 1614;
 const HAIR_SHEET_H = 522;
 
+// mesmo recorte (frame 0, mesmo spritesheet 1614x522), só que MAIOR --
+// é o "boneco" que fica fixo no topo do editor mostrando ao vivo o
+// resultado de cada escolha (base + cabelo selecionado empilhados, ver
+// AvatarPreviewLayer), igual ao editor de personagem do Habbo.
+const AVATAR_PREVIEW_W = 104;
+const AVATAR_PREVIEW_H = 135.2; // mantém a proporção 200:260 do frame
+
 const STATUS_OPTIONS: { id: ProfileStatus; label: string; dot: string }[] = [
   { id: "online", label: "Online", dot: STATUS_DOT_COLORS.online },
   { id: "away", label: "Ausente", dot: STATUS_DOT_COLORS.away },
@@ -919,6 +943,8 @@ function ProfileCard({
   onSelectHair,
   editorCategory,
   onSelectCategory,
+  measuredHeight,
+  onMeasuredHeight,
   onAskAvailable,
   onCallOver,
   onSendMessage,
@@ -937,12 +963,15 @@ function ProfileCard({
   onSelectHair: (id: string) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
+  measuredHeight: number | null;
+  onMeasuredHeight: (h: number) => void;
   onAskAvailable: () => void;
   onCallOver: () => void;
   onSendMessage: () => void;
 }) {
   const thumbScale = HAIR_THUMB_W / 200;
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const baseCardRef = useRef<HTMLDivElement>(null);
 
   const fields: RemoteProfile = info.isLocal
     ? { ...myProfile, role: "" }
@@ -950,19 +979,73 @@ function ProfileCard({
   const status = statusMeta(fields.status);
   const displayName = fields.name || (info.isLocal ? "Sem nome ainda" : "Visitante");
 
+  // mede a altura de VERDADE do card base (foto + campos) sempre que
+  // ele está na tela, e guarda lá em cima (GameRoom) -- é esse valor
+  // que a tela de edição usa (ver style logo abaixo), pra nunca ficar
+  // com um tamanho diferente do card de perfil. ResizeObserver em vez
+  // de medir só uma vez porque a largura do card pode encolher em
+  // telas pequenas (max-width:85%), o que muda a altura da foto
+  // (aspect-ratio 1/1) junto.
+  useLayoutEffect(() => {
+    if (editing) return;
+    const el = baseCardRef.current;
+    if (!el) return;
+    const measure = () => onMeasuredHeight(el.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [editing, onMeasuredHeight]);
+
   // "Editar meu personagem" toma o card INTEIRO (categorias + itens +
   // Cancelar/Salvar) em vez de aparecer espremido junto com os campos
   // de nome/status/bio -- ver onStartEdit/onCancelEdit. Título e abas
   // de categoria ficam FIXOS no topo, Cancelar/Salvar fixos embaixo;
   // só a lista de itens (e as cores do item selecionado) rola por
   // dentro -- assim o card nunca muda de tamanho trocando de categoria
-  // ou categoria com mais/menos itens (ver .profile-card.editing).
+  // ou categoria com mais/menos itens. A ALTURA em si (não só o
+  // max) é a mesma medida do card de perfil (measuredHeight, ver
+  // useLayoutEffect acima) -- por isso as duas telas têm
+  // EXATAMENTE o mesmo tamanho, "seguindo" o perfil.
   if (editing) {
     const selectedHairOption = HAIR_CATALOG.find((opt) => opt.id === selectedHairId);
     return (
       <div className="profile-backdrop" onClick={onClose}>
-        <div className="profile-card editing" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="profile-card editing"
+          style={{ height: measuredHeight ?? 560 }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <h3 className="profile-edit-title">Editar meu personagem</h3>
+
+          {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
+              cabelo selecionado empilhados, mesmo recorte de frame 0
+              dos thumbnails). Só cabelo tem arte de verdade por
+              enquanto; as próximas camadas (camisa, calça...) entram
+              aqui sozinhas assim que LAYER_TEXTURE_FILE deixar de ser
+              null pra elas, ver MainScene.ts. */}
+          <div className="avatar-preview-wrap">
+            <div className="avatar-preview" style={{ width: AVATAR_PREVIEW_W, height: AVATAR_PREVIEW_H }}>
+              <span
+                className="avatar-preview-layer"
+                style={{
+                  backgroundImage: "url(/assets/avatar_visual1.png)",
+                  backgroundPosition: "0 0",
+                  backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                }}
+              />
+              {selectedHairOption && (
+                <span
+                  className="avatar-preview-layer"
+                  style={{
+                    backgroundImage: `url(/assets/${selectedHairOption.file})`,
+                    backgroundPosition: "0 0",
+                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                  }}
+                />
+              )}
+            </div>
+          </div>
 
           <div className="edit-category-tabs">
             {CUSTOMIZATION_CATEGORIES.map((cat) => (
@@ -1046,7 +1129,7 @@ function ProfileCard({
 
   return (
     <div className="profile-backdrop" onClick={onClose}>
-      <div className="profile-card" onClick={(e) => e.stopPropagation()}>
+      <div className="profile-card" ref={baseCardRef} onClick={(e) => e.stopPropagation()}>
         <button className="profile-close" onClick={onClose} title="Fechar">
           ✕
         </button>

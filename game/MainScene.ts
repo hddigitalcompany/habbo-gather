@@ -235,6 +235,13 @@ export default class MainScene extends Phaser.Scene {
   // risco de tecla "grudar" pressionada ao reativar.
   private movementLocked = false;
 
+  // ignora clique em QUALQUER boneco enquanto o card de perfil (base ou
+  // editando) está aberto por cima do jogo -- ver setAvatarClicksLocked,
+  // chamado pelo GameRoom.tsx toda vez que profileCard muda. Defensivo:
+  // sem isso, um clique na UI do React que por algum motivo alcance o
+  // canvas por baixo reabriria/resetaria o card sem querer.
+  private avatarClicksLocked = false;
+
   private localContainer!: Phaser.GameObjects.Container;
   private remoteContainers: Map<string, Phaser.GameObjects.Container> = new Map();
 
@@ -472,6 +479,7 @@ export default class MainScene extends Phaser.Scene {
     container.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
     if (container.input) container.input.cursor = "pointer";
     container.on("pointerdown", () => {
+      if (this.avatarClicksLocked) return;
       this.onAvatarClick?.({ playerId, isLocal, name, color });
     });
 
@@ -507,6 +515,11 @@ export default class MainScene extends Phaser.Scene {
     this.localName = name;
     this.localStatusColor = statusColor;
     if (this.localContainer) this.setNameplate(this.localContainer, name, statusColor);
+  }
+
+  /** Liga/desliga o clique nos bonecos (ver avatarClicksLocked) -- chamado de fora sempre que profileCard muda (GameRoom.tsx). */
+  setAvatarClicksLocked(locked: boolean) {
+    this.avatarClicksLocked = locked;
   }
 
   /** Troca o penteado do jogador LOCAL ao vivo (ver HAIR_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */

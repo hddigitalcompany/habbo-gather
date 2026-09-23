@@ -741,6 +741,29 @@ body {
   flex-shrink: 0;
 }
 
+/* boneco fixo no topo do editor, mostrando ao vivo cada escolha (ver
+   avatar-preview-layer, um recorte do frame 0 igual ao dos thumbnails
+   de cabelo -- background-image + position + size, sem canvas nem
+   Phaser aqui). */
+.avatar-preview-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 4px 18px 10px;
+  flex-shrink: 0;
+}
+
+.avatar-preview {
+  position: relative;
+  image-rendering: pixelated;
+}
+
+.avatar-preview-layer {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
 .edit-category-tabs {
   display: flex;
   gap: 6px;
