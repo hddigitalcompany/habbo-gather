@@ -1,4 +1,6 @@
 import Phaser from "phaser";
+import { ROOM_FURNITURE, FurnitureDef, furnitureWorldPos } from "./furniture";
+import { clampTile, tileToWorld, worldToTile } from "./grid";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -12,21 +14,87 @@ import Phaser from "phaser";
  *   - scene.removeRemotePlayer(id)  -> chamado quando um jogador remoto sai
  *   - scene.getLocalPosition()      -> lido para calcular distância/proximidade
  *
- * Cada avatar é composto por DUAS sprites empilhadas: "avatar-skin" (pele,
- * cabelo, rosto, sapato — sempre igual pra todo mundo) e "avatar-clothes"
- * (tronco, braços, pernas — recebe um tint com a cor do jogador). Assim a
- * cor de identificação de cada jogador só pinta a roupa, não a cabeça toda.
+ * Arte do avatar: cada "visual" (skin completa, não roupa avulsa) é UM
+ * spritesheet só (arte gerada, não mais procedural). O spritesheet tem
+ * 11 frames:
+ *   0-1  down  (parado, passo)
+ *   2-3  left  (parado, passo)
+ *   4-5  right (parado, passo) -- mesma arte de "left", espelhada
+ *   6-7  up    (parado, passo)
+ *   8    sentado
+ *   9    bebendo (copo na mão)
+ *   10   bebendo (copo na boca)
+ *
+ * Diferente da versão anterior (pele+roupa em duas sprites, roupa com
+ * tint da cor do jogador), agora não há recoloração por jogador — a
+ * identidade visual vem de qual "visual" a pessoa escolheu (hoje só
+ * existe visual1; a galeria de escolha vem depois). A cor do jogador
+ * continua usada só no plaquinha do nome.
+ *
+ * Movimento é por GRADE (tile a tile, estilo Gather/Habbo) — ver
+ * game/grid.ts. Segurando uma direção, o boneco anda de quadrado em
+ * quadrado (sem diagonal); ele só é considerado "parado" quando termina
+ * de chegar num tile.
+ *
+ * Sentar é AUTOMÁTICO por móvel (ver game/furniture.ts), não por tecla:
+ * o avatar só senta quando PARA totalmente em cima do tile de um móvel
+ * tipo "chair" (não é mais raio de proximidade enquanto anda perto —
+ * só dispara quando ele efetivamente chega e fica parado ali). Anda de
+ * novo (qualquer tecla de direção) e levanta sozinho. Beber continua
+ * manual (tecla C), é um emote passageiro, não depende de móvel.
  */
+
+const FRAME_W = 200;
+const FRAME_H = 260;
+// caractere ocupa ~210px de altura dentro do frame de 260 -> essa escala
+// deixa ele com uns 90px de altura em tela (tamanho aprovado)
+const AVATAR_SCALE = 0.43;
+
+const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number]> = {
+  down: [0, 1],
+  left: [2, 3],
+  right: [4, 5],
+  up: [6, 7],
+};
+
+const POSE_FRAMES = {
+  sentado: 8,
+  bebendoCopo: 9,
+  bebendoBoca: 10,
+};
+
+type Direction = "down" | "left" | "right" | "up";
+type Activity = "idle" | "sentado" | "bebendo";
+
+// depois de levantar (por movimento), ignora o auto-sentar por um
+// instante -- senão sentaria de novo assim que parasse ainda em cima
+// do mesmo tile da cadeira.
+const STAND_COOLDOWN_MS = 350;
+
+// tempo pra andar UM quadrado (grade tile a tile, não pixel livre)
+const STEP_DURATION_MS = 180;
+
 export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
+  private drinkKey!: Phaser.Input.Keyboard.Key;
 
   private localContainer!: Phaser.GameObjects.Container;
   private remoteContainers: Map<string, Phaser.GameObjects.Container> = new Map();
 
   private lastSent = 0;
-  private readonly speed = 150;
-  private readonly bounds = { minX: 40, maxX: 760, minY: 108, maxY: 570 };
+
+  private localActivity: Activity = "idle";
+  private drinkTimer?: Phaser.Time.TimerEvent;
+  private sitCooldownUntil = 0;
+  private seatedAt: FurnitureDef | null = null;
+
+  // estado do passo atual na grade (tile a tile)
+  private stepping = false;
+  private stepFrom = { x: 0, y: 0 };
+  private stepTo = { x: 0, y: 0 };
+  private stepElapsed = 0;
+  private stepDir: Direction = "down";
 
   /** Definido de fora (GameRoom.tsx) após a cena ficar pronta. */
   onLocalMove?: (x: number, y: number) => void;
@@ -39,19 +107,31 @@ export default class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.spritesheet("avatar-skin", "/assets/avatar_skin.png", {
-      frameWidth: 72,
-      frameHeight: 72,
-    });
-    this.load.spritesheet("avatar-clothes", "/assets/avatar_clothes.png", {
-      frameWidth: 72,
-      frameHeight: 72,
+    this.load.spritesheet("avatar-visual1", "/assets/avatar_visual1.png", {
+      frameWidth: FRAME_W,
+      frameHeight: FRAME_H,
     });
     this.load.image("room", "/assets/room.png");
+
+    // carrega a arte de cada móvel (uma vez por textureKey, mesmo que
+    // vários móveis usem a mesma imagem)
+    const loaded = new Set<string>();
+    for (const f of ROOM_FURNITURE) {
+      if (loaded.has(f.textureKey)) continue;
+      loaded.add(f.textureKey);
+      this.load.image(f.textureKey, `/assets/${f.textureKey}.png`);
+    }
   }
 
   create() {
     this.add.image(400, 300, "room").setOrigin(0.5);
+
+    for (const f of ROOM_FURNITURE) {
+      // origem embaixo-centro, igual ao avatar: a posição do móvel é o
+      // pontinho onde ele "toca o chão", alinhado ao tile dele
+      const pos = furnitureWorldPos(f);
+      this.add.image(pos.x, pos.y, f.textureKey).setOrigin(0.5, 1);
+    }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys({
@@ -60,29 +140,24 @@ export default class MainScene extends Phaser.Scene {
       left: Phaser.Input.Keyboard.KeyCodes.A,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
+    this.drinkKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
     this.createAnimations();
 
-    this.localContainer = this.createAvatar(400, 470, this.localColor, this.localName);
+    const spawn = tileToWorld(9, 9);
+    this.localContainer = this.createAvatar(spawn.x, spawn.y, this.localColor, this.localName);
   }
 
   private createAnimations() {
-    if (this.anims.exists("walk-down-skin")) return;
-    const dirs: Array<[string, number]> = [
-      ["down", 0],
-      ["left", 4],
-      ["right", 8],
-      ["up", 12],
-    ];
-    for (const [dir, start] of dirs) {
-      for (const layer of ["skin", "clothes"] as const) {
-        this.anims.create({
-          key: `walk-${dir}-${layer}`,
-          frames: this.anims.generateFrameNumbers(`avatar-${layer}`, { start, end: start + 3 }),
-          frameRate: 8,
-          repeat: -1,
-        });
-      }
+    if (this.anims.exists("walk-down")) return;
+    for (const dir of Object.keys(WALK_FRAMES) as Direction[]) {
+      const [parado, passo] = WALK_FRAMES[dir];
+      this.anims.create({
+        key: `walk-${dir}`,
+        frames: [{ key: "avatar-visual1", frame: parado }, { key: "avatar-visual1", frame: passo }],
+        frameRate: 4,
+        repeat: -1,
+      });
     }
   }
 
@@ -92,14 +167,14 @@ export default class MainScene extends Phaser.Scene {
     color: string,
     name: string
   ): Phaser.GameObjects.Container {
-    // a pele fica embaixo, sem tint (sempre a mesma cor pra todo mundo)
-    const skinSprite = this.add.sprite(0, 0, "avatar-skin", 0);
-    // a roupa fica em cima, com o tint da cor do jogador
-    const clothesSprite = this.add.sprite(0, 0, "avatar-clothes", 0);
-    clothesSprite.setTint(Phaser.Display.Color.HexStringToColor(color).color);
+    const sprite = this.add.sprite(0, 0, "avatar-visual1", WALK_FRAMES.down[0]);
+    // origem embaixo-centro: o "pé" do boneco fica no (0,0) do container,
+    // que é a posição lógica dele na sala (chão)
+    sprite.setOrigin(0.5, 1);
+    sprite.setScale(AVATAR_SCALE);
 
     const label = this.add
-      .text(0, -46, name, {
+      .text(0, -sprite.displayHeight - 8, name, {
         fontSize: "11px",
         color: "#ffffff",
         fontFamily: "monospace",
@@ -108,66 +183,171 @@ export default class MainScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const container = this.add.container(x, y, [skinSprite, clothesSprite, label]);
-    container.setSize(48, 48);
-    container.setData("skinSprite", skinSprite);
-    container.setData("clothesSprite", clothesSprite);
+    const container = this.add.container(x, y, [sprite, label]);
+    container.setSize(sprite.displayWidth, sprite.displayHeight);
+    container.setData("sprite", sprite);
     container.setData("label", label);
+    container.setData("dir", "down" as Direction);
     return container;
   }
 
-  private playWalk(container: Phaser.GameObjects.Container, dir: "down" | "left" | "right" | "up") {
-    const skinSprite = container.getData("skinSprite") as Phaser.GameObjects.Sprite;
-    const clothesSprite = container.getData("clothesSprite") as Phaser.GameObjects.Sprite;
-    skinSprite.anims.play(`walk-${dir}-skin`, true);
-    clothesSprite.anims.play(`walk-${dir}-clothes`, true);
+  private playWalk(container: Phaser.GameObjects.Container, dir: Direction) {
+    const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
+    container.setData("dir", dir);
+    sprite.anims.play(`walk-${dir}`, true);
   }
 
   private stopWalk(container: Phaser.GameObjects.Container) {
-    const skinSprite = container.getData("skinSprite") as Phaser.GameObjects.Sprite;
-    const clothesSprite = container.getData("clothesSprite") as Phaser.GameObjects.Sprite;
-    skinSprite.anims.stop();
-    clothesSprite.anims.stop();
+    const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
+    const dir = container.getData("dir") as Direction;
+    sprite.anims.stop();
+    sprite.setFrame(WALK_FRAMES[dir][0]);
   }
 
-  update(_time: number, delta: number) {
-    const left = this.cursors.left?.isDown || this.wasd.left.isDown;
-    const right = this.cursors.right?.isDown || this.wasd.right.isDown;
-    const up = this.cursors.up?.isDown || this.wasd.up.isDown;
-    const down = this.cursors.down?.isDown || this.wasd.down.isDown;
+  private setPoseFrame(container: Phaser.GameObjects.Container, frame: number) {
+    const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
+    sprite.anims.stop();
+    sprite.setFrame(frame);
+  }
 
-    let vx = 0;
-    let vy = 0;
-    if (left) vx -= 1;
-    if (right) vx += 1;
-    if (up) vy -= 1;
-    if (down) vy += 1;
+  /** Levanta (se estiver sentado) e libera o movimento de novo. */
+  private standUp() {
+    this.localActivity = "idle";
+    this.seatedAt = null;
+    this.sitCooldownUntil = this.time.now + STAND_COOLDOWN_MS;
+    this.stopWalk(this.localContainer);
+  }
 
-    if (vx !== 0 || vy !== 0) {
-      const len = Math.hypot(vx, vy);
-      vx /= len;
-      vy /= len;
-      const dt = delta / 1000;
+  /** Senta automaticamente no móvel passado (chamado ao PARAR no tile dele). */
+  private sitAt(furniture: FurnitureDef) {
+    const pos = furnitureWorldPos(furniture);
+    this.localActivity = "sentado";
+    this.seatedAt = furniture;
+    this.localContainer.setPosition(pos.x, pos.y + (furniture.seatOffsetY ?? 0));
+    this.setPoseFrame(this.localContainer, POSE_FRAMES.sentado);
+  }
 
-      let nx = this.localContainer.x + vx * this.speed * dt;
-      let ny = this.localContainer.y + vy * this.speed * dt;
-      nx = Phaser.Math.Clamp(nx, this.bounds.minX, this.bounds.maxX);
-      ny = Phaser.Math.Clamp(ny, this.bounds.minY, this.bounds.maxY);
-      this.localContainer.setPosition(nx, ny);
-
-      if (Math.abs(vx) > Math.abs(vy)) {
-        this.playWalk(this.localContainer, vx > 0 ? "right" : "left");
-      } else {
-        this.playWalk(this.localContainer, vy > 0 ? "down" : "up");
-      }
-    } else {
-      this.stopWalk(this.localContainer);
+  /**
+   * Só considera sentar quando o boneco está IDLE (parado, não no meio
+   * de um passo) exatamente em cima do tile de uma cadeira -- andar
+   * perto ou passar por cima sem parar não senta.
+   */
+  private findChairAtCurrentTile(): FurnitureDef | null {
+    if (this.time.now < this.sitCooldownUntil) return null;
+    const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
+    for (const f of ROOM_FURNITURE) {
+      if (f.type === "chair" && f.col === col && f.row === row) return f;
     }
+    return null;
+  }
 
+  /** Emote de beber: toca a animação copo->boca e volta sozinho. */
+  private playDrink() {
+    if (this.localActivity === "sentado") return; // não bebe sentado, por enquanto
+    this.localActivity = "bebendo";
+    this.drinkTimer?.remove();
+    this.setPoseFrame(this.localContainer, POSE_FRAMES.bebendoCopo);
+    this.drinkTimer = this.time.delayedCall(280, () => {
+      this.setPoseFrame(this.localContainer, POSE_FRAMES.bebendoBoca);
+      this.drinkTimer = this.time.delayedCall(280, () => {
+        this.setPoseFrame(this.localContainer, POSE_FRAMES.bebendoCopo);
+        this.drinkTimer = this.time.delayedCall(280, () => {
+          this.localActivity = "idle";
+          this.stopWalk(this.localContainer);
+        });
+      });
+    });
+  }
+
+  /** Relata a posição atual pro servidor, no máximo a cada 50ms. */
+  private reportPosition(_time: number) {
     if (_time - this.lastSent > 50) {
       this.lastSent = _time;
       this.onLocalMove?.(this.localContainer.x, this.localContainer.y);
     }
+  }
+
+  /** Tecla de direção pressionada agora, só uma por vez (sem diagonal). */
+  private readInputDir(): Direction | null {
+    const left = this.cursors.left?.isDown || this.wasd.left.isDown;
+    const right = this.cursors.right?.isDown || this.wasd.right.isDown;
+    const up = this.cursors.up?.isDown || this.wasd.up.isDown;
+    const down = this.cursors.down?.isDown || this.wasd.down.isDown;
+    // prioridade fixa quando mais de uma tecla está pressionada junto
+    if (down) return "down";
+    if (up) return "up";
+    if (left) return "left";
+    if (right) return "right";
+    return null;
+  }
+
+  /** Começa a andar um tile na direção pedida, se o destino for válido. */
+  private startStep(dir: Direction) {
+    const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
+    const delta = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] }[dir];
+    const target = clampTile(col + delta[0], row + delta[1]);
+    const targetPos = tileToWorld(target.col, target.row);
+
+    // bateu na borda do mapa (destino = posição atual) -- só vira de
+    // frente pra direção pedida, sem "andar" de verdade
+    if (targetPos.x === this.localContainer.x && targetPos.y === this.localContainer.y) {
+      this.localContainer.setData("dir", dir);
+      this.stopWalk(this.localContainer);
+      return;
+    }
+
+    this.stepping = true;
+    this.stepDir = dir;
+    this.stepFrom = { x: this.localContainer.x, y: this.localContainer.y };
+    this.stepTo = targetPos;
+    this.stepElapsed = 0;
+    this.playWalk(this.localContainer, dir);
+  }
+
+  update(_time: number, delta: number) {
+    if (Phaser.Input.Keyboard.JustDown(this.drinkKey) && this.localActivity !== "sentado") {
+      this.playDrink();
+    }
+
+    const inputDir = this.readInputDir();
+
+    if (this.localActivity === "sentado") {
+      if (inputDir) {
+        // qualquer tecla de direção levanta -- o passo de verdade só
+        // começa no próximo frame (já sai da cadeira "de pé" primeiro)
+        this.standUp();
+      }
+      this.reportPosition(_time);
+      return;
+    }
+
+    if (this.localActivity === "bebendo") {
+      // emote de beber: sem movimento, mas ainda reporta posição
+      this.reportPosition(_time);
+      return;
+    }
+
+    if (this.stepping) {
+      this.stepElapsed += delta;
+      const t = Math.min(1, this.stepElapsed / STEP_DURATION_MS);
+      const x = Phaser.Math.Linear(this.stepFrom.x, this.stepTo.x, t);
+      const y = Phaser.Math.Linear(this.stepFrom.y, this.stepTo.y, t);
+      this.localContainer.setPosition(x, y);
+
+      if (t >= 1) {
+        this.stepping = false;
+        this.localContainer.setPosition(this.stepTo.x, this.stepTo.y);
+      }
+    } else if (inputDir) {
+      this.startStep(inputDir);
+    } else {
+      // totalmente parado (não só entre passos) -- só aqui checa auto-sentar
+      this.stopWalk(this.localContainer);
+      const chair = this.findChairAtCurrentTile();
+      if (chair) this.sitAt(chair);
+    }
+
+    this.reportPosition(_time);
   }
 
   upsertRemotePlayer(id: string, x: number, y: number, color: string, name: string) {
