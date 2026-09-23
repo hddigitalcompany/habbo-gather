@@ -6,47 +6,42 @@ html,
 body {
   margin: 0;
   padding: 0;
+  height: 100%;
+  overflow: hidden;
   background: #0d0715;
   color: #f5f0ff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/* tela cheia -- o jogo ocupa o navegador inteiro, sem "card" centralizado
+   nem margem ao redor (ver .phaser-container e game/config.ts, que
+   escala o canvas 800x600 pra caber aqui com Phaser.Scale.FIT). */
 .page {
-  min-height: 100vh;
+  width: 100vw;
+  height: 100vh;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-.page h1 {
-  font-size: 18px;
-  margin: 0 0 12px;
-  opacity: 0.85;
+  overflow: hidden;
 }
 
 .room-and-editor {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 14px;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
 }
 
 .room-wrapper {
   position: relative;
-  width: 800px;
-  max-width: 100%;
+  flex: 1;
+  height: 100%;
 }
 
 .phaser-container {
-  width: 800px;
-  max-width: 100%;
-  height: 600px;
-  border-radius: 12px;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-  border: 3px solid #3a2a55;
+  background: #1a1025;
 }
 
 .phaser-container canvas {
@@ -55,7 +50,7 @@ body {
 
 .local-video {
   position: absolute;
-  bottom: 74px;
+  bottom: 64px;
   left: 16px;
   width: 120px;
   height: 90px;
@@ -155,16 +150,17 @@ body {
    embaixo à esquerda, ver MicIcon/CamIcon/ScreenIcon em GameRoom.tsx. */
 .av-bar {
   position: absolute;
-  bottom: 16px;
+  bottom: 0;
   left: 16px;
   z-index: 6;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 7px;
-  border-radius: 999px;
+  border-radius: 999px 999px 0 0;
   background: rgba(40, 34, 56, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom: none;
   box-shadow:
     0 10px 30px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
