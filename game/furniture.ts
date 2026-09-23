@@ -57,14 +57,41 @@ export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, stri
     right: "poltrona_lado_dir.png",
     up: "poltrona_costas.png",
   },
-  // painel de vidro -- não senta, não tem direção (mesma arte pras 4,
-  // cai sempre no fallback "down", ver furnitureArtFile). Item alto de
-  // teste (2 tiles de altura exatos, largura sem vazar o tile) pra
-  // validar a profundidade dinâmica + a transparência juntas.
+  // "vidro" = categoria DIVISÓRIA DE VIDRO -- painel decorativo que
+  // também é uma parede de verdade (ver FURNITURE_BLOCKS_MOVEMENT). Não
+  // senta, não tem direção (mesma arte pras 4, cai sempre no fallback
+  // "down", ver furnitureArtFile). 2 tiles de altura exatos, largura sem
+  // vazar o tile.
   vidro: {
     down: "vidro.png",
   },
 };
+
+/**
+ * Categoria de cada tipo de móvel -- só documentação/agrupamento, não
+ * muda nenhuma lógica sozinha.
+ */
+export const FURNITURE_CATEGORY: Record<FurnitureType, string> = {
+  poltrona: "assento",
+  vidro: "divisória de vidro",
+};
+
+/**
+ * Tipos de móvel cujo TILE (o próprio, onde ele está ancorado) trava a
+ * passagem -- o boneco não consegue andar pra cima (ver startStep() em
+ * MainScene.ts, que usa isso pra recusar o passo igual já fazia na
+ * borda do mapa). O tile de CIMA (onde só a parte que "vaza" pra cima
+ * do móvel aparece, por overflow de altura) continua livre normalmente
+ * -- só o próprio tile do móvel é que trava.
+ */
+export const FURNITURE_BLOCKS_MOVEMENT: Record<FurnitureType, boolean> = {
+  poltrona: false,
+  vidro: true,
+};
+
+export function furnitureBlocksMovement(type: FurnitureType): boolean {
+  return FURNITURE_BLOCKS_MOVEMENT[type] ?? false;
+}
 
 /** Chave da textura no Phaser pra um móvel numa direção (ex: "poltrona" + "left" -> "furniture-poltrona-left"). */
 export function furnitureTextureKey(type: FurnitureType, facing: Direction): string {
@@ -135,6 +162,8 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
   // painel de vidro de teste -- item alto (2 tiles de altura exatos) em
   // área livre, pra validar a troca de profundidade (andar por cima
   // dele desce por trás) e a transparência (ver através dele) juntas.
+  // Fixado como divisória: o próprio tile trava (FURNITURE_BLOCKS_MOVEMENT),
+  // o de cima (onde só a parte de cima vaza) continua livre e transparente normal.
   {
     id: "vidro-teste-1",
     type: "vidro",
@@ -143,7 +172,26 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     facing: "down",
     transparent: true,
   },
+  // segundo teste: vidro um tile ABAIXO da poltrona-1, na mesma coluna
+  // (reto/alinhado com ela) -- valida a profundidade quando o overflow
+  // do vidro (que vaza pra cima, entrando na própria fileira da
+  // poltrona) se sobrepõe ao boneco sentado ali.
+  {
+    id: "vidro-teste-2",
+    type: "vidro",
+    col: 9,
+    row: 7,
+    facing: "down",
+    transparent: true,
+  },
 ];
+
+/** Retorna o móvel que TRAVA a passagem no tile dado, se houver (ver startStep() em MainScene.ts). */
+export function blockingFurnitureAt(col: number, row: number): FurnitureDef | undefined {
+  return ROOM_FURNITURE.find(
+    (f) => f.col === col && f.row === row && furnitureBlocksMovement(f.type)
+  );
+}
 
 export function furnitureWorldPos(f: FurnitureDef) {
   // tileToWorld() dá o CENTRO do tile -- é onde o boneco anda ancorado

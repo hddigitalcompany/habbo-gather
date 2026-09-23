@@ -7,6 +7,7 @@ import {
   furnitureWorldPos,
   furnitureTextureKey,
   furnitureArtFile,
+  blockingFurnitureAt,
 } from "./furniture";
 import { clampTile, tileToWorld, worldToTile, Direction, TILE } from "./grid";
 
@@ -438,9 +439,14 @@ export default class MainScene extends Phaser.Scene {
     const target = clampTile(col + delta[0], row + delta[1]);
     const targetPos = tileToWorld(target.col, target.row);
 
-    // bateu na borda do mapa (destino = posição atual) -- só vira de
-    // frente pra direção pedida, sem "andar" de verdade
-    if (targetPos.x === this.localContainer.x && targetPos.y === this.localContainer.y) {
+    // bateu na borda do mapa (destino = posição atual) OU o tile de
+    // destino é travado por um móvel (ex: divisória de vidro, ver
+    // FURNITURE_BLOCKS_MOVEMENT em furniture.ts) -- nos dois casos só
+    // vira de frente pra direção pedida, sem "andar" de verdade.
+    const blocked =
+      (targetPos.x === this.localContainer.x && targetPos.y === this.localContainer.y) ||
+      !!blockingFurnitureAt(target.col, target.row);
+    if (blocked) {
       this.localContainer.setData("dir", dir);
       this.stopWalk(this.localContainer);
       return;
