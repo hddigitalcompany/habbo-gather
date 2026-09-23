@@ -544,6 +544,30 @@ export default function GameRoom() {
 
   const generatedCode = useMemo(() => generateFurnitureCode(draftItems), [draftItems]);
 
+  // enquanto QUALQUER campo de texto da UI (nome/bio/insta do card,
+  // chat) estiver focado, trava o WASD/setas pro boneco não andar
+  // sozinho enquanto a pessoa digita (ver setMovementLocked na
+  // MainScene) -- um listener só, no documento inteiro, funciona pra
+  // qualquer input/textarea/select que existir agora ou vier depois.
+  useEffect(() => {
+    function isTypingTarget(el: EventTarget | null) {
+      if (!(el instanceof HTMLElement)) return false;
+      return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable;
+    }
+    function onFocusIn(e: FocusEvent) {
+      if (isTypingTarget(e.target)) sceneRef.current?.setMovementLocked(true);
+    }
+    function onFocusOut(e: FocusEvent) {
+      if (isTypingTarget(e.target)) sceneRef.current?.setMovementLocked(false);
+    }
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
   function closeProfileCard() {
     setProfileCard(null);
     setEditingCharacter(false);
@@ -898,6 +922,7 @@ function ProfileCard({
           )}
         </div>
 
+        <div className="profile-body">
         {info.isLocal ? (
           <div className="profile-fields">
             <label className="profile-field">
@@ -958,6 +983,7 @@ function ProfileCard({
         {info.isLocal && (
           <>
             <button className="edit-character-btn" onClick={onToggleEdit}>
+              <PencilIcon />
               {editing ? "Fechar edição" : "Editar meu personagem"}
             </button>
 
@@ -993,19 +1019,57 @@ function ProfileCard({
 
         {!info.isLocal && (
           <div className="profile-actions">
-            <button className="profile-action-btn" onClick={onAskAvailable}>
-              Disponível?
-            </button>
-            <button className="profile-action-btn" onClick={onCallOver}>
-              Chamar até você
-            </button>
             <button className="profile-action-btn primary" onClick={onSendMessage}>
+              <ShareIcon />
               Enviar mensagem
             </button>
+            <div className="profile-actions-row">
+              <button className="profile-action-btn" onClick={onAskAvailable}>
+                Disponível?
+              </button>
+              <button className="profile-action-btn" onClick={onCallOver}>
+                Chamar até você
+              </button>
+            </div>
           </div>
         )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function ShareIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 3v12M12 3 8 7M12 3l4 4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path
+        d="m16.5 4.5 3 3L8 19l-4 1 1-4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

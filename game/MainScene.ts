@@ -220,6 +220,15 @@ export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
 
+  // trava o movimento por teclado enquanto um campo de texto do React
+  // (nome/bio/instagram/chat) está focado -- ver setMovementLocked,
+  // chamado pelo listener focusin/focusout em GameRoom.tsx. Ignora o
+  // estado "isDown" dos Keys do Phaser direto (que continuam sendo
+  // atualizados pelo browser mesmo com o campo focado), em vez de
+  // tentar desligar o KeyboardPlugin inteiro -- mais simples e sem
+  // risco de tecla "grudar" pressionada ao reativar.
+  private movementLocked = false;
+
   private localContainer!: Phaser.GameObjects.Container;
   private remoteContainers: Map<string, Phaser.GameObjects.Container> = new Map();
 
@@ -555,8 +564,14 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
+  /** Liga/desliga a leitura de teclado (ver comentário em movementLocked). */
+  setMovementLocked(locked: boolean) {
+    this.movementLocked = locked;
+  }
+
   /** Tecla de direção pressionada agora, só uma por vez (sem diagonal). */
   private readInputDir(): Direction | null {
+    if (this.movementLocked) return null;
     const left = this.cursors.left?.isDown || this.wasd.left.isDown;
     const right = this.cursors.right?.isDown || this.wasd.right.isDown;
     const up = this.cursors.up?.isDown || this.wasd.up.isDown;
