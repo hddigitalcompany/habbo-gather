@@ -224,10 +224,19 @@ function loadSavedProfile(): Partial<ProfileFields> {
 // cada reconexão pro servidor pareceria uma pessoa nova (ver "userId"
 // vs "id" de conexão no comentário grande em server/index.js).
 const USER_ID_STORAGE_KEY = "habbo-gather-user-id";
-// lembrar se a gaveta de chat tá "fixada" como barra lateral (ver estado
-// chatPinned em GameRoom) -- só um boolean, não precisa de helper igual
-// getOrCreateUserId, lê/grava direto onde é usado.
+// lembrar como a gaveta de chat tá "fixada" (ver estado chatPinMode em
+// GameRoom): "float" (flutuando, padrão) | "side" (barra lateral) |
+// "top" (barra no topo). Formato antigo guardava só "1"/"0" (fixo na
+// lateral ou não) -- migrado na leitura (ver parsePinMode), não precisa
+// de helper de escrita, lê/grava direto onde é usado.
 const CHAT_PINNED_STORAGE_KEY = "habbo-gather-chat-pinned";
+type PinMode = "float" | "side" | "top";
+function parsePinMode(raw: string | null): PinMode {
+  if (raw === "side" || raw === "top" || raw === "float") return raw;
+  if (raw === "1") return "side"; // formato antigo (só lateral fixa)
+  return "float";
+}
+const AGENDA_PINNED_STORAGE_KEY = "habbo-gather-agenda-pinned";
 
 function getOrCreateUserId(): string {
   if (typeof window === "undefined") return "";
@@ -405,12 +414,23 @@ export default function GameRoom() {
   // igual o profile. Ver render lá embaixo: quando fixo, o ChatDrawer
   // entra como IRMÃO do .room-wrapper (antes dele, pra ficar à
   // esquerda), não mais como overlay por cima do jogo.
-  const [chatPinned, setChatPinned] = useState(() => {
-    if (typeof window === "undefined") return false;
+  const [chatPinMode, setChatPinMode] = useState<PinMode>(() => {
+    if (typeof window === "undefined") return "float";
     try {
-      return window.localStorage.getItem(CHAT_PINNED_STORAGE_KEY) === "1";
+      return parsePinMode(window.localStorage.getItem(CHAT_PINNED_STORAGE_KEY));
     } catch {
-      return false;
+      return "float";
+    }
+  });
+  // Agenda ganhou o mesmo "fixar" que o chat já tinha, só que sem a
+  // opção de lateral (só flutuando ou no topo -- ver "Adicione opcao de
+  // fixar no topo tambem").
+  const [agendaPinMode, setAgendaPinMode] = useState<"float" | "top">(() => {
+    if (typeof window === "undefined") return "float";
+    try {
+      return window.localStorage.getItem(AGENDA_PINNED_STORAGE_KEY) === "top" ? "top" : "float";
+    } catch {
+      return "float";
     }
   });
   const autoOpenNextConversationRef = useRef(false);
@@ -500,6 +520,31 @@ export default function GameRoom() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const myProfileRef = useRef(myProfile);
   myProfileRef.current = myProfile;
+
+  // toast de erro genérico -- usado nos pontos que antes falhavam
+  // CALADOS (só um console.warn) pra ações como anexar arquivo/marcar
+  // compromisso: "clica e não acontece nada" é o pior tipo de bug pra
+  // reportar, então agora qualquer falha aparece na tela.
+  function showErrorToast(text: string) {
+    const toastId = `${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev.slice(-3), { id: toastId, text }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
+  }
+
+  // manda pelo socket SÓ se ele realmente tiver aberto -- antes um
+  // socketRef.current?.send(...) com a conexão caída/reconectando (ex:
+  // logo depois de um F5 ou de recarregar código em dev) não dava erro
+  // nenhum, só não fazia nada: "clica e não acontece nada" em "Marcar
+  // compromisso", mandar mensagem, etc. Agora pelo menos avisa.
+  function wsSend(data: Record<string, unknown>): boolean {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showErrorToast("Sem conexão com o servidor agora -- espera reconectar e tenta de novo.");
+      return false;
+    }
+    ws.send(JSON.stringify(data));
+    return true;
+  }
 
   // --- editor de espaço ("Editar espaço") -- modo dev: só posiciona
   // visualmente e gera o código pra colar em furniture.ts, não salva
@@ -731,7 +776,12 @@ export default function GameRoom() {
         handleSignal(data.from, data.data);
       } else if (data.type === "chat") {
         const msg = data.message as ChatMessage;
-        setChatLog((prev) => [...prev.slice(-49), msg]);
+        // defesa: se por algum motivo "message" não vier junto (payload
+        // malformado, versão antiga do servidor etc.), NÃO empurra
+        // undefined pro log -- isso derrubava a tela inteira (ver
+        // ChatMessageRow, que lê msg.senderId sem checar) em vez de só
+        // ignorar essa mensagem quebrada.
+        if (msg && typeof msg === "object") setChatLog((prev) => [...prev.slice(-49), msg]);
       } else if (data.type === "chat_room_deleted") {
         // "apagar mensagem" na Sala (ver deleteRoomMessage) -- não tem
         // histórico salvo (ver comentário grande no topo), então isso só
@@ -1010,7 +1060,7 @@ export default function GameRoom() {
   function sendChat() {
     const text = chatInput.trim();
     if (!text) return;
-    socketRef.current?.send(JSON.stringify({ type: "chat", text }));
+    if (!wsSend({ type: "chat", text })) return;
     setChatInput("");
   }
 
@@ -1068,13 +1118,11 @@ export default function GameRoom() {
   function sendActiveChatMessage() {
     const text = chatComposerText.trim();
     if (!text) return;
-    if (activeConversationId === null) {
-      socketRef.current?.send(JSON.stringify({ type: "chat", text }));
-    } else {
-      socketRef.current?.send(
-        JSON.stringify({ type: "chat:send", conversationId: activeConversationId, text })
-      );
-    }
+    const ok =
+      activeConversationId === null
+        ? wsSend({ type: "chat", text })
+        : wsSend({ type: "chat:send", conversationId: activeConversationId, text });
+    if (!ok) return;
     setChatComposerText("");
   }
 
@@ -1083,14 +1131,13 @@ export default function GameRoom() {
     try {
       const attachment = await uploadChatFile(file, filename);
       if (activeConversationId === null) {
-        socketRef.current?.send(JSON.stringify({ type: "chat", attachment, kind }));
+        wsSend({ type: "chat", attachment, kind });
       } else {
-        socketRef.current?.send(
-          JSON.stringify({ type: "chat:send", conversationId: activeConversationId, attachment, kind })
-        );
+        wsSend({ type: "chat:send", conversationId: activeConversationId, attachment, kind });
       }
     } catch (e) {
       console.warn("Falha ao enviar anexo no chat", e);
+      showErrorToast("Não deu pra enviar o anexo -- tenta de novo.");
     } finally {
       setSendingAttachment(false);
     }
@@ -1112,7 +1159,25 @@ export default function GameRoom() {
   // tava acontecendo até o envio silencioso no fim). ---
   async function startVoiceRecording() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // reaproveita a track de áudio que JÁ tá capturada pra chamada da
+      // sala (localStreamRef) em vez de abrir uma SEGUNDA captura do
+      // mesmo microfone com getUserMedia -- pedir dois getUserMedia de
+      // áudio ao mesmo tempo do mesmo dispositivo faz alguns navegadores
+      // aplicarem cancelamento de eco entre as duas capturas e silenciam
+      // uma delas: a gravação "funciona" (o tempo conta certinho, o
+      // arquivo sai do tamanho esperado) mas sai muda ao reproduzir.
+      // Clona a track (não mexe na original, que continua servindo a
+      // chamada) e força enabled=true -- gravar um áudio não deveria
+      // depender de o mic da sala estar ligado ou desligado (ver micOn).
+      const roomAudioTrack = localStreamRef.current?.getAudioTracks()[0];
+      let stream: MediaStream;
+      if (roomAudioTrack && roomAudioTrack.readyState === "live") {
+        const cloned = roomAudioTrack.clone();
+        cloned.enabled = true;
+        stream = new MediaStream([cloned]);
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
       const mimeType = pickSupportedAudioMimeType();
       const mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       audioChunksRef.current = [];
@@ -1153,9 +1218,7 @@ export default function GameRoom() {
       setRecordingAudio(true);
     } catch (e) {
       console.warn("Sem acesso ao microfone pra gravar áudio", e);
-      const toastId = `${Date.now()}-${Math.random()}`;
-      setToasts((prev) => [...prev.slice(-3), { id: toastId, text: "Não deu pra acessar o microfone -- verifique a permissão do navegador." }]);
-      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
+      showErrorToast("Não deu pra acessar o microfone -- verifique a permissão do navegador.");
     }
   }
 
@@ -1193,9 +1256,9 @@ export default function GameRoom() {
   // server/index.js). conversationId null = mensagem da Sala.
   function deleteMessage(conversationId: string | null, messageId: string) {
     if (conversationId === null) {
-      socketRef.current?.send(JSON.stringify({ type: "chat:delete_room", messageId }));
+      wsSend({ type: "chat:delete_room", messageId });
     } else {
-      socketRef.current?.send(JSON.stringify({ type: "chat:delete", conversationId, messageId }));
+      wsSend({ type: "chat:delete", conversationId, messageId });
     }
   }
 
@@ -1243,23 +1306,25 @@ export default function GameRoom() {
     // NADA (nem mandava a mensagem, nem mostrava erro), por isso o botão
     // "não funcionava" quando a pessoa tentava marcar um compromisso só
     // pra ela mesma.
-    if (!Number.isFinite(startTs)) return;
+    if (!Number.isFinite(startTs)) {
+      setAgendaError("Preenche a data e o horário pra marcar o compromisso.");
+      return;
+    }
     setAgendaError(null);
     agendaCreatingRef.current = true;
-    socketRef.current?.send(
-      JSON.stringify({
-        type: "agenda:create",
-        title: agendaForm.title.trim() || "Call",
-        startTs,
-        durationMinutes: agendaForm.durationMinutes,
-        needs: agendaForm.needs,
-        participantIds: agendaForm.participantIds,
-        visibility: agendaForm.visibility,
-        description: agendaForm.description.trim(),
-        attachments: agendaForm.attachments,
-        blocksAgenda: agendaForm.blocksAgenda,
-      })
-    );
+    const ok = wsSend({
+      type: "agenda:create",
+      title: agendaForm.title.trim() || "Call",
+      startTs,
+      durationMinutes: agendaForm.durationMinutes,
+      needs: agendaForm.needs,
+      participantIds: agendaForm.participantIds,
+      visibility: agendaForm.visibility,
+      description: agendaForm.description.trim(),
+      attachments: agendaForm.attachments,
+      blocksAgenda: agendaForm.blocksAgenda,
+    });
+    if (!ok) agendaCreatingRef.current = false;
     // fica na tela do formulário até a resposta chegar (sucesso pula pro
     // detalhe da call criada, erro mostra o motivo aqui mesmo -- ver
     // handlePartyMessage/agendaCreatingRef).
@@ -1280,6 +1345,7 @@ export default function GameRoom() {
       setAgendaForm((prev) => ({ ...prev, attachments: [...prev.attachments, attachment] }));
     } catch (err) {
       console.warn("Falha ao anexar arquivo no compromisso", err);
+      showErrorToast("Não deu pra anexar o arquivo -- tenta de novo.");
     } finally {
       setSendingAgendaAttachment(false);
     }
@@ -1299,9 +1365,10 @@ export default function GameRoom() {
     setSendingDetailAttachment(true);
     try {
       const attachment = await uploadChatFile(file, file.name);
-      socketRef.current?.send(JSON.stringify({ type: "agenda:add_attachment", callId: agendaDetailId, attachment }));
+      wsSend({ type: "agenda:add_attachment", callId: agendaDetailId, attachment });
     } catch (err) {
       console.warn("Falha ao anexar arquivo na call", err);
+      showErrorToast("Não deu pra anexar o arquivo -- tenta de novo.");
     } finally {
       setSendingDetailAttachment(false);
     }
@@ -1399,11 +1466,32 @@ export default function GameRoom() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(CHAT_PINNED_STORAGE_KEY, chatPinned ? "1" : "0");
+      window.localStorage.setItem(CHAT_PINNED_STORAGE_KEY, chatPinMode);
     } catch {
       // sem localStorage (modo privado etc.) -- só não lembra da próxima vez
     }
-  }, [chatPinned]);
+  }, [chatPinMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AGENDA_PINNED_STORAGE_KEY, agendaPinMode);
+    } catch {
+      // sem localStorage -- só não lembra da próxima vez
+    }
+  }, [agendaPinMode]);
+
+  // clicar de novo no MESMO modo solta (volta a flutuar) -- é assim que
+  // tanto o botão de lateral quanto o de topo funcionam, pro chat e pra
+  // Agenda.
+  function toggleChatPinSide() {
+    setChatPinMode((m) => (m === "side" ? "float" : "side"));
+  }
+  function toggleChatPinTop() {
+    setChatPinMode((m) => (m === "top" ? "float" : "top"));
+  }
+  function toggleAgendaPinTop() {
+    setAgendaPinMode((m) => (m === "top" ? "float" : "top"));
+  }
 
   // checagem de disponibilidade AO VIVO enquanto o formulário "Marcar
   // call" tá aberto -- a cada mudança de data/hora/duração, pergunta pro
@@ -1596,12 +1684,14 @@ export default function GameRoom() {
     onSendRecordedAudio: sendRecordedAudio,
     onDeleteMessage: deleteMessage,
     onClose: () => setChatOpen(false),
-    onTogglePin: () => setChatPinned((v) => !v),
+    pinMode: chatPinMode,
+    onToggleSidePin: toggleChatPinSide,
+    onToggleTopPin: toggleChatPinTop,
   };
 
   // props do AgendaDrawer -- gaveta própria, separada do chat (ver
-  // agendaOpen), sem pin/sidebar (só flutua, igual o chat flutuava
-  // antes de ganhar o botão de fixar).
+  // agendaOpen). Ganhou o mesmo "fixar" do chat, só que sem a opção de
+  // lateral (só flutuar ou fixar no topo).
   const agendaDrawerProps = {
     myUserId,
     onlinePlayers: Array.from(remotePlayersRef.current.values()),
@@ -1634,11 +1724,13 @@ export default function GameRoom() {
     expandedAgendaDays,
     onToggleAgendaDay: toggleAgendaDay,
     onClose: () => setAgendaOpen(false),
+    pinMode: agendaPinMode,
+    onToggleTopPin: toggleAgendaPinTop,
   };
 
   return (
     <div className="room-and-editor">
-      {chatOpen && chatPinned && <ChatDrawer {...chatDrawerProps} pinned />}
+      {chatOpen && chatPinMode === "side" && <ChatDrawer {...chatDrawerProps} />}
       <div className="room-wrapper">
         <div ref={containerRef} className="phaser-container" />
 
@@ -1732,7 +1824,7 @@ export default function GameRoom() {
           </button>
         </div>
 
-        {chatOpen && !chatPinned && <ChatDrawer {...chatDrawerProps} pinned={false} />}
+        {chatOpen && chatPinMode !== "side" && <ChatDrawer {...chatDrawerProps} />}
         {agendaOpen && <AgendaDrawer {...agendaDrawerProps} />}
         <input
           ref={chatFileInputRef}
@@ -2408,8 +2500,9 @@ function ChatDrawer({
   onSendRecordedAudio,
   onDeleteMessage,
   onClose,
-  pinned,
-  onTogglePin,
+  pinMode,
+  onToggleSidePin,
+  onToggleTopPin,
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
@@ -2446,20 +2539,33 @@ function ChatDrawer({
   onSendRecordedAudio: () => void;
   onDeleteMessage: (conversationId: string | null, messageId: string) => void;
   onClose: () => void;
-  pinned: boolean;
-  onTogglePin: () => void;
+  pinMode: "float" | "side" | "top";
+  onToggleSidePin: () => void;
+  onToggleTopPin: () => void;
 }) {
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
   const scrollRef = useRef<HTMLDivElement>(null);
+  // dois botões independentes (lateral / topo) em vez de um só que
+  // ciclava -- mais fácil de descobrir o que cada um faz. Clicar no que
+  // já tá ativo solta (volta a flutuar).
   const pinBtn = (
-    <button
-      className={pinned ? "chat-icon-btn active" : "chat-icon-btn"}
-      title={pinned ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
-      onClick={onTogglePin}
-    >
-      <PinIcon filled={pinned} />
-    </button>
+    <>
+      <button
+        className={pinMode === "side" ? "chat-icon-btn active" : "chat-icon-btn"}
+        title={pinMode === "side" ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
+        onClick={onToggleSidePin}
+      >
+        <PinIcon filled={pinMode === "side"} />
+      </button>
+      <button
+        className={pinMode === "top" ? "chat-icon-btn active" : "chat-icon-btn"}
+        title={pinMode === "top" ? "Soltar (voltar a flutuar)" : "Fixar no topo"}
+        onClick={onToggleTopPin}
+      >
+        <PinTopIcon filled={pinMode === "top"} />
+      </button>
+    </>
   );
 
   useEffect(() => {
@@ -2471,7 +2577,11 @@ function ChatDrawer({
   const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
 
   return (
-    <div className={pinned ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}>
+    <div
+      className={
+        pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : pinMode === "top" ? "chat-drawer chat-drawer-top" : "chat-drawer"
+      }
+    >
       {view === "list" && (
         <>
           <div className="chat-drawer-header">
@@ -2632,7 +2742,7 @@ function ChatDrawer({
 
           <div className="chat-messages" ref={scrollRef}>
             {isRoom
-              ? roomChatLog.map((m) => (
+              ? roomChatLog.filter(Boolean).map((m) => (
                   <ChatMessageRow
                     key={m.id}
                     msg={m}
@@ -2641,7 +2751,7 @@ function ChatDrawer({
                     onDelete={m.senderId === myUserId && !m.deleted ? () => onDeleteMessage(null, m.id) : undefined}
                   />
                 ))
-              : messages.map((m) => (
+              : messages.filter(Boolean).map((m) => (
                   <ChatMessageRow
                     key={m.id}
                     msg={m}
@@ -2753,6 +2863,8 @@ function AgendaDrawer({
   expandedAgendaDays,
   onToggleAgendaDay,
   onClose,
+  pinMode,
+  onToggleTopPin,
 }: {
   myUserId: string;
   onlinePlayers: RemotePlayer[];
@@ -2785,7 +2897,18 @@ function AgendaDrawer({
   expandedAgendaDays: Set<string>;
   onToggleAgendaDay: (dateKey: string) => void;
   onClose: () => void;
+  pinMode: "float" | "top";
+  onToggleTopPin: () => void;
 }) {
+  const pinTopBtn = (
+    <button
+      className={pinMode === "top" ? "chat-icon-btn active" : "chat-icon-btn"}
+      title={pinMode === "top" ? "Soltar (voltar a flutuar)" : "Fixar no topo"}
+      onClick={onToggleTopPin}
+    >
+      <PinTopIcon filled={pinMode === "top"} />
+    </button>
+  );
   const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
   const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
   const onlineUserIds = new Set(onlinePlayers.map((p) => p.userId));
@@ -2847,12 +2970,13 @@ function AgendaDrawer({
   }
 
   return (
-    <div className="chat-drawer agenda-drawer">
+    <div className={pinMode === "top" ? "chat-drawer agenda-drawer chat-drawer-top" : "chat-drawer agenda-drawer"}>
       {agendaView === "list" && (
         <>
           <div className="chat-drawer-header">
             <h3>Minha agenda</h3>
             <div className="chat-drawer-header-actions">
+              {pinTopBtn}
               <button className="chat-icon-btn" title="Marcar compromisso" onClick={onStartNewCall}>
                 <PlusIcon />
               </button>
@@ -2931,6 +3055,7 @@ function AgendaDrawer({
             </button>
             <h3>Agenda de {agendaColleagueName}</h3>
             <div className="chat-drawer-header-actions">
+              {pinTopBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -2973,6 +3098,7 @@ function AgendaDrawer({
             </button>
             <h3>Marcar compromisso</h3>
             <div className="chat-drawer-header-actions">
+              {pinTopBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -3178,6 +3304,7 @@ function AgendaDrawer({
             </button>
             <h3>{detailCall.title}</h3>
             <div className="chat-drawer-header-actions">
+              {pinTopBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -3356,6 +3483,24 @@ function PinIcon({ filled }: { filled: boolean }) {
         strokeLinejoin="round"
       />
       <path d="M9 15 4 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// "fixar no topo" -- uma barra no alto com uma seta encostando nela,
+// pra distinguir visualmente do PinIcon (lateral) de olho no dedo.
+function PinTopIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <path d="M4.5 5h15" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path
+        d="M12 5v13m0 0-4-4m4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={filled ? "currentColor" : "none"}
+      />
     </svg>
   );
 }
