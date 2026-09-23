@@ -16,14 +16,17 @@ import { clampTile, tileToWorld, worldToTile } from "./grid";
  *
  * Arte do avatar: cada "visual" (skin completa, não roupa avulsa) é UM
  * spritesheet só (arte gerada, não mais procedural). O spritesheet tem
- * 11 frames:
- *   0-1  down  (parado, passo)
- *   2-3  left  (parado, passo)
- *   4-5  right (parado, passo) -- mesma arte de "left", espelhada
- *   6-7  up    (parado, passo)
- *   8    sentado
- *   9    bebendo (copo na mão)
- *   10   bebendo (copo na boca)
+ * 15 frames -- cada direção tem 1 frame parado + 2 frames de passo (perna
+ * A / perna B) que alternam a cada passo, pra dar a sensação real de
+ * andar (com só 1 frame de passo, segurando a tecla o boneco "deslizava"
+ * sem as pernas se mexerem):
+ *   0-2   down  (parado, passoA, passoB)
+ *   3-5   left  (parado, passoA, passoB)
+ *   6-8   right (parado, passoA, passoB) -- mesma arte de "left", espelhada
+ *   9-11  up    (parado, passoA, passoB)
+ *   12    sentado
+ *   13    bebendo (copo na mão)
+ *   14    bebendo (copo na boca)
  *
  * Diferente da versão anterior (pele+roupa em duas sprites, roupa com
  * tint da cor do jogador), agora não há recoloração por jogador — a
@@ -50,17 +53,20 @@ const FRAME_H = 260;
 // deixa ele com uns 90px de altura em tela (tamanho aprovado)
 const AVATAR_SCALE = 0.43;
 
-const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number]> = {
-  down: [0, 1],
-  left: [2, 3],
-  right: [4, 5],
-  up: [6, 7],
+// [parado, passoA, passoB] -- passoA/passoB alternam a cada passo dado
+// (ver playWalk), não por tempo -- assim funciona igual pra um pulo de
+// um quadrado só ou pra caminhada contínua.
+const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number, number]> = {
+  down: [0, 1, 2],
+  left: [3, 4, 5],
+  right: [6, 7, 8],
+  up: [9, 10, 11],
 };
 
 const POSE_FRAMES = {
-  sentado: 8,
-  bebendoCopo: 9,
-  bebendoBoca: 10,
+  sentado: 12,
+  bebendoCopo: 13,
+  bebendoBoca: 14,
 };
 
 type Direction = "down" | "left" | "right" | "up";
@@ -181,6 +187,7 @@ export default class MainScene extends Phaser.Scene {
     container.setData("sprite", sprite);
     container.setData("label", label);
     container.setData("dir", "down" as Direction);
+    container.setData("stepToggle", false);
     return container;
   }
 
@@ -191,11 +198,21 @@ export default class MainScene extends Phaser.Scene {
    * podia nem chegar a trocar de frame nesse intervalo curto, fazendo um
    * pulo de UM quadrado parecer que o boneco não se moveu de verdade.
    * Setando o frame direto, o "passo" fica visível a viagem toda.
+   *
+   * Alterna entre passoA/passoB a cada CHAMADA (ou seja, a cada passo de
+   * verdade dado -- ver startStep/upsertRemotePlayer), não por tempo. Com
+   * só 1 frame de passo o boneco "deslizava" parado; agora a perna troca
+   * de fato a cada quadrado andado, contínuo ou não.
    */
   private playWalk(container: Phaser.GameObjects.Container, dir: Direction) {
     const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
+    const prevDir = container.getData("dir") as Direction;
+    // só alterna a perna se já estava andando NA MESMA direção -- ao
+    // mudar de direção, recomeça do passoA pra ficar previsível
+    const toggle = prevDir === dir ? !container.getData("stepToggle") : true;
     container.setData("dir", dir);
-    sprite.setFrame(WALK_FRAMES[dir][1]);
+    container.setData("stepToggle", toggle);
+    sprite.setFrame(WALK_FRAMES[dir][toggle ? 1 : 2]);
   }
 
   private stopWalk(container: Phaser.GameObjects.Container) {
