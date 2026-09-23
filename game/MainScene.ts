@@ -564,9 +564,23 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  /** Liga/desliga a leitura de teclado (ver comentário em movementLocked). */
+  /**
+   * Liga/desliga a leitura de teclado (ver comentário em movementLocked).
+   * O flag sozinho barra o MOVIMENTO, mas não bastava: o Phaser também
+   * "captura" teclas de seta globalmente (preventDefault direto no
+   * KeyboardManager, ANTES de qualquer isDown/enabled de plugin) só pra
+   * evitar a página rolar durante o jogo -- só que isso quebra também o
+   * cursor de texto (setinha esquerda/direita) dentro de um input
+   * focado. disableGlobalCapture()/enableGlobalCapture() desliga essa
+   * captura por completo enquanto um campo de texto tá focado.
+   */
   setMovementLocked(locked: boolean) {
     this.movementLocked = locked;
+    if (locked) {
+      this.input.keyboard?.disableGlobalCapture();
+    } else {
+      this.input.keyboard?.enableGlobalCapture();
+    }
   }
 
   /** Tecla de direção pressionada agora, só uma por vez (sem diagonal). */

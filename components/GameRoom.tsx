@@ -578,6 +578,25 @@ export default function GameRoom() {
     sceneRef.current?.setLocalHairId(hairId);
   }
 
+  // "Editar meu personagem" agora toma o card INTEIRO (nada de ficar
+  // espremido embaixo dos campos de nome/bio junto -- ver ProfileCard)
+  // e sai com Cancelar/Salvar de verdade: Cancelar volta o cabelo pro
+  // que tava ANTES de abrir o editor (guardado aqui), Salvar só fecha
+  // (a troca em si já foi aplicada ao vivo a cada clique no picker,
+  // ver selectHair).
+  const hairBeforeEditRef = useRef(selectedHairId);
+  function startEditingCharacter() {
+    hairBeforeEditRef.current = selectedHairId;
+    setEditingCharacter(true);
+  }
+  function cancelEditingCharacter() {
+    selectHair(hairBeforeEditRef.current);
+    setEditingCharacter(false);
+  }
+  function saveEditingCharacter() {
+    setEditingCharacter(false);
+  }
+
   function sendProfileUpdate(fields: ProfileFields) {
     socketRef.current?.send(JSON.stringify({ type: "profile", ...fields }));
   }
@@ -633,7 +652,9 @@ export default function GameRoom() {
             onChangePhoto={handlePhotoChange}
             remoteProfile={remoteProfiles[profileCard.playerId]}
             editing={editingCharacter}
-            onToggleEdit={() => setEditingCharacter((v) => !v)}
+            onStartEdit={startEditingCharacter}
+            onCancelEdit={cancelEditingCharacter}
+            onSaveEdit={saveEditingCharacter}
             onClose={closeProfileCard}
             selectedHairId={selectedHairId}
             onSelectHair={selectHair}
@@ -810,8 +831,8 @@ const HAIR_SHEET_H = 522;
 
 const STATUS_OPTIONS: { id: ProfileStatus; label: string; dot: string }[] = [
   { id: "online", label: "Online", dot: "#4fd97a" },
-  { id: "away", label: "Ausente", dot: "#f5c542" },
-  { id: "focus", label: "Foco", dot: "#7c5cff" },
+  { id: "away", label: "Ausente", dot: "#9a9aa5" },
+  { id: "focus", label: "Foco", dot: "#f5c542" },
 ];
 
 function statusMeta(status: ProfileStatus) {
@@ -840,7 +861,9 @@ function ProfileCard({
   onChangePhoto,
   remoteProfile,
   editing,
-  onToggleEdit,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
   onClose,
   selectedHairId,
   onSelectHair,
@@ -854,7 +877,9 @@ function ProfileCard({
   onChangePhoto: (file: File) => void;
   remoteProfile: RemoteProfile | undefined;
   editing: boolean;
-  onToggleEdit: () => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
   onClose: () => void;
   selectedHairId: string;
   onSelectHair: (id: string) => void;
@@ -871,6 +896,51 @@ function ProfileCard({
   const status = statusMeta(fields.status);
   const displayName = fields.name || (info.isLocal ? "Sem nome ainda" : "Visitante");
 
+  // "Editar meu personagem" toma o card INTEIRO (só o seletor de
+  // cabelo + Cancelar/Salvar) em vez de aparecer espremido junto com
+  // os campos de nome/status/bio -- ver onStartEdit/onCancelEdit.
+  if (editing) {
+    return (
+      <div className="profile-backdrop" onClick={onClose}>
+        <div className="profile-card editing" onClick={(e) => e.stopPropagation()}>
+          <div className="profile-edit-scroll">
+            <h3 className="profile-edit-title">Editar meu personagem</h3>
+            <div className="hair-picker">
+              {HAIR_CATALOG.map((opt) => (
+                <button
+                  key={opt.id}
+                  className={selectedHairId === opt.id ? "hair-option selected" : "hair-option"}
+                  onClick={() => onSelectHair(opt.id)}
+                  title={opt.label}
+                >
+                  <span
+                    className="hair-thumb"
+                    style={{
+                      width: HAIR_THUMB_W,
+                      height: HAIR_THUMB_H,
+                      backgroundImage: `url(/assets/${opt.file})`,
+                      backgroundPosition: "0 0",
+                      backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
+                    }}
+                  />
+                  <span className="hair-label">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="profile-edit-actions">
+            <button className="profile-action-btn" onClick={onCancelEdit}>
+              Cancelar
+            </button>
+            <button className="profile-action-btn primary" onClick={onSaveEdit}>
+              Salvar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="profile-backdrop" onClick={onClose}>
       <div className="profile-card" onClick={(e) => e.stopPropagation()}>
@@ -883,17 +953,20 @@ function ProfileCard({
             {!fields.photoUrl && <span className="profile-photo-fallback">{displayName.slice(0, 1).toUpperCase()}</span>}
             <div className="profile-photo-fade" />
             <div className="profile-photo-text">
-              {info.isLocal ? (
-                <input
-                  className="profile-name-input"
-                  value={myProfile.name}
-                  placeholder="Seu nome"
-                  maxLength={40}
-                  onChange={(e) => onChangeMyProfile({ name: e.target.value })}
-                />
-              ) : (
-                <span className="profile-name">{displayName}</span>
-              )}
+              <span className="profile-name-row">
+                <span className="profile-status-dot" style={{ background: status.dot }} title={status.label} />
+                {info.isLocal ? (
+                  <input
+                    className="profile-name-input"
+                    value={myProfile.name}
+                    placeholder="Seu nome"
+                    maxLength={40}
+                    onChange={(e) => onChangeMyProfile({ name: e.target.value })}
+                  />
+                ) : (
+                  <span className="profile-name">{displayName}</span>
+                )}
+              </span>
               <span className="profile-role">{fields.role || (info.isLocal ? "Cargo (definido pelo admin)" : " ")}</span>
             </div>
           </div>
@@ -981,40 +1054,10 @@ function ProfileCard({
         )}
 
         {info.isLocal && (
-          <>
-            <button className="edit-character-btn" onClick={onToggleEdit}>
-              <PencilIcon />
-              {editing ? "Fechar edição" : "Editar meu personagem"}
-            </button>
-
-            {editing && (
-              <div className="character-editor">
-                <h3>Cabelo</h3>
-                <div className="hair-picker">
-                  {HAIR_CATALOG.map((opt) => (
-                    <button
-                      key={opt.id}
-                      className={selectedHairId === opt.id ? "hair-option selected" : "hair-option"}
-                      onClick={() => onSelectHair(opt.id)}
-                      title={opt.label}
-                    >
-                      <span
-                        className="hair-thumb"
-                        style={{
-                          width: HAIR_THUMB_W,
-                          height: HAIR_THUMB_H,
-                          backgroundImage: `url(/assets/${opt.file})`,
-                          backgroundPosition: "0 0",
-                          backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
-                        }}
-                      />
-                      <span className="hair-label">{opt.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
+          <button className="edit-character-btn" onClick={onStartEdit}>
+            <PencilIcon />
+            Editar meu personagem
+          </button>
         )}
 
         {!info.isLocal && (
