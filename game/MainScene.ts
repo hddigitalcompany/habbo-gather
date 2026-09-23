@@ -66,8 +66,16 @@ const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number, num
   up: [9, 10, 11],
 };
 
-const POSE_FRAMES = {
-  sentado: 12,
+type Direction = "down" | "left" | "right" | "up";
+
+// sentado tem uma pose por direção -- ainda falta a de "costas" (essa
+// leva só trouxe frente/esquerda/direita), então sentar virado pra
+// cima cai de volta pra frente por enquanto.
+const SENTADO_FRAMES: Record<Direction, number> = {
+  down: 12,
+  left: 13,
+  right: 14,
+  up: 12,
 };
 
 /**
@@ -112,7 +120,6 @@ function layerTextureKey(layer: LayerKey): string {
   return `avatar-${layer}`;
 }
 
-type Direction = "down" | "left" | "right" | "up";
 type Activity = "idle" | "sentado";
 
 // depois de levantar (por movimento), ignora o auto-sentar por um
@@ -298,7 +305,10 @@ export default class MainScene extends Phaser.Scene {
     this.localActivity = "sentado";
     this.seatedAt = furniture;
     this.localContainer.setPosition(pos.x, pos.y + (furniture.seatOffsetY ?? 0));
-    this.setPoseFrame(this.localContainer, POSE_FRAMES.sentado);
+    // a pose sentada segue a direção que o móvel "olha" (facing), não a
+    // direção que o jogador estava andando antes de sentar
+    this.localContainer.setData("dir", furniture.facing);
+    this.setPoseFrame(this.localContainer, SENTADO_FRAMES[furniture.facing]);
   }
 
   /**
