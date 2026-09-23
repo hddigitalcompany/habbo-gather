@@ -1,10 +1,10 @@
-// Fica de olho na pasta de origem do cabelo (ver scripts/avatarAssetsConfig.mjs)
-// e roda scripts/syncAvatarAssets.mjs de novo toda vez que algo muda lá
-// dentro (pasta nova, arquivo trocado, item apagado) -- é isso que faz um
-// item de cabelo aparecer no jogo só de criar a pasta com as 4 imagens,
-// sem precisar rodar nada na mão nem mandar as imagens pelo chat. Sobe
-// junto com `npm run dev` (ver package.json, processo "assets" no
-// concurrently).
+// Fica de olho nas pastas de origem de cabelo e de tom de pele (ver
+// scripts/avatarAssetsConfig.mjs) e roda os scripts de sincronização de
+// novo toda vez que algo muda em qualquer uma delas (pasta nova, arquivo
+// trocado, item apagado) -- é isso que faz um item aparecer no jogo só
+// de criar a pasta com as imagens, sem precisar rodar nada na mão nem
+// mandar as imagens pelo chat. Sobe junto com `npm run dev` (ver
+// package.json, processo "assets" no concurrently).
 //
 // Usa fs.watch com recursive:true (suportado no macOS/Windows -- roda
 // bem na máquina do Douglas; em Linux essa opção não existe, então nesse
@@ -15,46 +15,53 @@ import { watch, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
-import { CABELO_SRC_ROOT as SRC_ROOT } from "./avatarAssetsConfig.mjs";
+import { CABELO_SRC_ROOT, AVATAR_SKIN_SRC_ROOT } from "./avatarAssetsConfig.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SYNC_SCRIPT = path.join(__dirname, "syncAvatarAssets.mjs");
+const TARGETS = [
+  { label: "cabelo", srcRoot: CABELO_SRC_ROOT, script: path.join(__dirname, "syncAvatarAssets.mjs") },
+  { label: "tom de pele", srcRoot: AVATAR_SKIN_SRC_ROOT, script: path.join(__dirname, "syncSkinAssets.mjs") },
+];
 
-let pending = false;
-let running = false;
+function watchTarget({ label, srcRoot, script }) {
+  let pending = false;
+  let running = false;
 
-function runSync() {
-  if (running) {
-    pending = true;
-    return;
-  }
-  running = true;
-  const child = spawn(process.execPath, [SYNC_SCRIPT], { stdio: "inherit" });
-  child.on("exit", () => {
-    running = false;
-    if (pending) {
-      pending = false;
-      runSync();
+  function runSync() {
+    if (running) {
+      pending = true;
+      return;
     }
-  });
+    running = true;
+    const child = spawn(process.execPath, [script], { stdio: "inherit" });
+    child.on("exit", () => {
+      running = false;
+      if (pending) {
+        pending = false;
+        runSync();
+      }
+    });
+  }
+
+  let debounceTimer = null;
+  function scheduleSync() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(runSync, 400);
+  }
+
+  if (!existsSync(srcRoot)) {
+    mkdirSync(srcRoot, { recursive: true });
+  }
+
+  console.log(`[assets] observando ${srcRoot} (${label}) pra sincronizar automaticamente...`);
+  runSync(); // roda uma vez já de cara, pra pegar pastas que já existiam antes de subir o dev
+
+  try {
+    watch(srcRoot, { recursive: true }, () => scheduleSync());
+  } catch {
+    console.warn(`[assets] recursive:true não suportado nesse sistema pra ${label}, observando só o primeiro nível.`);
+    watch(srcRoot, () => scheduleSync());
+  }
 }
 
-let debounceTimer = null;
-function scheduleSync() {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(runSync, 400);
-}
-
-if (!existsSync(SRC_ROOT)) {
-  mkdirSync(SRC_ROOT, { recursive: true });
-}
-
-console.log(`[assets] observando ${SRC_ROOT} pra sincronizar itens de cabelo automaticamente...`);
-runSync();
-
-try {
-  watch(SRC_ROOT, { recursive: true }, () => scheduleSync());
-} catch {
-  console.warn("[assets] recursive:true não suportado nesse sistema, observando só o primeiro nível.");
-  watch(SRC_ROOT, () => scheduleSync());
-}
+for (const target of TARGETS) watchTarget(target);

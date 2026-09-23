@@ -12,6 +12,8 @@ import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
+  SKIN_CATALOG,
+  DEFAULT_SKIN_ID,
   CUSTOMIZATION_CATEGORIES,
   CustomizationCategoryId,
 } from "@/game/customization";
@@ -581,6 +583,17 @@ export default function GameRoom() {
   } | null>(null);
   const [editingCharacter, setEditingCharacter] = useState(false);
   const [selectedHairId, setSelectedHairId] = useState(DEFAULT_HAIR_ID);
+  // cor escolhida DENTRO do penteado atual (ex: "Castanho"/"Loiro" de
+  // "Cabelinho pra trás") -- não é um penteado novo, é uma variação de
+  // arte do mesmo item (ver ColorOption em game/customization.ts). null
+  // = nenhuma cor escolhida ainda, mostra a arte "padrão" do penteado
+  // (opt.file). Reseta pra null toda vez que troca de PENTEADO (ver
+  // selectHair) -- a cor é sempre relativa ao penteado selecionado.
+  const [selectedHairColorId, setSelectedHairColorId] = useState<string | null>(null);
+  // tom de pele/corpo base (ver SKIN_CATALOG) -- selecionável no espaço
+  // ao lado do boneco no topo do editor (ver AvatarPreviewWrap), não
+  // dentro da grade de categorias.
+  const [selectedSkinId, setSelectedSkinId] = useState(DEFAULT_SKIN_ID);
   // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
@@ -1721,23 +1734,48 @@ export default function GameRoom() {
 
   function selectHair(hairId: string) {
     setSelectedHairId(hairId);
+    setSelectedHairColorId(null); // penteado novo -- volta pra arte "padrão" dele, sem cor escolhida
     sceneRef.current?.setLocalHairId(hairId);
+  }
+
+  // troca a COR do penteado ATUAL (não troca de penteado -- ver
+  // comentário em selectedHairColorId acima). setLocalHairId recebe o
+  // id da COR em vez do id do penteado porque cada cor já é seu próprio
+  // spritesheet (ver customization.ts / setLocalHairId em MainScene.ts).
+  function selectHairColor(colorId: string) {
+    setSelectedHairColorId(colorId);
+    sceneRef.current?.setLocalHairId(colorId);
+  }
+
+  function selectSkin(skinId: string) {
+    setSelectedSkinId(skinId);
+    sceneRef.current?.setLocalSkinId(skinId);
   }
 
   // "Editar meu personagem" agora toma o card INTEIRO (nada de ficar
   // espremido embaixo dos campos de nome/bio junto -- ver ProfileCard)
-  // e sai com Cancelar/Salvar de verdade: Cancelar volta o cabelo pro
-  // que tava ANTES de abrir o editor (guardado aqui), Salvar só fecha
-  // (a troca em si já foi aplicada ao vivo a cada clique no picker,
-  // ver selectHair).
+  // e sai com Cancelar/Salvar de verdade: Cancelar volta cabelo+cor+tom
+  // de pele pro que tava ANTES de abrir o editor (guardado aqui),
+  // Salvar só fecha (a troca em si já foi aplicada ao vivo a cada
+  // clique no picker, ver selectHair/selectHairColor/selectSkin).
   const hairBeforeEditRef = useRef(selectedHairId);
+  const hairColorBeforeEditRef = useRef(selectedHairColorId);
+  const skinBeforeEditRef = useRef(selectedSkinId);
   function startEditingCharacter() {
     hairBeforeEditRef.current = selectedHairId;
+    hairColorBeforeEditRef.current = selectedHairColorId;
+    skinBeforeEditRef.current = selectedSkinId;
     setEditorCategory("cabelo");
     setEditingCharacter(true);
   }
   function cancelEditingCharacter() {
-    selectHair(hairBeforeEditRef.current);
+    // restaura direto pro estado guardado (sem passar por
+    // selectHair/selectHairColor, que resetariam a cor de novo)
+    setSelectedHairId(hairBeforeEditRef.current);
+    setSelectedHairColorId(hairColorBeforeEditRef.current);
+    sceneRef.current?.setLocalHairId(hairColorBeforeEditRef.current ?? hairBeforeEditRef.current);
+    setSelectedSkinId(skinBeforeEditRef.current);
+    sceneRef.current?.setLocalSkinId(skinBeforeEditRef.current);
     setEditingCharacter(false);
   }
   function saveEditingCharacter() {
@@ -1903,6 +1941,10 @@ export default function GameRoom() {
             onClose={closeProfileCard}
             selectedHairId={selectedHairId}
             onSelectHair={selectHair}
+            selectedHairColorId={selectedHairColorId}
+            onSelectHairColor={selectHairColor}
+            selectedSkinId={selectedSkinId}
+            onSelectSkin={selectSkin}
             editorCategory={editorCategory}
             onSelectCategory={setEditorCategory}
             measuredHeight={profileCardHeight}
@@ -2111,6 +2153,12 @@ const HAIR_SHEET_H = 522;
 const AVATAR_PREVIEW_W = 104;
 const AVATAR_PREVIEW_H = 135.2; // mantém a proporção 200:260 do frame
 
+// miniatura de uma COR de cabelo (dentro de "Cores de ..."): mesmo
+// recorte de frame 0 que hair-thumb/avatar-preview, só que BEM menor --
+// é um seletor de variação, não a grade principal de penteados.
+const COLOR_SWATCH_W = 32;
+const COLOR_SWATCH_H = 41.6; // mantém a proporção 200:260 do frame
+
 const STATUS_OPTIONS: { id: ProfileStatus; label: string; dot: string }[] = [
   { id: "online", label: "Online", dot: STATUS_DOT_COLORS.online },
   { id: "away", label: "Ausente", dot: STATUS_DOT_COLORS.away },
@@ -2149,6 +2197,10 @@ function ProfileCard({
   onClose,
   selectedHairId,
   onSelectHair,
+  selectedHairColorId,
+  onSelectHairColor,
+  selectedSkinId,
+  onSelectSkin,
   editorCategory,
   onSelectCategory,
   measuredHeight,
@@ -2169,6 +2221,10 @@ function ProfileCard({
   onClose: () => void;
   selectedHairId: string;
   onSelectHair: (id: string) => void;
+  selectedHairColorId: string | null;
+  onSelectHairColor: (id: string) => void;
+  selectedSkinId: string;
+  onSelectSkin: (id: string) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
   measuredHeight: number | null;
@@ -2217,6 +2273,15 @@ function ProfileCard({
   // EXATAMENTE o mesmo tamanho, "seguindo" o perfil.
   if (editing) {
     const selectedHairOption = HAIR_CATALOG.find((opt) => opt.id === selectedHairId);
+    // cor escolhida dentro do penteado atual (se houver) -- troca só o
+    // ARQUIVO exibido/aplicado, o penteado "selecionado" continua sendo
+    // o mesmo pro resto da UI (grade de penteados, categoria etc).
+    const selectedColorOption = selectedHairColorId
+      ? selectedHairOption?.colors?.find((c) => c.id === selectedHairColorId)
+      : undefined;
+    const effectiveHairFile = selectedColorOption?.file ?? selectedHairOption?.file;
+    const selectedSkinOption = SKIN_CATALOG.find((opt) => opt.id === selectedSkinId) ?? SKIN_CATALOG[0];
+    const colorSwatchScale = COLOR_SWATCH_W / 200;
     return (
       <div className="profile-backdrop" onClick={onClose}>
         <div
@@ -2237,21 +2302,40 @@ function ProfileCard({
               <span
                 className="avatar-preview-layer"
                 style={{
-                  backgroundImage: "url(/assets/avatar_visual1.png)",
+                  backgroundImage: `url(/assets/${selectedSkinOption.file})`,
                   backgroundPosition: "0 0",
                   backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                 }}
               />
-              {selectedHairOption && (
+              {effectiveHairFile && (
                 <span
                   className="avatar-preview-layer"
                   style={{
-                    backgroundImage: `url(/assets/${selectedHairOption.file})`,
+                    backgroundImage: `url(/assets/${effectiveHairFile})`,
                     backgroundPosition: "0 0",
                     backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                   }}
                 />
               )}
+            </div>
+
+            {/* tons de pele (ver SKIN_CATALOG) -- selecionáveis aqui do
+                lado do boneco, não dentro da grade de categorias (pedido
+                do Douglas). Troca ao vivo (ver selectSkin), sem precisar
+                estar na aba "cabelo". */}
+            <div className="skin-picker">
+              <span className="skin-picker-label">Tom de pele</span>
+              <div className="skin-swatches">
+                {SKIN_CATALOG.map((skin) => (
+                  <button
+                    key={skin.id}
+                    className={selectedSkinId === skin.id ? "skin-swatch selected" : "skin-swatch"}
+                    style={{ background: skin.hex ?? "#8a7ca8" }}
+                    onClick={() => onSelectSkin(skin.id)}
+                    title={skin.label}
+                  />
+                ))}
+              </div>
             </div>
           </div>
 
@@ -2293,10 +2377,15 @@ function ProfileCard({
                   ))}
                 </div>
 
-                {/* cores do item selecionado -- espaço já reservado,
-                    ver ColorOption em game/customization.ts; o
-                    Douglas ainda vai mandar as opções de cor de cada
-                    item, até lá mostra "Em breve" no lugar */}
+                {/* cores do penteado selecionado (ver ColorOption em
+                    game/customization.ts) -- NÃO é um penteado novo,
+                    é uma variação de arte do mesmo item (ex: "Castanho"/
+                    "Loiro" de "Cabelinho pra trás"); cada miniatura é um
+                    recorte do próprio spritesheet da cor (igual ao
+                    hair-thumb da grade acima, só que menor), gerado
+                    automaticamente a partir da pasta de origem -- ver
+                    scripts/syncAvatarAssets.mjs. Sem cores geradas
+                    ainda pra esse item, mostra "Em breve". */}
                 {selectedHairOption && (
                   <div className="color-picker">
                     <span className="color-picker-label">Cores de &quot;{selectedHairOption.label}&quot;</span>
@@ -2305,8 +2394,15 @@ function ProfileCard({
                         {selectedHairOption.colors.map((c) => (
                           <button
                             key={c.id}
-                            className="color-swatch"
-                            style={{ background: c.hex }}
+                            className={selectedHairColorId === c.id ? "color-swatch selected" : "color-swatch"}
+                            style={{
+                              width: COLOR_SWATCH_W,
+                              height: COLOR_SWATCH_H,
+                              backgroundImage: `url(/assets/${c.file})`,
+                              backgroundPosition: "0 0",
+                              backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
+                            }}
+                            onClick={() => onSelectHairColor(c.id)}
                             title={c.label}
                           />
                         ))}

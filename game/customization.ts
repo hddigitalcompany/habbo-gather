@@ -10,18 +10,18 @@
  * o frame 9, igual ao resto do sistema de camadas).
  */
 /**
- * Variação de COR de um item (ex: "Cabelinho pra trás" em preto,
- * castanho, loiro...) -- por enquanto é só um espaço reservado: as
- * artes/tons de verdade ainda não existem, o Douglas vai mandar depois
- * item por item. Até lá, `colors` fica vazio/ausente em cada opção do
- * catálogo, e o editor (ver ProfileCard em GameRoom.tsx) já sabe
- * mostrar essa lista quando ela existir, sem precisar mexer em mais
- * nada.
+ * Variação de COR de um item (ex: "Cabelinho pra trás" em Castanho/
+ * Loiro/Preto) -- cada cor é um spritesheet PRÓPRIO (mesmo layout de
+ * frames do penteado "base"), gerado automaticamente a partir da pasta
+ * de origem (ver scripts/syncAvatarAssets.mjs). Selecionar uma cor troca
+ * a textura pro arquivo dela (ver setLocalHairId em MainScene.ts, chamado
+ * com o id da COR em vez do id do penteado) -- não é um tint/hex aplicado
+ * em cima da mesma arte, é uma arte diferente por cor.
  */
 export interface ColorOption {
   id: string;
   label: string;
-  hex: string;
+  file: string;
 }
 
 export interface HairOption {
@@ -31,19 +31,66 @@ export interface HairOption {
   colors?: ColorOption[];
 }
 
-// itens gerados automaticamente a partir de assets-source/cabelo/ -- ver
-// scripts/syncAvatarAssets.mjs (roda sozinho junto com `npm run dev`).
-// NÃO editar esse import nem o arquivo dele à mão, ele é reescrito toda
-// vez que a pasta muda.
-import { GENERATED_HAIR_CATALOG } from "./customizationCatalog.generated";
+// itens gerados automaticamente a partir da pasta de origem de cabelo
+// (ver scripts/avatarAssetsConfig.mjs/syncAvatarAssets.mjs, roda sozinho
+// junto com `npm run dev`). NÃO editar esse import nem o arquivo dele à
+// mão, ele é reescrito toda vez que a pasta muda.
+//
+// GENERATED_HAIR_CATALOG: penteados novos, que ainda não existem abaixo
+// à mão (cada um já vem com suas próprias cores, se a pasta de origem
+// tiver estilo/cor aninhados).
+// GENERATED_HAIR_COLORS_BY_STYLE: cores de um penteado que JÁ existe
+// aqui embaixo (casadas pelo nome da pasta de estilo -- "Cabelinho pra
+// trás"/"Vorcarinho do Rói" -- ver MANUAL_STYLE_MATCH no script) --
+// entram dentro do `colors` do item manual correspondente, em vez de
+// criar um item novo na grade principal.
+import { GENERATED_HAIR_CATALOG, GENERATED_HAIR_COLORS_BY_STYLE } from "./customizationCatalog.generated";
 
 export const HAIR_CATALOG: HairOption[] = [
-  { id: "ondulado", label: "Cabelinho pra trás", file: "cabelo_1.png" },
-  { id: "vorcarinho-do-roi", label: "Vorcarinho do Rói", file: "cabelo_3.png" },
+  {
+    id: "ondulado",
+    label: "Cabelinho pra trás",
+    file: "cabelo_1.png",
+    colors: GENERATED_HAIR_COLORS_BY_STYLE["ondulado"],
+  },
+  {
+    id: "vorcarinho-do-roi",
+    label: "Vorcarinho do Rói",
+    file: "cabelo_3.png",
+    colors: GENERATED_HAIR_COLORS_BY_STYLE["vorcarinho-do-roi"],
+  },
   ...GENERATED_HAIR_CATALOG,
 ];
 
 export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
+
+/**
+ * Tom de pele/corpo base (camada "base" do avatar, ver LAYER_TEXTURE_FILE
+ * em MainScene.ts) -- igual ao cabelo, cada tom é um spritesheet PRÓPRIO
+ * (mesmas 15 poses, mas aqui TODAS diferentes de verdade -- sem repetir
+ * passo/direção como o cabelo faz) gerado automaticamente a partir da
+ * pasta de origem (ver scripts/syncSkinAssets.mjs). `hex` é só pra
+ * desenhar o botão seletor (ver ProfileCard em GameRoom.tsx) -- o
+ * Douglas mandou os tons certos pelo chat, não é uma cor tirada da
+ * imagem.
+ */
+export interface SkinOption {
+  id: string;
+  label: string;
+  file: string;
+  hex?: string;
+}
+
+// gerado automaticamente -- ver scripts/syncSkinAssets.mjs, NÃO editar
+// esse import nem o arquivo dele à mão.
+import { GENERATED_SKIN_CATALOG } from "./skinCatalog.generated";
+
+export const SKIN_CATALOG: SkinOption[] = [
+  { id: "padrao", label: "Padrão", file: "avatar_visual1.png" },
+  ...GENERATED_SKIN_CATALOG,
+];
+
+export const DEFAULT_SKIN_ID = SKIN_CATALOG[0].id;
 
 /**
  * Categorias do editor de personagem ("Editar meu personagem", ver

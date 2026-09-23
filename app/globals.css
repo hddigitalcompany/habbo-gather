@@ -1843,7 +1843,9 @@ body {
    Phaser aqui). */
 .avatar-preview-wrap {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 18px;
   padding: 4px 18px 10px;
   flex-shrink: 0;
 }
@@ -1941,16 +1943,26 @@ body {
   gap: 8px;
 }
 
+/* cada swatch de cor é um recorte de imagem (o mesmo spritesheet da
+   cor, ver COLOR_SWATCH_W/H em GameRoom.tsx) -- não um hex plano, por
+   isso é um retângulo arredondado (igual ao hair-thumb) em vez de um
+   círculo cheio de cor. */
 .color-swatch {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
+  display: block;
+  background-color: #0d0715;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  border-radius: 6px;
   border: 2px solid #2f2245;
   cursor: pointer;
   padding: 0;
 }
 
 .color-swatch:hover {
+  border-color: #3a2a55;
+}
+
+.color-swatch.selected {
   border-color: #7c5cff;
 }
 
@@ -2003,6 +2015,52 @@ body {
   font-size: 10px;
   color: #f5f0ff;
   opacity: 0.85;
+}
+
+/* tons de pele (ver SKIN_CATALOG) -- ficam do LADO do boneco no topo
+   do editor (dentro de .avatar-preview-wrap), não dentro da grade de
+   categorias -- pedido explícito do Douglas. flex:1 pra ocupar o
+   espaço vazio à direita do boneco até a borda do card. */
+.skin-picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.skin-picker-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #cfc4e6;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+
+.skin-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* aqui SIM é um círculo de cor cheia -- tom de pele é uma cor plana
+   (hex mandado pelo Douglas, ver SKIN_HEX_BY_NAME em
+   scripts/syncSkinAssets.mjs), diferente da cor de cabelo (que é uma
+   arte/imagem própria, ver .color-swatch acima). */
+.skin-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #2f2245;
+  cursor: pointer;
+  padding: 0;
+}
+
+.skin-swatch:hover {
+  border-color: #3a2a55;
+}
+
+.skin-swatch.selected {
+  border-color: #7c5cff;
 }
 
 .toast-stack {

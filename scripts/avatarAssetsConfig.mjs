@@ -1,13 +1,16 @@
-// Configuração compartilhada por scripts/syncAvatarAssets.mjs e
-// scripts/watchAvatarAssets.mjs -- principalmente ONDE fica a pasta de
-// origem das artes de cabelo.
+// Configuração compartilhada pelos scripts de sincronização de arte do
+// avatar (cabelo e tom de pele/corpo base) -- principalmente ONDE ficam
+// as pastas de origem.
 //
-// Por padrão essa pasta fica DENTRO do projeto (assets-source/cabelo/),
-// mas pode apontar pra qualquer pasta fora dele -- por exemplo uma pasta
-// no Documentos onde você já organiza tudo -- criando um arquivo
-// avatar-assets.local.json na raiz do projeto com:
+// Por padrão essas pastas ficam DENTRO do projeto (assets-source/cabelo/,
+// assets-source/avatar/), mas podem apontar pra qualquer pasta fora dele
+// -- por exemplo uma pasta no Documentos onde você já organiza tudo --
+// criando um arquivo avatar-assets.local.json na raiz do projeto com:
 //
-//   { "cabeloSourceRoot": "/caminho/completo/pra/pasta/Cabelos" }
+//   {
+//     "cabeloSourceRoot": "/caminho/completo/pra/pasta/Cabelos",
+//     "avatarSkinSourceRoot": "/caminho/completo/pra/pasta/Avatar"
+//   }
 //
 // Esse arquivo fica de fora do git (ver .gitignore) porque o caminho é
 // específico da sua máquina.
@@ -36,3 +39,7 @@ const cfg = readLocalConfig();
 export const CABELO_SRC_ROOT = cfg.cabeloSourceRoot
   ? cfg.cabeloSourceRoot
   : path.join(ROOT, "assets-source", "cabelo");
+
+export const AVATAR_SKIN_SRC_ROOT = cfg.avatarSkinSourceRoot
+  ? cfg.avatarSkinSourceRoot
+  : path.join(ROOT, "assets-source", "avatar");
