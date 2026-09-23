@@ -9,6 +9,8 @@ import MainScene, { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
+import { FLOOR_CATALOG, FLOOR_CATEGORIES, FloorCatalogEntry, FloorCategory, FloorTileDef } from "@/game/floor";
+import { generateFloorCode } from "@/game/floorCodegen";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -576,6 +578,18 @@ export default function GameRoom() {
   const [draftItems, setDraftItems] = useState<FurnitureDef[]>([]);
   const [copied, setCopied] = useState(false);
 
+  // --- aba "Piso" do editor de espaço -- mesma ideia do rascunho de
+  // móvel acima (a cena Phaser é quem manda de verdade, ver
+  // selectFloorTool/paintFloorAt em MainScene.ts; aqui só espelha pra
+  // destacar o botão certo e mostrar a lista/código). editTab escolhe
+  // qual paleta aparece (móveis ou piso); floorCategory só filtra QUAL
+  // categoria de modelo aparece na paleta de piso.
+  const [editTab, setEditTab] = useState<"moveis" | "piso">("moveis");
+  const [floorCategory, setFloorCategory] = useState<FloorCategory>(FLOOR_CATEGORIES[0].id);
+  const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
+  const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
+  const [floorCopied, setFloorCopied] = useState(false);
+
   // --- controles de câmera do mapa ("estilo Gather" -- zoom +/- e
   // centralizar, ver MapControls logo abaixo) -- só espelha o zoom
   // atual da câmera (MainScene.zoomIn/zoomOut já limitam o valor, ver
@@ -1124,6 +1138,7 @@ export default function GameRoom() {
           checkProximity();
         };
         scene.onDraftChange = (items) => setDraftItems(items);
+        scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
         scene.onAvatarClick = (info) => {
           setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
           setEditingCharacter(false);
@@ -1628,6 +1643,7 @@ export default function GameRoom() {
     const next = !editMode;
     setEditMode(next);
     setSelectedCatalogIndex(null);
+    setSelectedFloorToolId(null);
     sceneRef.current?.setEditMode(next);
   }
 
@@ -1636,6 +1652,7 @@ export default function GameRoom() {
     // colocar"), igual clicar um toggle
     const next = selectedCatalogIndex === index ? null : index;
     setSelectedCatalogIndex(next);
+    setSelectedFloorToolId(null); // móvel e piso são ferramentas exclusivas, ver selectCatalogEntry na cena
     sceneRef.current?.selectCatalogEntry(next === null ? null : FURNITURE_CATALOG[next]);
   }
 
@@ -1663,6 +1680,38 @@ export default function GameRoom() {
   }
 
   const generatedCode = useMemo(() => generateFurnitureCode(draftItems), [draftItems]);
+
+  // clicar de novo na MESMA ferramenta de piso já selecionada desarma
+  // (mesmo "clique de novo desseleciona" da paleta de móveis acima).
+  function selectFloorPaint(entry: FloorCatalogEntry) {
+    const next = selectedFloorToolId === entry.id ? null : entry.id;
+    setSelectedFloorToolId(next);
+    setSelectedCatalogIndex(null);
+    sceneRef.current?.selectFloorTool(next === null ? null : { kind: "paint", entry });
+  }
+
+  function selectFloorEraser() {
+    const next = selectedFloorToolId === "erase" ? null : "erase";
+    setSelectedFloorToolId(next);
+    setSelectedCatalogIndex(null);
+    sceneRef.current?.selectFloorTool(next === null ? null : { kind: "erase" });
+  }
+
+  function clearDraftFloorItems() {
+    sceneRef.current?.clearDraftFloor();
+  }
+
+  async function copyGeneratedFloorCode() {
+    try {
+      await navigator.clipboard.writeText(generatedFloorCode);
+      setFloorCopied(true);
+      setTimeout(() => setFloorCopied(false), 1500);
+    } catch (e) {
+      console.warn("Não deu pra copiar pro clipboard", e);
+    }
+  }
+
+  const generatedFloorCode = useMemo(() => generateFloorCode(draftFloorItems), [draftFloorItems]);
 
   // reflete nome/status do MEU card ao vivo no boneco dentro do jogo
   // (nome + bolinha de status, ver setNameplate/setLocalProfile na
@@ -2144,6 +2193,8 @@ export default function GameRoom() {
 
       {editMode && (
         <EditPanel
+          editTab={editTab}
+          onChangeEditTab={setEditTab}
           selectedCatalogIndex={selectedCatalogIndex}
           onSelectCatalog={selectCatalog}
           draftItems={draftItems}
@@ -2153,6 +2204,16 @@ export default function GameRoom() {
           generatedCode={generatedCode}
           onCopyCode={copyGeneratedCode}
           copied={copied}
+          floorCategory={floorCategory}
+          onChangeFloorCategory={setFloorCategory}
+          selectedFloorToolId={selectedFloorToolId}
+          onSelectFloorPaint={selectFloorPaint}
+          onSelectFloorEraser={selectFloorEraser}
+          draftFloorItems={draftFloorItems}
+          onClearAllFloor={clearDraftFloorItems}
+          generatedFloorCode={generatedFloorCode}
+          onCopyFloorCode={copyGeneratedFloorCode}
+          floorCopied={floorCopied}
         />
       )}
     </div>
@@ -2160,6 +2221,8 @@ export default function GameRoom() {
 }
 
 function EditPanel({
+  editTab,
+  onChangeEditTab,
   selectedCatalogIndex,
   onSelectCatalog,
   draftItems,
@@ -2169,7 +2232,19 @@ function EditPanel({
   generatedCode,
   onCopyCode,
   copied,
+  floorCategory,
+  onChangeFloorCategory,
+  selectedFloorToolId,
+  onSelectFloorPaint,
+  onSelectFloorEraser,
+  draftFloorItems,
+  onClearAllFloor,
+  generatedFloorCode,
+  onCopyFloorCode,
+  floorCopied,
 }: {
+  editTab: "moveis" | "piso";
+  onChangeEditTab: (tab: "moveis" | "piso") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   draftItems: FurnitureDef[];
@@ -2179,57 +2254,146 @@ function EditPanel({
   generatedCode: string;
   onCopyCode: () => void;
   copied: boolean;
+  floorCategory: FloorCategory;
+  onChangeFloorCategory: (category: FloorCategory) => void;
+  selectedFloorToolId: string | "erase" | null;
+  onSelectFloorPaint: (entry: FloorCatalogEntry) => void;
+  onSelectFloorEraser: () => void;
+  draftFloorItems: FloorTileDef[];
+  onClearAllFloor: () => void;
+  generatedFloorCode: string;
+  onCopyFloorCode: () => void;
+  floorCopied: boolean;
 }) {
+  const floorEntriesInCategory = FLOOR_CATALOG.filter((e) => e.category === floorCategory);
+
   return (
     <div className="edit-panel">
       <h2>Editar espaço</h2>
-      <p className="edit-hint">
-        Escolha um item abaixo e clique num quadrado livre da sala pra colocar.
-        Clique num item já colocado (borda vermelha ao passar o mouse) pra
-        remover. Isso ainda não salva sozinho — copie o código no fim e cole
-        em <code>ROOM_FURNITURE</code>.
-      </p>
 
-      <div className="palette">
-        {FURNITURE_CATALOG.map((entry, i) => (
-          <button
-            key={i}
-            className={selectedCatalogIndex === i ? "palette-btn selected" : "palette-btn"}
-            onClick={() => onSelectCatalog(i)}
-          >
-            {entry.label}
-          </button>
-        ))}
+      <div className="edit-mode-tabs">
+        <button
+          className={editTab === "moveis" ? "edit-mode-tab selected" : "edit-mode-tab"}
+          onClick={() => onChangeEditTab("moveis")}
+        >
+          Móveis
+        </button>
+        <button
+          className={editTab === "piso" ? "edit-mode-tab selected" : "edit-mode-tab"}
+          onClick={() => onChangeEditTab("piso")}
+        >
+          Piso
+        </button>
       </div>
 
-      <h3>Itens colocados ({draftItems.length})</h3>
-      {draftItems.length === 0 ? (
-        <p className="edit-hint">Nenhum item colocado ainda.</p>
-      ) : (
-        <ul className="draft-list">
-          {draftItems.map((item) => (
-            <li key={item.id}>
-              <span>
-                {catalogLabelFor(item)} — col {item.col}, row {item.row}
-              </span>
-              <button onClick={() => onRemoveItem(item.id)} title="Remover">
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {draftItems.length > 0 && (
-        <button className="clear-btn" onClick={onClearAll}>
-          Limpar tudo
-        </button>
-      )}
+      {editTab === "moveis" ? (
+        <>
+          <p className="edit-hint">
+            Escolha um item abaixo e clique num quadrado livre da sala pra colocar.
+            Clique num item já colocado (borda vermelha ao passar o mouse) pra
+            remover. Isso ainda não salva sozinho — copie o código no fim e cole
+            em <code>ROOM_FURNITURE</code>.
+          </p>
 
-      <h3>Código pra colar em furniture.ts</h3>
-      <textarea readOnly value={generatedCode} className="code-box" spellCheck={false} />
-      <button className="copy-btn" onClick={onCopyCode}>
-        {copied ? "Copiado!" : "Copiar código"}
-      </button>
+          <div className="palette">
+            {FURNITURE_CATALOG.map((entry, i) => (
+              <button
+                key={i}
+                className={selectedCatalogIndex === i ? "palette-btn selected" : "palette-btn"}
+                onClick={() => onSelectCatalog(i)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+
+          <h3>Itens colocados ({draftItems.length})</h3>
+          {draftItems.length === 0 ? (
+            <p className="edit-hint">Nenhum item colocado ainda.</p>
+          ) : (
+            <ul className="draft-list">
+              {draftItems.map((item) => (
+                <li key={item.id}>
+                  <span>
+                    {catalogLabelFor(item)} — col {item.col}, row {item.row}
+                  </span>
+                  <button onClick={() => onRemoveItem(item.id)} title="Remover">
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {draftItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAll}>
+              Limpar tudo
+            </button>
+          )}
+
+          <h3>Código pra colar em furniture.ts</h3>
+          <textarea readOnly value={generatedCode} className="code-box" spellCheck={false} />
+          <button className="copy-btn" onClick={onCopyCode}>
+            {copied ? "Copiado!" : "Copiar código"}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="edit-hint">
+            Escolha um modelo abaixo e clique num quadrado da sala pra pintar só
+            ele ("unitário"), ou clique e arraste pra pintar vários de uma vez.
+            "Apagar" volta o quadrado pro fundo padrão da sala. Isso ainda não
+            salva sozinho — copie o código no fim e cole em <code>ROOM_FLOOR</code>.
+          </p>
+
+          <div className="floor-category-tabs">
+            {FLOOR_CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                className={floorCategory === cat.id ? "floor-category-tab selected" : "floor-category-tab"}
+                onClick={() => onChangeFloorCategory(cat.id)}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="floor-palette">
+            <button
+              className={selectedFloorToolId === "erase" ? "floor-eraser-btn selected" : "floor-eraser-btn"}
+              onClick={onSelectFloorEraser}
+              title="Apagar piso pintado (volta pro fundo padrão)"
+            >
+              ✕ Apagar
+            </button>
+            {floorEntriesInCategory.map((entry) => (
+              <button
+                key={entry.id}
+                className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
+                style={{ backgroundImage: `url(/assets/${entry.file})` }}
+                onClick={() => onSelectFloorPaint(entry)}
+                title={entry.label}
+              />
+            ))}
+          </div>
+          {floorEntriesInCategory.length === 0 && (
+            <p className="edit-hint">Nenhum modelo de {floorCategory} ainda -- suba as imagens na pasta de origem.</p>
+          )}
+
+          <h3>Piso pintado ({draftFloorItems.length})</h3>
+          {draftFloorItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
+          {draftFloorItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAllFloor}>
+              Limpar tudo
+            </button>
+          )}
+
+          <h3>Código pra colar em floor.ts</h3>
+          <textarea readOnly value={generatedFloorCode} className="code-box" spellCheck={false} />
+          <button className="copy-btn" onClick={onCopyFloorCode}>
+            {floorCopied ? "Copiado!" : "Copiar código"}
+          </button>
+        </>
+      )}
     </div>
   );
 }

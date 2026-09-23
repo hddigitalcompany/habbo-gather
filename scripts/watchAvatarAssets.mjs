@@ -15,7 +15,13 @@ import { watch, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
-import { CABELO_SRC_ROOT, AVATAR_SKIN_SRC_ROOT, BARBA_SRC_ROOT, ACESSORIO_SRC_ROOT } from "./avatarAssetsConfig.mjs";
+import {
+  CABELO_SRC_ROOT,
+  AVATAR_SKIN_SRC_ROOT,
+  BARBA_SRC_ROOT,
+  ACESSORIO_SRC_ROOT,
+  PISO_SRC_ROOT,
+} from "./avatarAssetsConfig.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TARGETS = [
@@ -23,6 +29,7 @@ const TARGETS = [
   { label: "tom de pele", srcRoot: AVATAR_SKIN_SRC_ROOT, script: path.join(__dirname, "syncSkinAssets.mjs") },
   { label: "barba", srcRoot: BARBA_SRC_ROOT, script: path.join(__dirname, "syncBeardAssets.mjs") },
   { label: "acessório", srcRoot: ACESSORIO_SRC_ROOT, script: path.join(__dirname, "syncAccessoryAssets.mjs") },
+  { label: "piso", srcRoot: PISO_SRC_ROOT, script: path.join(__dirname, "syncFloorAssets.mjs") },
 ];
 
 function watchTarget({ label, srcRoot, script }) {

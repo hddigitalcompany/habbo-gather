@@ -1,22 +1,29 @@
 // Configuração compartilhada pelos scripts de sincronização de arte do
-// avatar (cabelo, tom de pele/corpo base, barba, acessório) --
-// principalmente ONDE ficam as pastas de origem.
+// avatar (cabelo, tom de pele/corpo base, barba, acessório) e do piso
+// da sala -- principalmente ONDE ficam as pastas de origem.
 //
 // Por padrão essas pastas ficam DENTRO do projeto (assets-source/cabelo/,
-// assets-source/avatar/, assets-source/barba/, assets-source/acessorio/),
-// mas podem apontar pra qualquer pasta fora dele -- por exemplo uma
-// pasta no Documentos onde você já organiza tudo -- criando um arquivo
-// avatar-assets.local.json na raiz do projeto com:
+// assets-source/avatar/, assets-source/barba/, assets-source/acessorio/,
+// assets-source/piso/), mas podem apontar pra qualquer pasta fora dele
+// -- por exemplo uma pasta no Documentos onde você já organiza tudo --
+// criando um arquivo avatar-assets.local.json na raiz do projeto com:
 //
 //   {
 //     "cabeloSourceRoot": "/caminho/completo/pra/pasta/Cabelos",
 //     "avatarSkinSourceRoot": "/caminho/completo/pra/pasta/Avatar",
 //     "barbaSourceRoot": "/caminho/completo/pra/pasta/Barba",
-//     "acessorioSourceRoot": "/caminho/completo/pra/pasta/Acessório"
+//     "acessorioSourceRoot": "/caminho/completo/pra/pasta/Acessório",
+//     "pisoSourceRoot": "/caminho/completo/pra/pasta/Piso"
 //   }
 //
 // Esse arquivo fica de fora do git (ver .gitignore) porque o caminho é
 // específico da sua máquina.
+//
+// A pasta de piso é mais simples que as de avatar: não tem poses nem
+// cores aninhadas, só duas subpastas FIXAS (o nome vira a categoria) --
+// "Porcelanato" e "Laminado" -- e dentro de cada uma, um arquivo de
+// imagem por modelo/padrão (o nome do arquivo vira o rótulo). Ver
+// scripts/syncFloorAssets.mjs.
 
 import { existsSync, readFileSync } from "fs";
 import path from "path";
@@ -54,3 +61,7 @@ export const BARBA_SRC_ROOT = cfg.barbaSourceRoot
 export const ACESSORIO_SRC_ROOT = cfg.acessorioSourceRoot
   ? cfg.acessorioSourceRoot
   : path.join(ROOT, "assets-source", "acessorio");
+
+export const PISO_SRC_ROOT = cfg.pisoSourceRoot
+  ? cfg.pisoSourceRoot
+  : path.join(ROOT, "assets-source", "piso");

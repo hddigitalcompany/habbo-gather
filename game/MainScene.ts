@@ -22,6 +22,7 @@ import {
   ACCESSORY_CATALOG,
   DEFAULT_ACCESSORY_ID,
 } from "./customization";
+import { FLOOR_CATALOG, ROOM_FLOOR, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -206,6 +207,10 @@ const DEPTH_FURNITURE_ROW_HEIGHT = TILE;
 // profundidade -- ver FurnitureDef.flat em furniture.ts.
 const DEPTH_FLAT_FURNITURE = -1_000_000;
 
+// piso pintado (ver game/floor.ts) fica ATRÁS até de um tapete "flat" --
+// é o próprio chão, tudo o mais (móvel flat incluso) fica em cima dele.
+const DEPTH_FLOOR = -2_000_000;
+
 /** Fronteira de profundidade de um móvel a partir da FILEIRA lógica dele (não da posição visual) -- ver comentário acima. */
 function furnitureDepthForRow(row: number): number {
   return tileToWorld(0, row).y + TILE / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
@@ -239,6 +244,12 @@ const STATUS_DOT_RADIUS = 4;
 const STATUS_DOT_GAP = 5;
 
 type Activity = "idle" | "sentado";
+
+/** Ferramenta de piso selecionada no editor (ver selectFloorTool) --
+ * "paint" pinta o modelo escolhido, "erase" apaga (volta pro fundo
+ * padrão da sala), null = nenhuma ferramenta armada (clique não faz
+ * nada nos tiles). */
+type FloorTool = { kind: "paint"; entry: FloorCatalogEntry } | { kind: "erase" } | null;
 
 // depois de levantar (por movimento), ignora o auto-sentar por um
 // instante -- senão sentaria de novo assim que parasse ainda em cima
@@ -331,6 +342,21 @@ export default class MainScene extends Phaser.Scene {
 
   /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido no editor, pra React manter a lista/código em dia. */
   onDraftChange?: (items: FurnitureDef[]) => void;
+
+  // --- piso do editor de espaço (aba "Piso", ver selectFloorTool) --
+  // MESMA ideia do rascunho de móvel acima (Map próprio, não mexe em
+  // ROOM_FLOOR direto), só que a chave é "col,row" (um piso por tile,
+  // não por id -- pintar de novo em cima troca o estilo daquele
+  // quadrado em vez de empilhar) e o clique pinta/arrasta em vez de só
+  // colocar um item por clique (ver paintFloorAt/handleEditPointerDown).
+  private selectedFloorTool: FloorTool = null;
+  private draftFloor: Map<string, FloorTileDef> = new Map();
+  private draftFloorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
+  private isPaintingFloor = false;
+  private lastPaintedFloorKey: string | null = null;
+
+  /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftChange, mas pro piso. */
+  onDraftFloorChange?: (items: FloorTileDef[]) => void;
 
   /** Definido de fora (GameRoom.tsx) -- chamado ao clicar em QUALQUER avatar (local ou remoto), pra abrir o card de perfil. */
   onAvatarClick?: (info: { playerId: string; isLocal: boolean; name: string; color: string }) => void;
@@ -447,10 +473,24 @@ export default class MainScene extends Phaser.Scene {
         this.load.image(furnitureTextureKey(type, facing), `/assets/${file}`);
       }
     }
+
+    // cada modelo de piso (ver FLOOR_CATALOG) é uma imagem PLANA só,
+    // sem poses/direção (diferente do avatar) -- carrega todos de uma
+    // vez pra pintar ao vivo no editor sem recarregar nada.
+    for (const entry of FLOOR_CATALOG) {
+      this.load.image(floorTextureKey(entry.id), `/assets/${entry.file}`);
+    }
   }
 
   create() {
     this.add.image(400, 300, "room").setOrigin(0.5);
+
+    // piso pintado (ver ROOM_FLOOR em floor.ts) vai ATRÁS de tudo o
+    // resto, cobrindo só os quadrados escolhidos -- por isso desenha
+    // antes até dos móveis fixos (ver DEPTH_FLOOR).
+    for (const f of ROOM_FLOOR) {
+      this.addFloorSprite(f);
+    }
 
     for (const f of ROOM_FURNITURE) {
       this.addFurnitureSprite(f);
@@ -492,8 +532,14 @@ export default class MainScene extends Phaser.Scene {
       this.handleEditPointerDown(pointer);
       this.startCameraPan(pointer);
     });
-    this.input.on("pointerup", () => this.stopCameraPan());
-    this.input.on("pointerupoutside", () => this.stopCameraPan());
+    this.input.on("pointerup", () => {
+      this.stopCameraPan();
+      this.stopFloorPaint();
+    });
+    this.input.on("pointerupoutside", () => {
+      this.stopCameraPan();
+      this.stopFloorPaint();
+    });
   }
 
   /**
@@ -512,6 +558,26 @@ export default class MainScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
       .setAlpha(f.transparent ? GLASS_ALPHA : 1);
+  }
+
+  /**
+   * Cria (ou recria) a imagem de UM quadrado de piso pintado, já com
+   * origem/tamanho/profundidade certos -- usado tanto pro piso fixo
+   * (ROOM_FLOOR, no create()) quanto pros tiles "rascunho" pintados no
+   * editor de espaço (ver paintFloorAt), mesma ideia do
+   * addFurnitureSprite. Devolve null se o styleId não bate com nenhum
+   * item do catálogo (defensivo -- não deveria acontecer, ROOM_FLOOR só
+   * é editado colando o código gerado pelo próprio editor).
+   */
+  private addFloorSprite(f: FloorTileDef): Phaser.GameObjects.Image | null {
+    const entry = floorEntryById(f.styleId);
+    if (!entry) return null;
+    const pos = floorWorldPos(f);
+    return this.add
+      .image(pos.x, pos.y, floorTextureKey(f.styleId))
+      .setOrigin(0.5, 0.5)
+      .setDisplaySize(TILE, TILE)
+      .setDepth(DEPTH_FLOOR);
   }
 
   private createAvatar(
@@ -884,6 +950,11 @@ export default class MainScene extends Phaser.Scene {
     this.isPanningCamera = false;
   }
 
+  private stopFloorPaint() {
+    this.isPaintingFloor = false;
+    this.lastPaintedFloorKey = null;
+  }
+
   /** Aplica um novo zoom mantendo o mesmo PONTO CENTRAL da câmera --
    * setZoom sozinho "puxa" a visão pro canto 0,0 do mundo, o que dá um
    * pulo feio na tela toda vez que aperta "+"/"-". */
@@ -1065,17 +1136,19 @@ export default class MainScene extends Phaser.Scene {
   // igual ao onLocalMove/upsertRemotePlayer já existentes.
   // ------------------------------------------------------------------
 
-  /** Liga/desliga o modo de edição (mostra/esconde a grade, some com a seleção da paleta). Os itens já colocados continuam na cena dos dois jeitos. */
+  /** Liga/desliga o modo de edição (mostra/esconde a grade, some com a seleção da paleta/piso). Os itens já colocados continuam na cena dos dois jeitos. */
   setEditMode(active: boolean) {
     this.editMode = active;
     this.selectedCatalogEntry = null;
+    this.selectedFloorTool = null;
     this.gridGraphics?.setVisible(active);
     if (!active) this.hoverGraphics?.setVisible(false);
   }
 
-  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). */
+  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma a ferramenta de piso (ver selectFloorTool) -- só uma ferramenta ativa por vez. */
   selectCatalogEntry(entry: FurnitureCatalogEntry | null) {
     this.selectedCatalogEntry = entry;
+    this.selectedFloorTool = null;
   }
 
   getDraftFurnitureList(): FurnitureDef[] {
@@ -1094,6 +1167,57 @@ export default class MainScene extends Phaser.Scene {
     this.draftSprites.clear();
     this.draftFurniture.clear();
     this.onDraftChange?.(this.getDraftFurnitureList());
+  }
+
+  /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma o item de móvel selecionado (ver selectCatalogEntry) -- só uma ferramenta ativa por vez. */
+  selectFloorTool(tool: FloorTool) {
+    this.selectedFloorTool = tool;
+    this.selectedCatalogEntry = null;
+  }
+
+  getDraftFloorList(): FloorTileDef[] {
+    return Array.from(this.draftFloor.values());
+  }
+
+  clearDraftFloor() {
+    for (const sprite of this.draftFloorSprites.values()) sprite.destroy();
+    this.draftFloorSprites.clear();
+    this.draftFloor.clear();
+    this.onDraftFloorChange?.(this.getDraftFloorList());
+  }
+
+  /**
+   * Pinta (ou apaga, se a ferramenta ativa for "erase") o tile col/row
+   * com a ferramenta de piso selecionada -- chamado tanto por um clique
+   * único quanto, repetidamente, durante um arrasto (ver
+   * handleEditPointerDown/handleCameraPan... não, handleEditPointerMove
+   * mais embaixo). Sem ferramenta selecionada, não faz nada.
+   */
+  private paintFloorAt(col: number, row: number) {
+    const tool = this.selectedFloorTool;
+    if (!tool) return;
+    const key = `${col},${row}`;
+
+    if (tool.kind === "erase") {
+      const existing = this.draftFloor.get(key);
+      if (!existing) return; // nada pintado aqui nesta sessão, não tem o que apagar
+      this.draftFloorSprites.get(key)?.destroy();
+      this.draftFloorSprites.delete(key);
+      this.draftFloor.delete(key);
+      this.onDraftFloorChange?.(this.getDraftFloorList());
+      return;
+    }
+
+    const existing = this.draftFloor.get(key);
+    if (existing && existing.styleId === tool.entry.id) return; // já pintado com o mesmo modelo, nada a fazer
+
+    this.draftFloorSprites.get(key)?.destroy();
+    const def: FloorTileDef = { col, row, styleId: tool.entry.id };
+    const sprite = this.addFloorSprite(def);
+    if (!sprite) return;
+    this.draftFloor.set(key, def);
+    this.draftFloorSprites.set(key, sprite);
+    this.onDraftFloorChange?.(this.getDraftFloorList());
   }
 
   /** Desenha o contorno de TODO tile colocável (mesmos limites que clampTile usa pro boneco) -- só visível durante o modo de edição. */
@@ -1133,6 +1257,19 @@ export default class MainScene extends Phaser.Scene {
       this.hoverGraphics.setVisible(false);
       return;
     }
+
+    // arrastar com a ferramenta de piso armada pinta CADA tile novo que
+    // o cursor entra durante o arrasto (não só onde o botão foi
+    // pressionado) -- é o "arrastando" que o Douglas pediu, em vez de só
+    // o clique único ("unitário").
+    if (this.isPaintingFloor && pointer.isDown && this.selectedFloorTool) {
+      const key = `${col},${row}`;
+      if (key !== this.lastPaintedFloorKey) {
+        this.lastPaintedFloorKey = key;
+        this.paintFloorAt(col, row);
+      }
+    }
+
     const occupied = this.anyFurnitureAt(col, row);
     const { x, y } = tileToWorld(col, row);
     this.hoverGraphics
@@ -1174,6 +1311,17 @@ export default class MainScene extends Phaser.Scene {
     if (this.isPointerOnAnyAvatar(pointer)) return;
     const { col, row } = worldToTile(pointer.x, pointer.y);
     if (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS) return;
+
+    // ferramenta de piso armada: pinta/apaga esse tile (clique único --
+    // "unitário") e já entra em modo de arrasto (ver
+    // handleEditPointerMove) pra continuar pintando se o mouse continuar
+    // pressionado e se mover; NÃO cai no fluxo de móvel abaixo.
+    if (this.selectedFloorTool) {
+      this.isPaintingFloor = true;
+      this.lastPaintedFloorKey = `${col},${row}`;
+      this.paintFloorAt(col, row);
+      return;
+    }
 
     const draftId = this.draftIdAt(col, row);
     if (draftId) {

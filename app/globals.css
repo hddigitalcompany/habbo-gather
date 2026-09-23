@@ -1497,6 +1497,119 @@ body {
   border-radius: 4px;
 }
 
+/* Aba "Móveis" x "Piso" no topo do editor de espaço (ver EditPanel em
+   GameRoom.tsx) -- escolhe qual paleta aparece embaixo. */
+.edit-mode-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.edit-mode-tab {
+  flex: 1;
+  background: #0d0715;
+  border: 1px solid #2f2245;
+  border-radius: 6px;
+  color: #f5f0ff;
+  padding: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.edit-mode-tab:hover {
+  background: #1c1329;
+}
+
+.edit-mode-tab.selected {
+  background: #7c5cff;
+  border-color: #9376ff;
+}
+
+/* Sub-abas de categoria dentro de "Piso" (Porcelanato/Laminado, ver
+   FLOOR_CATEGORIES em game/floor.ts) -- mesma pegada do .edit-mode-tabs
+   só que menor, já que fica um nível abaixo. */
+.floor-category-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.floor-category-tab {
+  flex: 1;
+  background: #2a1d40;
+  border: 1px solid #3a2a55;
+  border-radius: 6px;
+  color: #f5f0ff;
+  padding: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.floor-category-tab:hover {
+  background: #3d2a5c;
+}
+
+.floor-category-tab.selected {
+  background: #7c5cff;
+  border-color: #9376ff;
+}
+
+/* Paleta de piso -- miniaturas da TEXTURA de verdade (ver
+   scripts/syncFloorAssets.mjs), diferente da paleta de móveis (botão de
+   texto): dá pra ver o padrão do porcelanato/laminado antes de pintar. */
+.floor-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.floor-swatch {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 2px solid #2f2245;
+  background-color: #0d0715;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.floor-swatch:hover {
+  border-color: #3a2a55;
+}
+
+.floor-swatch.selected {
+  border-color: #7c5cff;
+}
+
+/* Ferramenta de apagar piso -- separada das miniaturas (não é uma
+   textura), tom avermelhado pra ficar claro que é destrutiva, igual o
+   .clear-btn. */
+.floor-eraser-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1px solid #5c2a3d;
+  background: #3a1f2a;
+  color: #ff9db0;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.floor-eraser-btn:hover {
+  background: #4a2836;
+}
+
+.floor-eraser-btn.selected {
+  background: #d95959;
+  border-color: #ff8080;
+  color: white;
+}
+
 .palette {
   display: flex;
   flex-wrap: wrap;
