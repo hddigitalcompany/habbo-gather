@@ -58,6 +58,8 @@
 //                           (checagem AO VIVO enquanto a pessoa preenche o
 //                           formulário, pra já mostrar quem fica indisponível)
 //   agenda:create       -> cliente->servidor: { type: "agenda:create", title, startTs, durationMinutes, needs, participantIds, visibility? }
+//                           (participantIds pode vir [] -- "compromisso" só da própria pessoa,
+//                           sem convidar ninguém, ver comentário no case abaixo)
 //                           (visibility: "public" (padrão) ou "private" -- privada só ocupa o
 //                           horário pra quem pesquisar a agenda de um participante dela, ver
 //                           agenda:view_colleague embaixo, sem mostrar o conteúdo)
@@ -589,10 +591,14 @@ wss.on("connection", (ws, req) => {
       }
       case "agenda:create": {
         if (!Array.isArray(data.participantIds)) break;
+        // participantIds pode vir vazio -- "a pessoa pode subir
+        // compromisso pra ela sozinha" (sem convidar ninguém, só ocupa
+        // a própria agenda). createCall sempre inclui quem criou, então
+        // um array vazio ainda vira uma call válida com 1 participante.
         const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
         const startTs = Number(data.startTs);
         const durationMinutes = Number(data.durationMinutes) || 30;
-        if (!Number.isFinite(startTs) || participantIds.length === 0) break;
+        if (!Number.isFinite(startTs)) break;
 
         // revalida no servidor (defesa contra corrida: alguém marcou
         // ENQUANTO essa pessoa preenchia o formulário) -- se algum

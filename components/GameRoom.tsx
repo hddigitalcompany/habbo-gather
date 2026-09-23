@@ -361,9 +361,10 @@ export default function GameRoom() {
   const chatFileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Agenda (ver tipos CallEvent/AgendaFormState lá em cima e o
-  // comentário grande em server/index.js) -- segunda aba da MESMA
-  // gaveta de chat, ver chatMainTab. ---
-  const [chatMainTab, setChatMainTab] = useState<"conversas" | "agenda">("conversas");
+  // comentário grande em server/index.js) -- gaveta PRÓPRIA, separada da
+  // de chat (ver agendaOpen/AgendaDrawer), com seu próprio botão na
+  // av-bar. ---
+  const [agendaOpen, setAgendaOpen] = useState(false);
   const [calls, setCalls] = useState<CallEvent[]>([]);
   // quem, dos candidatos a convidado, já tá ocupado no horário sendo
   // escolhido AGORA no formulário -- atualizado ao vivo (ver o useEffect
@@ -1350,8 +1351,14 @@ export default function GameRoom() {
     onStopRecording: stopVoiceRecording,
     onClose: () => setChatOpen(false),
     onTogglePin: () => setChatPinned((v) => !v),
-    mainTab: chatMainTab,
-    onChangeMainTab: setChatMainTab,
+  };
+
+  // props do AgendaDrawer -- gaveta própria, separada do chat (ver
+  // agendaOpen), sem pin/sidebar (só flutua, igual o chat flutuava
+  // antes de ganhar o botão de fixar).
+  const agendaDrawerProps = {
+    myUserId,
+    onlinePlayers: Array.from(remotePlayersRef.current.values()),
     calls,
     busyUserIds,
     agendaView,
@@ -1372,6 +1379,7 @@ export default function GameRoom() {
     colleagueCalls,
     onViewColleagueAgenda: viewColleagueAgenda,
     onBackToMyAgenda: backToMyAgenda,
+    onClose: () => setAgendaOpen(false),
   };
 
   return (
@@ -1461,9 +1469,17 @@ export default function GameRoom() {
           >
             <ChatIcon />
           </button>
+          <button
+            className={agendaOpen ? "av-btn on" : "av-btn"}
+            onClick={() => setAgendaOpen((v) => !v)}
+            title={agendaOpen ? "Fechar agenda" : "Abrir agenda"}
+          >
+            <AgendaIcon />
+          </button>
         </div>
 
         {chatOpen && !chatPinned && <ChatDrawer {...chatDrawerProps} pinned={false} />}
+        {agendaOpen && <AgendaDrawer {...agendaDrawerProps} />}
         <input
           ref={chatFileInputRef}
           type="file"
@@ -2122,28 +2138,6 @@ function ChatDrawer({
   onClose,
   pinned,
   onTogglePin,
-  mainTab,
-  onChangeMainTab,
-  calls,
-  busyUserIds,
-  agendaView,
-  onChangeAgendaView,
-  agendaDetailId,
-  onOpenCallDetail,
-  agendaForm,
-  onChangeAgendaForm,
-  onToggleAgendaParticipant,
-  agendaError,
-  onStartNewCall,
-  onSubmitCreateCall,
-  onRespondToCall,
-  agendaSearchQuery,
-  onChangeAgendaSearchQuery,
-  agendaColleagueId,
-  agendaColleagueName,
-  colleagueCalls,
-  onViewColleagueAgenda,
-  onBackToMyAgenda,
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
@@ -2176,34 +2170,10 @@ function ChatDrawer({
   onClose: () => void;
   pinned: boolean;
   onTogglePin: () => void;
-  mainTab: "conversas" | "agenda";
-  onChangeMainTab: (t: "conversas" | "agenda") => void;
-  calls: CallEvent[];
-  busyUserIds: string[];
-  agendaView: "list" | "new" | "detail" | "colleague";
-  onChangeAgendaView: (v: "list" | "new" | "detail" | "colleague") => void;
-  agendaDetailId: string | null;
-  onOpenCallDetail: (callId: string) => void;
-  agendaForm: AgendaFormState;
-  onChangeAgendaForm: (partial: Partial<AgendaFormState>) => void;
-  onToggleAgendaParticipant: (userId: string) => void;
-  agendaError: string | null;
-  onStartNewCall: () => void;
-  onSubmitCreateCall: () => void;
-  onRespondToCall: (callId: string, status: "approved" | "declined") => void;
-  agendaSearchQuery: string;
-  onChangeAgendaSearchQuery: (v: string) => void;
-  agendaColleagueId: string | null;
-  agendaColleagueName: string;
-  colleagueCalls: CallEvent[];
-  onViewColleagueAgenda: (userId: string, name: string) => void;
-  onBackToMyAgenda: () => void;
 }) {
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
-  const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
   const pinBtn = (
     <button
       className={pinned ? "chat-icon-btn active" : "chat-icon-btn"}
@@ -2221,34 +2191,9 @@ function ChatDrawer({
   // dedupe por userId -- se alguém tiver 2 abas abertas, ainda aparece
   // uma vez só na lista de "quem tá na sala" (ver onlinePlayers).
   const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
-  // resultado de "pesquise a agenda de um colega" -- filtra quem tá na
-  // sala (mesma fonte do picker de participantes) pelo nome digitado,
-  // sem mim mesmo. Cálculo local, não precisa ir no servidor pra buscar.
-  const colleagueQuery = agendaSearchQuery.trim().toLowerCase();
-  const colleagueMatches =
-    colleagueQuery.length === 0
-      ? []
-      : pickable.filter((p) => p.userId !== myUserId && (p.name || "").toLowerCase().includes(colleagueQuery));
 
   return (
     <div className={pinned ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}>
-      <div className="chat-main-tabs">
-        <button
-          className={mainTab === "conversas" ? "chat-main-tab active" : "chat-main-tab"}
-          onClick={() => onChangeMainTab("conversas")}
-        >
-          Conversas
-        </button>
-        <button
-          className={mainTab === "agenda" ? "chat-main-tab active" : "chat-main-tab"}
-          onClick={() => onChangeMainTab("agenda")}
-        >
-          Agenda
-        </button>
-      </div>
-
-      {mainTab === "conversas" && (
-        <>
       {view === "list" && (
         <>
           <div className="chat-drawer-header">
@@ -2460,341 +2405,391 @@ function ChatDrawer({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function AgendaDrawer({
+  myUserId,
+  onlinePlayers,
+  calls,
+  busyUserIds,
+  agendaView,
+  onChangeAgendaView,
+  agendaDetailId,
+  onOpenCallDetail,
+  agendaForm,
+  onChangeAgendaForm,
+  onToggleAgendaParticipant,
+  agendaError,
+  onStartNewCall,
+  onSubmitCreateCall,
+  onRespondToCall,
+  agendaSearchQuery,
+  onChangeAgendaSearchQuery,
+  agendaColleagueId,
+  agendaColleagueName,
+  colleagueCalls,
+  onViewColleagueAgenda,
+  onBackToMyAgenda,
+  onClose,
+}: {
+  myUserId: string;
+  onlinePlayers: RemotePlayer[];
+  calls: CallEvent[];
+  busyUserIds: string[];
+  agendaView: "list" | "new" | "detail" | "colleague";
+  onChangeAgendaView: (v: "list" | "new" | "detail" | "colleague") => void;
+  agendaDetailId: string | null;
+  onOpenCallDetail: (callId: string) => void;
+  agendaForm: AgendaFormState;
+  onChangeAgendaForm: (partial: Partial<AgendaFormState>) => void;
+  onToggleAgendaParticipant: (userId: string) => void;
+  agendaError: string | null;
+  onStartNewCall: () => void;
+  onSubmitCreateCall: () => void;
+  onRespondToCall: (callId: string, status: "approved" | "declined") => void;
+  agendaSearchQuery: string;
+  onChangeAgendaSearchQuery: (v: string) => void;
+  agendaColleagueId: string | null;
+  agendaColleagueName: string;
+  colleagueCalls: CallEvent[];
+  onViewColleagueAgenda: (userId: string, name: string) => void;
+  onBackToMyAgenda: () => void;
+  onClose: () => void;
+}) {
+  const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
+  const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
+  // dedupe por userId -- se alguém tiver 2 abas abertas, ainda aparece
+  // uma vez só na lista de "quem tá na sala".
+  const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
+  // resultado de "pesquise a agenda de um colega" -- filtra quem tá na
+  // sala (mesma fonte do picker de participantes) pelo nome digitado,
+  // sem mim mesmo. Cálculo local, não precisa ir no servidor pra buscar.
+  const colleagueQuery = agendaSearchQuery.trim().toLowerCase();
+  const colleagueMatches =
+    colleagueQuery.length === 0
+      ? []
+      : pickable.filter((p) => p.userId !== myUserId && (p.name || "").toLowerCase().includes(colleagueQuery));
+
+  return (
+    <div className="chat-drawer agenda-drawer">
+      {agendaView === "list" && (
+        <>
+          <div className="chat-drawer-header">
+            <h3>Minha agenda</h3>
+            <div className="chat-drawer-header-actions">
+              <button className="chat-icon-btn" title="Marcar compromisso" onClick={onStartNewCall}>
+                <PlusIcon />
+              </button>
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          <div className="agenda-search-row">
+            <input
+              className="agenda-search-input"
+              value={agendaSearchQuery}
+              onChange={(e) => onChangeAgendaSearchQuery(e.target.value)}
+              placeholder="Pesquise a agenda de um colega..."
+            />
+            {colleagueQuery.length > 0 && (
+              <div className="agenda-search-results">
+                {colleagueMatches.length === 0 && <p className="chat-empty-hint">Ninguém encontrado.</p>}
+                {colleagueMatches.map((p) => (
+                  <button
+                    key={p.userId}
+                    className="agenda-search-result-item"
+                    onClick={() => onViewColleagueAgenda(p.userId, p.name || "Sem nome")}
+                  >
+                    <span className="chat-conv-avatar" style={{ background: p.color }}>
+                      {(p.name || "?").slice(0, 1).toUpperCase()}
+                    </span>
+                    <span>{p.name || "Sem nome"}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="agenda-call-list">
+            {calls.length === 0 && <p className="chat-empty-hint">Nenhum compromisso marcado ainda.</p>}
+            {calls.map((c) => {
+              const mine = c.participants.find((p) => p.id === myUserId);
+              const approvedCount = c.participants.filter((p) => p.status === "approved").length;
+              const soloCall = c.participants.length <= 1;
+              return (
+                <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
+                  <span className="agenda-call-item-main">
+                    <span className="agenda-call-title">
+                      {c.visibility === "private" && "🔒 "}
+                      {c.title}
+                    </span>
+                    <span className="agenda-call-when">
+                      {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+                    </span>
+                  </span>
+                  {soloCall && <span className="agenda-badge">Pessoal</span>}
+                  {!soloCall && mine?.status === "pending" && (
+                    <span className="agenda-badge pending">Aguardando você</span>
+                  )}
+                  {!soloCall && mine?.status === "declined" && <span className="agenda-badge declined">Recusada</span>}
+                  {!soloCall && mine?.status === "approved" && (
+                    <span className="agenda-badge approved">
+                      {approvedCount}/{c.participants.length} confirmados
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </>
       )}
 
-      {mainTab === "agenda" && (
+      {agendaView === "colleague" && (
         <>
-          {agendaView === "list" && (
-            <>
-              <div className="chat-drawer-header">
-                <h3>Minha agenda</h3>
-                <div className="chat-drawer-header-actions">
-                  {pinBtn}
-                  <button className="chat-icon-btn" title="Marcar call" onClick={onStartNewCall}>
-                    <PlusIcon />
-                  </button>
-                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                    <CloseIcon />
-                  </button>
+          <div className="chat-drawer-header">
+            <button className="chat-icon-btn" title="Voltar pra minha agenda" onClick={onBackToMyAgenda}>
+              <BackIcon />
+            </button>
+            <h3>Agenda de {agendaColleagueName}</h3>
+            <div className="chat-drawer-header-actions">
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          <div className="agenda-call-list">
+            {colleagueCalls.length === 0 && (
+              <p className="chat-empty-hint">Nenhum compromisso marcado por enquanto.</p>
+            )}
+            {colleagueCalls.map((c) =>
+              c.redacted ? (
+                <div key={c.id} className="agenda-call-item agenda-call-item-private">
+                  <span className="agenda-call-item-main">
+                    <span className="agenda-call-title agenda-call-title-private">🔒 Conteúdo da agenda privado</span>
+                    <span className="agenda-call-when">
+                      {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+                    </span>
+                  </span>
                 </div>
-              </div>
-              <div className="agenda-search-row">
+              ) : (
+                <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
+                  <span className="agenda-call-item-main">
+                    <span className="agenda-call-title">{c.title}</span>
+                    <span className="agenda-call-when">
+                      {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+                    </span>
+                  </span>
+                </button>
+              )
+            )}
+          </div>
+        </>
+      )}
+
+      {agendaView === "new" && (
+        <>
+          <div className="chat-drawer-header">
+            <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeAgendaView("list")}>
+              <BackIcon />
+            </button>
+            <h3>Marcar compromisso</h3>
+            <div className="chat-drawer-header-actions">
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          <div className="agenda-form-body">
+            <label className="chat-field">
+              <span>Título</span>
+              <input
+                value={agendaForm.title}
+                onChange={(e) => onChangeAgendaForm({ title: e.target.value })}
+                placeholder="Ex: Alinhamento do projeto"
+                maxLength={80}
+              />
+            </label>
+            <div className="agenda-datetime-row">
+              <label className="chat-field">
+                <span>Data</span>
+                <input type="date" value={agendaForm.date} onChange={(e) => onChangeAgendaForm({ date: e.target.value })} />
+              </label>
+              <label className="chat-field">
+                <span>Horário</span>
+                <input type="time" value={agendaForm.time} onChange={(e) => onChangeAgendaForm({ time: e.target.value })} />
+              </label>
+              <label className="chat-field">
+                <span>Duração</span>
+                <select
+                  value={agendaForm.durationMinutes}
+                  onChange={(e) => onChangeAgendaForm({ durationMinutes: Number(e.target.value) })}
+                >
+                  <option value={15}>15 min</option>
+                  <option value={30}>30 min</option>
+                  <option value={45}>45 min</option>
+                  <option value={60}>1h</option>
+                  <option value={90}>1h30</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="agenda-needs-row">
+              <span className="agenda-field-label">Necessidades</span>
+              <label className="agenda-need-check">
                 <input
-                  className="agenda-search-input"
-                  value={agendaSearchQuery}
-                  onChange={(e) => onChangeAgendaSearchQuery(e.target.value)}
-                  placeholder="Pesquise a agenda de um colega..."
+                  type="checkbox"
+                  checked={agendaForm.needs.camera}
+                  onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, camera: e.target.checked } })}
                 />
-                {colleagueQuery.length > 0 && (
-                  <div className="agenda-search-results">
-                    {colleagueMatches.length === 0 && <p className="chat-empty-hint">Ninguém encontrado.</p>}
-                    {colleagueMatches.map((p) => (
-                      <button
-                        key={p.userId}
-                        className="agenda-search-result-item"
-                        onClick={() => onViewColleagueAgenda(p.userId, p.name || "Sem nome")}
-                      >
-                        <span className="chat-conv-avatar" style={{ background: p.color }}>
-                          {(p.name || "?").slice(0, 1).toUpperCase()}
-                        </span>
-                        <span>{p.name || "Sem nome"}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <CamIcon off={false} /> Câmera
+              </label>
+              <label className="agenda-need-check">
+                <input
+                  type="checkbox"
+                  checked={agendaForm.needs.audio}
+                  onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, audio: e.target.checked } })}
+                />
+                <MicIcon off={false} /> Áudio
+              </label>
+              <label className="agenda-need-check">
+                <input
+                  type="checkbox"
+                  checked={agendaForm.needs.screen}
+                  onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, screen: e.target.checked } })}
+                />
+                <ScreenIcon active={false} /> Tela
+              </label>
+            </div>
+
+            <div className="agenda-visibility-row">
+              <span className="agenda-field-label">Visibilidade</span>
+              <div className="agenda-visibility-toggle">
+                <button
+                  type="button"
+                  className={agendaForm.visibility === "public" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
+                  onClick={() => onChangeAgendaForm({ visibility: "public" })}
+                >
+                  Público
+                </button>
+                <button
+                  type="button"
+                  className={agendaForm.visibility === "private" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
+                  onClick={() => onChangeAgendaForm({ visibility: "private" })}
+                >
+                  Privado
+                </button>
               </div>
-              <div className="agenda-call-list">
-                {calls.length === 0 && <p className="chat-empty-hint">Nenhuma call marcada ainda.</p>}
-                {calls.map((c) => {
-                  const mine = c.participants.find((p) => p.id === myUserId);
-                  const approvedCount = c.participants.filter((p) => p.status === "approved").length;
+              <p className="agenda-visibility-hint">
+                {agendaForm.visibility === "public"
+                  ? "Quem pesquisar a agenda de um participante vê o conteúdo desse compromisso."
+                  : 'Quem pesquisar a agenda de um participante só vê o horário ocupado, com "conteúdo da agenda privado".'}
+              </p>
+            </div>
+
+            <span className="agenda-field-label">Participantes (opcional -- deixe vazio pra um compromisso só seu)</span>
+            {pickable.length === 0 ? (
+              <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
+            ) : (
+              <div className="chat-picker-list">
+                {pickable.map((p) => {
+                  const busy = busyUserIds.includes(p.userId);
                   return (
-                    <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
-                      <span className="agenda-call-item-main">
-                        <span className="agenda-call-title">
-                          {c.visibility === "private" && "🔒 "}
-                          {c.title}
-                        </span>
-                        <span className="agenda-call-when">
-                          {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-                        </span>
-                      </span>
-                      {mine?.status === "pending" && <span className="agenda-badge pending">Aguardando você</span>}
-                      {mine?.status === "declined" && <span className="agenda-badge declined">Recusada</span>}
-                      {mine?.status === "approved" && (
-                        <span className="agenda-badge approved">
-                          {approvedCount}/{c.participants.length} confirmados
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {agendaView === "colleague" && (
-            <>
-              <div className="chat-drawer-header">
-                <button className="chat-icon-btn" title="Voltar pra minha agenda" onClick={onBackToMyAgenda}>
-                  <BackIcon />
-                </button>
-                <h3>Agenda de {agendaColleagueName}</h3>
-                <div className="chat-drawer-header-actions">
-                  {pinBtn}
-                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                    <CloseIcon />
-                  </button>
-                </div>
-              </div>
-              <div className="agenda-call-list">
-                {colleagueCalls.length === 0 && (
-                  <p className="chat-empty-hint">Nenhum compromisso marcado por enquanto.</p>
-                )}
-                {colleagueCalls.map((c) =>
-                  c.redacted ? (
-                    <div key={c.id} className="agenda-call-item agenda-call-item-private">
-                      <span className="agenda-call-item-main">
-                        <span className="agenda-call-title agenda-call-title-private">🔒 Conteúdo da agenda privado</span>
-                        <span className="agenda-call-when">
-                          {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-                        </span>
-                      </span>
-                    </div>
-                  ) : (
-                    <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
-                      <span className="agenda-call-item-main">
-                        <span className="agenda-call-title">{c.title}</span>
-                        <span className="agenda-call-when">
-                          {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-                        </span>
-                      </span>
-                    </button>
-                  )
-                )}
-              </div>
-            </>
-          )}
-
-          {agendaView === "new" && (
-            <>
-              <div className="chat-drawer-header">
-                <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeAgendaView("list")}>
-                  <BackIcon />
-                </button>
-                <h3>Marcar call</h3>
-                <div className="chat-drawer-header-actions">
-                  {pinBtn}
-                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                    <CloseIcon />
-                  </button>
-                </div>
-              </div>
-              <div className="agenda-form-body">
-                <label className="chat-field">
-                  <span>Título</span>
-                  <input
-                    value={agendaForm.title}
-                    onChange={(e) => onChangeAgendaForm({ title: e.target.value })}
-                    placeholder="Ex: Alinhamento do projeto"
-                    maxLength={80}
-                  />
-                </label>
-                <div className="agenda-datetime-row">
-                  <label className="chat-field">
-                    <span>Data</span>
-                    <input
-                      type="date"
-                      value={agendaForm.date}
-                      onChange={(e) => onChangeAgendaForm({ date: e.target.value })}
-                    />
-                  </label>
-                  <label className="chat-field">
-                    <span>Horário</span>
-                    <input
-                      type="time"
-                      value={agendaForm.time}
-                      onChange={(e) => onChangeAgendaForm({ time: e.target.value })}
-                    />
-                  </label>
-                  <label className="chat-field">
-                    <span>Duração</span>
-                    <select
-                      value={agendaForm.durationMinutes}
-                      onChange={(e) => onChangeAgendaForm({ durationMinutes: Number(e.target.value) })}
-                    >
-                      <option value={15}>15 min</option>
-                      <option value={30}>30 min</option>
-                      <option value={45}>45 min</option>
-                      <option value={60}>1h</option>
-                      <option value={90}>1h30</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="agenda-needs-row">
-                  <span className="agenda-field-label">Necessidades (a pessoa se prepara)</span>
-                  <label className="agenda-need-check">
-                    <input
-                      type="checkbox"
-                      checked={agendaForm.needs.camera}
-                      onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, camera: e.target.checked } })}
-                    />
-                    <CamIcon off={false} /> Câmera
-                  </label>
-                  <label className="agenda-need-check">
-                    <input
-                      type="checkbox"
-                      checked={agendaForm.needs.audio}
-                      onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, audio: e.target.checked } })}
-                    />
-                    <MicIcon off={false} /> Áudio
-                  </label>
-                  <label className="agenda-need-check">
-                    <input
-                      type="checkbox"
-                      checked={agendaForm.needs.screen}
-                      onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, screen: e.target.checked } })}
-                    />
-                    <ScreenIcon active={false} /> Tela
-                  </label>
-                </div>
-
-                <div className="agenda-visibility-row">
-                  <span className="agenda-field-label">Visibilidade</span>
-                  <div className="agenda-visibility-toggle">
-                    <button
-                      type="button"
-                      className={agendaForm.visibility === "public" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
-                      onClick={() => onChangeAgendaForm({ visibility: "public" })}
-                    >
-                      Público
-                    </button>
-                    <button
-                      type="button"
-                      className={agendaForm.visibility === "private" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
-                      onClick={() => onChangeAgendaForm({ visibility: "private" })}
-                    >
-                      Privado
-                    </button>
-                  </div>
-                  <p className="agenda-visibility-hint">
-                    {agendaForm.visibility === "public"
-                      ? "Quem pesquisar a agenda de um participante vê o conteúdo dessa call."
-                      : 'Quem pesquisar a agenda de um participante só vê o horário ocupado, com "conteúdo da agenda privado".'}
-                  </p>
-                </div>
-
-                <span className="agenda-field-label">Participantes</span>
-                {pickable.length === 0 ? (
-                  <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
-                ) : (
-                  <div className="chat-picker-list">
-                    {pickable.map((p) => {
-                      const busy = busyUserIds.includes(p.userId);
-                      return (
-                        <label key={p.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
-                          <input
-                            type="checkbox"
-                            checked={agendaForm.participantIds.includes(p.userId)}
-                            disabled={busy}
-                            onChange={() => onToggleAgendaParticipant(p.userId)}
-                          />
-                          <span className="chat-conv-avatar" style={{ background: p.color }}>
-                            {(p.name || "?").slice(0, 1).toUpperCase()}
-                          </span>
-                          <span>{p.name || "Sem nome"}</span>
-                          {busy && <span className="agenda-badge busy">Indisponível</span>}
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {agendaError && <p className="agenda-error">{agendaError}</p>}
-
-                <button
-                  className="chat-primary-btn"
-                  disabled={!agendaForm.date || !agendaForm.time || agendaForm.participantIds.length === 0}
-                  onClick={onSubmitCreateCall}
-                >
-                  Marcar call
-                </button>
-              </div>
-            </>
-          )}
-
-          {agendaView === "detail" && detailCall && (
-            <>
-              <div className="chat-drawer-header">
-                <button
-                  className="chat-icon-btn"
-                  title="Voltar"
-                  onClick={() => onChangeAgendaView(agendaColleagueId ? "colleague" : "list")}
-                >
-                  <BackIcon />
-                </button>
-                <h3>{detailCall.title}</h3>
-                <div className="chat-drawer-header-actions">
-                  {pinBtn}
-                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                    <CloseIcon />
-                  </button>
-                </div>
-              </div>
-              <div className="agenda-detail-body">
-                <p className="agenda-detail-when">
-                  {formatCallDateTime(detailCall.startTs)} · {detailCall.durationMinutes}min
-                </p>
-                <p className="agenda-detail-creator">
-                  Marcada por {detailCall.createdByName || "?"} ·{" "}
-                  {detailCall.visibility === "private" ? "🔒 Privada" : "Pública"}
-                </p>
-                <div className="agenda-needs-row">
-                  {detailCall.needs.camera && (
-                    <span className="agenda-need-pill">
-                      <CamIcon off={false} /> Câmera
-                    </span>
-                  )}
-                  {detailCall.needs.audio && (
-                    <span className="agenda-need-pill">
-                      <MicIcon off={false} /> Áudio
-                    </span>
-                  )}
-                  {detailCall.needs.screen && (
-                    <span className="agenda-need-pill">
-                      <ScreenIcon active={false} /> Tela
-                    </span>
-                  )}
-                </div>
-                <span className="agenda-field-label">Participantes</span>
-                <div className="agenda-participant-list">
-                  {detailCall.participants.map((p) => (
-                    <div key={p.id} className="agenda-participant-row">
+                    <label key={p.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
+                      <input
+                        type="checkbox"
+                        checked={agendaForm.participantIds.includes(p.userId)}
+                        disabled={busy}
+                        onChange={() => onToggleAgendaParticipant(p.userId)}
+                      />
                       <span className="chat-conv-avatar" style={{ background: p.color }}>
                         {(p.name || "?").slice(0, 1).toUpperCase()}
                       </span>
-                      <span className="agenda-participant-name">{p.id === myUserId ? "Você" : p.name || "Sem nome"}</span>
-                      <span className={`agenda-badge ${p.status}`}>
-                        {p.status === "approved" ? "Confirmado" : p.status === "declined" ? "Recusou" : "Aguardando"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                {myCallStatus === "pending" && (
-                  <div className="agenda-respond-row">
-                    <button className="chat-primary-btn" onClick={() => onRespondToCall(detailCall.id, "approved")}>
-                      Confirmar presença
-                    </button>
-                    <button className="chat-secondary-btn" onClick={() => onRespondToCall(detailCall.id, "declined")}>
-                      Recusar
-                    </button>
-                  </div>
-                )}
+                      <span>{p.name || "Sem nome"}</span>
+                      {busy && <span className="agenda-badge busy">Indisponível</span>}
+                    </label>
+                  );
+                })}
               </div>
-            </>
-          )}
+            )}
+
+            {agendaError && <p className="agenda-error">{agendaError}</p>}
+
+            <button className="chat-primary-btn" disabled={!agendaForm.date || !agendaForm.time} onClick={onSubmitCreateCall}>
+              Marcar compromisso
+            </button>
+          </div>
+        </>
+      )}
+
+      {agendaView === "detail" && detailCall && (
+        <>
+          <div className="chat-drawer-header">
+            <button
+              className="chat-icon-btn"
+              title="Voltar"
+              onClick={() => onChangeAgendaView(agendaColleagueId ? "colleague" : "list")}
+            >
+              <BackIcon />
+            </button>
+            <h3>{detailCall.title}</h3>
+            <div className="chat-drawer-header-actions">
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          <div className="agenda-detail-body">
+            <p className="agenda-detail-when">
+              {formatCallDateTime(detailCall.startTs)} · {detailCall.durationMinutes}min
+            </p>
+            <p className="agenda-detail-creator">
+              Marcado por {detailCall.createdByName || "?"} ·{" "}
+              {detailCall.visibility === "private" ? "🔒 Privado" : "Público"}
+            </p>
+            <div className="agenda-needs-row">
+              {detailCall.needs.camera && (
+                <span className="agenda-need-pill">
+                  <CamIcon off={false} /> Câmera
+                </span>
+              )}
+              {detailCall.needs.audio && (
+                <span className="agenda-need-pill">
+                  <MicIcon off={false} /> Áudio
+                </span>
+              )}
+              {detailCall.needs.screen && (
+                <span className="agenda-need-pill">
+                  <ScreenIcon active={false} /> Tela
+                </span>
+              )}
+            </div>
+            <span className="agenda-field-label">Participantes</span>
+            <div className="agenda-participant-list">
+              {detailCall.participants.map((p) => (
+                <div key={p.id} className="agenda-participant-row">
+                  <span className="chat-conv-avatar" style={{ background: p.color }}>
+                    {(p.name || "?").slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="agenda-participant-name">{p.id === myUserId ? "Você" : p.name || "Sem nome"}</span>
+                  <span className={`agenda-badge ${p.status}`}>
+                    {p.status === "approved" ? "Confirmado" : p.status === "declined" ? "Recusou" : "Aguardando"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {myCallStatus === "pending" && (
+              <div className="agenda-respond-row">
+                <button className="chat-primary-btn" onClick={() => onRespondToCall(detailCall.id, "approved")}>
+                  Confirmar presença
+                </button>
+                <button className="chat-secondary-btn" onClick={() => onRespondToCall(detailCall.id, "declined")}>
+                  Recusar
+                </button>
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -2849,6 +2844,17 @@ function PinIcon({ filled }: { filled: boolean }) {
         strokeLinejoin="round"
       />
       <path d="M9 15 4 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AgendaIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 9.5h17" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M7.5 13.5h3M7.5 16.5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }

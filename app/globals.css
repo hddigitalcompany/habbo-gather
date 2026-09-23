@@ -654,38 +654,6 @@ body {
   opacity: 0.5;
 }
 
-/* Tira Conversas/Agenda no topo da gaveta -- sempre visível, troca só o
-   CONTEÚDO abaixo (ver mainTab em ChatDrawer), o resto da gaveta (lista/
-   nova conversa/conversa aberta OU lista de calls/marcar call/detalhe)
-   continua com seu próprio cabeçalho por baixo dessa tira. */
-.chat-main-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 10px 0;
-  flex-shrink: 0;
-}
-
-.chat-main-tab {
-  flex: 1;
-  background: none;
-  border: none;
-  border-radius: 999px;
-  padding: 6px 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: #a99fc2;
-  cursor: pointer;
-}
-
-.chat-main-tab:hover {
-  color: #f5f0ff;
-}
-
-.chat-main-tab.active {
-  background: rgba(124, 92, 255, 0.22);
-  color: #f5f0ff;
-}
-
 .chat-field select {
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.14);
