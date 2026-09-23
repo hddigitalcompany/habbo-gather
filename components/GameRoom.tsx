@@ -224,19 +224,17 @@ function loadSavedProfile(): Partial<ProfileFields> {
 // cada reconexão pro servidor pareceria uma pessoa nova (ver "userId"
 // vs "id" de conexão no comentário grande em server/index.js).
 const USER_ID_STORAGE_KEY = "habbo-gather-user-id";
-// lembrar como a gaveta de chat tá "fixada" (ver estado chatPinMode em
-// GameRoom): "float" (flutuando, padrão) | "side" (barra lateral) |
-// "top" (barra no topo). Formato antigo guardava só "1"/"0" (fixo na
-// lateral ou não) -- migrado na leitura (ver parsePinMode), não precisa
-// de helper de escrita, lê/grava direto onde é usado.
+// lembrar se a gaveta de chat tá "fixada" como barra lateral (ver estado
+// chatPinMode em GameRoom) -- só "float" (flutuando, padrão) ou "side"
+// (barra lateral). Formato antigo guardava só "1"/"0", migrado na
+// leitura (ver parsePinMode), não precisa de helper de escrita, lê/grava
+// direto onde é usado.
 const CHAT_PINNED_STORAGE_KEY = "habbo-gather-chat-pinned";
-type PinMode = "float" | "side" | "top";
+type PinMode = "float" | "side";
 function parsePinMode(raw: string | null): PinMode {
-  if (raw === "side" || raw === "top" || raw === "float") return raw;
-  if (raw === "1") return "side"; // formato antigo (só lateral fixa)
+  if (raw === "side" || raw === "1") return "side"; // "1" = formato antigo
   return "float";
 }
-const AGENDA_PINNED_STORAGE_KEY = "habbo-gather-agenda-pinned";
 
 function getOrCreateUserId(): string {
   if (typeof window === "undefined") return "";
@@ -418,17 +416,6 @@ export default function GameRoom() {
     if (typeof window === "undefined") return "float";
     try {
       return parsePinMode(window.localStorage.getItem(CHAT_PINNED_STORAGE_KEY));
-    } catch {
-      return "float";
-    }
-  });
-  // Agenda ganhou o mesmo "fixar" que o chat já tinha, só que sem a
-  // opção de lateral (só flutuando ou no topo -- ver "Adicione opcao de
-  // fixar no topo tambem").
-  const [agendaPinMode, setAgendaPinMode] = useState<"float" | "top">(() => {
-    if (typeof window === "undefined") return "float";
-    try {
-      return window.localStorage.getItem(AGENDA_PINNED_STORAGE_KEY) === "top" ? "top" : "float";
     } catch {
       return "float";
     }
@@ -1472,25 +1459,8 @@ export default function GameRoom() {
     }
   }, [chatPinMode]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(AGENDA_PINNED_STORAGE_KEY, agendaPinMode);
-    } catch {
-      // sem localStorage -- só não lembra da próxima vez
-    }
-  }, [agendaPinMode]);
-
-  // clicar de novo no MESMO modo solta (volta a flutuar) -- é assim que
-  // tanto o botão de lateral quanto o de topo funcionam, pro chat e pra
-  // Agenda.
   function toggleChatPinSide() {
     setChatPinMode((m) => (m === "side" ? "float" : "side"));
-  }
-  function toggleChatPinTop() {
-    setChatPinMode((m) => (m === "top" ? "float" : "top"));
-  }
-  function toggleAgendaPinTop() {
-    setAgendaPinMode((m) => (m === "top" ? "float" : "top"));
   }
 
   // checagem de disponibilidade AO VIVO enquanto o formulário "Marcar
@@ -1686,12 +1656,10 @@ export default function GameRoom() {
     onClose: () => setChatOpen(false),
     pinMode: chatPinMode,
     onToggleSidePin: toggleChatPinSide,
-    onToggleTopPin: toggleChatPinTop,
   };
 
   // props do AgendaDrawer -- gaveta própria, separada do chat (ver
-  // agendaOpen). Ganhou o mesmo "fixar" do chat, só que sem a opção de
-  // lateral (só flutuar ou fixar no topo).
+  // agendaOpen).
   const agendaDrawerProps = {
     myUserId,
     onlinePlayers: Array.from(remotePlayersRef.current.values()),
@@ -1724,8 +1692,6 @@ export default function GameRoom() {
     expandedAgendaDays,
     onToggleAgendaDay: toggleAgendaDay,
     onClose: () => setAgendaOpen(false),
-    pinMode: agendaPinMode,
-    onToggleTopPin: toggleAgendaPinTop,
   };
 
   return (
@@ -2502,7 +2468,6 @@ function ChatDrawer({
   onClose,
   pinMode,
   onToggleSidePin,
-  onToggleTopPin,
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
@@ -2539,33 +2504,21 @@ function ChatDrawer({
   onSendRecordedAudio: () => void;
   onDeleteMessage: (conversationId: string | null, messageId: string) => void;
   onClose: () => void;
-  pinMode: "float" | "side" | "top";
+  pinMode: "float" | "side";
   onToggleSidePin: () => void;
-  onToggleTopPin: () => void;
 }) {
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
   const scrollRef = useRef<HTMLDivElement>(null);
-  // dois botões independentes (lateral / topo) em vez de um só que
-  // ciclava -- mais fácil de descobrir o que cada um faz. Clicar no que
-  // já tá ativo solta (volta a flutuar).
+  // clicar de novo no lateral solta (volta a flutuar).
   const pinBtn = (
-    <>
-      <button
-        className={pinMode === "side" ? "chat-icon-btn active" : "chat-icon-btn"}
-        title={pinMode === "side" ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
-        onClick={onToggleSidePin}
-      >
-        <PinIcon filled={pinMode === "side"} />
-      </button>
-      <button
-        className={pinMode === "top" ? "chat-icon-btn active" : "chat-icon-btn"}
-        title={pinMode === "top" ? "Soltar (voltar a flutuar)" : "Fixar no topo"}
-        onClick={onToggleTopPin}
-      >
-        <PinTopIcon filled={pinMode === "top"} />
-      </button>
-    </>
+    <button
+      className={pinMode === "side" ? "chat-icon-btn active" : "chat-icon-btn"}
+      title={pinMode === "side" ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
+      onClick={onToggleSidePin}
+    >
+      <PinIcon filled={pinMode === "side"} />
+    </button>
   );
 
   useEffect(() => {
@@ -2578,9 +2531,7 @@ function ChatDrawer({
 
   return (
     <div
-      className={
-        pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : pinMode === "top" ? "chat-drawer chat-drawer-top" : "chat-drawer"
-      }
+      className={pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}
     >
       {view === "list" && (
         <>
@@ -2863,8 +2814,6 @@ function AgendaDrawer({
   expandedAgendaDays,
   onToggleAgendaDay,
   onClose,
-  pinMode,
-  onToggleTopPin,
 }: {
   myUserId: string;
   onlinePlayers: RemotePlayer[];
@@ -2897,18 +2846,7 @@ function AgendaDrawer({
   expandedAgendaDays: Set<string>;
   onToggleAgendaDay: (dateKey: string) => void;
   onClose: () => void;
-  pinMode: "float" | "top";
-  onToggleTopPin: () => void;
 }) {
-  const pinTopBtn = (
-    <button
-      className={pinMode === "top" ? "chat-icon-btn active" : "chat-icon-btn"}
-      title={pinMode === "top" ? "Soltar (voltar a flutuar)" : "Fixar no topo"}
-      onClick={onToggleTopPin}
-    >
-      <PinTopIcon filled={pinMode === "top"} />
-    </button>
-  );
   const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
   const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
   const onlineUserIds = new Set(onlinePlayers.map((p) => p.userId));
@@ -2970,13 +2908,12 @@ function AgendaDrawer({
   }
 
   return (
-    <div className={pinMode === "top" ? "chat-drawer agenda-drawer chat-drawer-top" : "chat-drawer agenda-drawer"}>
+    <div className="chat-drawer agenda-drawer">
       {agendaView === "list" && (
         <>
           <div className="chat-drawer-header">
             <h3>Minha agenda</h3>
             <div className="chat-drawer-header-actions">
-              {pinTopBtn}
               <button className="chat-icon-btn" title="Marcar compromisso" onClick={onStartNewCall}>
                 <PlusIcon />
               </button>
@@ -3055,7 +2992,6 @@ function AgendaDrawer({
             </button>
             <h3>Agenda de {agendaColleagueName}</h3>
             <div className="chat-drawer-header-actions">
-              {pinTopBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -3098,7 +3034,6 @@ function AgendaDrawer({
             </button>
             <h3>Marcar compromisso</h3>
             <div className="chat-drawer-header-actions">
-              {pinTopBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -3304,7 +3239,6 @@ function AgendaDrawer({
             </button>
             <h3>{detailCall.title}</h3>
             <div className="chat-drawer-header-actions">
-              {pinTopBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -3483,24 +3417,6 @@ function PinIcon({ filled }: { filled: boolean }) {
         strokeLinejoin="round"
       />
       <path d="M9 15 4 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-// "fixar no topo" -- uma barra no alto com uma seta encostando nela,
-// pra distinguir visualmente do PinIcon (lateral) de olho no dedo.
-function PinTopIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-      <path d="M4.5 5h15" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path
-        d="M12 5v13m0 0-4-4m4 4 4-4"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill={filled ? "currentColor" : "none"}
-      />
     </svg>
   );
 }
