@@ -14,25 +14,29 @@ import { clampTile, tileToWorld, worldToTile } from "./grid";
  *   - scene.removeRemotePlayer(id)  -> chamado quando um jogador remoto sai
  *   - scene.getLocalPosition()      -> lido para calcular distância/proximidade
  *
- * Arte do avatar: cada "visual" (skin completa, não roupa avulsa) é UM
- * spritesheet só (arte gerada, não mais procedural). O spritesheet tem
- * 15 frames -- cada direção tem 1 frame parado + 2 frames de passo (perna
- * A / perna B) que alternam a cada passo, pra dar a sensação real de
- * andar (com só 1 frame de passo, segurando a tecla o boneco "deslizava"
- * sem as pernas se mexerem):
+ * Arte do avatar: sistema de CAMADAS (layers) -- o "base" (corpo/pele)
+ * é um spritesheet, e cada item de customização (cabelo, óculos, barba,
+ * camiseta, casaco, calça, tênis) é OUTRO spritesheet separado, desenhado
+ * empilhado por cima, na mesma posição e MESMO frame que o base (ver
+ * LAYER_DRAW_ORDER mais abaixo). Isso troca o sistema anterior de "um
+ * visual = uma imagem só" pelo esquema modular pedido: cada peça pode
+ * ser adicionada/trocada independente, e o boneco base fica padronizado.
+ *
+ * Cada spritesheet de camada (base ou item) usa o MESMO layout de
+ * frames -- 13 frames:
  *   0-2   down  (parado, passoA, passoB)
  *   3-5   left  (parado, passoA, passoB)
  *   6-8   right (parado, passoA, passoB) -- mesma arte de "left", espelhada
  *   9-11  up    (parado, passoA, passoB)
  *   12    sentado
- *   13    bebendo (copo na mão)
- *   14    bebendo (copo na boca)
+ * (passoA/passoB alternam a cada passo dado, pra dar sensação real de
+ * andar -- ver playWalk.)
  *
- * Diferente da versão anterior (pele+roupa em duas sprites, roupa com
- * tint da cor do jogador), agora não há recoloração por jogador — a
- * identidade visual vem de qual "visual" a pessoa escolheu (hoje só
- * existe visual1; a galeria de escolha vem depois). A cor do jogador
- * continua usada só no plaquinha do nome.
+ * Hoje só a camada "base" tem arte de verdade; as outras (cabelo, barba,
+ * óculos, camiseta, casaco, calça, tênis) entram em LAYER_TEXTURE_FILE
+ * conforme a arte for chegando -- cada uma precisa ser processada pelo
+ * mesmo pipeline (chroma-key, normalização, alinhamento) do base, pra
+ * bater exatamente o mesmo frame/pose/escala.
  *
  * Movimento é por GRADE (tile a tile, estilo Gather/Habbo) — ver
  * game/grid.ts. Segurando uma direção, o boneco anda de quadrado em
@@ -43,8 +47,7 @@ import { clampTile, tileToWorld, worldToTile } from "./grid";
  * o avatar só senta quando PARA totalmente em cima do tile de um móvel
  * tipo "chair" (não é mais raio de proximidade enquanto anda perto —
  * só dispara quando ele efetivamente chega e fica parado ali). Anda de
- * novo (qualquer tecla de direção) e levanta sozinho. Beber continua
- * manual (tecla C), é um emote passageiro, não depende de móvel.
+ * novo (qualquer tecla de direção) e levanta sozinho.
  */
 
 const FRAME_W = 200;
@@ -65,12 +68,52 @@ const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number, num
 
 const POSE_FRAMES = {
   sentado: 12,
-  bebendoCopo: 13,
-  bebendoBoca: 14,
 };
 
+/**
+ * Camadas de customização, na ordem em que são desenhadas (primeiro =
+ * mais atrás, último = mais na frente). É um palpite inicial razoável
+ * pra roupa/corpo -- fácil de reordenar aqui quando a arte de verdade
+ * chegar (ex: se o cabelo tiver franja que devia cobrir os óculos, é só
+ * trocar a ordem das duas linhas).
+ */
+const LAYER_DRAW_ORDER = [
+  "base",
+  "calca",
+  "tenis",
+  "camiseta",
+  "casaco",
+  "barba",
+  "cabelo",
+  "oculos",
+] as const;
+type LayerKey = (typeof LAYER_DRAW_ORDER)[number];
+
+/**
+ * Arquivo de cada camada. Só "base" existe por enquanto -- as outras
+ * ficam `null` (não carrega, não desenha) até a arte chegar. Pra
+ * "adicionar" um item, basta trocar o `null` pelo nome do arquivo (já
+ * processado pelo pipeline de chroma-key/normalização) em
+ * `public/assets/`.
+ */
+const LAYER_TEXTURE_FILE: Record<LayerKey, string | null> = {
+  base: "avatar_visual1.png",
+  calca: null,
+  tenis: null,
+  camiseta: null,
+  casaco: null,
+  barba: null,
+  cabelo: null,
+  oculos: null,
+};
+
+/** Chave da textura no Phaser pra uma camada (ex: "cabelo" -> "avatar-cabelo"). */
+function layerTextureKey(layer: LayerKey): string {
+  return `avatar-${layer}`;
+}
+
 type Direction = "down" | "left" | "right" | "up";
-type Activity = "idle" | "sentado" | "bebendo";
+type Activity = "idle" | "sentado";
 
 // depois de levantar (por movimento), ignora o auto-sentar por um
 // instante -- senão sentaria de novo assim que parasse ainda em cima
@@ -83,7 +126,6 @@ const STEP_DURATION_MS = 180;
 export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
-  private drinkKey!: Phaser.Input.Keyboard.Key;
 
   private localContainer!: Phaser.GameObjects.Container;
   private remoteContainers: Map<string, Phaser.GameObjects.Container> = new Map();
@@ -91,7 +133,6 @@ export default class MainScene extends Phaser.Scene {
   private lastSent = 0;
 
   private localActivity: Activity = "idle";
-  private drinkTimer?: Phaser.Time.TimerEvent;
   private sitCooldownUntil = 0;
   private seatedAt: FurnitureDef | null = null;
 
@@ -113,18 +154,26 @@ export default class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.spritesheet("avatar-visual1", "/assets/avatar_visual1.png", {
-      frameWidth: FRAME_W,
-      frameHeight: FRAME_H,
-      // 2px de espaço transparente entre cada frame -- sem isso, com
-      // antialias:true (necessário pra arte gerada não ficar serrilhada),
-      // a GPU "vaza" um fiapo de pixel do frame vizinho nas bordas
-      // (bilinear filtering lendo além do frame), o que aparecia como o
-      // frame de outra pose "grudado" junto, principalmente entre poses
-      // adjacentes na folha (ex: perna de "passo" aparecendo junto com a
-      // pose do lado).
-      spacing: 2,
-    });
+    // carrega o spritesheet de cada camada que já tem arte definida em
+    // LAYER_TEXTURE_FILE (as com valor `null` ficam de fora até a arte
+    // chegar -- ver createAvatar, que também só desenha as camadas
+    // carregadas).
+    for (const layer of LAYER_DRAW_ORDER) {
+      const file = LAYER_TEXTURE_FILE[layer];
+      if (!file) continue;
+      this.load.spritesheet(layerTextureKey(layer), `/assets/${file}`, {
+        frameWidth: FRAME_W,
+        frameHeight: FRAME_H,
+        // 2px de espaço transparente entre cada frame -- sem isso, com
+        // antialias:true (necessário pra arte gerada não ficar serrilhada),
+        // a GPU "vaza" um fiapo de pixel do frame vizinho nas bordas
+        // (bilinear filtering lendo além do frame), o que aparecia como o
+        // frame de outra pose "grudado" junto, principalmente entre poses
+        // adjacentes na folha (ex: perna de "passo" aparecendo junto com a
+        // pose do lado).
+        spacing: 2,
+      });
+    }
     this.load.image("room", "/assets/room.png");
 
     // carrega a arte de cada móvel (uma vez por textureKey, mesmo que
@@ -154,7 +203,6 @@ export default class MainScene extends Phaser.Scene {
       left: Phaser.Input.Keyboard.KeyCodes.A,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
-    this.drinkKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
     const spawn = tileToWorld(9, 9);
     this.localContainer = this.createAvatar(spawn.x, spawn.y, this.localColor, this.localName);
@@ -166,14 +214,22 @@ export default class MainScene extends Phaser.Scene {
     color: string,
     name: string
   ): Phaser.GameObjects.Container {
-    const sprite = this.add.sprite(0, 0, "avatar-visual1", WALK_FRAMES.down[0]);
-    // origem embaixo-centro: o "pé" do boneco fica no (0,0) do container,
-    // que é a posição lógica dele na sala (chão)
-    sprite.setOrigin(0.5, 1);
-    sprite.setScale(AVATAR_SCALE);
+    // uma Sprite por camada EQUIPADA (só as que já têm arte carregada em
+    // LAYER_TEXTURE_FILE), empilhadas na ordem de LAYER_DRAW_ORDER --
+    // todas na mesma posição/frame, então de longe parecem um boneco só.
+    const layerSprites: Phaser.GameObjects.Sprite[] = [];
+    for (const layer of LAYER_DRAW_ORDER) {
+      if (!LAYER_TEXTURE_FILE[layer]) continue;
+      const sprite = this.add.sprite(0, 0, layerTextureKey(layer), WALK_FRAMES.down[0]);
+      // origem embaixo-centro: o "pé" do boneco fica no (0,0) do
+      // container, que é a posição lógica dele na sala (chão)
+      sprite.setOrigin(0.5, 1);
+      sprite.setScale(AVATAR_SCALE);
+      layerSprites.push(sprite);
+    }
 
     const label = this.add
-      .text(0, -sprite.displayHeight - 8, name, {
+      .text(0, -layerSprites[0].displayHeight - 8, name, {
         fontSize: "11px",
         color: "#ffffff",
         fontFamily: "monospace",
@@ -182,9 +238,9 @@ export default class MainScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const container = this.add.container(x, y, [sprite, label]);
-    container.setSize(sprite.displayWidth, sprite.displayHeight);
-    container.setData("sprite", sprite);
+    const container = this.add.container(x, y, [...layerSprites, label]);
+    container.setSize(layerSprites[0].displayWidth, layerSprites[0].displayHeight);
+    container.setData("layers", layerSprites);
     container.setData("label", label);
     container.setData("dir", "down" as Direction);
     container.setData("stepToggle", false);
@@ -205,25 +261,27 @@ export default class MainScene extends Phaser.Scene {
    * de fato a cada quadrado andado, contínuo ou não.
    */
   private playWalk(container: Phaser.GameObjects.Container, dir: Direction) {
-    const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
+    const layers = container.getData("layers") as Phaser.GameObjects.Sprite[];
     const prevDir = container.getData("dir") as Direction;
     // só alterna a perna se já estava andando NA MESMA direção -- ao
     // mudar de direção, recomeça do passoA pra ficar previsível
     const toggle = prevDir === dir ? !container.getData("stepToggle") : true;
     container.setData("dir", dir);
     container.setData("stepToggle", toggle);
-    sprite.setFrame(WALK_FRAMES[dir][toggle ? 1 : 2]);
+    const frame = WALK_FRAMES[dir][toggle ? 1 : 2];
+    for (const sprite of layers) sprite.setFrame(frame);
   }
 
   private stopWalk(container: Phaser.GameObjects.Container) {
-    const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
+    const layers = container.getData("layers") as Phaser.GameObjects.Sprite[];
     const dir = container.getData("dir") as Direction;
-    sprite.setFrame(WALK_FRAMES[dir][0]);
+    const frame = WALK_FRAMES[dir][0];
+    for (const sprite of layers) sprite.setFrame(frame);
   }
 
   private setPoseFrame(container: Phaser.GameObjects.Container, frame: number) {
-    const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
-    sprite.setFrame(frame);
+    const layers = container.getData("layers") as Phaser.GameObjects.Sprite[];
+    for (const sprite of layers) sprite.setFrame(frame);
   }
 
   /** Levanta (se estiver sentado) e libera o movimento de novo. */
@@ -255,24 +313,6 @@ export default class MainScene extends Phaser.Scene {
       if (f.type === "chair" && f.col === col && f.row === row) return f;
     }
     return null;
-  }
-
-  /** Emote de beber: toca a animação copo->boca e volta sozinho. */
-  private playDrink() {
-    if (this.localActivity === "sentado") return; // não bebe sentado, por enquanto
-    this.localActivity = "bebendo";
-    this.drinkTimer?.remove();
-    this.setPoseFrame(this.localContainer, POSE_FRAMES.bebendoCopo);
-    this.drinkTimer = this.time.delayedCall(280, () => {
-      this.setPoseFrame(this.localContainer, POSE_FRAMES.bebendoBoca);
-      this.drinkTimer = this.time.delayedCall(280, () => {
-        this.setPoseFrame(this.localContainer, POSE_FRAMES.bebendoCopo);
-        this.drinkTimer = this.time.delayedCall(280, () => {
-          this.localActivity = "idle";
-          this.stopWalk(this.localContainer);
-        });
-      });
-    });
   }
 
   /** Relata a posição atual pro servidor, no máximo a cada 50ms. */
@@ -321,10 +361,6 @@ export default class MainScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    if (Phaser.Input.Keyboard.JustDown(this.drinkKey) && this.localActivity !== "sentado") {
-      this.playDrink();
-    }
-
     const inputDir = this.readInputDir();
 
     if (this.localActivity === "sentado") {
@@ -333,12 +369,6 @@ export default class MainScene extends Phaser.Scene {
         // começa no próximo frame (já sai da cadeira "de pé" primeiro)
         this.standUp();
       }
-      this.reportPosition(_time);
-      return;
-    }
-
-    if (this.localActivity === "bebendo") {
-      // emote de beber: sem movimento, mas ainda reporta posição
       this.reportPosition(_time);
       return;
     }
