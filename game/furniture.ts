@@ -66,23 +66,23 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     id: "poltrona-1",
     type: "poltrona",
     col: 9,
-    row: 5,
+    row: 6, // desceu (era 5) -- pedido do usuário
     facing: "down",
     seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
   },
   {
     id: "poltrona-2",
     type: "poltrona",
-    col: 2,
-    row: 2,
+    col: 3, // veio mais pro centro (era 2) -- pedido do usuário
+    row: 1, // subiu (era 2) -- pedido do usuário
     facing: "left",
     seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
   },
   {
     id: "poltrona-3",
     type: "poltrona",
-    col: 10,
-    row: 2,
+    col: 9, // veio mais pro centro (era 10) -- pedido do usuário
+    row: 1, // subiu (era 2) -- pedido do usuário
     facing: "right",
     seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
   },
@@ -90,7 +90,7 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     id: "poltrona-4",
     type: "poltrona",
     col: 5,
-    row: 1,
+    row: 2, // desceu (era 1) -- pedido do usuário
     facing: "up",
     seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
   },
