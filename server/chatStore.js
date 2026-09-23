@@ -74,6 +74,20 @@ export function getUser(userId) {
   return store.users[userId] ?? { name: "", color: "#5c9bff", photoUrl: "" };
 }
 
+/** Todo mundo já cadastrado no ambiente (qualquer um que já mandou
+ * "identify" alguma vez), online ou não -- ver "Todos cadastrados no
+ * ambiente, independente se ta online ou nao" no picker de participantes
+ * da Agenda e na busca "pesquise a agenda de um colega" (GameRoom.tsx),
+ * que antes só enxergavam quem tava conectado na sala NAQUELE momento. */
+export function listAllUsers() {
+  return Object.entries(store.users).map(([userId, u]) => ({
+    userId,
+    name: u.name || "",
+    color: u.color || "#5c9bff",
+    photoUrl: u.photoUrl || "",
+  }));
+}
+
 function directKeyFor(userIdA, userIdB) {
   return [userIdA, userIdB].sort().join("::");
 }
@@ -195,4 +209,25 @@ export function addMessage(conversationId, { senderId, senderName, kind, text, a
 export function getMessages(conversationId, limit = 200) {
   const list = store.messages[conversationId] ?? [];
   return list.slice(-limit);
+}
+
+/** "Apagar mensagem" -- apaga PRA TODOS (não é só esconder do lado de
+ * quem apagou): zera texto/anexo e marca "deleted", mas mantém a
+ * mensagem na lista (na posição/horário originais) pra virar a tarja
+ * "Fulano apagou uma mensagem" no lugar de sumir sem deixar rastro. Só
+ * quem MANDOU a mensagem pode apagá-la -- devolve null se não achar a
+ * mensagem/conversa ou se quem pediu não for o remetente. Idempotente
+ * (apagar de novo uma já apagada só devolve ela mesma). */
+export function deleteMessage(conversationId, messageId, requesterUserId) {
+  const list = store.messages[conversationId];
+  if (!list) return null;
+  const msg = list.find((m) => m.id === messageId);
+  if (!msg) return null;
+  if (msg.senderId !== requesterUserId) return null;
+  if (msg.deleted) return msg;
+  msg.deleted = true;
+  msg.text = "";
+  msg.attachment = null;
+  persist();
+  return msg;
 }

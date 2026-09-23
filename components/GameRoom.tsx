@@ -72,6 +72,10 @@ type ChatMsgBase = {
   text: string;
   attachment: ChatAttachment | null;
   ts: number;
+  // true quando alguém apagou essa mensagem ("apaga pra todos") -- o
+  // texto/anexo original já vem vazio do servidor nesse caso, o bubble
+  // mostra só a tarja "Fulano apagou uma mensagem" (ver ChatMessageRow).
+  deleted?: boolean;
 };
 type ChatMsg = ChatMsgBase & { conversationId: string };
 // mensagem da SALA -- mesmo formato, sem conversationId (ver comentário acima)
@@ -115,7 +119,19 @@ type CallEvent = {
   // participa -- título/necessidades/participantes vêm vazios, só o
   // horário é real (ver redact() em server/agendaStore.js).
   redacted?: boolean;
+  description: string;
+  attachments: ChatAttachment[];
+  // "travar agenda" (padrão true) = conta como ocupado pra quem tá nela
+  // (ver getConflictingUserIds); false = "mostrar compromisso sem travar
+  // agenda" -- ainda aparece na agenda, mas não bloqueia esse horário
+  // pra outros compromissos.
+  blocksAgenda: boolean;
 };
+// entrada da "lista de todo mundo cadastrado no ambiente" (ver allUsers/
+// users:list) -- diferente de RemotePlayer, que só existe pra quem tá
+// CONECTADO agora na sala; isso aqui vem do cadastro persistente do chat
+// (server/chatStore.js), então inclui gente offline também.
+type DirectoryUser = { userId: string; name: string; color: string; photoUrl: string };
 // rascunho do formulário "Marcar call" -- fica num objeto só (em vez de
 // um useState por campo) pra dar pra passar/atualizar de um jeito só
 // pro ChatDrawer (ver onChangeAgendaForm).
@@ -127,6 +143,9 @@ type AgendaFormState = {
   participantIds: string[];
   needs: CallNeeds;
   visibility: CallVisibility;
+  description: string;
+  attachments: ChatAttachment[];
+  blocksAgenda: boolean;
 };
 
 function pad2(n: number): string {
@@ -284,6 +303,39 @@ function formatChatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+// "0:07", "1:23" etc -- usado no contador de gravação de áudio (ver
+// recordingElapsedSec) e no preview antes de mandar.
+function formatRecordingTime(totalSec: number): string {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${pad2(s)}`;
+}
+
+// tenta mimeTypes em ordem de preferência -- nem todo navegador aceita
+// "audio/webm;codecs=opus" (ex: Safari), então cai pro próximo que o
+// MediaRecorder confirmar que suporta; undefined = deixa o navegador
+// escolher sozinho (fallback do próprio construtor).
+function pickSupportedAudioMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return undefined;
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+  return candidates.find((t) => {
+    try {
+      return MediaRecorder.isTypeSupported(t);
+    } catch {
+      return false;
+    }
+  });
+}
+
+// "25/set", "26/set" -- ver o "strip" de dias da Minha Agenda.
+const MESES_ABREV = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+function dayChipLabel(dateKey: string, todayKey: string, tomorrowKey: string): string {
+  if (dateKey === todayKey) return "Hoje";
+  if (dateKey === tomorrowKey) return "Amanhã";
+  const [, m, d] = dateKey.split("-").map(Number);
+  return `${pad2(d)}/${MESES_ABREV[(m - 1 + 12) % 12]}`;
+}
+
 /** Manda o arquivo pro servidor (bytes crus no corpo, ver POST /upload
  * em server/index.js -- nada de multipart, mais simples dos dois
  * lados) e devolve a URL/nome/tamanho/mime já prontos pra entrar numa
@@ -341,6 +393,12 @@ export default function GameRoom() {
   const [renamingGroup, setRenamingGroup] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const [recordingAudio, setRecordingAudio] = useState(false);
+  // contador ao vivo (segundos) enquanto tá gravando, e o áudio já
+  // parado esperando confirmação de envio (igual WhatsApp: grava, mostra
+  // o tempo, PARA, e só manda quando a pessoa confirma) -- ver
+  // startVoiceRecording/stopVoiceRecording/sendRecordedAudio.
+  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const [recordedPreview, setRecordedPreview] = useState<{ url: string; durationSec: number } | null>(null);
   const [sendingAttachment, setSendingAttachment] = useState(false);
   // "fixar" a gaveta de chat como barra lateral fixa (esquerda), em vez
   // de flutuar sobre o jogo -- lembrado entre visitas (localStorage),
@@ -358,7 +416,17 @@ export default function GameRoom() {
   const autoOpenNextConversationRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordedBlobRef = useRef<Blob | null>(null);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartRef = useRef(0);
+  // true só quando a pessoa CANCELOU a gravação em andamento (lixeira
+  // durante a gravação) -- o onstop do MediaRecorder dispara do mesmo
+  // jeito nesse caso, essa ref é o jeito dele saber que é pra descartar
+  // em vez de virar preview (ver cancelVoiceRecording).
+  const discardRecordingRef = useRef(false);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const agendaFileInputRef = useRef<HTMLInputElement>(null);
+  const agendaDetailFileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Agenda (ver tipos CallEvent/AgendaFormState lá em cima e o
   // comentário grande em server/index.js) -- gaveta PRÓPRIA, separada da
@@ -382,8 +450,23 @@ export default function GameRoom() {
     participantIds: [],
     needs: { camera: true, audio: true, screen: false },
     visibility: "public",
+    description: "",
+    attachments: [],
+    blocksAgenda: true,
   });
   const [agendaError, setAgendaError] = useState<string | null>(null);
+  const [sendingAgendaAttachment, setSendingAgendaAttachment] = useState(false);
+  const [sendingDetailAttachment, setSendingDetailAttachment] = useState(false);
+  // "hoje | amanhã | 25/set | ..." -- quais dias do strip da Minha
+  // Agenda estão expandidos agora (ver renderAgendaListView). Hoje
+  // começa aberto ("deve aparecer o hoje aberto").
+  const [expandedAgendaDays, setExpandedAgendaDays] = useState<Set<string>>(() => new Set([localDateStr(new Date())]));
+  // todo mundo já cadastrado no ambiente (ver server/chatStore.js
+  // listAllUsers), online ou não -- usado no picker de participantes do
+  // "Marcar compromisso" e na busca "pesquise a agenda de um colega",
+  // que não devem mais depender de quem tá na sala AGORA (ver
+  // users:list/handlePartyMessage).
+  const [allUsers, setAllUsers] = useState<DirectoryUser[]>([]);
   const agendaCreatingRef = useRef(false);
   // "pesquise a agenda de um colega" -- campo de busca (filtrado no
   // ChatDrawer contra quem tá na sala, mesma fonte da lista de
@@ -649,6 +732,16 @@ export default function GameRoom() {
       } else if (data.type === "chat") {
         const msg = data.message as ChatMessage;
         setChatLog((prev) => [...prev.slice(-49), msg]);
+      } else if (data.type === "chat_room_deleted") {
+        // "apagar mensagem" na Sala (ver deleteRoomMessage) -- não tem
+        // histórico salvo (ver comentário grande no topo), então isso só
+        // tarja a mensagem no log local de quem tá com a sala aberta
+        // AGORA, igual o broadcast original já era só pra quem tava
+        // conectado na hora.
+        const messageId = data.messageId as string;
+        setChatLog((prev) => prev.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null } : m)));
+      } else if (data.type === "users:list") {
+        setAllUsers(data.users as DirectoryUser[]);
       } else if (data.type === "chat:conversations") {
         const list = (data.conversations as Conversation[]).slice().sort((a, b) => b.updatedAt - a.updatedAt);
         setConversations(list);
@@ -670,6 +763,19 @@ export default function GameRoom() {
         }
       } else if (data.type === "chat:history") {
         setMessagesByConv((prev) => ({ ...prev, [data.conversationId]: data.messages }));
+      } else if (data.type === "chat:message_deleted") {
+        // "apaga pra todos" numa conversa direta/grupo -- a mensagem já
+        // chega tarjada do servidor (ver deleteMessage em
+        // server/chatStore.js), só reflete no estado local.
+        const { conversationId, messageId } = data as { conversationId: string; messageId: string };
+        setMessagesByConv((prev) => {
+          const list = prev[conversationId];
+          if (!list) return prev;
+          return {
+            ...prev,
+            [conversationId]: list.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null } : m)),
+          };
+        });
       } else if (data.type === "chat:message") {
         const msg = data.message as ChatMsg;
         setMessagesByConv((prev) => ({
@@ -997,30 +1103,100 @@ export default function GameRoom() {
     sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
   }
 
+  // --- gravação de áudio, estilo WhatsApp: grava (mostra o tempo já
+  // gravado ao vivo) -> PARA (sem mandar sozinho) -> mostra um preview
+  // pra ouvir de novo -> só manda quando a pessoa confirma. Antes disso
+  // o áudio era enviado sozinho assim que parava de gravar, sem
+  // confirmação nem progresso visível -- "o audio liga, mas nao funciona
+  // nao envia" (o clique funcionava, só não dava nenhum feedback do que
+  // tava acontecendo até o envio silencioso no fim). ---
   async function startVoiceRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
+      const mimeType = pickSupportedAudioMimeType();
+      const mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       audioChunksRef.current = [];
+      discardRecordingRef.current = false;
       mr.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       mr.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
-        if (blob.size > 0) sendChatAttachment(blob, `gravacao-${Date.now()}.webm`, "audio");
+        if (recordingIntervalRef.current) {
+          clearInterval(recordingIntervalRef.current);
+          recordingIntervalRef.current = null;
+        }
         setRecordingAudio(false);
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          audioChunksRef.current = [];
+          return;
+        }
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
+        if (blob.size > 0) {
+          recordedBlobRef.current = blob;
+          const durationSec = Math.max(0, Math.round((Date.now() - recordingStartRef.current) / 1000));
+          setRecordedPreview({ url: URL.createObjectURL(blob), durationSec });
+        }
       };
       mediaRecorderRef.current = mr;
-      mr.start();
+      // timeslice de 250ms -- garante pedaços acumulando ao longo da
+      // gravação em vez de depender só do chunk final no stop (alguns
+      // navegadores demoram ou falham nisso sem um timeslice).
+      mr.start(250);
+      recordingStartRef.current = Date.now();
+      setRecordingElapsedSec(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingElapsedSec(Math.floor((Date.now() - recordingStartRef.current) / 1000));
+      }, 250);
+      setRecordedPreview(null);
       setRecordingAudio(true);
     } catch (e) {
       console.warn("Sem acesso ao microfone pra gravar áudio", e);
+      const toastId = `${Date.now()}-${Math.random()}`;
+      setToasts((prev) => [...prev.slice(-3), { id: toastId, text: "Não deu pra acessar o microfone -- verifique a permissão do navegador." }]);
+      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
     }
   }
 
+  // só PARA a gravação -- vira preview (ver onstop acima), não manda.
   function stopVoiceRecording() {
     mediaRecorderRef.current?.stop();
+  }
+
+  // cancela a gravação EM ANDAMENTO (lixeira enquanto ainda tá gravando)
+  // -- descarta tudo, não vira preview.
+  function cancelVoiceRecording() {
+    discardRecordingRef.current = true;
+    mediaRecorderRef.current?.stop();
+  }
+
+  // descarta o preview já gravado (depois de já ter parado) sem enviar.
+  function discardRecordedAudio() {
+    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
+    recordedBlobRef.current = null;
+    setRecordedPreview(null);
+  }
+
+  // confirma o envio do preview -- só AQUI o áudio de fato sai pro chat.
+  async function sendRecordedAudio() {
+    const blob = recordedBlobRef.current;
+    if (!blob) return;
+    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
+    recordedBlobRef.current = null;
+    setRecordedPreview(null);
+    await sendChatAttachment(blob, `gravacao-${Date.now()}.webm`, "audio");
+  }
+
+  // "apagar mensagem" -- apaga PRA TODOS (ver server/chatStore.js
+  // deleteMessage e o case chat:delete/chat:delete_room em
+  // server/index.js). conversationId null = mensagem da Sala.
+  function deleteMessage(conversationId: string | null, messageId: string) {
+    if (conversationId === null) {
+      socketRef.current?.send(JSON.stringify({ type: "chat:delete_room", messageId }));
+    } else {
+      socketRef.current?.send(JSON.stringify({ type: "chat:delete", conversationId, messageId }));
+    }
   }
 
   // --- Agenda (ver tipos/comentário grande lá em cima) ---
@@ -1049,6 +1225,9 @@ export default function GameRoom() {
       participantIds: [],
       needs: { camera: true, audio: true, screen: false },
       visibility: "public",
+      description: "",
+      attachments: [],
+      blocksAgenda: true,
     });
     setAgendaError(null);
     setBusyUserIds([]);
@@ -1057,7 +1236,14 @@ export default function GameRoom() {
 
   function submitCreateCall() {
     const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
-    if (!Number.isFinite(startTs) || agendaForm.participantIds.length === 0) return;
+    // participantIds vazio é válido (compromisso só da própria pessoa --
+    // ver comentário em agenda:create no servidor). Antes tinha um
+    // "|| agendaForm.participantIds.length === 0" aqui que travava
+    // exatamente esse caso: o clique em "Marcar compromisso" não fazia
+    // NADA (nem mandava a mensagem, nem mostrava erro), por isso o botão
+    // "não funcionava" quando a pessoa tentava marcar um compromisso só
+    // pra ela mesma.
+    if (!Number.isFinite(startTs)) return;
     setAgendaError(null);
     agendaCreatingRef.current = true;
     socketRef.current?.send(
@@ -1069,11 +1255,65 @@ export default function GameRoom() {
         needs: agendaForm.needs,
         participantIds: agendaForm.participantIds,
         visibility: agendaForm.visibility,
+        description: agendaForm.description.trim(),
+        attachments: agendaForm.attachments,
+        blocksAgenda: agendaForm.blocksAgenda,
       })
     );
     // fica na tela do formulário até a resposta chegar (sucesso pula pro
     // detalhe da call criada, erro mostra o motivo aqui mesmo -- ver
     // handlePartyMessage/agendaCreatingRef).
+  }
+
+  // upload de anexo do "Marcar compromisso" -- mesmo endpoint HTTP do
+  // chat (ver uploadChatFile), só que o resultado fica guardado no
+  // FORMULÁRIO (agendaForm.attachments) em vez de mandar na hora, porque
+  // a call em si só é criada quando a pessoa confirma "Marcar
+  // compromisso".
+  async function handleAgendaFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setSendingAgendaAttachment(true);
+    try {
+      const attachment = await uploadChatFile(file, file.name);
+      setAgendaForm((prev) => ({ ...prev, attachments: [...prev.attachments, attachment] }));
+    } catch (err) {
+      console.warn("Falha ao anexar arquivo no compromisso", err);
+    } finally {
+      setSendingAgendaAttachment(false);
+    }
+  }
+
+  function removeAgendaFormAttachment(index: number) {
+    setAgendaForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
+  }
+
+  // anexar arquivo numa call JÁ CRIADA (visível pra quem já tá na tela
+  // de detalhe) -- diferente do de cima, esse manda direto pro servidor
+  // (ver agenda:add_attachment), porque a call já existe.
+  async function handleAgendaDetailFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !agendaDetailId) return;
+    setSendingDetailAttachment(true);
+    try {
+      const attachment = await uploadChatFile(file, file.name);
+      socketRef.current?.send(JSON.stringify({ type: "agenda:add_attachment", callId: agendaDetailId, attachment }));
+    } catch (err) {
+      console.warn("Falha ao anexar arquivo na call", err);
+    } finally {
+      setSendingDetailAttachment(false);
+    }
+  }
+
+  function toggleAgendaDay(dateKey: string) {
+    setExpandedAgendaDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
   }
 
   function openCallDetail(callId: string) {
@@ -1347,8 +1587,14 @@ export default function GameRoom() {
     onPickFile: () => chatFileInputRef.current?.click(),
     sendingAttachment,
     recordingAudio,
+    recordingElapsedSec,
+    recordedPreview,
     onStartRecording: startVoiceRecording,
     onStopRecording: stopVoiceRecording,
+    onCancelRecording: cancelVoiceRecording,
+    onDiscardRecordedAudio: discardRecordedAudio,
+    onSendRecordedAudio: sendRecordedAudio,
+    onDeleteMessage: deleteMessage,
     onClose: () => setChatOpen(false),
     onTogglePin: () => setChatPinned((v) => !v),
   };
@@ -1359,6 +1605,7 @@ export default function GameRoom() {
   const agendaDrawerProps = {
     myUserId,
     onlinePlayers: Array.from(remotePlayersRef.current.values()),
+    allUsers,
     calls,
     busyUserIds,
     agendaView,
@@ -1379,6 +1626,13 @@ export default function GameRoom() {
     colleagueCalls,
     onViewColleagueAgenda: viewColleagueAgenda,
     onBackToMyAgenda: backToMyAgenda,
+    onPickAgendaFile: () => agendaFileInputRef.current?.click(),
+    onRemoveAgendaAttachment: removeAgendaFormAttachment,
+    sendingAgendaAttachment,
+    onPickDetailAttachment: () => agendaDetailFileInputRef.current?.click(),
+    sendingDetailAttachment,
+    expandedAgendaDays,
+    onToggleAgendaDay: toggleAgendaDay,
     onClose: () => setAgendaOpen(false),
   };
 
@@ -1485,6 +1739,18 @@ export default function GameRoom() {
           type="file"
           style={{ display: "none" }}
           onChange={handleChatFileChange}
+        />
+        <input
+          ref={agendaFileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={handleAgendaFileChange}
+        />
+        <input
+          ref={agendaDetailFileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={handleAgendaDetailFileChange}
         />
       </div>
 
@@ -2133,8 +2399,14 @@ function ChatDrawer({
   onPickFile,
   sendingAttachment,
   recordingAudio,
+  recordingElapsedSec,
+  recordedPreview,
   onStartRecording,
   onStopRecording,
+  onCancelRecording,
+  onDiscardRecordedAudio,
+  onSendRecordedAudio,
+  onDeleteMessage,
   onClose,
   pinned,
   onTogglePin,
@@ -2165,8 +2437,14 @@ function ChatDrawer({
   onPickFile: () => void;
   sendingAttachment: boolean;
   recordingAudio: boolean;
+  recordingElapsedSec: number;
+  recordedPreview: { url: string; durationSec: number } | null;
   onStartRecording: () => void;
   onStopRecording: () => void;
+  onCancelRecording: () => void;
+  onDiscardRecordedAudio: () => void;
+  onSendRecordedAudio: () => void;
+  onDeleteMessage: (conversationId: string | null, messageId: string) => void;
   onClose: () => void;
   pinned: boolean;
   onTogglePin: () => void;
@@ -2355,7 +2633,13 @@ function ChatDrawer({
           <div className="chat-messages" ref={scrollRef}>
             {isRoom
               ? roomChatLog.map((m) => (
-                  <ChatMessageRow key={m.id} msg={m} own={m.senderId === myUserId} showSenderName={m.senderId !== myUserId} />
+                  <ChatMessageRow
+                    key={m.id}
+                    msg={m}
+                    own={m.senderId === myUserId}
+                    showSenderName={m.senderId !== myUserId}
+                    onDelete={m.senderId === myUserId && !m.deleted ? () => onDeleteMessage(null, m.id) : undefined}
+                  />
                 ))
               : messages.map((m) => (
                   <ChatMessageRow
@@ -2363,6 +2647,11 @@ function ChatDrawer({
                     msg={m}
                     own={m.senderId === myUserId}
                     showSenderName={m.senderId !== myUserId && activeConv?.kind === "group"}
+                    onDelete={
+                      m.senderId === myUserId && !m.deleted && activeConversationId
+                        ? () => onDeleteMessage(activeConversationId, m.id)
+                        : undefined
+                    }
                   />
                 ))}
             {isRoom && roomChatLog.length === 0 && (
@@ -2373,36 +2662,59 @@ function ChatDrawer({
             )}
           </div>
 
-          <div className="chat-composer">
-            <button
-              className="chat-composer-btn"
-              title="Anexar foto/arquivo"
-              onClick={onPickFile}
-              disabled={sendingAttachment || recordingAudio}
-            >
-              <AttachIcon />
-            </button>
-            <button
-              className={recordingAudio ? "chat-composer-btn recording" : "chat-composer-btn"}
-              title={recordingAudio ? "Parar e enviar áudio" : "Gravar áudio"}
-              onClick={recordingAudio ? onStopRecording : onStartRecording}
-            >
-              {recordingAudio ? <StopIcon /> : <MicIcon off={false} />}
-            </button>
-            <input
-              className="chat-composer-input"
-              value={composerText}
-              onChange={(e) => onChangeComposerText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onSendComposer();
-              }}
-              placeholder={recordingAudio ? "Gravando áudio..." : "Digite uma mensagem..."}
-              disabled={recordingAudio}
-            />
-            <button className="chat-composer-btn primary" title="Enviar" onClick={onSendComposer}>
-              <SendIcon />
-            </button>
-          </div>
+          {recordingAudio ? (
+            // gravando AGORA -- mostra o tempo correndo (igual WhatsApp),
+            // lixeira cancela sem mandar nada, o botão de parar só PÁRA
+            // (vira preview embaixo, ainda não envia).
+            <div className="chat-composer chat-recording-bar">
+              <button className="chat-composer-btn" title="Cancelar gravação" onClick={onCancelRecording}>
+                <TrashIcon />
+              </button>
+              <span className="chat-recording-indicator">
+                <span className="chat-recording-dot" />
+                Gravando... {formatRecordingTime(recordingElapsedSec)}
+              </span>
+              <button className="chat-composer-btn primary" title="Parar gravação" onClick={onStopRecording}>
+                <StopIcon />
+              </button>
+            </div>
+          ) : recordedPreview ? (
+            // já parou -- preview pra ouvir de novo antes de decidir:
+            // lixeira descarta, play manda de verdade (ver
+            // sendRecordedAudio/discardRecordedAudio).
+            <div className="chat-composer chat-audio-preview-bar">
+              <button className="chat-composer-btn" title="Descartar" onClick={onDiscardRecordedAudio}>
+                <TrashIcon />
+              </button>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <audio className="chat-audio-preview-player" controls src={recordedPreview.url} />
+              <span className="chat-recording-time">{formatRecordingTime(recordedPreview.durationSec)}</span>
+              <button className="chat-composer-btn primary" title="Enviar áudio" onClick={onSendRecordedAudio}>
+                <SendIcon />
+              </button>
+            </div>
+          ) : (
+            <div className="chat-composer">
+              <button className="chat-composer-btn" title="Anexar foto/arquivo" onClick={onPickFile} disabled={sendingAttachment}>
+                <AttachIcon />
+              </button>
+              <button className="chat-composer-btn" title="Gravar áudio" onClick={onStartRecording}>
+                <MicIcon off={false} />
+              </button>
+              <input
+                className="chat-composer-input"
+                value={composerText}
+                onChange={(e) => onChangeComposerText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onSendComposer();
+                }}
+                placeholder="Digite uma mensagem..."
+              />
+              <button className="chat-composer-btn primary" title="Enviar" onClick={onSendComposer}>
+                <SendIcon />
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -2412,6 +2724,7 @@ function ChatDrawer({
 function AgendaDrawer({
   myUserId,
   onlinePlayers,
+  allUsers,
   calls,
   busyUserIds,
   agendaView,
@@ -2432,10 +2745,18 @@ function AgendaDrawer({
   colleagueCalls,
   onViewColleagueAgenda,
   onBackToMyAgenda,
+  onPickAgendaFile,
+  onRemoveAgendaAttachment,
+  sendingAgendaAttachment,
+  onPickDetailAttachment,
+  sendingDetailAttachment,
+  expandedAgendaDays,
+  onToggleAgendaDay,
   onClose,
 }: {
   myUserId: string;
   onlinePlayers: RemotePlayer[];
+  allUsers: DirectoryUser[];
   calls: CallEvent[];
   busyUserIds: string[];
   agendaView: "list" | "new" | "detail" | "colleague";
@@ -2456,21 +2777,74 @@ function AgendaDrawer({
   colleagueCalls: CallEvent[];
   onViewColleagueAgenda: (userId: string, name: string) => void;
   onBackToMyAgenda: () => void;
+  onPickAgendaFile: () => void;
+  onRemoveAgendaAttachment: (index: number) => void;
+  sendingAgendaAttachment: boolean;
+  onPickDetailAttachment: () => void;
+  sendingDetailAttachment: boolean;
+  expandedAgendaDays: Set<string>;
+  onToggleAgendaDay: (dateKey: string) => void;
   onClose: () => void;
 }) {
   const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
   const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
-  // dedupe por userId -- se alguém tiver 2 abas abertas, ainda aparece
-  // uma vez só na lista de "quem tá na sala".
-  const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
-  // resultado de "pesquise a agenda de um colega" -- filtra quem tá na
-  // sala (mesma fonte do picker de participantes) pelo nome digitado,
-  // sem mim mesmo. Cálculo local, não precisa ir no servidor pra buscar.
+  const onlineUserIds = new Set(onlinePlayers.map((p) => p.userId));
+  // todo mundo cadastrado no ambiente, menos eu (ver allUsers/users:list
+  // em server/chatStore.js) -- usado tanto no picker de participantes do
+  // "Marcar compromisso" quanto em "pesquise a agenda de um colega",
+  // independente de quem tá online agora (ver comentário no tipo
+  // DirectoryUser).
+  const roster = allUsers.filter((u) => u.userId !== myUserId);
   const colleagueQuery = agendaSearchQuery.trim().toLowerCase();
   const colleagueMatches =
-    colleagueQuery.length === 0
-      ? []
-      : pickable.filter((p) => p.userId !== myUserId && (p.name || "").toLowerCase().includes(colleagueQuery));
+    colleagueQuery.length === 0 ? [] : roster.filter((u) => (u.name || "").toLowerCase().includes(colleagueQuery));
+
+  // "hoje | amanhã | 25/set | 26/set" -- ver comentário grande no
+  // useState de expandedAgendaDays em GameRoom(). Agrupa as calls
+  // futuras (de hoje em diante) por dia local; o strip sempre mostra os
+  // próximos 7 dias corridos, mais qualquer dia além disso que já tenha
+  // algum compromisso (pra não esconder nada).
+  const now = new Date();
+  const todayKey = localDateStr(now);
+  const tomorrowKey = localDateStr(new Date(now.getTime() + 86_400_000));
+  const callsByDay = new Map<string, CallEvent[]>();
+  for (const c of calls) {
+    const key = localDateStr(new Date(c.startTs));
+    if (key < todayKey) continue; // passado não entra no strip -- só o que vem daqui pra frente
+    if (!callsByDay.has(key)) callsByDay.set(key, []);
+    callsByDay.get(key)!.push(c);
+  }
+  const stripDays: string[] = [];
+  for (let i = 0; i < 7; i++) stripDays.push(localDateStr(new Date(now.getTime() + i * 86_400_000)));
+  for (const key of callsByDay.keys()) if (!stripDays.includes(key)) stripDays.push(key);
+  stripDays.sort();
+  function renderCallItem(c: CallEvent) {
+    const mine = c.participants.find((p) => p.id === myUserId);
+    const approvedCount = c.participants.filter((p) => p.status === "approved").length;
+    const soloCall = c.participants.length <= 1;
+    return (
+      <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
+        <span className="agenda-call-item-main">
+          <span className="agenda-call-title">
+            {c.visibility === "private" && "🔒 "}
+            {c.title}
+          </span>
+          <span className="agenda-call-when">
+            {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+            {c.blocksAgenda === false && " · não trava agenda"}
+          </span>
+        </span>
+        {soloCall && <span className="agenda-badge">Pessoal</span>}
+        {!soloCall && mine?.status === "pending" && <span className="agenda-badge pending">Aguardando você</span>}
+        {!soloCall && mine?.status === "declined" && <span className="agenda-badge declined">Recusada</span>}
+        {!soloCall && mine?.status === "approved" && (
+          <span className="agenda-badge approved">
+            {approvedCount}/{c.participants.length} confirmados
+          </span>
+        )}
+      </button>
+    );
+  }
 
   return (
     <div className="chat-drawer agenda-drawer">
@@ -2512,36 +2886,39 @@ function AgendaDrawer({
               </div>
             )}
           </div>
-          <div className="agenda-call-list">
-            {calls.length === 0 && <p className="chat-empty-hint">Nenhum compromisso marcado ainda.</p>}
-            {calls.map((c) => {
-              const mine = c.participants.find((p) => p.id === myUserId);
-              const approvedCount = c.participants.filter((p) => p.status === "approved").length;
-              const soloCall = c.participants.length <= 1;
+          <div className="agenda-day-strip">
+            {stripDays.map((key) => {
+              const dayCalls = callsByDay.get(key) ?? [];
+              const expanded = expandedAgendaDays.has(key);
               return (
-                <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
-                  <span className="agenda-call-item-main">
-                    <span className="agenda-call-title">
-                      {c.visibility === "private" && "🔒 "}
-                      {c.title}
-                    </span>
-                    <span className="agenda-call-when">
-                      {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-                    </span>
-                  </span>
-                  {soloCall && <span className="agenda-badge">Pessoal</span>}
-                  {!soloCall && mine?.status === "pending" && (
-                    <span className="agenda-badge pending">Aguardando você</span>
-                  )}
-                  {!soloCall && mine?.status === "declined" && <span className="agenda-badge declined">Recusada</span>}
-                  {!soloCall && mine?.status === "approved" && (
-                    <span className="agenda-badge approved">
-                      {approvedCount}/{c.participants.length} confirmados
-                    </span>
-                  )}
+                <button
+                  key={key}
+                  className={expanded ? "agenda-day-chip active" : "agenda-day-chip"}
+                  onClick={() => onToggleAgendaDay(key)}
+                >
+                  {dayChipLabel(key, todayKey, tomorrowKey)}
+                  {dayCalls.length > 0 && <span className="agenda-day-chip-count">{dayCalls.length}</span>}
                 </button>
               );
             })}
+          </div>
+          <div className="agenda-call-list">
+            {calls.length === 0 && <p className="chat-empty-hint">Nenhum compromisso marcado ainda.</p>}
+            {stripDays
+              .filter((key) => expandedAgendaDays.has(key))
+              .map((key) => {
+                const dayCalls = (callsByDay.get(key) ?? []).slice().sort((a, b) => a.startTs - b.startTs);
+                return (
+                  <div key={key} className="agenda-day-group">
+                    <p className="agenda-day-group-label">{dayChipLabel(key, todayKey, tomorrowKey)}</p>
+                    {dayCalls.length === 0 ? (
+                      <p className="chat-empty-hint agenda-day-group-empty">Nada marcado.</p>
+                    ) : (
+                      dayCalls.map(renderCallItem)
+                    )}
+                  </div>
+                );
+              })}
           </div>
         </>
       )}
@@ -2609,6 +2986,17 @@ function AgendaDrawer({
                 onChange={(e) => onChangeAgendaForm({ title: e.target.value })}
                 placeholder="Ex: Alinhamento do projeto"
                 maxLength={80}
+              />
+            </label>
+            <label className="chat-field">
+              <span>Descrição (opcional)</span>
+              <textarea
+                className="agenda-description-input"
+                value={agendaForm.description}
+                onChange={(e) => onChangeAgendaForm({ description: e.target.value })}
+                placeholder="Detalhes do compromisso..."
+                maxLength={2000}
+                rows={3}
               />
             </label>
             <div className="agenda-datetime-row">
@@ -2688,25 +3076,80 @@ function AgendaDrawer({
               </p>
             </div>
 
+            <div className="agenda-visibility-row">
+              <span className="agenda-field-label">Ocupação na agenda</span>
+              <div className="agenda-visibility-toggle">
+                <button
+                  type="button"
+                  className={agendaForm.blocksAgenda ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
+                  onClick={() => onChangeAgendaForm({ blocksAgenda: true })}
+                >
+                  Travar agenda
+                </button>
+                <button
+                  type="button"
+                  className={!agendaForm.blocksAgenda ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
+                  onClick={() => onChangeAgendaForm({ blocksAgenda: false })}
+                >
+                  Mostrar sem travar
+                </button>
+              </div>
+              <p className="agenda-visibility-hint">
+                {agendaForm.blocksAgenda
+                  ? "Ocupa o horário -- quem for convidado pra outro compromisso no mesmo horário aparece como indisponível."
+                  : "Só aparece na agenda, sem travar o horário -- dá pra marcar outro compromisso em cima desse."}
+              </p>
+            </div>
+
+            <div className="agenda-attachment-field">
+              <span className="agenda-field-label">Anexos (visíveis pra todos da call)</span>
+              {agendaForm.attachments.length > 0 && (
+                <div className="agenda-attachment-list">
+                  {agendaForm.attachments.map((a, i) => (
+                    <div key={`${a.url}-${i}`} className="chat-attachment-file agenda-attachment-pending">
+                      <FileIcon />
+                      <span className="chat-attachment-file-info">
+                        <span className="chat-attachment-file-name">{a.name}</span>
+                        <span className="chat-attachment-file-size">{formatFileSize(a.size)}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="chat-icon-btn"
+                        title="Remover anexo"
+                        onClick={() => onRemoveAgendaAttachment(i)}
+                      >
+                        <CloseIcon />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button type="button" className="chat-secondary-btn" onClick={onPickAgendaFile} disabled={sendingAgendaAttachment}>
+                {sendingAgendaAttachment ? "Enviando..." : "+ Anexar arquivo"}
+              </button>
+            </div>
+
             <span className="agenda-field-label">Participantes (opcional -- deixe vazio pra um compromisso só seu)</span>
-            {pickable.length === 0 ? (
-              <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
+            {roster.length === 0 ? (
+              <p className="chat-empty-hint">Ainda não tem mais ninguém cadastrado no ambiente.</p>
             ) : (
               <div className="chat-picker-list">
-                {pickable.map((p) => {
-                  const busy = busyUserIds.includes(p.userId);
+                {roster.map((u) => {
+                  const busy = busyUserIds.includes(u.userId);
+                  const online = onlineUserIds.has(u.userId);
                   return (
-                    <label key={p.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
+                    <label key={u.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
                       <input
                         type="checkbox"
-                        checked={agendaForm.participantIds.includes(p.userId)}
+                        checked={agendaForm.participantIds.includes(u.userId)}
                         disabled={busy}
-                        onChange={() => onToggleAgendaParticipant(p.userId)}
+                        onChange={() => onToggleAgendaParticipant(u.userId)}
                       />
-                      <span className="chat-conv-avatar" style={{ background: p.color }}>
-                        {(p.name || "?").slice(0, 1).toUpperCase()}
+                      <span className="chat-conv-avatar" style={{ background: u.color }}>
+                        {(u.name || "?").slice(0, 1).toUpperCase()}
                       </span>
-                      <span>{p.name || "Sem nome"}</span>
+                      <span>{u.name || "Sem nome"}</span>
+                      {online && <span className="agenda-online-dot" title="Online agora" />}
                       {busy && <span className="agenda-badge busy">Indisponível</span>}
                     </label>
                   );
@@ -2746,8 +3189,10 @@ function AgendaDrawer({
             </p>
             <p className="agenda-detail-creator">
               Marcado por {detailCall.createdByName || "?"} ·{" "}
-              {detailCall.visibility === "private" ? "🔒 Privado" : "Público"}
+              {detailCall.visibility === "private" ? "🔒 Privado" : "Público"} ·{" "}
+              {detailCall.blocksAgenda === false ? "não trava agenda" : "trava agenda"}
             </p>
+            {detailCall.description && <p className="agenda-detail-description">{detailCall.description}</p>}
             <div className="agenda-needs-row">
               {detailCall.needs.camera && (
                 <span className="agenda-need-pill">
@@ -2765,6 +3210,42 @@ function AgendaDrawer({
                 </span>
               )}
             </div>
+            {(detailCall.attachments.length > 0 || myCallStatus !== null) && (
+              <div className="agenda-attachment-field">
+                <span className="agenda-field-label">Anexos</span>
+                {detailCall.attachments.length > 0 ? (
+                  <div className="agenda-attachment-list">
+                    {detailCall.attachments.map((a, i) => (
+                      <a
+                        key={`${a.url}-${i}`}
+                        className="chat-attachment-file"
+                        href={attachmentUrl(a.url)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <FileIcon />
+                        <span className="chat-attachment-file-info">
+                          <span className="chat-attachment-file-name">{a.name}</span>
+                          <span className="chat-attachment-file-size">{formatFileSize(a.size)}</span>
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="chat-empty-hint agenda-day-group-empty">Nenhum anexo ainda.</p>
+                )}
+                {myCallStatus !== null && (
+                  <button
+                    type="button"
+                    className="chat-secondary-btn"
+                    onClick={onPickDetailAttachment}
+                    disabled={sendingDetailAttachment}
+                  >
+                    {sendingDetailAttachment ? "Enviando..." : "+ Anexar arquivo"}
+                  </button>
+                )}
+              </div>
+            )}
             <span className="agenda-field-label">Participantes</span>
             <div className="agenda-participant-list">
               {detailCall.participants.map((p) => (
@@ -2796,36 +3277,67 @@ function AgendaDrawer({
   );
 }
 
-function ChatMessageRow({ msg, own, showSenderName }: { msg: ChatMessage; own: boolean; showSenderName: boolean }) {
+function ChatMessageRow({
+  msg,
+  own,
+  showSenderName,
+  onDelete,
+}: {
+  msg: ChatMessage;
+  own: boolean;
+  showSenderName: boolean;
+  // presente só nas MINHAS mensagens ainda não apagadas -- ver
+  // chamadores em ChatDrawer (Sala usa chat:delete_room, conversa de
+  // verdade usa chat:delete).
+  onDelete?: () => void;
+}) {
+  if (msg.deleted) {
+    return (
+      <div className={own ? "chat-message own" : "chat-message"}>
+        {showSenderName && <span className="chat-message-sender">{msg.senderName || "Alguém"}</span>}
+        <div className="chat-bubble chat-bubble-deleted">
+          <em>{own ? "Você apagou uma mensagem" : `${msg.senderName || "Alguém"} apagou uma mensagem`}</em>
+        </div>
+        <span className="chat-message-time">{formatChatTime(msg.ts)}</span>
+      </div>
+    );
+  }
   return (
     <div className={own ? "chat-message own" : "chat-message"}>
       {showSenderName && <span className="chat-message-sender">{msg.senderName || "Alguém"}</span>}
-      <div className="chat-bubble">
-        {msg.kind === "text" && <span>{msg.text}</span>}
-        {msg.kind === "image" && msg.attachment && (
-          <a href={attachmentUrl(msg.attachment.url)} target="_blank" rel="noreferrer">
-            <img className="chat-attachment-image" src={attachmentUrl(msg.attachment.url)} alt={msg.attachment.name} />
-          </a>
+      <div className="chat-message-row">
+        {own && onDelete && (
+          <button className="chat-message-delete-btn" title="Apagar mensagem" onClick={onDelete}>
+            <TrashIcon />
+          </button>
         )}
-        {msg.kind === "audio" && msg.attachment && (
-          // eslint-disable-next-line jsx-a11y/media-has-caption
-          <audio className="chat-attachment-audio" controls src={attachmentUrl(msg.attachment.url)} />
-        )}
-        {msg.kind === "file" && msg.attachment && (
-          <a
-            className="chat-attachment-file"
-            href={attachmentUrl(msg.attachment.url)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <FileIcon />
-            <span className="chat-attachment-file-info">
-              <span className="chat-attachment-file-name">{msg.attachment.name}</span>
-              <span className="chat-attachment-file-size">{formatFileSize(msg.attachment.size)}</span>
-            </span>
-          </a>
-        )}
-        {msg.text && msg.kind !== "text" && <div className="chat-attachment-caption">{msg.text}</div>}
+        <div className="chat-bubble">
+          {msg.kind === "text" && <span>{msg.text}</span>}
+          {msg.kind === "image" && msg.attachment && (
+            <a href={attachmentUrl(msg.attachment.url)} target="_blank" rel="noreferrer">
+              <img className="chat-attachment-image" src={attachmentUrl(msg.attachment.url)} alt={msg.attachment.name} />
+            </a>
+          )}
+          {msg.kind === "audio" && msg.attachment && (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <audio className="chat-attachment-audio" controls src={attachmentUrl(msg.attachment.url)} />
+          )}
+          {msg.kind === "file" && msg.attachment && (
+            <a
+              className="chat-attachment-file"
+              href={attachmentUrl(msg.attachment.url)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <FileIcon />
+              <span className="chat-attachment-file-info">
+                <span className="chat-attachment-file-name">{msg.attachment.name}</span>
+                <span className="chat-attachment-file-size">{formatFileSize(msg.attachment.size)}</span>
+              </span>
+            </a>
+          )}
+          {msg.text && msg.kind !== "text" && <div className="chat-attachment-caption">{msg.text}</div>}
+        </div>
       </div>
       <span className="chat-message-time">{formatChatTime(msg.ts)}</span>
     </div>
@@ -2936,6 +3448,20 @@ function StopIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M5 7h14M9.5 7V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v2M7 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

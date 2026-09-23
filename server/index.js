@@ -42,6 +42,21 @@
 //   online, com) -> { type: "chat:conversation", conversation }
 //   chat:send        -> cliente->servidor: { type: "chat:send", conversationId, text?, attachment?, kind? }
 //                        servidor->participantes online: { type: "chat:message", conversationId, message }
+//   chat:delete      -> cliente->servidor: { type: "chat:delete", conversationId, messageId }
+//                        (só quem MANDOU a mensagem pode apagar -- apaga PRA TODOS, ver
+//                        deleteMessage em chatStore.js)
+//                        servidor->participantes: { type: "chat:message_deleted", conversationId, messageId }
+//   chat:delete_room -> cliente->servidor: { type: "chat:delete_room", messageId }
+//                        (chat da SALA não tem histórico salvo, então isso só repassa pra
+//                        quem tá conectado AGORA tarjar a mensagem no próprio log local --
+//                        ver comentário no case)
+//                        servidor->sala: { type: "chat_room_deleted", messageId }
+//   users:list        -> servidor->sala, toda vez que alguém identifica ou muda o perfil:
+//                        { type: "users:list", users: [{ userId, name, color, photoUrl }] }
+//                        (todo mundo já cadastrado no ambiente, ONLINE OU NÃO -- ver
+//                        listAllUsers em chatStore.js -- usado no picker de participantes
+//                        e na busca de agenda de colega, que antes só viam quem tava na
+//                        sala naquele momento)
 //
 // Upload de foto/arquivo/áudio do chat NÃO vai pelo WebSocket (ficaria
 // pesado no JSON) -- vai por HTTP simples nesse mesmo servidor:
@@ -57,16 +72,25 @@
 //                           servidor->cliente: { type: "agenda:availability", busyUserIds }
 //                           (checagem AO VIVO enquanto a pessoa preenche o
 //                           formulário, pra já mostrar quem fica indisponível)
-//   agenda:create       -> cliente->servidor: { type: "agenda:create", title, startTs, durationMinutes, needs, participantIds, visibility? }
+//   agenda:create       -> cliente->servidor: { type: "agenda:create", title, startTs, durationMinutes,
+//                           needs, participantIds, visibility?, description?, attachments?, blocksAgenda? }
 //                           (participantIds pode vir [] -- "compromisso" só da própria pessoa,
 //                           sem convidar ninguém, ver comentário no case abaixo)
 //                           (visibility: "public" (padrão) ou "private" -- privada só ocupa o
 //                           horário pra quem pesquisar a agenda de um participante dela, ver
 //                           agenda:view_colleague embaixo, sem mostrar o conteúdo)
+//                           (blocksAgenda: true (padrão, "travar agenda") conta como ocupado pra quem
+//                           tá na call; false ("mostrar compromisso sem travar agenda") só aparece
+//                           na agenda, sem contar como conflito -- ver getConflictingUserIds)
 //                           servidor->cada participante: { type: "agenda:call", call }
 //                           servidor->cada convidado (exceto quem criou): { type: "agenda:invite", call }
 //                           (recusa com { type: "agenda:error", reason: "conflict", busyUserIds }
 //                           se alguém ficou ocupado ENTRE a checagem ao vivo e o clique em criar)
+//   agenda:add_attachment -> cliente->servidor: { type: "agenda:add_attachment", callId, attachment }
+//                           (só um PARTICIPANTE da call pode anexar -- diferente do "attachments" de
+//                           agenda:create, que entra junto na hora de criar; esse aqui pendura um
+//                           arquivo numa call que já existe, visível pra todo mundo que participa)
+//                           servidor->cada participante: { type: "agenda:call", call }
 //   agenda:respond      -> cliente->servidor: { type: "agenda:respond", callId, status }  (status: "approved"|"declined")
 //                           servidor->cada participante: { type: "agenda:call", call }
 //                           (histórico de aprovação fica visível pra todo mundo da call)
@@ -427,6 +451,11 @@ wss.on("connection", (ws, req) => {
           broadcast(room, { type: "identity", id, userId: player.userId }, id);
         }
         syncChatUser(player);
+        // roster de "todo mundo cadastrado no ambiente" (ver
+        // listAllUsers em chatStore.js) -- manda de novo pra sala inteira
+        // toda vez que alguém entra/identifica, assim quem já tava
+        // conectado também enxerga gente nova sem precisar recarregar.
+        broadcast(room, { type: "users:list", users: chatStore.listAllUsers() });
         break;
       }
       case "move": {
@@ -483,6 +512,10 @@ wss.on("connection", (ws, req) => {
         }
         syncChatUser(player);
         broadcast(room, { type: "profile", id, ...pickProfileFields(player) });
+        // nome/cor/foto podem ter mudado -- atualiza o roster de todo
+        // mundo pra refletir no picker de participantes/busca da Agenda
+        // (ver comentário em "identify" acima).
+        broadcast(room, { type: "users:list", users: chatStore.listAllUsers() });
         break;
       }
       case "poke": {
@@ -570,6 +603,34 @@ wss.on("connection", (ws, req) => {
         }
         break;
       }
+      case "chat:delete": {
+        // "apagar mensagem" numa conversa direta/grupo -- apaga PRA
+        // TODOS (ver deleteMessage em chatStore.js), só quem mandou pode
+        // apagar a própria mensagem.
+        if (typeof data.conversationId !== "string" || typeof data.messageId !== "string") break;
+        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
+        const deleted = chatStore.deleteMessage(data.conversationId, data.messageId, player.userId);
+        if (!deleted) break;
+        const conv = chatStore.getConversation(data.conversationId);
+        for (const uid of conv.participantIds) {
+          sendToUser(uid, { type: "chat:message_deleted", conversationId: data.conversationId, messageId: deleted.id });
+        }
+        break;
+      }
+      case "chat:delete_room": {
+        // "apagar mensagem" na SALA -- diferente do de cima, a Sala não
+        // guarda histórico nenhum (ver o case "chat" logo ali em cima),
+        // então não tem como o servidor conferir aqui quem mandou a
+        // mensagem original; só repassa pra quem tá conectado AGORA
+        // tarjar no próprio log local. O cliente só mostra o botão de
+        // apagar nas mensagens do PRÓPRIO usuário (ver ChatMessageRow em
+        // GameRoom.tsx) -- risco aceitável pro tamanho desse projeto
+        // (mesmo modelo de confiança do resto da Sala, que já deixa
+        // qualquer um mandar o nome que quiser no "profile").
+        if (typeof data.messageId !== "string") break;
+        broadcast(room, { type: "chat_room_deleted", messageId: data.messageId });
+        break;
+      }
 
       // --- agenda: marcar call (data/horário/participantes, necessidades
       // de câmera/áudio/tela), aprovação dos convidados, checagem de
@@ -618,12 +679,28 @@ wss.on("connection", (ws, req) => {
           participantIds,
           createdBy: player.userId,
           visibility: data.visibility === "private" ? "private" : "public",
+          description: data.description,
+          attachments: data.attachments,
+          blocksAgenda: data.blocksAgenda,
         });
         for (const p of call.participants) {
           sendToUser(p.id, { type: "agenda:call", call });
           if (p.id !== player.userId) sendToUser(p.id, { type: "agenda:invite", call });
         }
         scheduleReminder(call);
+        break;
+      }
+      case "agenda:add_attachment": {
+        // anexar arquivo numa call já existente (ver comentário em
+        // addAttachmentToCall em server/agendaStore.js) -- o upload em si
+        // já rolou por HTTP (POST /upload, ver comentário grande no
+        // topo), aqui só chega a URL resultante.
+        if (typeof data.callId !== "string" || !data.callId) break;
+        const call = agendaStore.addAttachmentToCall(data.callId, data.attachment, player.userId);
+        if (!call) break;
+        for (const p of call.participants) {
+          sendToUser(p.id, { type: "agenda:call", call });
+        }
         break;
       }
       case "agenda:respond": {

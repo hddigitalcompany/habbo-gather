@@ -48,6 +48,22 @@ function overlaps(aStart, aDuration, bStart, bDuration) {
   return aStart < bEnd && bStart < aEnd;
 }
 
+/** Mesmo saneamento de anexo que o chatStore.js usa pras mensagens de
+ * chat (ver addMessage lá) -- reaproveitado aqui pros anexos de um
+ * compromisso, que vêm do MESMO endpoint HTTP de upload (POST /upload
+ * em server/index.js), só que penduram na call em vez de numa mensagem. */
+function sanitizeAttachment(a) {
+  if (!a || typeof a !== "object") return null;
+  const url = String(a.url || "").slice(0, 500);
+  if (!url) return null;
+  return {
+    url,
+    name: String(a.name || "arquivo").slice(0, 200),
+    size: Number(a.size) || 0,
+    mime: String(a.mime || "").slice(0, 100),
+  };
+}
+
 /** Pra cada userId candidato, diz se ele já tem uma call (que ele não
  * recusou) batendo com o horário pedido -- usado tanto pra já marcar
  * como "indisponível" quem a pessoa está escolhendo pra call nova
@@ -60,6 +76,10 @@ export function getConflictingUserIds(candidateUserIds, startTs, durationMinutes
   const busy = new Set();
   for (const call of Object.values(store.calls)) {
     if (excludeCallId && call.id === excludeCallId) continue;
+    // "mostrar compromisso sem travar agenda" -- não conta como ocupado
+    // pra ninguém, só aparece na agenda de quem participa (ver
+    // blocksAgenda em createCall/enrich).
+    if (call.blocksAgenda === false) continue;
     if (!overlaps(startTs, durationMinutes, call.startTs, call.durationMinutes)) continue;
     for (const p of call.participants) {
       if (p.status === "declined") continue;
@@ -90,6 +110,13 @@ function enrich(call) {
     // pra quem NÃO é participante, o conteúdo some (vira "redacted").
     visibility: call.visibility === "private" ? "private" : "public",
     redacted: false,
+    description: call.description || "",
+    attachments: Array.isArray(call.attachments) ? call.attachments : [],
+    // "travar agenda" (padrão true) -- ver comentário em
+    // getConflictingUserIds. call.blocksAgenda pode não existir em calls
+    // criadas antes dessa feature, por isso o "!== false" em vez de só
+    // ler o valor direto.
+    blocksAgenda: call.blocksAgenda !== false,
   };
 }
 
@@ -110,10 +137,24 @@ function redact(call) {
     createdAt: call.createdAt,
     visibility: "private",
     redacted: true,
+    description: "",
+    attachments: [],
+    blocksAgenda: true,
   };
 }
 
-export function createCall({ title, startTs, durationMinutes, needs, participantIds, createdBy, visibility }) {
+export function createCall({
+  title,
+  startTs,
+  durationMinutes,
+  needs,
+  participantIds,
+  createdBy,
+  visibility,
+  description,
+  attachments,
+  blocksAgenda,
+}) {
   const ids = Array.from(new Set([...participantIds.filter((x) => x !== createdBy), createdBy]));
   const call = {
     id: randomUUID(),
@@ -130,8 +171,28 @@ export function createCall({ title, startTs, durationMinutes, needs, participant
     participants: ids.map((id) => ({ id, status: id === createdBy ? "approved" : "pending" })),
     createdAt: Date.now(),
     visibility: visibility === "private" ? "private" : "public",
+    description: String(description || "").slice(0, 2000),
+    attachments: Array.isArray(attachments) ? attachments.map(sanitizeAttachment).filter(Boolean).slice(0, 20) : [],
+    blocksAgenda: blocksAgenda !== false,
   };
   store.calls[call.id] = call;
+  persist();
+  return enrich(call);
+}
+
+/** Anexa um arquivo numa call JÁ CRIADA (visível pra todo mundo que já
+ * participa dela) -- diferente dos anexos mandados junto com createCall
+ * (esses entram no formulário ANTES de a call existir), esse aqui pendura
+ * direto numa call existente. Só um PARTICIPANTE pode anexar; devolve
+ * null se a call não existir ou quem pediu não participar dela. */
+export function addAttachmentToCall(callId, attachment, requesterUserId) {
+  const call = store.calls[callId];
+  if (!call) return null;
+  if (!call.participants.some((p) => p.id === requesterUserId)) return null;
+  const clean = sanitizeAttachment(attachment);
+  if (!clean) return null;
+  if (!Array.isArray(call.attachments)) call.attachments = [];
+  call.attachments.push(clean);
   persist();
   return enrich(call);
 }

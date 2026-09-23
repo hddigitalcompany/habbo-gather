@@ -989,6 +989,211 @@ body {
   flex: 1;
 }
 
+/* Descrição do compromisso (form + detalhe) */
+.agenda-description-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #f5f0ff;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 50px;
+}
+
+.agenda-description-input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.agenda-detail-description {
+  margin: 0;
+  font-size: 12px;
+  color: #d8d0ea;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* Anexos do compromisso (form + detalhe), reaproveita o visual dos
+   anexos de arquivo do chat (.chat-attachment-file) */
+.agenda-attachment-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agenda-attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agenda-attachment-pending {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 6px 8px;
+}
+
+.agenda-attachment-pending .chat-icon-btn {
+  margin-left: auto;
+}
+
+/* bolinha "online agora" no picker de participantes -- roster agora é
+   TODO MUNDO cadastrado, não só quem tá na sala, então isso sinaliza
+   quem tá conectado sem depender só do texto. */
+.agenda-online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4fd97a;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+/* "hoje | amanhã | 25/set | 26/set" -- strip de dias da Minha Agenda */
+.agenda-day-strip {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.agenda-day-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #d8d0ea;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agenda-day-chip.active {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #fff;
+}
+
+.agenda-day-chip-count {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+.agenda-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.agenda-day-group-label {
+  margin: 4px 4px 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+}
+
+.agenda-day-group-empty {
+  padding: 6px 4px;
+  text-align: left;
+}
+
+/* barra de gravação de áudio (gravando) e preview (parado, antes de
+   enviar) -- substituem o .chat-composer normal enquanto ativos (ver
+   ChatDrawer) */
+.chat-recording-bar,
+.chat-audio-preview-bar {
+  justify-content: space-between;
+}
+
+.chat-recording-indicator {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #f5f0ff;
+  padding: 0 4px;
+}
+
+.chat-recording-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff4545;
+  flex-shrink: 0;
+  animation: chat-recording-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-audio-preview-player {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+}
+
+.chat-recording-time {
+  font-size: 11px;
+  color: #a99fc2;
+  flex-shrink: 0;
+}
+
+/* mensagem apagada -- tarja "Fulano apagou uma mensagem" no lugar do
+   conteúdo original (ver ChatMessageRow) */
+.chat-bubble-deleted {
+  background: rgba(255, 255, 255, 0.04);
+  color: #a99fc2;
+  font-size: 12px;
+}
+
+/* botão de apagar (lixeira) que aparece do lado das PRÓPRIAS mensagens
+   ainda não apagadas -- fica escondido até passar o mouse por perto, pra
+   não poluir a conversa toda com uma lixeira do lado de cada balão. */
+.chat-message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.chat-message.own .chat-message-row {
+  flex-direction: row-reverse;
+}
+
+.chat-message-delete-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #7c7290;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.chat-message-row:hover .chat-message-delete-btn {
+  opacity: 1;
+}
+
+.chat-message-delete-btn:hover {
+  color: #ff5c7a;
+}
+
 .hint {
   margin-top: 10px;
   font-size: 12px;
