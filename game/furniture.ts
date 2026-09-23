@@ -64,7 +64,9 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     col: 9,
     row: 5,
     facing: "down",
-    seatOffsetY: -30,
+    // poltrona ficou bem menor (77x96, era 154x192) -- escala o mesmo
+    // ajuste proporcionalmente (~16% da altura). Ainda é estimativa.
+    seatOffsetY: -15,
   },
 ];
 
