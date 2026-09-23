@@ -110,6 +110,14 @@ export default class MainScene extends Phaser.Scene {
     this.load.spritesheet("avatar-visual1", "/assets/avatar_visual1.png", {
       frameWidth: FRAME_W,
       frameHeight: FRAME_H,
+      // 2px de espaço transparente entre cada frame -- sem isso, com
+      // antialias:true (necessário pra arte gerada não ficar serrilhada),
+      // a GPU "vaza" um fiapo de pixel do frame vizinho nas bordas
+      // (bilinear filtering lendo além do frame), o que aparecia como o
+      // frame de outra pose "grudado" junto, principalmente entre poses
+      // adjacentes na folha (ex: perna de "passo" aparecendo junto com a
+      // pose do lado).
+      spacing: 2,
     });
     this.load.image("room", "/assets/room.png");
 
@@ -142,23 +150,8 @@ export default class MainScene extends Phaser.Scene {
     }) as Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
     this.drinkKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
-    this.createAnimations();
-
     const spawn = tileToWorld(9, 9);
     this.localContainer = this.createAvatar(spawn.x, spawn.y, this.localColor, this.localName);
-  }
-
-  private createAnimations() {
-    if (this.anims.exists("walk-down")) return;
-    for (const dir of Object.keys(WALK_FRAMES) as Direction[]) {
-      const [parado, passo] = WALK_FRAMES[dir];
-      this.anims.create({
-        key: `walk-${dir}`,
-        frames: [{ key: "avatar-visual1", frame: parado }, { key: "avatar-visual1", frame: passo }],
-        frameRate: 4,
-        repeat: -1,
-      });
-    }
   }
 
   private createAvatar(
@@ -191,22 +184,28 @@ export default class MainScene extends Phaser.Scene {
     return container;
   }
 
+  /**
+   * Mostra o frame de "passo" (andando) na direção dada, direto -- sem
+   * depender de uma animação com frameRate próprio. Um passo na grade
+   * dura só STEP_DURATION_MS (180ms); uma animação por tempo (frameRate)
+   * podia nem chegar a trocar de frame nesse intervalo curto, fazendo um
+   * pulo de UM quadrado parecer que o boneco não se moveu de verdade.
+   * Setando o frame direto, o "passo" fica visível a viagem toda.
+   */
   private playWalk(container: Phaser.GameObjects.Container, dir: Direction) {
     const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
     container.setData("dir", dir);
-    sprite.anims.play(`walk-${dir}`, true);
+    sprite.setFrame(WALK_FRAMES[dir][1]);
   }
 
   private stopWalk(container: Phaser.GameObjects.Container) {
     const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
     const dir = container.getData("dir") as Direction;
-    sprite.anims.stop();
     sprite.setFrame(WALK_FRAMES[dir][0]);
   }
 
   private setPoseFrame(container: Phaser.GameObjects.Container, frame: number) {
     const sprite = container.getData("sprite") as Phaser.GameObjects.Sprite;
-    sprite.anims.stop();
     sprite.setFrame(frame);
   }
 
