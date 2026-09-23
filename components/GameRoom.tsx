@@ -11,8 +11,83 @@ import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import { HAIR_CATALOG, DEFAULT_HAIR_ID } from "@/game/customization";
 
-type RemotePlayer = { id: string; x: number; y: number; name: string; color: string };
+// "focus/ausente/online" -- ver caixinha de status no ProfileCard.
+type ProfileStatus = "online" | "away" | "focus";
+
+// campos do card de perfil que o PRÓPRIO jogador edita (ver ProfileCard)
+// -- "role" fica de fora de propósito, é osó campo que o server atribui
+// (ver PROFILE_ROLE_PLACEHOLDER em server/index.js), não tem edição aqui.
+type ProfileFields = {
+  name: string;
+  status: ProfileStatus;
+  instagram: string;
+  bio: string;
+  photoUrl: string;
+};
+
+type RemoteProfile = ProfileFields & { role: string };
+
+type RemotePlayer = { id: string; x: number; y: number; color: string } & RemoteProfile;
 type ChatMessage = { id: string; text: string; ts: number };
+type Toast = { id: string; text: string };
+
+// extrai só os campos de perfil de um objeto maior (player do socket,
+// ou um remoteProfiles[id] anterior mesclado com um update parcial) --
+// sempre com fallback, pra nunca quebrar o card se algum campo não
+// tiver chegado ainda.
+function pickRemoteProfile(p: Partial<RemotePlayer> | undefined): RemoteProfile {
+  return {
+    name: p?.name ?? "",
+    status: (p?.status as ProfileStatus) ?? "online",
+    instagram: p?.instagram ?? "",
+    bio: p?.bio ?? "",
+    photoUrl: p?.photoUrl ?? "",
+    role: p?.role ?? "",
+  };
+}
+
+const PROFILE_STORAGE_KEY = "habbo-gather-profile";
+
+function loadSavedProfile(): Partial<ProfileFields> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+// redimensiona/comprime a foto ANTES de mandar -- vai como data-URL pela
+// mesma conexão de posição/chat (ver server/index.js, MAX_MESSAGE_BYTES),
+// então precisa ficar pequena. Recorta um quadrado central e reamostra
+// pra no máx 240x240, exporta como JPEG ~80% (suficiente pra uma foto de
+// perfil pequena, bem abaixo do limite do servidor).
+function compressPhotoToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      img.onerror = () => reject(new Error("Não deu pra ler a imagem"));
+      img.onload = () => {
+        const size = Math.min(img.width, img.height);
+        const sx = (img.width - size) / 2;
+        const sy = (img.height - size) / 2;
+        const target = Math.min(240, size);
+        const canvas = document.createElement("canvas");
+        canvas.width = target;
+        canvas.height = target;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Sem contexto 2D"));
+        ctx.drawImage(img, sx, sy, size, size, 0, 0, target, target);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 // distância (em pixels) pra ligar e desligar o vídeo/áudio — com uma
 // pequena "zona morta" entre os dois valores pra não ficar oscilando
@@ -46,6 +121,24 @@ export default function GameRoom() {
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
 
+  // --- card de perfil: MEUS campos (editáveis) e os dos OUTROS
+  // jogadores (sincronizados pelo servidor, ver mensagem "profile" em
+  // server/index.js) -- persisto os meus no localStorage, então voltam
+  // sozinhos na próxima visita, mas continuam só "meus" (não tem
+  // login/conta de verdade aqui). ---
+  const [myProfile, setMyProfile] = useState<ProfileFields>(() => ({
+    name: "",
+    status: "online",
+    instagram: "",
+    bio: "",
+    photoUrl: "",
+    ...loadSavedProfile(),
+  }));
+  const [remoteProfiles, setRemoteProfiles] = useState<Record<string, RemoteProfile>>({});
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const myProfileRef = useRef(myProfile);
+  myProfileRef.current = myProfile;
+
   // --- editor de espaço ("Editar espaço") -- modo dev: só posiciona
   // visualmente e gera o código pra colar em furniture.ts, não salva
   // nada sozinho (ver game/furnitureCodegen.ts) ---
@@ -62,8 +155,6 @@ export default function GameRoom() {
   const [profileCard, setProfileCard] = useState<{
     playerId: string;
     isLocal: boolean;
-    name: string;
-    color: string;
   } | null>(null);
   const [editingCharacter, setEditingCharacter] = useState(false);
   const [selectedHairId, setSelectedHairId] = useState(DEFAULT_HAIR_ID);
@@ -180,15 +271,57 @@ export default function GameRoom() {
 
       if (data.type === "init") {
         selfIdRef.current = data.selfId;
-        for (const p of data.players as RemotePlayer[]) {
+        const players = data.players as RemotePlayer[];
+        const nextProfiles: Record<string, RemoteProfile> = {};
+        for (const p of players) {
+          nextProfiles[p.id] = pickRemoteProfile(p);
           if (p.id === data.selfId) continue;
           remotePlayersRef.current.set(p.id, p);
           scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name);
         }
+        setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
+
+        // o servidor me deu um nome/status/etc. PADRÃO (ver server/index.js)
+        // -- se eu já tinha algo salvo localmente (nome escolhido antes,
+        // bio, foto...) sobrescrevo por cima e já mando de volta pro
+        // servidor, pra sala inteira ver o valor certo, não o genérico.
+        const serverSelf = players.find((p) => p.id === data.selfId);
+        setMyProfile((prev) => {
+          const merged: ProfileFields = {
+            name: prev.name || serverSelf?.name || "",
+            status: prev.status,
+            instagram: prev.instagram,
+            bio: prev.bio,
+            photoUrl: prev.photoUrl,
+          };
+          sendProfileUpdate(merged);
+          return merged;
+        });
       } else if (data.type === "join") {
         const p: RemotePlayer = data.player;
         remotePlayersRef.current.set(p.id, p);
+        setRemoteProfiles((prev) => ({ ...prev, [p.id]: pickRemoteProfile(p) }));
         scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name);
+      } else if (data.type === "profile") {
+        const existing = remotePlayersRef.current.get(data.id);
+        if (existing) Object.assign(existing, data);
+        setRemoteProfiles((prev) => ({
+          ...prev,
+          [data.id]: pickRemoteProfile({ ...prev[data.id], ...data }),
+        }));
+        if (typeof data.name === "string" && existing) {
+          scene?.upsertRemotePlayer(data.id, existing.x, existing.y, existing.color, data.name);
+        }
+      } else if (data.type === "poke") {
+        const text =
+          data.kind === "available"
+            ? `${data.fromName} perguntou se você tá disponível`
+            : data.kind === "call"
+              ? `${data.fromName} te chamou pra ir até lá`
+              : `${data.fromName} quer falar com você no chat`;
+        const toastId = `${Date.now()}-${Math.random()}`;
+        setToasts((prev) => [...prev.slice(-3), { id: toastId, text }]);
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 4500);
       } else if (data.type === "move") {
         const p = remotePlayersRef.current.get(data.id);
         if (p) {
@@ -260,7 +393,7 @@ export default function GameRoom() {
         };
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onAvatarClick = (info) => {
-          setProfileCard(info);
+          setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
           setEditingCharacter(false);
         };
       });
@@ -421,6 +554,48 @@ export default function GameRoom() {
     sceneRef.current?.setLocalHairId(hairId);
   }
 
+  function sendProfileUpdate(fields: ProfileFields) {
+    socketRef.current?.send(JSON.stringify({ type: "profile", ...fields }));
+  }
+
+  // edição do MEU card (nome/status/insta/bio/foto): atualiza local +
+  // localStorage na hora (a UI não trava esperando o servidor), e manda
+  // pro servidor com um debounce curto -- assim digitar a bio não manda
+  // uma mensagem por tecla.
+  const profileSendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function updateMyProfile(partial: Partial<ProfileFields>) {
+    setMyProfile((prev) => {
+      const next = { ...prev, ...partial };
+      try {
+        window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // localStorage indisponível (modo privado, etc.) -- segue só em memória
+      }
+      if (profileSendTimer.current) clearTimeout(profileSendTimer.current);
+      profileSendTimer.current = setTimeout(() => sendProfileUpdate(next), 400);
+      return next;
+    });
+  }
+
+  async function handlePhotoChange(file: File) {
+    try {
+      const dataUrl = await compressPhotoToDataUrl(file);
+      updateMyProfile({ photoUrl: dataUrl });
+    } catch (e) {
+      console.warn("Não deu pra processar a foto", e);
+    }
+  }
+
+  function sendPoke(targetId: string, kind: "available" | "call" | "message") {
+    socketRef.current?.send(JSON.stringify({ type: "poke", to: targetId, kind }));
+  }
+
+  function sendMessageTo(targetId: string, targetName: string) {
+    sendPoke(targetId, "message");
+    setChatInput((prev) => (prev ? prev : `@${targetName} `));
+    closeProfileCard();
+  }
+
   return (
     <div className="room-and-editor">
       <div className="room-wrapper">
@@ -429,13 +604,30 @@ export default function GameRoom() {
         {profileCard && (
           <ProfileCard
             info={profileCard}
+            myProfile={myProfile}
+            onChangeMyProfile={updateMyProfile}
+            onChangePhoto={handlePhotoChange}
+            remoteProfile={remoteProfiles[profileCard.playerId]}
             editing={editingCharacter}
             onToggleEdit={() => setEditingCharacter((v) => !v)}
             onClose={closeProfileCard}
             selectedHairId={selectedHairId}
             onSelectHair={selectHair}
+            onAskAvailable={() => sendPoke(profileCard.playerId, "available")}
+            onCallOver={() => sendPoke(profileCard.playerId, "call")}
+            onSendMessage={() =>
+              sendMessageTo(profileCard.playerId, remoteProfiles[profileCard.playerId]?.name || "alguém")
+            }
           />
         )}
+
+        <div className="toast-stack">
+          {toasts.map((t) => (
+            <div key={t.id} className="toast">
+              {t.text}
+            </div>
+          ))}
+        </div>
 
         <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
 
@@ -592,22 +784,68 @@ const HAIR_THUMB_H = 83.2; // mantém a proporção 200:260 do frame
 const HAIR_SHEET_W = 1614;
 const HAIR_SHEET_H = 522;
 
+const STATUS_OPTIONS: { id: ProfileStatus; label: string; dot: string }[] = [
+  { id: "online", label: "Online", dot: "#4fd97a" },
+  { id: "away", label: "Ausente", dot: "#f5c542" },
+  { id: "focus", label: "Foco", dot: "#7c5cff" },
+];
+
+function statusMeta(status: ProfileStatus) {
+  return STATUS_OPTIONS.find((s) => s.id === status) ?? STATUS_OPTIONS[0];
+}
+
+function instagramHref(handle: string) {
+  return `https://instagram.com/${handle.replace(/^@/, "").trim()}`;
+}
+
+// Card de perfil -- visual "cartão fosco" (foto grande no topo, nome,
+// status/cargo, ação embaixo) parecido com o card de compartilhar
+// perfil do iOS que o usuário mandou de referência. Dois modos bem
+// diferentes:
+//   isLocal=true  -> TUDO editável (foto/nome/status/insta/bio) +
+//                     botão "Editar meu personagem" (abre o seletor de
+//                     cabelo já existente).
+//   isLocal=false -> só leitura (dados vêm sincronizados pelo servidor,
+//                     ver "profile" em server/index.js) + botões de
+//                     interação fixados embaixo (Disponível? / Chamar
+//                     até você / Enviar mensagem).
 function ProfileCard({
   info,
+  myProfile,
+  onChangeMyProfile,
+  onChangePhoto,
+  remoteProfile,
   editing,
   onToggleEdit,
   onClose,
   selectedHairId,
   onSelectHair,
+  onAskAvailable,
+  onCallOver,
+  onSendMessage,
 }: {
-  info: { playerId: string; isLocal: boolean; name: string; color: string };
+  info: { playerId: string; isLocal: boolean };
+  myProfile: ProfileFields;
+  onChangeMyProfile: (partial: Partial<ProfileFields>) => void;
+  onChangePhoto: (file: File) => void;
+  remoteProfile: RemoteProfile | undefined;
   editing: boolean;
   onToggleEdit: () => void;
   onClose: () => void;
   selectedHairId: string;
   onSelectHair: (id: string) => void;
+  onAskAvailable: () => void;
+  onCallOver: () => void;
+  onSendMessage: () => void;
 }) {
   const thumbScale = HAIR_THUMB_W / 200;
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const fields: RemoteProfile = info.isLocal
+    ? { ...myProfile, role: "" }
+    : remoteProfile ?? pickRemoteProfile(undefined);
+  const status = statusMeta(fields.status);
+  const displayName = fields.name || (info.isLocal ? "Sem nome ainda" : "Visitante");
 
   return (
     <div className="profile-backdrop" onClick={onClose}>
@@ -616,16 +854,111 @@ function ProfileCard({
           ✕
         </button>
 
-        <div className="profile-header">
-          <span className="profile-color-dot" style={{ background: info.color }} />
-          <span className="profile-name">{info.name}</span>
+        <div className="profile-photo-wrap">
+          <div className="profile-photo" style={{ backgroundImage: fields.photoUrl ? `url(${fields.photoUrl})` : undefined }}>
+            {!fields.photoUrl && <span className="profile-photo-fallback">{displayName.slice(0, 1).toUpperCase()}</span>}
+            <div className="profile-photo-fade" />
+            <div className="profile-photo-text">
+              {info.isLocal ? (
+                <input
+                  className="profile-name-input"
+                  value={myProfile.name}
+                  placeholder="Seu nome"
+                  maxLength={40}
+                  onChange={(e) => onChangeMyProfile({ name: e.target.value })}
+                />
+              ) : (
+                <span className="profile-name">{displayName}</span>
+              )}
+              <span className="profile-role">{fields.role || (info.isLocal ? "Cargo (definido pelo admin)" : " ")}</span>
+            </div>
+          </div>
+
+          {info.isLocal && (
+            <>
+              <button
+                className="profile-photo-edit"
+                title="Trocar foto"
+                onClick={() => photoInputRef.current?.click()}
+              >
+                <BrushIcon />
+              </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onChangePhoto(file);
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
         </div>
-        {!info.isLocal && <p className="edit-hint">Jogador da sala.</p>}
+
+        {info.isLocal ? (
+          <div className="profile-fields">
+            <label className="profile-field">
+              <span>Status</span>
+              <select
+                value={myProfile.status}
+                onChange={(e) => onChangeMyProfile({ status: e.target.value as ProfileStatus })}
+              >
+                {STATUS_OPTIONS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="profile-field">
+              <span>Instagram</span>
+              <input
+                value={myProfile.instagram}
+                placeholder="@seuusuario"
+                maxLength={30}
+                onChange={(e) => onChangeMyProfile({ instagram: e.target.value })}
+              />
+            </label>
+
+            <label className="profile-field">
+              <span>Bio</span>
+              <textarea
+                value={myProfile.bio}
+                placeholder="Fale um pouco sobre você"
+                maxLength={280}
+                rows={3}
+                onChange={(e) => onChangeMyProfile({ bio: e.target.value })}
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="profile-view">
+            <span className="profile-status-line">
+              <span className="profile-status-dot" style={{ background: status.dot }} />
+              {status.label}
+            </span>
+            {fields.instagram && (
+              <a
+                className="profile-instagram-link"
+                href={instagramHref(fields.instagram)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                @{fields.instagram.replace(/^@/, "")}
+              </a>
+            )}
+            {fields.bio && <p className="profile-bio">{fields.bio}</p>}
+          </div>
+        )}
 
         {info.isLocal && (
           <>
             <button className="edit-character-btn" onClick={onToggleEdit}>
-              {editing ? "Fechar edição" : "Editar personagem"}
+              {editing ? "Fechar edição" : "Editar meu personagem"}
             </button>
 
             {editing && (
@@ -657,8 +990,41 @@ function ProfileCard({
             )}
           </>
         )}
+
+        {!info.isLocal && (
+          <div className="profile-actions">
+            <button className="profile-action-btn" onClick={onAskAvailable}>
+              Disponível?
+            </button>
+            <button className="profile-action-btn" onClick={onCallOver}>
+              Chamar até você
+            </button>
+            <button className="profile-action-btn primary" onClick={onSendMessage}>
+              Enviar mensagem
+            </button>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function BrushIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 20c0-3.2 1.3-5 4-5s3 1.8 3 3.5S9.5 21 8 21c-1.8 0-2.4-1-4-1Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m10.5 14.5 7.3-7.3a2 2 0 0 0 0-2.8l-.2-.2a2 2 0 0 0-2.8 0L7.5 11.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

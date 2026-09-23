@@ -6,12 +6,19 @@
 // (ex: Render), sem depender de Durable Objects/Cloudflare.
 //
 // Protocolo (idêntico ao que o cliente já espera):
-//   init   -> { type: "init", selfId, players: [...] }
-//   join   -> { type: "join", player }
-//   move   -> { type: "move", id, x, y }
-//   leave  -> { type: "leave", id }
-//   signal -> { type: "signal", from, data }   (relay de WebRTC)
-//   chat   -> { type: "chat", id, text }
+//   init    -> { type: "init", selfId, players: [...] }
+//   join    -> { type: "join", player }
+//   move    -> { type: "move", id, x, y }
+//   leave   -> { type: "leave", id }
+//   signal  -> { type: "signal", from, data }   (relay de WebRTC)
+//   chat    -> { type: "chat", id, text }
+//   profile -> { type: "profile", id, name, status, instagram, bio, photoUrl }
+//              (card de perfil -- ver ProfileCard em GameRoom.tsx; "role"
+//              NÃO entra aqui, é só o servidor que atribui, ver PROFILE_FIELDS)
+//   poke    -> { type: "poke", from, fromName, kind, text? }
+//              (botões de interação do card de OUTRO jogador -- "Disponível?"
+//              / "Chamar até você" / "Enviar mensagem" -- relay privado, só
+//              pro alvo, vira um toast do lado de quem recebe)
 
 import { createServer } from "http";
 import { randomUUID } from "crypto";
@@ -49,6 +56,25 @@ function broadcast(room, data, excludeId) {
   }
 }
 
+// campos do card de perfil que o PRÓPRIO jogador manda (ver mensagem
+// "profile" acima) -- "role" fica de fora de propósito: é o único campo
+// "setado pelo administrador" que o pedido descreve, e como ainda não
+// existe login/admin nenhum aqui, cada jogador só recebe um valor fixo
+// (PROFILE_ROLE_PLACEHOLDER) que o cliente mostra como somente-leitura.
+const PROFILE_FIELDS = ["name", "status", "instagram", "bio", "photoUrl"];
+const PROFILE_ROLE_PLACEHOLDER = "";
+// tamanho máx de uma mensagem (principalmente a foto, que vai como
+// data-URL) -- generoso o bastante pra uma foto pequena comprimida no
+// cliente (ver compressPhotoToDataUrl em GameRoom.tsx), mas evita que
+// alguém trave a sala mandando um payload gigante.
+const MAX_MESSAGE_BYTES = 900_000;
+
+function pickProfileFields(player) {
+  const out = {};
+  for (const field of PROFILE_FIELDS) out[field] = player[field] ?? "";
+  return out;
+}
+
 const httpServer = createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("Servidor multiplayer do habbo-gather está no ar.\n");
@@ -71,6 +97,11 @@ wss.on("connection", (ws, req) => {
     y: 480 + Math.floor(Math.random() * 3) * 20,
     name: `Visitante-${id.slice(0, 4)}`,
     color,
+    status: "online",
+    instagram: "",
+    bio: "",
+    photoUrl: "",
+    role: PROFILE_ROLE_PLACEHOLDER,
   };
 
   room.set(id, { ws, player });
@@ -86,6 +117,8 @@ wss.on("connection", (ws, req) => {
   broadcast(room, { type: "join", player }, id);
 
   ws.on("message", (raw) => {
+    if (raw.length > MAX_MESSAGE_BYTES) return;
+
     let data;
     try {
       data = JSON.parse(raw.toString());
@@ -112,6 +145,30 @@ wss.on("connection", (ws, req) => {
       case "chat": {
         const text = String(data.text ?? "").slice(0, 300);
         if (text.trim()) broadcast(room, { type: "chat", id, text });
+        break;
+      }
+      case "profile": {
+        // card de perfil (ver ProfileCard) -- só os campos que o próprio
+        // jogador é dono; "role" nunca vem do cliente (ver PROFILE_FIELDS).
+        for (const field of PROFILE_FIELDS) {
+          if (typeof data[field] !== "string") continue;
+          const max = field === "photoUrl" ? 400_000 : field === "bio" ? 280 : 80;
+          player[field] = data[field].slice(0, max);
+        }
+        broadcast(room, { type: "profile", id, ...pickProfileFields(player) });
+        break;
+      }
+      case "poke": {
+        // botões do card de OUTRO jogador ("Disponível?" / "Chamar até
+        // você" / "Enviar mensagem") -- relay PRIVADO, só quem recebeu o
+        // clique vê o toast, não a sala toda.
+        const target = room.get(data.to);
+        const kind = String(data.kind ?? "").slice(0, 40);
+        if (target && target.ws.readyState === target.ws.OPEN && kind) {
+          target.ws.send(
+            JSON.stringify({ type: "poke", from: id, fromName: player.name, kind })
+          );
+        }
         break;
       }
     }

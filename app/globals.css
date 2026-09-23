@@ -424,59 +424,252 @@ body {
 
 .profile-card {
   position: relative;
-  width: 260px;
+  width: 290px;
   max-width: 85%;
-  background: #16101f;
-  border: 1px solid #3a2a55;
-  border-radius: 10px;
-  padding: 16px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  background: rgba(28, 22, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 26px;
+  padding: 14px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
 }
 
 .profile-close {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background: none;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
   border: none;
-  color: #f5f0ff;
-  font-size: 14px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 13px;
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 .profile-close:hover {
   opacity: 1;
 }
 
-.profile-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+/* --- foto grande no topo, estilo "share profile" da Apple: nome/cargo
+   sobrepostos na parte de baixo da própria foto, com um degradê ---- */
+.profile-photo-wrap {
+  position: relative;
 }
 
-.profile-color-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
+.profile-photo {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 18px;
+  background: #2a1d40 center/cover no-repeat;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.profile-photo-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 56px;
+  font-weight: 600;
+  opacity: 0.35;
+}
+
+.profile-photo-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 60%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
+.profile-photo-text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 12px 14px;
+  width: 100%;
+  text-align: center;
 }
 
 .profile-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
+  color: #fff;
+}
+
+.profile-name-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+  text-align: center;
+  padding: 2px 4px;
+}
+
+.profile-name-input:focus {
+  outline: none;
+  border-color: #9376ff;
+}
+
+.profile-role {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.profile-photo-edit {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(20, 14, 32, 0.85);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.profile-photo-edit:hover {
+  background: #7c5cff;
+}
+
+.profile-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.profile-field select,
+.profile-field input,
+.profile-field textarea {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #f5f0ff;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+}
+
+.profile-field select:focus,
+.profile-field input:focus,
+.profile-field textarea:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.profile-view {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.profile-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.profile-instagram-link {
+  color: #9fb4ff;
+  font-size: 13px;
+  text-decoration: none;
+  width: fit-content;
+}
+
+.profile-instagram-link:hover {
+  text-decoration: underline;
+}
+
+.profile-bio {
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.profile-action-btn {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  padding: 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.profile-action-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.profile-action-btn.primary {
+  background: #7c5cff;
+  border-color: transparent;
+}
+
+.profile-action-btn.primary:hover {
+  background: #9376ff;
 }
 
 .edit-character-btn {
-  margin-top: 10px;
+  margin-top: 12px;
   width: 100%;
   background: #7c5cff;
   border: none;
-  border-radius: 6px;
+  border-radius: 999px;
   color: white;
-  padding: 8px;
+  padding: 9px;
   font-size: 13px;
   cursor: pointer;
 }
@@ -535,6 +728,30 @@ body {
   font-size: 10px;
   color: #f5f0ff;
   opacity: 0.85;
+}
+
+.toast-stack {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.toast {
+  background: rgba(28, 22, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #f5f0ff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
 }
 
 .loading {
