@@ -1742,24 +1742,25 @@ export default function GameRoom() {
     setEditingCharacter(false);
   }
 
+  // IMPORTANTE: esses seletores só mexem no estado local (o "rascunho"
+  // que a prévia do editor mostra, ver avatar-preview-wrap) -- NÃO
+  // chamam mais sceneRef.current?.setLocalXId aqui. O boneco de verdade
+  // dentro do jogo só muda quando o Douglas clica "Salvar" (ver
+  // saveEditingCharacter), pra ele poder experimentar à vontade sem o
+  // resto da sala ver a troca antes de decidir.
   function selectHair(hairId: string) {
     setSelectedHairId(hairId);
     setSelectedHairColorId(null); // penteado novo -- volta pra arte "padrão" dele, sem cor escolhida
-    sceneRef.current?.setLocalHairId(hairId);
   }
 
   // troca a COR do penteado ATUAL (não troca de penteado -- ver
-  // comentário em selectedHairColorId acima). setLocalHairId recebe o
-  // id da COR em vez do id do penteado porque cada cor já é seu próprio
-  // spritesheet (ver customization.ts / setLocalHairId em MainScene.ts).
+  // comentário em selectedHairColorId acima).
   function selectHairColor(colorId: string) {
     setSelectedHairColorId(colorId);
-    sceneRef.current?.setLocalHairId(colorId);
   }
 
   function selectSkin(skinId: string) {
     setSelectedSkinId(skinId);
-    sceneRef.current?.setLocalSkinId(skinId);
   }
 
   // barba e acessório: mesmo par de funções do cabelo (troca de
@@ -1768,30 +1769,27 @@ export default function GameRoom() {
   function selectBeard(beardId: string) {
     setSelectedBeardId(beardId);
     setSelectedBeardColorId(null);
-    sceneRef.current?.setLocalBeardId(beardId);
   }
   function selectBeardColor(colorId: string) {
     setSelectedBeardColorId(colorId);
-    sceneRef.current?.setLocalBeardId(colorId);
   }
   function selectAccessory(accessoryId: string) {
     setSelectedAccessoryId(accessoryId);
     setSelectedAccessoryColorId(null);
-    sceneRef.current?.setLocalAccessoryId(accessoryId);
   }
   function selectAccessoryColor(colorId: string) {
     setSelectedAccessoryColorId(colorId);
-    sceneRef.current?.setLocalAccessoryId(colorId);
   }
 
   // "Editar meu personagem" agora toma o card INTEIRO (nada de ficar
   // espremido embaixo dos campos de nome/bio junto -- ver ProfileCard)
-  // e sai com Cancelar/Salvar de verdade: Cancelar volta cabelo+cor+tom
-  // de pele+barba+acessório pro que tava ANTES de abrir o editor
-  // (guardado aqui), Salvar só fecha (a troca em si já foi aplicada ao
-  // vivo a cada clique no picker, ver selectHair/selectHairColor/
-  // selectSkin/selectBeard/selectBeardColor/selectAccessory/
-  // selectAccessoryColor).
+  // e sai com Cancelar/Salvar de verdade: Cancelar descarta o rascunho
+  // e volta cabelo+cor+tom de pele+barba+acessório pro que tava ANTES
+  // de abrir o editor (guardado aqui) -- como nada foi aplicado no
+  // boneco de verdade ainda (ver comentário acima), só precisa resetar
+  // o estado local, sem mexer na cena. Salvar é o único que aplica de
+  // verdade (setLocalHairId/setLocalSkinId/setLocalBeardId/
+  // setLocalAccessoryId) e fecha.
   const hairBeforeEditRef = useRef(selectedHairId);
   const hairColorBeforeEditRef = useRef(selectedHairColorId);
   const skinBeforeEditRef = useRef(selectedSkinId);
@@ -1811,22 +1809,25 @@ export default function GameRoom() {
     setEditingCharacter(true);
   }
   function cancelEditingCharacter() {
-    // restaura direto pro estado guardado (sem passar por
-    // selectHair/selectHairColor, que resetariam a cor de novo)
+    // só descarta o rascunho (o boneco de verdade no jogo nunca mudou
+    // enquanto editava, ver comentário acima -- nada a desfazer nele)
     setSelectedHairId(hairBeforeEditRef.current);
     setSelectedHairColorId(hairColorBeforeEditRef.current);
-    sceneRef.current?.setLocalHairId(hairColorBeforeEditRef.current ?? hairBeforeEditRef.current);
     setSelectedSkinId(skinBeforeEditRef.current);
-    sceneRef.current?.setLocalSkinId(skinBeforeEditRef.current);
     setSelectedBeardId(beardBeforeEditRef.current);
     setSelectedBeardColorId(beardColorBeforeEditRef.current);
-    sceneRef.current?.setLocalBeardId(beardColorBeforeEditRef.current ?? beardBeforeEditRef.current);
     setSelectedAccessoryId(accessoryBeforeEditRef.current);
     setSelectedAccessoryColorId(accessoryColorBeforeEditRef.current);
-    sceneRef.current?.setLocalAccessoryId(accessoryColorBeforeEditRef.current ?? accessoryBeforeEditRef.current);
     setEditingCharacter(false);
   }
   function saveEditingCharacter() {
+    // aplica o rascunho no boneco de verdade dentro do jogo -- só agora
+    // (ver comentário grande acima). Cor escolhida (se houver) manda
+    // mais que o item/estilo base, exatamente como no preview do topo.
+    sceneRef.current?.setLocalHairId(selectedHairColorId ?? selectedHairId);
+    sceneRef.current?.setLocalSkinId(selectedSkinId);
+    sceneRef.current?.setLocalBeardId(selectedBeardColorId ?? selectedBeardId);
+    sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
     setEditingCharacter(false);
   }
 
