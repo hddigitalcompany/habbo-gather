@@ -51,21 +51,21 @@ function statusColorFor(status: string | undefined): string {
 // grupo usa pra saber quem é quem entre uma visita e outra (ver
 // comentário grande em server/index.js).
 type RemotePlayer = { id: string; userId: string; x: number; y: number; color: string } & RemoteProfile;
-type ChatMessage = { id: string; text: string; ts: number };
 type Toast = { id: string; text: string };
 
 // --- chat de verdade (direta/grupo/histórico/anexos) -- ver comentário
 // grande no topo de server/index.js e server/chatStore.js pro protocolo
-// e a persistência. Tudo isso é SEPARADO do chat de sala (chatLog/
-// chatInput/sendChat, mais simples e sem histórico) só que os dois
-// aparecem juntos na mesma gaveta (ver ChatDrawer) -- "Sala" é só mais
-// uma entrada na lista de conversas, mesmo não sendo uma de verdade.
+// e a persistência. O chat de SALA (chatLog/chatInput/sendChat) usa o
+// MESMO formato de mensagem (ChatMsgBase, com foto/arquivo/áudio) mas
+// não fica salvo em disco -- ver o case "chat" em server/index.js --
+// então "Sala" aparece junto na mesma gaveta (ver ChatDrawer) como só
+// mais uma entrada na lista de conversas, mesmo não sendo uma de
+// verdade (não tem conversationId, ninguém precisa abrir histórico).
 type ChatAttachmentKind = "image" | "file" | "audio";
 type ChatAttachment = { url: string; name: string; size: number; mime: string };
 type ChatMsgKind = "text" | ChatAttachmentKind;
-type ChatMsg = {
+type ChatMsgBase = {
   id: string;
-  conversationId: string;
   senderId: string;
   senderName: string;
   kind: ChatMsgKind;
@@ -73,6 +73,9 @@ type ChatMsg = {
   attachment: ChatAttachment | null;
   ts: number;
 };
+type ChatMsg = ChatMsgBase & { conversationId: string };
+// mensagem da SALA -- mesmo formato, sem conversationId (ver comentário acima)
+type ChatMessage = ChatMsgBase;
 type ConversationParticipant = { id: string; name: string; color: string; photoUrl: string };
 type Conversation = {
   id: string;
@@ -83,6 +86,61 @@ type Conversation = {
   updatedAt: number;
   lastMessage: { senderId: string; senderName: string; kind: ChatMsgKind; text: string; ts: number } | null;
 };
+
+// --- Agenda (marcar call: data/horário/participantes, necessidades de
+// câmera/áudio/tela, aprovação dos convidados) -- ver comentário grande
+// no topo de server/index.js e server/agendaStore.js pro protocolo e a
+// persistência. Mora na MESMA gaveta de chat (ver ChatDrawer), como uma
+// segunda aba (Conversas | Agenda). ---
+type CallNeeds = { camera: boolean; audio: boolean; screen: boolean };
+type CallParticipantStatus = "pending" | "approved" | "declined";
+type CallParticipant = { id: string; name: string; color: string; status: CallParticipantStatus };
+type CallEvent = {
+  id: string;
+  title: string;
+  startTs: number;
+  durationMinutes: number;
+  needs: CallNeeds;
+  createdBy: string;
+  createdByName: string;
+  participants: CallParticipant[];
+  createdAt: number;
+};
+// rascunho do formulário "Marcar call" -- fica num objeto só (em vez de
+// um useState por campo) pra dar pra passar/atualizar de um jeito só
+// pro ChatDrawer (ver onChangeAgendaForm).
+type AgendaFormState = {
+  title: string;
+  date: string; // "AAAA-MM-DD", igual <input type="date">
+  time: string; // "HH:MM", igual <input type="time">
+  durationMinutes: number;
+  participantIds: string[];
+  needs: CallNeeds;
+};
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function localTimeStr(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+/** Junta os campos separados de data/horário do formulário (horário
+ * LOCAL do navegador, igual um <input type="datetime-local">) num
+ * único epoch ms -- o que o servidor usa pra checar conflito e ordenar
+ * (ver server/agendaStore.js). NaN se algum campo ainda tiver vazio. */
+function combineLocalDateTime(dateStr: string, timeStr: string): number {
+  if (!dateStr || !timeStr) return NaN;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh, mm] = timeStr.split(":").map(Number);
+  if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
+  return new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
+}
+function formatCallDateTime(ts: number): string {
+  return new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
 
 /** Nome pra mostrar de uma conversa: nome do grupo se tiver, senão o
  * nome do outro participante (direta) -- usado na lista E no cabeçalho
@@ -136,6 +194,10 @@ function loadSavedProfile(): Partial<ProfileFields> {
 // cada reconexão pro servidor pareceria uma pessoa nova (ver "userId"
 // vs "id" de conexão no comentário grande em server/index.js).
 const USER_ID_STORAGE_KEY = "habbo-gather-user-id";
+// lembrar se a gaveta de chat tá "fixada" como barra lateral (ver estado
+// chatPinned em GameRoom) -- só um boolean, não precisa de helper igual
+// getOrCreateUserId, lê/grava direto onde é usado.
+const CHAT_PINNED_STORAGE_KEY = "habbo-gather-chat-pinned";
 
 function getOrCreateUserId(): string {
   if (typeof window === "undefined") return "";
@@ -269,10 +331,47 @@ export default function GameRoom() {
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const [recordingAudio, setRecordingAudio] = useState(false);
   const [sendingAttachment, setSendingAttachment] = useState(false);
+  // "fixar" a gaveta de chat como barra lateral fixa (esquerda), em vez
+  // de flutuar sobre o jogo -- lembrado entre visitas (localStorage),
+  // igual o profile. Ver render lá embaixo: quando fixo, o ChatDrawer
+  // entra como IRMÃO do .room-wrapper (antes dele, pra ficar à
+  // esquerda), não mais como overlay por cima do jogo.
+  const [chatPinned, setChatPinned] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(CHAT_PINNED_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const autoOpenNextConversationRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Agenda (ver tipos CallEvent/AgendaFormState lá em cima e o
+  // comentário grande em server/index.js) -- segunda aba da MESMA
+  // gaveta de chat, ver chatMainTab. ---
+  const [chatMainTab, setChatMainTab] = useState<"conversas" | "agenda">("conversas");
+  const [calls, setCalls] = useState<CallEvent[]>([]);
+  // quem, dos candidatos a convidado, já tá ocupado no horário sendo
+  // escolhido AGORA no formulário -- atualizado ao vivo (ver o useEffect
+  // de "agenda:availability" mais abaixo), pra já desabilitar/marcar
+  // "indisponível" na lista de participantes ANTES da pessoa tentar
+  // selecionar (ver getConflictingUserIds em server/agendaStore.js).
+  const [busyUserIds, setBusyUserIds] = useState<string[]>([]);
+  const [agendaView, setAgendaView] = useState<"list" | "new" | "detail">("list");
+  const [agendaDetailId, setAgendaDetailId] = useState<string | null>(null);
+  const [agendaForm, setAgendaForm] = useState<AgendaFormState>({
+    title: "",
+    date: "",
+    time: "",
+    durationMinutes: 30,
+    participantIds: [],
+    needs: { camera: true, audio: true, screen: false },
+  });
+  const [agendaError, setAgendaError] = useState<string | null>(null);
+  const agendaCreatingRef = useRef(false);
 
   // --- card de perfil: MEUS campos (editáveis) e os dos OUTROS
   // jogadores (sincronizados pelo servidor, ver mensagem "profile" em
@@ -521,7 +620,8 @@ export default function GameRoom() {
       } else if (data.type === "signal") {
         handleSignal(data.from, data.data);
       } else if (data.type === "chat") {
-        setChatLog((prev) => [...prev.slice(-49), { id: data.id, text: data.text, ts: Date.now() }]);
+        const msg = data.message as ChatMessage;
+        setChatLog((prev) => [...prev.slice(-49), msg]);
       } else if (data.type === "chat:conversations") {
         const list = (data.conversations as Conversation[]).slice().sort((a, b) => b.updatedAt - a.updatedAt);
         setConversations(list);
@@ -560,6 +660,45 @@ export default function GameRoom() {
           const rest = prev.filter((c) => c.id !== data.conversationId);
           return [updated, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
         });
+      } else if (data.type === "agenda:calls") {
+        setCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
+      } else if (data.type === "agenda:call") {
+        const call = data.call as CallEvent;
+        setCalls((prev) => {
+          const rest = prev.filter((c) => c.id !== call.id);
+          return [...rest, call].sort((a, b) => a.startTs - b.startTs);
+        });
+        // se essa call é a que EU acabei de marcar (ver submitCreateCall/
+        // agendaCreatingRef), pula direto pro detalhe dela -- os outros
+        // convidados só recebem pra aparecer na LISTA deles, sem pular
+        // sozinho (mesmo padrão de autoOpenNextConversationRef no chat).
+        if (agendaCreatingRef.current && call.createdBy === myUserId) {
+          agendaCreatingRef.current = false;
+          setAgendaError(null);
+          setAgendaDetailId(call.id);
+          setAgendaView("detail");
+        }
+      } else if (data.type === "agenda:availability") {
+        setBusyUserIds(data.busyUserIds as string[]);
+      } else if (data.type === "agenda:invite") {
+        const call = data.call as CallEvent;
+        const toastId = `${Date.now()}-${Math.random()}`;
+        setToasts((prev) => [
+          ...prev.slice(-3),
+          { id: toastId, text: `${call.createdByName || "Alguém"} marcou "${call.title}" com você` },
+        ]);
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
+      } else if (data.type === "agenda:reminder") {
+        const call = data.call as CallEvent;
+        const toastId = `${Date.now()}-${Math.random()}`;
+        setToasts((prev) => [...prev.slice(-3), { id: toastId, text: `"${call.title}" começa em breve` }]);
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 6000);
+      } else if (data.type === "agenda:error") {
+        agendaCreatingRef.current = false;
+        if (data.reason === "conflict") {
+          setBusyUserIds((data.busyUserIds as string[]) ?? []);
+          setAgendaError("Algum convidado ficou indisponível nesse horário -- escolha outro e tente de novo.");
+        }
       }
     }
 
@@ -630,6 +769,7 @@ export default function GameRoom() {
         // em getOrCreateUserId) + já pede a lista de conversas salvas.
         socket.send(JSON.stringify({ type: "identify", userId: myUserId }));
         socket.send(JSON.stringify({ type: "chat:list" }));
+        socket.send(JSON.stringify({ type: "agenda:list" }));
       });
       socket.addEventListener("close", () => setStatus("Desconectado"));
       socket.addEventListener("error", () => setStatus("Erro de conexão"));
@@ -735,8 +875,8 @@ export default function GameRoom() {
 
   // --- chat de verdade (direta/grupo) -- ver tipos Conversation/ChatMsg
   // lá em cima. "Sala" (activeConversationId === null) continua usando
-  // sendChat/chatLog de cima, sem histórico nem anexo -- ver comentário
-  // em ChatDrawer sobre esse limite intencional. ---
+  // sendChat/chatLog de cima -- mesmo formato de mensagem (com anexo),
+  // só que sem histórico salvo (ver comentário no tipo ChatMessage). ---
 
   function openConversation(id: string | null) {
     setActiveConversationId(id);
@@ -798,13 +938,16 @@ export default function GameRoom() {
   }
 
   async function sendChatAttachment(file: Blob, filename: string, kind: ChatAttachmentKind) {
-    if (!activeConversationId) return; // "Sala" não tem anexo, ver comentário acima
     setSendingAttachment(true);
     try {
       const attachment = await uploadChatFile(file, filename);
-      socketRef.current?.send(
-        JSON.stringify({ type: "chat:send", conversationId: activeConversationId, attachment, kind })
-      );
+      if (activeConversationId === null) {
+        socketRef.current?.send(JSON.stringify({ type: "chat", attachment, kind }));
+      } else {
+        socketRef.current?.send(
+          JSON.stringify({ type: "chat:send", conversationId: activeConversationId, attachment, kind })
+        );
+      }
     } catch (e) {
       console.warn("Falha ao enviar anexo no chat", e);
     } finally {
@@ -843,6 +986,66 @@ export default function GameRoom() {
 
   function stopVoiceRecording() {
     mediaRecorderRef.current?.stop();
+  }
+
+  // --- Agenda (ver tipos/comentário grande lá em cima) ---
+
+  function updateAgendaForm(partial: Partial<AgendaFormState>) {
+    setAgendaForm((prev) => ({ ...prev, ...partial }));
+  }
+
+  function toggleAgendaParticipant(userId: string) {
+    if (busyUserIds.includes(userId)) return; // indisponível nesse horário, não deixa marcar
+    setAgendaForm((prev) => ({
+      ...prev,
+      participantIds: prev.participantIds.includes(userId)
+        ? prev.participantIds.filter((x) => x !== userId)
+        : [...prev.participantIds, userId],
+    }));
+  }
+
+  function startNewCall() {
+    const suggestion = new Date(Date.now() + 30 * 60_000); // meia hora a partir de agora, só de ponto de partida
+    setAgendaForm({
+      title: "",
+      date: localDateStr(suggestion),
+      time: localTimeStr(suggestion),
+      durationMinutes: 30,
+      participantIds: [],
+      needs: { camera: true, audio: true, screen: false },
+    });
+    setAgendaError(null);
+    setBusyUserIds([]);
+    setAgendaView("new");
+  }
+
+  function submitCreateCall() {
+    const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
+    if (!Number.isFinite(startTs) || agendaForm.participantIds.length === 0) return;
+    setAgendaError(null);
+    agendaCreatingRef.current = true;
+    socketRef.current?.send(
+      JSON.stringify({
+        type: "agenda:create",
+        title: agendaForm.title.trim() || "Call",
+        startTs,
+        durationMinutes: agendaForm.durationMinutes,
+        needs: agendaForm.needs,
+        participantIds: agendaForm.participantIds,
+      })
+    );
+    // fica na tela do formulário até a resposta chegar (sucesso pula pro
+    // detalhe da call criada, erro mostra o motivo aqui mesmo -- ver
+    // handlePartyMessage/agendaCreatingRef).
+  }
+
+  function openCallDetail(callId: string) {
+    setAgendaDetailId(callId);
+    setAgendaView("detail");
+  }
+
+  function respondToCall(callId: string, status: "approved" | "declined") {
+    socketRef.current?.send(JSON.stringify({ type: "agenda:respond", callId, status }));
   }
 
   function toggleEditMode() {
@@ -893,6 +1096,50 @@ export default function GameRoom() {
   useEffect(() => {
     sceneRef.current?.setLocalProfile(myProfile.name || "Você", statusColorFor(myProfile.status));
   }, [myProfile.name, myProfile.status]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_PINNED_STORAGE_KEY, chatPinned ? "1" : "0");
+    } catch {
+      // sem localStorage (modo privado etc.) -- só não lembra da próxima vez
+    }
+  }, [chatPinned]);
+
+  // checagem de disponibilidade AO VIVO enquanto o formulário "Marcar
+  // call" tá aberto -- a cada mudança de data/hora/duração, pergunta pro
+  // servidor quem (de todo mundo na sala) já fica ocupado nesse horário
+  // (ver getConflictingUserIds em server/agendaStore.js), pra já
+  // desabilitar essas pessoas na lista de participantes ANTES da pessoa
+  // tentar selecionar (não só revalidar depois de clicar "Marcar call").
+  // Debounce curto pra não mandar uma mensagem por tecla.
+  useEffect(() => {
+    if (agendaView !== "new") return;
+    const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
+    if (!Number.isFinite(startTs)) {
+      setBusyUserIds([]);
+      return;
+    }
+    const candidateUserIds = Array.from(
+      new Map(Array.from(remotePlayersRef.current.values()).map((p) => [p.userId, p])).values()
+    )
+      .map((p) => p.userId)
+      .filter((uid) => uid !== myUserId);
+    if (candidateUserIds.length === 0) {
+      setBusyUserIds([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      socketRef.current?.send(
+        JSON.stringify({
+          type: "agenda:availability",
+          candidateUserIds,
+          startTs,
+          durationMinutes: agendaForm.durationMinutes,
+        })
+      );
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [agendaView, agendaForm.date, agendaForm.time, agendaForm.durationMinutes, myUserId]);
 
   // enquanto o card de perfil (base OU editando) está aberto, o jogo
   // ignora clique em qualquer boneco -- sem isso, um clique na UI do
@@ -1007,8 +1254,63 @@ export default function GameRoom() {
     closeProfileCard();
   }
 
+  // props compartilhadas do ChatDrawer -- o MESMO componente é usado em
+  // dois lugares do JSX agora (flutuante por cima do jogo, ou fixo como
+  // barra lateral à esquerda, ver chatPinned), só a posição/pinned muda.
+  const chatDrawerProps = {
+    view: chatView,
+    onChangeView: setChatView,
+    conversations,
+    activeConversationId,
+    onOpenConversation: openConversation,
+    messages: activeConversationId === null ? [] : messagesByConv[activeConversationId] ?? [],
+    roomChatLog: chatLog,
+    myUserId,
+    onlinePlayers: Array.from(remotePlayersRef.current.values()),
+    newConvSelection,
+    onToggleNewConvSelection: toggleNewConvSelection,
+    newConvName,
+    onChangeNewConvName: setNewConvName,
+    onSubmitNewConversation: submitNewConversation,
+    renamingGroup,
+    onStartRenameGroup: (currentName: string) => {
+      setGroupNameDraft(currentName);
+      setRenamingGroup(true);
+    },
+    onCancelRenameGroup: () => setRenamingGroup(false),
+    groupNameDraft,
+    onChangeGroupNameDraft: setGroupNameDraft,
+    onSubmitRenameGroup: submitRenameGroup,
+    composerText: activeConversationId === null ? chatInput : chatComposerText,
+    onChangeComposerText: activeConversationId === null ? setChatInput : setChatComposerText,
+    onSendComposer: activeConversationId === null ? sendChat : sendActiveChatMessage,
+    onPickFile: () => chatFileInputRef.current?.click(),
+    sendingAttachment,
+    recordingAudio,
+    onStartRecording: startVoiceRecording,
+    onStopRecording: stopVoiceRecording,
+    onClose: () => setChatOpen(false),
+    onTogglePin: () => setChatPinned((v) => !v),
+    mainTab: chatMainTab,
+    onChangeMainTab: setChatMainTab,
+    calls,
+    busyUserIds,
+    agendaView,
+    onChangeAgendaView: setAgendaView,
+    agendaDetailId,
+    onOpenCallDetail: openCallDetail,
+    agendaForm,
+    onChangeAgendaForm: updateAgendaForm,
+    onToggleAgendaParticipant: toggleAgendaParticipant,
+    agendaError,
+    onStartNewCall: startNewCall,
+    onSubmitCreateCall: submitCreateCall,
+    onRespondToCall: respondToCall,
+  };
+
   return (
     <div className="room-and-editor">
+      {chatOpen && chatPinned && <ChatDrawer {...chatDrawerProps} pinned />}
       <div className="room-wrapper">
         <div ref={containerRef} className="phaser-container" />
 
@@ -1095,42 +1397,7 @@ export default function GameRoom() {
           </button>
         </div>
 
-        {chatOpen && (
-          <ChatDrawer
-            view={chatView}
-            onChangeView={setChatView}
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            onOpenConversation={openConversation}
-            messages={activeConversationId === null ? [] : messagesByConv[activeConversationId] ?? []}
-            roomChatLog={chatLog}
-            myUserId={myUserId}
-            onlinePlayers={Array.from(remotePlayersRef.current.values())}
-            newConvSelection={newConvSelection}
-            onToggleNewConvSelection={toggleNewConvSelection}
-            newConvName={newConvName}
-            onChangeNewConvName={setNewConvName}
-            onSubmitNewConversation={submitNewConversation}
-            renamingGroup={renamingGroup}
-            onStartRenameGroup={(currentName) => {
-              setGroupNameDraft(currentName);
-              setRenamingGroup(true);
-            }}
-            onCancelRenameGroup={() => setRenamingGroup(false)}
-            groupNameDraft={groupNameDraft}
-            onChangeGroupNameDraft={setGroupNameDraft}
-            onSubmitRenameGroup={submitRenameGroup}
-            composerText={activeConversationId === null ? chatInput : chatComposerText}
-            onChangeComposerText={activeConversationId === null ? setChatInput : setChatComposerText}
-            onSendComposer={activeConversationId === null ? sendChat : sendActiveChatMessage}
-            onPickFile={() => chatFileInputRef.current?.click()}
-            sendingAttachment={sendingAttachment}
-            recordingAudio={recordingAudio}
-            onStartRecording={startVoiceRecording}
-            onStopRecording={stopVoiceRecording}
-            onClose={() => setChatOpen(false)}
-          />
-        )}
+        {chatOpen && !chatPinned && <ChatDrawer {...chatDrawerProps} pinned={false} />}
         <input
           ref={chatFileInputRef}
           type="file"
@@ -1787,6 +2054,23 @@ function ChatDrawer({
   onStartRecording,
   onStopRecording,
   onClose,
+  pinned,
+  onTogglePin,
+  mainTab,
+  onChangeMainTab,
+  calls,
+  busyUserIds,
+  agendaView,
+  onChangeAgendaView,
+  agendaDetailId,
+  onOpenCallDetail,
+  agendaForm,
+  onChangeAgendaForm,
+  onToggleAgendaParticipant,
+  agendaError,
+  onStartNewCall,
+  onSubmitCreateCall,
+  onRespondToCall,
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
@@ -1817,10 +2101,38 @@ function ChatDrawer({
   onStartRecording: () => void;
   onStopRecording: () => void;
   onClose: () => void;
+  pinned: boolean;
+  onTogglePin: () => void;
+  mainTab: "conversas" | "agenda";
+  onChangeMainTab: (t: "conversas" | "agenda") => void;
+  calls: CallEvent[];
+  busyUserIds: string[];
+  agendaView: "list" | "new" | "detail";
+  onChangeAgendaView: (v: "list" | "new" | "detail") => void;
+  agendaDetailId: string | null;
+  onOpenCallDetail: (callId: string) => void;
+  agendaForm: AgendaFormState;
+  onChangeAgendaForm: (partial: Partial<AgendaFormState>) => void;
+  onToggleAgendaParticipant: (userId: string) => void;
+  agendaError: string | null;
+  onStartNewCall: () => void;
+  onSubmitCreateCall: () => void;
+  onRespondToCall: (callId: string, status: "approved" | "declined") => void;
 }) {
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const detailCall = calls.find((c) => c.id === agendaDetailId) ?? null;
+  const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
+  const pinBtn = (
+    <button
+      className={pinned ? "chat-icon-btn active" : "chat-icon-btn"}
+      title={pinned ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
+      onClick={onTogglePin}
+    >
+      <PinIcon filled={pinned} />
+    </button>
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -1831,12 +2143,30 @@ function ChatDrawer({
   const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
 
   return (
-    <div className="chat-drawer">
+    <div className={pinned ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}>
+      <div className="chat-main-tabs">
+        <button
+          className={mainTab === "conversas" ? "chat-main-tab active" : "chat-main-tab"}
+          onClick={() => onChangeMainTab("conversas")}
+        >
+          Conversas
+        </button>
+        <button
+          className={mainTab === "agenda" ? "chat-main-tab active" : "chat-main-tab"}
+          onClick={() => onChangeMainTab("agenda")}
+        >
+          Agenda
+        </button>
+      </div>
+
+      {mainTab === "conversas" && (
+        <>
       {view === "list" && (
         <>
           <div className="chat-drawer-header">
             <h3>Chat</h3>
             <div className="chat-drawer-header-actions">
+              {pinBtn}
               <button className="chat-icon-btn" title="Nova conversa" onClick={() => onChangeView("new")}>
                 <PlusIcon />
               </button>
@@ -1891,9 +2221,12 @@ function ChatDrawer({
               <BackIcon />
             </button>
             <h3>Nova conversa</h3>
-            <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-              <CloseIcon />
-            </button>
+            <div className="chat-drawer-header-actions">
+              {pinBtn}
+              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
           </div>
           <div className="chat-new-conv-body">
             {pickable.length === 0 ? (
@@ -1961,6 +2294,7 @@ function ChatDrawer({
               <h3>{activeConv ? conversationDisplayName(activeConv) : ""}</h3>
             )}
             <div className="chat-drawer-header-actions">
+              {pinBtn}
               {!isRoom && activeConv?.kind === "group" && !renamingGroup && (
                 <button
                   className="chat-icon-btn"
@@ -1987,11 +2321,8 @@ function ChatDrawer({
 
           <div className="chat-messages" ref={scrollRef}>
             {isRoom
-              ? roomChatLog.map((m, i) => (
-                  <div key={i} className="chat-message">
-                    <span className="chat-message-sender">{m.id.slice(0, 4)}</span>
-                    <div className="chat-bubble">{m.text}</div>
-                  </div>
+              ? roomChatLog.map((m) => (
+                  <ChatMessageRow key={m.id} msg={m} own={m.senderId === myUserId} showSenderName={m.senderId !== myUserId} />
                 ))
               : messages.map((m) => (
                   <ChatMessageRow
@@ -2001,31 +2332,30 @@ function ChatDrawer({
                     showSenderName={m.senderId !== myUserId && activeConv?.kind === "group"}
                   />
                 ))}
+            {isRoom && roomChatLog.length === 0 && (
+              <p className="chat-empty-hint">Nenhuma mensagem ainda -- diga oi pra quem tiver por perto!</p>
+            )}
             {!isRoom && messages.length === 0 && (
               <p className="chat-empty-hint">Nenhuma mensagem ainda -- diga oi!</p>
             )}
           </div>
 
           <div className="chat-composer">
-            {!isRoom && (
-              <>
-                <button
-                  className="chat-composer-btn"
-                  title="Anexar foto/arquivo"
-                  onClick={onPickFile}
-                  disabled={sendingAttachment || recordingAudio}
-                >
-                  <AttachIcon />
-                </button>
-                <button
-                  className={recordingAudio ? "chat-composer-btn recording" : "chat-composer-btn"}
-                  title={recordingAudio ? "Parar e enviar áudio" : "Gravar áudio"}
-                  onClick={recordingAudio ? onStopRecording : onStartRecording}
-                >
-                  {recordingAudio ? <StopIcon /> : <MicIcon off={false} />}
-                </button>
-              </>
-            )}
+            <button
+              className="chat-composer-btn"
+              title="Anexar foto/arquivo"
+              onClick={onPickFile}
+              disabled={sendingAttachment || recordingAudio}
+            >
+              <AttachIcon />
+            </button>
+            <button
+              className={recordingAudio ? "chat-composer-btn recording" : "chat-composer-btn"}
+              title={recordingAudio ? "Parar e enviar áudio" : "Gravar áudio"}
+              onClick={recordingAudio ? onStopRecording : onStartRecording}
+            >
+              {recordingAudio ? <StopIcon /> : <MicIcon off={false} />}
+            </button>
             <input
               className="chat-composer-input"
               value={composerText}
@@ -2042,11 +2372,245 @@ function ChatDrawer({
           </div>
         </>
       )}
+        </>
+      )}
+
+      {mainTab === "agenda" && (
+        <>
+          {agendaView === "list" && (
+            <>
+              <div className="chat-drawer-header">
+                <h3>Agenda</h3>
+                <div className="chat-drawer-header-actions">
+                  {pinBtn}
+                  <button className="chat-icon-btn" title="Marcar call" onClick={onStartNewCall}>
+                    <PlusIcon />
+                  </button>
+                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div className="agenda-call-list">
+                {calls.length === 0 && <p className="chat-empty-hint">Nenhuma call marcada ainda.</p>}
+                {calls.map((c) => {
+                  const mine = c.participants.find((p) => p.id === myUserId);
+                  const approvedCount = c.participants.filter((p) => p.status === "approved").length;
+                  return (
+                    <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
+                      <span className="agenda-call-item-main">
+                        <span className="agenda-call-title">{c.title}</span>
+                        <span className="agenda-call-when">
+                          {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+                        </span>
+                      </span>
+                      {mine?.status === "pending" && <span className="agenda-badge pending">Aguardando você</span>}
+                      {mine?.status === "declined" && <span className="agenda-badge declined">Recusada</span>}
+                      {mine?.status === "approved" && (
+                        <span className="agenda-badge approved">
+                          {approvedCount}/{c.participants.length} confirmados
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {agendaView === "new" && (
+            <>
+              <div className="chat-drawer-header">
+                <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeAgendaView("list")}>
+                  <BackIcon />
+                </button>
+                <h3>Marcar call</h3>
+                <div className="chat-drawer-header-actions">
+                  {pinBtn}
+                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div className="agenda-form-body">
+                <label className="chat-field">
+                  <span>Título</span>
+                  <input
+                    value={agendaForm.title}
+                    onChange={(e) => onChangeAgendaForm({ title: e.target.value })}
+                    placeholder="Ex: Alinhamento do projeto"
+                    maxLength={80}
+                  />
+                </label>
+                <div className="agenda-datetime-row">
+                  <label className="chat-field">
+                    <span>Data</span>
+                    <input
+                      type="date"
+                      value={agendaForm.date}
+                      onChange={(e) => onChangeAgendaForm({ date: e.target.value })}
+                    />
+                  </label>
+                  <label className="chat-field">
+                    <span>Horário</span>
+                    <input
+                      type="time"
+                      value={agendaForm.time}
+                      onChange={(e) => onChangeAgendaForm({ time: e.target.value })}
+                    />
+                  </label>
+                  <label className="chat-field">
+                    <span>Duração</span>
+                    <select
+                      value={agendaForm.durationMinutes}
+                      onChange={(e) => onChangeAgendaForm({ durationMinutes: Number(e.target.value) })}
+                    >
+                      <option value={15}>15 min</option>
+                      <option value={30}>30 min</option>
+                      <option value={45}>45 min</option>
+                      <option value={60}>1h</option>
+                      <option value={90}>1h30</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="agenda-needs-row">
+                  <span className="agenda-field-label">Necessidades (a pessoa se prepara)</span>
+                  <label className="agenda-need-check">
+                    <input
+                      type="checkbox"
+                      checked={agendaForm.needs.camera}
+                      onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, camera: e.target.checked } })}
+                    />
+                    <CamIcon off={false} /> Câmera
+                  </label>
+                  <label className="agenda-need-check">
+                    <input
+                      type="checkbox"
+                      checked={agendaForm.needs.audio}
+                      onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, audio: e.target.checked } })}
+                    />
+                    <MicIcon off={false} /> Áudio
+                  </label>
+                  <label className="agenda-need-check">
+                    <input
+                      type="checkbox"
+                      checked={agendaForm.needs.screen}
+                      onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, screen: e.target.checked } })}
+                    />
+                    <ScreenIcon active={false} /> Tela
+                  </label>
+                </div>
+
+                <span className="agenda-field-label">Participantes</span>
+                {pickable.length === 0 ? (
+                  <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
+                ) : (
+                  <div className="chat-picker-list">
+                    {pickable.map((p) => {
+                      const busy = busyUserIds.includes(p.userId);
+                      return (
+                        <label key={p.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
+                          <input
+                            type="checkbox"
+                            checked={agendaForm.participantIds.includes(p.userId)}
+                            disabled={busy}
+                            onChange={() => onToggleAgendaParticipant(p.userId)}
+                          />
+                          <span className="chat-conv-avatar" style={{ background: p.color }}>
+                            {(p.name || "?").slice(0, 1).toUpperCase()}
+                          </span>
+                          <span>{p.name || "Sem nome"}</span>
+                          {busy && <span className="agenda-badge busy">Indisponível</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {agendaError && <p className="agenda-error">{agendaError}</p>}
+
+                <button
+                  className="chat-primary-btn"
+                  disabled={!agendaForm.date || !agendaForm.time || agendaForm.participantIds.length === 0}
+                  onClick={onSubmitCreateCall}
+                >
+                  Marcar call
+                </button>
+              </div>
+            </>
+          )}
+
+          {agendaView === "detail" && detailCall && (
+            <>
+              <div className="chat-drawer-header">
+                <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeAgendaView("list")}>
+                  <BackIcon />
+                </button>
+                <h3>{detailCall.title}</h3>
+                <div className="chat-drawer-header-actions">
+                  {pinBtn}
+                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div className="agenda-detail-body">
+                <p className="agenda-detail-when">
+                  {formatCallDateTime(detailCall.startTs)} · {detailCall.durationMinutes}min
+                </p>
+                <p className="agenda-detail-creator">Marcada por {detailCall.createdByName || "?"}</p>
+                <div className="agenda-needs-row">
+                  {detailCall.needs.camera && (
+                    <span className="agenda-need-pill">
+                      <CamIcon off={false} /> Câmera
+                    </span>
+                  )}
+                  {detailCall.needs.audio && (
+                    <span className="agenda-need-pill">
+                      <MicIcon off={false} /> Áudio
+                    </span>
+                  )}
+                  {detailCall.needs.screen && (
+                    <span className="agenda-need-pill">
+                      <ScreenIcon active={false} /> Tela
+                    </span>
+                  )}
+                </div>
+                <span className="agenda-field-label">Participantes</span>
+                <div className="agenda-participant-list">
+                  {detailCall.participants.map((p) => (
+                    <div key={p.id} className="agenda-participant-row">
+                      <span className="chat-conv-avatar" style={{ background: p.color }}>
+                        {(p.name || "?").slice(0, 1).toUpperCase()}
+                      </span>
+                      <span className="agenda-participant-name">{p.id === myUserId ? "Você" : p.name || "Sem nome"}</span>
+                      <span className={`agenda-badge ${p.status}`}>
+                        {p.status === "approved" ? "Confirmado" : p.status === "declined" ? "Recusou" : "Aguardando"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {myCallStatus === "pending" && (
+                  <div className="agenda-respond-row">
+                    <button className="chat-primary-btn" onClick={() => onRespondToCall(detailCall.id, "approved")}>
+                      Confirmar presença
+                    </button>
+                    <button className="chat-secondary-btn" onClick={() => onRespondToCall(detailCall.id, "declined")}>
+                      Recusar
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function ChatMessageRow({ msg, own, showSenderName }: { msg: ChatMsg; own: boolean; showSenderName: boolean }) {
+function ChatMessageRow({ msg, own, showSenderName }: { msg: ChatMessage; own: boolean; showSenderName: boolean }) {
   return (
     <div className={own ? "chat-message own" : "chat-message"}>
       {showSenderName && <span className="chat-message-sender">{msg.senderName || "Alguém"}</span>}
@@ -2083,6 +2647,20 @@ function ChatMessageRow({ msg, own, showSenderName }: { msg: ChatMsg; own: boole
 }
 
 // --- ícones do chat, mesmo estilo linha-fina dos ícones da av-bar ---
+
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
+      <path
+        d="M14.5 3.5 20.5 9.5 17 13l.5 5-3-2.5-4 4-1-1 4-4L11 12l3.5-3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M9 15 4 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function ChatIcon() {
   return (

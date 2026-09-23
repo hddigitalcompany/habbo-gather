@@ -11,7 +11,12 @@
 //   move    -> { type: "move", id, x, y }
 //   leave   -> { type: "leave", id }
 //   signal  -> { type: "signal", from, data }   (relay de WebRTC)
-//   chat    -> { type: "chat", id, text }        (chat da SALA, todo mundo vê)
+//   chat    -> cliente->servidor: { type: "chat", text?, attachment?, kind? }
+//              servidor->sala:    { type: "chat", id, message }
+//              (chat da SALA, todo mundo vê -- NÃO fica salvo em disco,
+//              diferente do chat direto/grupo abaixo; "message" tem o
+//              mesmo formato de "chat:message" lá embaixo, pra dar pra
+//              desenhar com o mesmo componente dos dois lados)
 //   profile -> { type: "profile", id, name, status, instagram, bio, photoUrl }
 //              (card de perfil -- ver ProfileCard em GameRoom.tsx; "role"
 //              NÃO entra aqui, é só o servidor que atribui, ver PROFILE_FIELDS)
@@ -43,6 +48,26 @@
 //   POST /upload?filename=<nome>   (corpo = bytes crus do arquivo, Content-Type = mime)
 //     -> 200 { url, name, size, mime }  (url relativa, ver GET abaixo)
 //   GET  /uploads/<arquivo>        -> serve o arquivo salvo
+//
+// Agenda (marcar call: data/horário/participantes, necessidades de
+// câmera/áudio/tela, aprovação dos convidados) -- ver server/agendaStore.js:
+//   agenda:list         -> cliente->servidor: { type: "agenda:list" }
+//                           servidor->cliente: { type: "agenda:calls", calls }
+//   agenda:availability -> cliente->servidor: { type: "agenda:availability", candidateUserIds, startTs, durationMinutes }
+//                           servidor->cliente: { type: "agenda:availability", busyUserIds }
+//                           (checagem AO VIVO enquanto a pessoa preenche o
+//                           formulário, pra já mostrar quem fica indisponível)
+//   agenda:create       -> cliente->servidor: { type: "agenda:create", title, startTs, durationMinutes, needs, participantIds }
+//                           servidor->cada participante: { type: "agenda:call", call }
+//                           servidor->cada convidado (exceto quem criou): { type: "agenda:invite", call }
+//                           (recusa com { type: "agenda:error", reason: "conflict", busyUserIds }
+//                           se alguém ficou ocupado ENTRE a checagem ao vivo e o clique em criar)
+//   agenda:respond      -> cliente->servidor: { type: "agenda:respond", callId, status }  (status: "approved"|"declined")
+//                           servidor->cada participante: { type: "agenda:call", call }
+//                           (histórico de aprovação fica visível pra todo mundo da call)
+//   agenda:reminder     -> servidor->participantes (não recusados), alguns minutos antes do horário:
+//                           { type: "agenda:reminder", call }
+//                           (timer em memória -- some se o servidor reiniciar antes da hora)
 
 import { createServer } from "http";
 import { randomUUID } from "crypto";
@@ -52,6 +77,7 @@ import { unlink } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as chatStore from "./chatStore.js";
+import * as agendaStore from "./agendaStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
@@ -125,6 +151,27 @@ function sendToUser(userId, data) {
 function sendConversationTo(userId, conversationId) {
   const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conversationId);
   if (enriched) sendToUser(userId, { type: "chat:conversation", conversation: enriched });
+}
+
+// --- lembrete de call agendada (ver server/agendaStore.js) ---
+const REMINDER_LEAD_MS = 5 * 60 * 1000; // avisa 5min antes do horário marcado
+const MAX_SETTIMEOUT_MS = 2_147_000_000; // margem abaixo do limite de 32 bits do setTimeout (~24.8 dias)
+
+function scheduleReminder(call) {
+  const fireAt = call.startTs - REMINDER_LEAD_MS;
+  const delay = fireAt - Date.now();
+  // só agenda se falta MENOS que o limite do setTimeout -- calls marcadas
+  // com muita antecedência não recebem lembrete (o servidor não guarda
+  // timers em disco: se reiniciar antes da hora, esse lembrete específico
+  // se perde; aceitável pro tamanho desse projeto, sem fila de jobs).
+  if (delay <= 0 || delay > MAX_SETTIMEOUT_MS) return;
+  setTimeout(() => {
+    const fresh = agendaStore.getCall(call.id);
+    if (!fresh) return;
+    for (const p of fresh.participants) {
+      if (p.status !== "declined") sendToUser(p.id, { type: "agenda:reminder", call: fresh });
+    }
+  }, delay);
 }
 
 // campos do card de perfil que o PRÓPRIO jogador manda (ver mensagem
@@ -388,8 +435,32 @@ wss.on("connection", (ws, req) => {
         break;
       }
       case "chat": {
-        const text = String(data.text ?? "").slice(0, 300);
-        if (text.trim()) broadcast(room, { type: "chat", id, text });
+        // chat da SALA -- não fica salvo (ver comentário grande no topo),
+        // mas agora aceita anexo (foto/arquivo/áudio) igual ao chat
+        // direto/grupo, no mesmo formato de mensagem (ver chat:send
+        // embaixo) pra dar pra desenhar com o mesmo componente.
+        const text = typeof data.text === "string" ? data.text.slice(0, 2000) : "";
+        const attachment =
+          data.attachment && typeof data.attachment === "object"
+            ? {
+                url: String(data.attachment.url || "").slice(0, 500),
+                name: String(data.attachment.name || "arquivo").slice(0, 200),
+                size: Number(data.attachment.size) || 0,
+                mime: String(data.attachment.mime || "").slice(0, 100),
+              }
+            : null;
+        if (!text.trim() && !attachment) break;
+        const kind = !attachment ? "text" : data.kind === "audio" ? "audio" : data.kind === "image" ? "image" : "file";
+        const message = {
+          id: randomUUID(),
+          senderId: player.userId,
+          senderName: player.name,
+          kind,
+          text,
+          attachment,
+          ts: Date.now(),
+        };
+        broadcast(room, { type: "chat", id, message });
         break;
       }
       case "profile": {
@@ -486,6 +557,66 @@ wss.on("connection", (ws, req) => {
         const conv = chatStore.getConversation(data.conversationId);
         for (const uid of conv.participantIds) {
           sendToUser(uid, { type: "chat:message", conversationId: data.conversationId, message: msg });
+        }
+        break;
+      }
+
+      // --- agenda: marcar call (data/horário/participantes, necessidades
+      // de câmera/áudio/tela), aprovação dos convidados, checagem de
+      // conflito de horário (ver server/agendaStore.js) ---
+      case "agenda:list": {
+        const calls = agendaStore.listCallsForUser(player.userId);
+        ws.send(JSON.stringify({ type: "agenda:calls", calls }));
+        break;
+      }
+      case "agenda:availability": {
+        if (!Array.isArray(data.candidateUserIds)) break;
+        const candidateUserIds = data.candidateUserIds.filter((x) => typeof x === "string").slice(0, 100);
+        const startTs = Number(data.startTs);
+        const durationMinutes = Number(data.durationMinutes) || 30;
+        if (!Number.isFinite(startTs)) break;
+        const busyUserIds = agendaStore.getConflictingUserIds(candidateUserIds, startTs, durationMinutes);
+        ws.send(JSON.stringify({ type: "agenda:availability", busyUserIds }));
+        break;
+      }
+      case "agenda:create": {
+        if (!Array.isArray(data.participantIds)) break;
+        const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
+        const startTs = Number(data.startTs);
+        const durationMinutes = Number(data.durationMinutes) || 30;
+        if (!Number.isFinite(startTs) || participantIds.length === 0) break;
+
+        // revalida no servidor (defesa contra corrida: alguém marcou
+        // ENQUANTO essa pessoa preenchia o formulário) -- se algum
+        // convidado ficou ocupado nesse meio-tempo, recusa a criação
+        // inteira em vez de criar silenciosamente sem essa pessoa.
+        const busyUserIds = agendaStore.getConflictingUserIds(participantIds, startTs, durationMinutes);
+        if (busyUserIds.length > 0) {
+          ws.send(JSON.stringify({ type: "agenda:error", reason: "conflict", busyUserIds }));
+          break;
+        }
+
+        const call = agendaStore.createCall({
+          title: data.title,
+          startTs,
+          durationMinutes,
+          needs: data.needs,
+          participantIds,
+          createdBy: player.userId,
+        });
+        for (const p of call.participants) {
+          sendToUser(p.id, { type: "agenda:call", call });
+          if (p.id !== player.userId) sendToUser(p.id, { type: "agenda:invite", call });
+        }
+        scheduleReminder(call);
+        break;
+      }
+      case "agenda:respond": {
+        if (typeof data.callId !== "string" || typeof data.status !== "string") break;
+        const call = agendaStore.respondToCall(data.callId, player.userId, data.status);
+        if (!call) break;
+        for (const p of call.participants) {
+          sendToUser(p.id, { type: "agenda:call", call });
         }
         break;
       }

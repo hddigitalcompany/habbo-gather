@@ -236,6 +236,26 @@ body {
   backdrop-filter: blur(22px) saturate(180%);
 }
 
+/* "Fixar": em vez de flutuar por cima do jogo, a gaveta vira uma barra
+   lateral FIXA à esquerda (irmã de .room-wrapper dentro de
+   .room-and-editor, ver render em GameRoom.tsx) -- mesma pegada visual,
+   só troca posicionamento/tamanho/cantos (sobrescreve .chat-drawer, por
+   isso vem DEPOIS dele aqui: mesma especificidade, quem vier por
+   último no arquivo ganha). */
+.chat-drawer-sidebar {
+  position: static;
+  flex-shrink: 0;
+  width: 320px;
+  max-width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  box-shadow: 2px 0 30px rgba(0, 0, 0, 0.35);
+}
+
 .chat-drawer-header {
   display: flex;
   align-items: center;
@@ -278,6 +298,17 @@ body {
 
 .chat-icon-btn:hover {
   background: rgba(255, 255, 255, 0.16);
+}
+
+/* botão de fixar (ver PinIcon/chatPinned) -- mesmo destaque "ativo" que
+   os botões da av-bar quando ligados. */
+.chat-icon-btn.active {
+  background: #7c5cff;
+  color: #fff;
+}
+
+.chat-icon-btn.active:hover {
+  background: #8c6dff;
 }
 
 .chat-rename-input {
@@ -621,6 +652,265 @@ body {
 
 .chat-composer-input:disabled {
   opacity: 0.5;
+}
+
+/* Tira Conversas/Agenda no topo da gaveta -- sempre visível, troca só o
+   CONTEÚDO abaixo (ver mainTab em ChatDrawer), o resto da gaveta (lista/
+   nova conversa/conversa aberta OU lista de calls/marcar call/detalhe)
+   continua com seu próprio cabeçalho por baixo dessa tira. */
+.chat-main-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 0;
+  flex-shrink: 0;
+}
+
+.chat-main-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a99fc2;
+  cursor: pointer;
+}
+
+.chat-main-tab:hover {
+  color: #f5f0ff;
+}
+
+.chat-main-tab.active {
+  background: rgba(124, 92, 255, 0.22);
+  color: #f5f0ff;
+}
+
+.chat-field select {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #f5f0ff;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+
+.chat-field select:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.chat-secondary-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #f5f0ff;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* --- Agenda (marcar call: ver comentário grande no tipo CallEvent em
+   GameRoom.tsx e no topo de server/index.js) --- */
+
+.agenda-call-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agenda-call-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #f5f0ff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agenda-call-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.agenda-call-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.agenda-call-title {
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda-call-when {
+  font-size: 11px;
+  color: #a99fc2;
+}
+
+.agenda-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #d8d0ea;
+  white-space: nowrap;
+}
+
+.agenda-badge.pending {
+  background: rgba(245, 197, 66, 0.2);
+  color: #f5c542;
+}
+
+.agenda-badge.approved {
+  background: rgba(79, 217, 122, 0.2);
+  color: #4fd97a;
+}
+
+.agenda-badge.declined {
+  background: rgba(255, 92, 122, 0.2);
+  color: #ff5c7a;
+}
+
+.agenda-badge.busy {
+  background: rgba(255, 92, 122, 0.2);
+  color: #ff5c7a;
+}
+
+.agenda-form-body,
+.agenda-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agenda-datetime-row {
+  display: flex;
+  gap: 8px;
+}
+
+.agenda-datetime-row .chat-field {
+  flex: 1;
+}
+
+.agenda-needs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.agenda-field-label {
+  font-size: 11px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.agenda-need-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agenda-need-check svg {
+  width: 15px;
+  height: 15px;
+}
+
+.agenda-need-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.agenda-need-pill svg {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-picker-item.busy {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-picker-item.busy .agenda-badge {
+  margin-left: auto;
+}
+
+.agenda-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff5c7a;
+}
+
+.agenda-detail-when {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.agenda-detail-creator {
+  margin: 0;
+  font-size: 12px;
+  color: #a99fc2;
+}
+
+.agenda-participant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agenda-participant-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agenda-participant-name {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda-respond-row {
+  display: flex;
+  gap: 8px;
+}
+
+.agenda-respond-row button {
+  flex: 1;
 }
 
 .hint {
