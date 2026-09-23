@@ -54,9 +54,11 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
   return art[facing] ?? art.down ?? null;
 }
 
-// poltrona de teste, só pra validar o sistema de auto-sentar com arte
-// direcional de verdade. Posição definitiva vem depois, junto com o
-// resto da mobília da sala.
+// 4 poltronas de teste, uma virada pra cada direção -- pra validar as 4
+// artes (frente/lado esq/lado dir/costas) juntas na sala de uma vez.
+// Posição definitiva vem depois, junto com o resto da mobília da sala.
+const POLTRONA_SEAT_OFFSET_Y = -15; // ~16% da altura (77x96) -- estimativa
+
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {
     id: "poltrona-1",
@@ -64,9 +66,31 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     col: 9,
     row: 5,
     facing: "down",
-    // poltrona ficou bem menor (77x96, era 154x192) -- escala o mesmo
-    // ajuste proporcionalmente (~16% da altura). Ainda é estimativa.
-    seatOffsetY: -15,
+    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+  },
+  {
+    id: "poltrona-2",
+    type: "poltrona",
+    col: 2,
+    row: 2,
+    facing: "left",
+    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+  },
+  {
+    id: "poltrona-3",
+    type: "poltrona",
+    col: 10,
+    row: 2,
+    facing: "right",
+    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
+  },
+  {
+    id: "poltrona-4",
+    type: "poltrona",
+    col: 5,
+    row: 1,
+    facing: "up",
+    seatOffsetY: POLTRONA_SEAT_OFFSET_Y,
   },
 ];
 
