@@ -175,18 +175,25 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     facing: "up",
     seatOffsetY: SEAT_Y_FRENTE_COSTAS,
   },
-  // painel de vidro de teste -- item alto (2 tiles de altura exatos) em
-  // área livre, pra validar a troca de profundidade (andar por cima
-  // dele desce por trás) e a transparência (ver através dele) juntas.
-  // Fixado como divisória: o próprio tile trava (FURNITURE_BLOCKS_MOVEMENT),
-  // o de cima (onde só a parte de cima vaza) continua livre e transparente normal.
+  // painel de vidro de teste -- item alto (quase 3 tiles de altura,
+  // overflow pra cima é intencional) em área livre, pra validar a troca
+  // de profundidade (andar por cima dele desce por trás) e a
+  // transparência (ver através dele) juntas. Fixado como divisória: o
+  // próprio tile trava (FURNITURE_BLOCKS_MOVEMENT), o de cima (onde só a
+  // parte de cima vaza) continua livre.
+  //
+  // A transparência agora vem DA PRÓPRIA ARTE (vidro.png tem alpha
+  // diferente por região: perfil/moldura -- a barra escura no topo --
+  // 100% opaco, corpo do vidro com alpha reduzido já assado no PNG) --
+  // por isso NÃO usa mais `transparent: true` aqui, que aplicaria
+  // GLASS_ALPHA por cima da imagem inteira e deixaria a moldura
+  // transparente também, o que o usuário pediu pra não acontecer.
   {
     id: "vidro-teste-1",
     type: "vidro",
     col: 1,
     row: 4,
     facing: "down",
-    transparent: true,
     baseOffsetY: VIDRO_BASE_OFFSET_Y,
   },
   // segundo teste: vidro um tile ABAIXO da poltrona-1, na mesma coluna
@@ -199,7 +206,6 @@ export const ROOM_FURNITURE: FurnitureDef[] = [
     col: 9,
     row: 7,
     facing: "down",
-    transparent: true,
     baseOffsetY: VIDRO_BASE_OFFSET_Y,
   },
 ];
