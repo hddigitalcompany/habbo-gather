@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
@@ -90,6 +90,13 @@ type Conversation = {
   updatedAt: number;
   lastMessage: { senderId: string; senderName: string; kind: ChatMsgKind; text: string; ts: number } | null;
 };
+
+// --- chamada de voz/vídeo de uma conversa (chat direto/grupo, "tipo
+// discord") -- ver comentário grande em server/index.js (call:join/
+// call:leave/call:state). connectionId é o que endereça o mesh de
+// WebRTC (ver callPeersRef em GameRoom), userId/name/color/photoUrl são
+// só pra desenhar (quem já tá dentro, o botão verde na lista, etc). ---
+type ChatCallParticipant = { connectionId: string; userId: string; name: string; color: string; photoUrl: string };
 
 // --- Agenda (marcar call: data/horário/participantes, necessidades de
 // câmera/áudio/tela, aprovação dos convidados) -- ver comentário grande
@@ -370,6 +377,16 @@ export default function GameRoom() {
   const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const connectedPeersRef = useRef<Set<string>>(new Set());
   const selfIdRef = useRef<string>("");
+  // mesh PARALELO da chamada de chat (ver comentário grande na função
+  // sendCallSignal lá embaixo) -- connectionId -> RTCPeerConnection,
+  // igual peersRef mas só entre quem tá NA MESMA chamada, não por
+  // proximidade. myCallConversationIdRef espelha o estado
+  // myCallConversationId (ver embaixo) pra ler o valor atual de DENTRO
+  // do efeito de conexão (que só roda uma vez, ver useEffect com
+  // handlePartyMessage) sem cair em stale closure -- mesmo padrão já
+  // usado pra agendaColleagueIdRef/myProfileRef.
+  const callPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const myCallConversationIdRef = useRef<string | null>(null);
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -394,6 +411,18 @@ export default function GameRoom() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMsg[]>>({});
+  // chamada de voz/vídeo de uma conversa ("tipo discord") -- ver o tipo
+  // ChatCallParticipant lá em cima e o mesh em callPeersRef/
+  // sendCallSignal. callParticipantsByConversation cobre TODAS as
+  // conversas (é o que acende o botão verde de quem ainda não entrou);
+  // myCallConversationId é só a MINHA (não dá pra estar em duas ao mesmo
+  // tempo -- entrar numa nova sai da anterior sozinho, ver joinCall).
+  const [callParticipantsByConversation, setCallParticipantsByConversation] = useState<
+    Record<string, ChatCallParticipant[]>
+  >({});
+  const [myCallConversationId, setMyCallConversationId] = useState<string | null>(null);
+  myCallConversationIdRef.current = myCallConversationId;
+  const [callRemoteStreams, setCallRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [chatComposerText, setChatComposerText] = useState("");
   const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
   const [newConvName, setNewConvName] = useState("");
@@ -647,6 +676,93 @@ export default function GameRoom() {
       }
     }
 
+    // --- chamada de voz/vídeo de uma conversa (chat direto/grupo) --
+    // mesh de WebRTC PARALELO ao de cima (peersRef, por proximidade na
+    // Sala): endereçado pelo MESMO connectionId e pelo MESMO relay
+    // "signal" do servidor, mas com um "channel":"call" dentro do "data"
+    // pra não se misturar com o sinal de proximidade (ver handleSignal
+    // acima e handlePartyMessage embaixo, que decide pra qual dos dois
+    // mandar). Reaproveita o MESMO localStreamRef da Sala (câmera/mic já
+    // capturados ali) em vez de pedir uma segunda captura -- entrar numa
+    // chamada de chat não depende de tá perto de ninguém no mapa.
+    function sendCallSignal(to: string, data: unknown) {
+      socketRef.current?.send(JSON.stringify({ type: "signal", to, data: { channel: "call", ...(data as object) } }));
+    }
+
+    function createCallPeerConnection(peerId: string): RTCPeerConnection {
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      const localStream = localStreamRef.current;
+      if (localStream) {
+        localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      }
+
+      pc.ontrack = (event) => {
+        setCallRemoteStreams((prev) => ({ ...prev, [peerId]: event.streams[0] }));
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) sendCallSignal(peerId, { candidate: event.candidate });
+      };
+
+      callPeersRef.current.set(peerId, pc);
+      return pc;
+    }
+
+    function closeCallPeer(peerId: string) {
+      const pc = callPeersRef.current.get(peerId);
+      if (pc) {
+        pc.close();
+        callPeersRef.current.delete(peerId);
+      }
+      setCallRemoteStreams((prev) => {
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
+    }
+
+    function closeAllCallPeers() {
+      callPeersRef.current.forEach((pc) => pc.close());
+      callPeersRef.current.clear();
+      setCallRemoteStreams({});
+    }
+
+    async function connectToCallPeer(peerId: string) {
+      if (callPeersRef.current.has(peerId)) return;
+      const pc = createCallPeerConnection(peerId);
+      // mesmo critério de empate do mesh de proximidade: quem tem o id
+      // "menor" oferta primeiro, assim os dois lados não ofertam juntos.
+      const amInitiator = selfIdRef.current < peerId;
+      if (amInitiator) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        sendCallSignal(peerId, { sdp: pc.localDescription });
+      }
+    }
+
+    async function handleCallSignal(from: string, data: any) {
+      let pc = callPeersRef.current.get(from);
+      if (!pc) pc = createCallPeerConnection(from);
+
+      if (data.sdp) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        if (data.sdp.type === "offer") {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          sendCallSignal(from, { sdp: pc.localDescription });
+        }
+      } else if (data.candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (e) {
+          console.warn("Falha ao adicionar candidato ICE (chamada)", e);
+        }
+      }
+    }
+
     function checkProximity() {
       const scene = sceneRef.current;
       if (!scene) return;
@@ -760,7 +876,14 @@ export default function GameRoom() {
         scene?.removeRemotePlayer(data.id);
         closePeer(data.id);
       } else if (data.type === "signal") {
-        handleSignal(data.from, data.data);
+        // "channel":"call" = sinalização da chamada de chat (mesh
+        // paralelo, ver handleCallSignal acima); sem isso é o sinal de
+        // proximidade normal da Sala.
+        if (data.data && data.data.channel === "call") {
+          handleCallSignal(data.from, data.data);
+        } else {
+          handleSignal(data.from, data.data);
+        }
       } else if (data.type === "chat") {
         const msg = data.message as ChatMessage;
         // defesa: se por algum motivo "message" não vier junto (payload
@@ -830,6 +953,35 @@ export default function GameRoom() {
           const rest = prev.filter((c) => c.id !== data.conversationId);
           return [updated, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
         });
+      } else if (data.type === "call:state") {
+        // "quem tá na chamada" de UMA conversa -- chega pra todo mundo
+        // que participa dela (esteja ou não na call agora, é o que
+        // acende o botão verde na lista, ver ChatDrawer). Se essa
+        // conversa é a MINHA chamada ativa (ver myCallConversationIdRef,
+        // espelho pra ler aqui dentro do efeito sem stale-closure),
+        // reconcilia o mesh: conecta quem entrou, desconecta quem saiu.
+        const conversationId = data.conversationId as string;
+        const participants = data.participants as ChatCallParticipant[];
+        setCallParticipantsByConversation((prev) => ({ ...prev, [conversationId]: participants }));
+        if (myCallConversationIdRef.current === conversationId) {
+          const stillIn = participants.some((p) => p.userId === myUserId);
+          if (!stillIn) {
+            // saí (ou outra aba minha saiu) -- limpa o lado local também.
+            myCallConversationIdRef.current = null;
+            setMyCallConversationId(null);
+            closeAllCallPeers();
+          } else {
+            const wantedPeerIds = new Set(
+              participants.filter((p) => p.userId !== myUserId).map((p) => p.connectionId)
+            );
+            callPeersRef.current.forEach((_pc, peerId) => {
+              if (!wantedPeerIds.has(peerId)) closeCallPeer(peerId);
+            });
+            wantedPeerIds.forEach((peerId) => {
+              if (!callPeersRef.current.has(peerId)) connectToCallPeer(peerId);
+            });
+          }
+        }
       } else if (data.type === "agenda:calls") {
         setCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
       } else if (data.type === "agenda:call") {
@@ -973,6 +1125,8 @@ export default function GameRoom() {
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       peersRef.current.forEach((pc) => pc.close());
       peersRef.current.clear();
+      callPeersRef.current.forEach((pc) => pc.close());
+      callPeersRef.current.clear();
     };
   }, []);
 
@@ -1247,6 +1401,34 @@ export default function GameRoom() {
     } else {
       wsSend({ type: "chat:delete", conversationId, messageId });
     }
+  }
+
+  // --- chamada de voz/vídeo de uma conversa ("tipo discord") -- opt-in
+  // (ver call:join/call:leave em server/index.js), só dá pra estar numa
+  // por vez: entrar numa nova sai da anterior sozinho. Fecha o mesh local
+  // NA HORA (não espera o "call:state" confirmar, ver
+  // handlePartyMessage) pra UI reagir de imediato; o eco que volta do
+  // servidor só reconcilia de novo, sem efeito nenhum já que já tá tudo
+  // limpo. ---
+  function joinCall(conversationId: string) {
+    if (myCallConversationId === conversationId) return;
+    if (myCallConversationId) {
+      wsSend({ type: "call:leave", conversationId: myCallConversationId });
+      callPeersRef.current.forEach((pc) => pc.close());
+      callPeersRef.current.clear();
+      setCallRemoteStreams({});
+    }
+    setMyCallConversationId(conversationId);
+    wsSend({ type: "call:join", conversationId });
+  }
+
+  function leaveCall() {
+    if (!myCallConversationId) return;
+    wsSend({ type: "call:leave", conversationId: myCallConversationId });
+    setMyCallConversationId(null);
+    callPeersRef.current.forEach((pc) => pc.close());
+    callPeersRef.current.clear();
+    setCallRemoteStreams({});
   }
 
   // --- Agenda (ver tipos/comentário grande lá em cima) ---
@@ -1653,6 +1835,13 @@ export default function GameRoom() {
     onDiscardRecordedAudio: discardRecordedAudio,
     onSendRecordedAudio: sendRecordedAudio,
     onDeleteMessage: deleteMessage,
+    callParticipantsByConversation,
+    myCallConversationId,
+    callRemoteStreams,
+    onJoinCall: joinCall,
+    onLeaveCall: leaveCall,
+    localStreamRef,
+    camOn,
     onClose: () => setChatOpen(false),
     pinMode: chatPinMode,
     onToggleSidePin: toggleChatPinSide,
@@ -2424,6 +2613,34 @@ function RemoteVideoTile({
   );
 }
 
+// video da chamada de CHAT (ver ChatDrawer/joinCall) -- mais simples que
+// RemoteVideoTile de cima (sem opacidade por distância, não faz
+// sentido numa chamada que não depende de posição no mapa). "muted" só
+// pro MEU PRÓPRIO preview (senão eu ouviria meu próprio áudio de volta),
+// o vídeo de quem eu tô chamando nunca é mudo.
+function ChatCallVideoTile({ stream, muted }: { stream: MediaStream; muted?: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream;
+  }, [stream]);
+
+  return <video ref={ref} autoPlay muted={muted} playsInline className="chat-call-video" />;
+}
+
+function PhoneIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M6.5 3.5c.6 0 1.1.4 1.3 1l1 2.8c.2.5 0 1.1-.4 1.4L7 10c1 2.3 2.7 4 5 5l1.3-1.4c.4-.4 1-.5 1.4-.3l2.8 1c.6.2 1 .7 1 1.3v2.6c0 1-.9 1.8-1.9 1.6C10.4 18.8 5.2 13.6 4.2 6.4 4 5.4 4.8 4.5 5.8 4.5h.7Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 // Gaveta de chat "de verdade" -- Sala (nearby, sem histórico, ver
 // comentário nos tipos lá em cima) + conversas diretas/grupo com
 // histórico persistido no servidor + foto/arquivo/áudio. Tamanho FIXO
@@ -2465,6 +2682,13 @@ function ChatDrawer({
   onDiscardRecordedAudio,
   onSendRecordedAudio,
   onDeleteMessage,
+  callParticipantsByConversation,
+  myCallConversationId,
+  callRemoteStreams,
+  onJoinCall,
+  onLeaveCall,
+  localStreamRef,
+  camOn,
   onClose,
   pinMode,
   onToggleSidePin,
@@ -2503,6 +2727,13 @@ function ChatDrawer({
   onDiscardRecordedAudio: () => void;
   onSendRecordedAudio: () => void;
   onDeleteMessage: (conversationId: string | null, messageId: string) => void;
+  callParticipantsByConversation: Record<string, ChatCallParticipant[]>;
+  myCallConversationId: string | null;
+  callRemoteStreams: Record<string, MediaStream>;
+  onJoinCall: (conversationId: string) => void;
+  onLeaveCall: () => void;
+  localStreamRef: RefObject<MediaStream | null>;
+  camOn: boolean;
   onClose: () => void;
   pinMode: "float" | "side";
   onToggleSidePin: () => void;
@@ -2510,6 +2741,10 @@ function ChatDrawer({
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const activeCallParticipants =
+    !isRoom && activeConversationId ? callParticipantsByConversation[activeConversationId] ?? [] : [];
+  const inActiveCall = !isRoom && myCallConversationId === activeConversationId;
+  const localCallStream = localStreamRef.current;
   // clicar de novo no lateral solta (volta a flutuar).
   const pinBtn = (
     <button
@@ -2561,24 +2796,45 @@ function ChatDrawer({
                 </span>
               </span>
             </button>
-            {conversations.map((c) => (
-              <button key={c.id} className="chat-conv-item" onClick={() => onOpenConversation(c.id)}>
-                <span
-                  className="chat-conv-avatar"
-                  style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
-                >
-                  {c.kind === "group" ? <GroupIcon /> : conversationDisplayName(c).slice(0, 1).toUpperCase()}
-                </span>
-                <span className="chat-conv-info">
-                  <span className="chat-conv-name">{conversationDisplayName(c)}</span>
-                  <span className="chat-conv-preview">
-                    {c.lastMessage
-                      ? `${c.lastMessage.senderId === myUserId ? "Você: " : ""}${previewText(c.lastMessage)}`
-                      : "Nenhuma mensagem ainda"}
+            {conversations.map((c) => {
+              // botão verde "tipo discord": acende quando tem gente NA
+              // CHAMADA dessa conversa agora, mesmo que eu ainda não
+              // tenha entrado -- clicar nele já abre a conversa E entra
+              // direto na chamada (ver onJoinCall/joinCall).
+              const activeCall = callParticipantsByConversation[c.id] ?? [];
+              return (
+                <button key={c.id} className="chat-conv-item" onClick={() => onOpenConversation(c.id)}>
+                  <span
+                    className="chat-conv-avatar"
+                    style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
+                  >
+                    {c.kind === "group" ? <GroupIcon /> : conversationDisplayName(c).slice(0, 1).toUpperCase()}
                   </span>
-                </span>
-              </button>
-            ))}
+                  <span className="chat-conv-info">
+                    <span className="chat-conv-name">{conversationDisplayName(c)}</span>
+                    <span className="chat-conv-preview">
+                      {c.lastMessage
+                        ? `${c.lastMessage.senderId === myUserId ? "Você: " : ""}${previewText(c.lastMessage)}`
+                        : "Nenhuma mensagem ainda"}
+                    </span>
+                  </span>
+                  {activeCall.length > 0 && (
+                    <span
+                      className="chat-call-badge"
+                      title={`Chamada em andamento -- ${activeCall.length} ${activeCall.length === 1 ? "pessoa" : "pessoas"}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenConversation(c.id);
+                        onJoinCall(c.id);
+                      }}
+                    >
+                      <PhoneIcon />
+                      {activeCall.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             {conversations.length === 0 && (
               <p className="chat-empty-hint">Clique em + pra começar uma conversa direta ou em grupo.</p>
             )}
@@ -2667,6 +2923,15 @@ function ChatDrawer({
             )}
             <div className="chat-drawer-header-actions">
               {pinBtn}
+              {!isRoom && activeConversationId && (
+                <button
+                  className={inActiveCall ? "chat-icon-btn call-active" : "chat-icon-btn"}
+                  title={inActiveCall ? "Sair da chamada" : "Iniciar/entrar na chamada"}
+                  onClick={() => (inActiveCall ? onLeaveCall() : activeConversationId && onJoinCall(activeConversationId))}
+                >
+                  <PhoneIcon />
+                </button>
+              )}
               {!isRoom && activeConv?.kind === "group" && !renamingGroup && (
                 <button
                   className="chat-icon-btn"
@@ -2689,6 +2954,66 @@ function ChatDrawer({
 
           {!isRoom && activeConv?.kind === "group" && (
             <div className="chat-group-members">{activeConv.participants.map((p) => p.name || "?").join(", ")}</div>
+          )}
+
+          {!isRoom && activeCallParticipants.length > 0 && (
+            // "botão de chamada verde ... com a opção da pessoa entrar
+            // ou não, sair e ver quem tá participando, no topo" -- quem
+            // já tá dentro aparece aqui pra QUALQUER participante da
+            // conversa, mesmo quem ainda não entrou (é o que dá pra ver
+            // "quem tá participando" antes de decidir entrar).
+            <div className="chat-call-bar">
+              <div className="chat-call-bar-people">
+                {activeCallParticipants.map((p) => (
+                  <span key={p.connectionId} className="chat-call-bar-avatar" style={{ background: p.color }} title={p.name || "?"}>
+                    {(p.name || "?").slice(0, 1).toUpperCase()}
+                  </span>
+                ))}
+                <span className="chat-call-bar-label">
+                  {activeCallParticipants.length} {activeCallParticipants.length === 1 ? "pessoa" : "pessoas"} na chamada
+                </span>
+              </div>
+              {inActiveCall ? (
+                <button className="chat-call-bar-btn leave" onClick={onLeaveCall}>
+                  Sair
+                </button>
+              ) : (
+                <button
+                  className="chat-call-bar-btn join"
+                  onClick={() => activeConversationId && onJoinCall(activeConversationId)}
+                >
+                  Entrar
+                </button>
+              )}
+            </div>
+          )}
+
+          {inActiveCall && (
+            <div className="chat-call-videos">
+              <div className="chat-call-video-tile">
+                {camOn && localCallStream ? (
+                  <ChatCallVideoTile stream={localCallStream} muted />
+                ) : (
+                  <span className="chat-call-video-placeholder">Você</span>
+                )}
+                <span className="video-name">Você</span>
+              </div>
+              {activeCallParticipants
+                .filter((p) => p.userId !== myUserId)
+                .map((p) => {
+                  const stream = callRemoteStreams[p.connectionId];
+                  return (
+                    <div key={p.connectionId} className="chat-call-video-tile">
+                      {stream ? (
+                        <ChatCallVideoTile stream={stream} />
+                      ) : (
+                        <span className="chat-call-video-placeholder">{(p.name || "?").slice(0, 1).toUpperCase()}</span>
+                      )}
+                      <span className="video-name">{p.name || "?"}</span>
+                    </div>
+                  );
+                })}
+            </div>
           )}
 
           <div className="chat-messages" ref={scrollRef}>

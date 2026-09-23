@@ -51,6 +51,19 @@
 //                        quem tá conectado AGORA tarjar a mensagem no próprio log local --
 //                        ver comentário no case)
 //                        servidor->sala: { type: "chat_room_deleted", messageId }
+//   call:join         -> cliente->servidor: { type: "call:join", conversationId }
+//                        (chamada de voz/vídeo de uma conversa direta/grupo -- "opt-in", só
+//                        entra quem clicar; só quem PARTICIPA da conversa pode entrar)
+//   call:leave        -> cliente->servidor: { type: "call:leave", conversationId }
+//   call:state        -> servidor->cada participante da conversa (esteja OU NÃO na
+//                        chamada, é o que acende o botão verde "entrar" de quem ainda
+//                        não entrou -- ver comentário em broadcastCallState):
+//                        { type: "call:state", conversationId, participants: [{ connectionId, userId, name, color, photoUrl }] }
+//                        (participants: [] = ninguém na chamada agora; o mesh de WebRTC
+//                        entre quem tá dentro usa o "signal" de cima, endereçado por
+//                        connectionId, com um "channel":"call" dentro do "data" pra não
+//                        misturar com a chamada de proximidade da Sala -- ver
+//                        connectionsById/activeCalls)
 //   users:list        -> servidor->sala, toda vez que alguém identifica ou muda o perfil:
 //                        { type: "users:list", users: [{ userId, name, color, photoUrl }] }
 //                        (todo mundo já cadastrado no ambiente, ONLINE OU NÃO -- ver
@@ -139,6 +152,72 @@ function getRoom(roomId) {
     rooms.set(roomId, room);
   }
   return room;
+}
+
+// connectionId -> { ws, player } -- igual "rooms", mas achatado (sem
+// precisar saber o roomId pra procurar), usado pela CHAMADA de chat (ver
+// "call:join" embaixo): o mesh de WebRTC de uma call é endereçado por
+// connectionId (mesmo esquema do "signal" de proximidade), então preciso
+// resolver connectionId -> jogador/ws sem depender de qual sala a pessoa
+// tá. Só um Map a mais espelhando o "rooms" de cima; populado/limpo nos
+// mesmos pontos (connection/close).
+const connectionsById = new Map();
+
+// conversationId -> Set<connectionId> -- quem tá NA CHAMADA de uma
+// conversa direta/grupo agora (ver "call:join"/"call:leave" embaixo).
+// Só em memória, de propósito: uma chamada em andamento não precisa
+// sobreviver a um restart do servidor (ninguém ficaria conectado mesmo,
+// já que o WebSocket também cai). Diferente do chat/agenda, que persistem
+// em disco -- ver chatStore.js/agendaStore.js.
+const activeCalls = new Map();
+
+/** Quem tá na chamada de uma conversa agora, já com nome/cor/foto pra
+ * desenhar (ver call:state embaixo) -- ignora silenciosamente qualquer
+ * connectionId que já caiu (não deveria acontecer, já que "close" limpa
+ * a call, mas defende contra corrida). */
+function callParticipantsPayload(conversationId) {
+  const set = activeCalls.get(conversationId);
+  if (!set) return [];
+  const out = [];
+  for (const connId of set) {
+    const conn = connectionsById.get(connId);
+    if (!conn) continue;
+    out.push({
+      connectionId: connId,
+      userId: conn.player.userId,
+      name: conn.player.name,
+      color: conn.player.color,
+      photoUrl: conn.player.photoUrl,
+    });
+  }
+  return out;
+}
+
+/** Avisa TODO MUNDO que participa da conversa (online, esteja ou não NA
+ * chamada agora) que a lista de quem tá na chamada mudou -- é o que
+ * acende o botão verde "entrar na call" de quem ainda não entrou (ver
+ * "tipo discord" no pedido) e atualiza a lista de participantes de quem
+ * já tá dentro. */
+function broadcastCallState(conversationId) {
+  const conv = chatStore.getConversation(conversationId);
+  if (!conv) return;
+  const participants = callParticipantsPayload(conversationId);
+  for (const userId of conv.participantIds) {
+    sendToUser(userId, { type: "call:state", conversationId, participants });
+  }
+}
+
+/** Tira uma conexão de QUALQUER chamada em que ela esteja (ver "close"
+ * embaixo -- fechar a aba/cair a conexão não pode deixar um fantasma pra
+ * sempre "na chamada" pros outros). Avisa só as conversas de onde ela
+ * realmente saiu. */
+function leaveAllCalls(connectionId) {
+  for (const [conversationId, set] of activeCalls) {
+    if (!set.has(connectionId)) continue;
+    set.delete(connectionId);
+    if (set.size === 0) activeCalls.delete(conversationId);
+    broadcastCallState(conversationId);
+  }
 }
 
 function broadcast(room, data, excludeId) {
@@ -404,6 +483,7 @@ wss.on("connection", (ws, req) => {
   };
 
   room.set(id, { ws, player });
+  connectionsById.set(id, { ws, player });
   registerUserConnection(player.userId, ws);
 
   ws.send(
@@ -537,6 +617,16 @@ wss.on("connection", (ws, req) => {
       case "chat:list": {
         const conversations = chatStore.listConversationsForUser(player.userId);
         ws.send(JSON.stringify({ type: "chat:conversations", conversations }));
+        // já manda o estado de chamada de quem já tiver uma rolando --
+        // sem isso o botão verde "entrar na call" só apareceria depois
+        // da PRÓXIMA mudança (ver broadcastCallState), não já na
+        // primeira vez que a lista de conversas carrega.
+        for (const conv of conversations) {
+          const participants = callParticipantsPayload(conv.id);
+          if (participants.length > 0) {
+            ws.send(JSON.stringify({ type: "call:state", conversationId: conv.id, participants }));
+          }
+        }
         break;
       }
       case "chat:open": {
@@ -629,6 +719,35 @@ wss.on("connection", (ws, req) => {
         // qualquer um mandar o nome que quiser no "profile").
         if (typeof data.messageId !== "string") break;
         broadcast(room, { type: "chat_room_deleted", messageId: data.messageId });
+        break;
+      }
+
+      // --- chamada de voz/vídeo de uma conversa direta/grupo ("tipo
+      // discord"): opt-in (ninguém entra sozinho), qualquer participante
+      // pode entrar/sair a qualquer momento, o mesh de WebRTC entre quem
+      // tá NA chamada usa o mesmo relay "signal" de cima (endereçado por
+      // connectionId, ver comentário em activeCalls) -- só a lista de
+      // quem tá dentro passa por aqui. ---
+      case "call:join": {
+        if (typeof data.conversationId !== "string") break;
+        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
+        let set = activeCalls.get(data.conversationId);
+        if (!set) {
+          set = new Set();
+          activeCalls.set(data.conversationId, set);
+        }
+        set.add(id);
+        broadcastCallState(data.conversationId);
+        break;
+      }
+      case "call:leave": {
+        if (typeof data.conversationId !== "string") break;
+        const set = activeCalls.get(data.conversationId);
+        if (set) {
+          set.delete(id);
+          if (set.size === 0) activeCalls.delete(data.conversationId);
+        }
+        broadcastCallState(data.conversationId);
         break;
       }
 
@@ -729,7 +848,9 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     room.delete(id);
+    connectionsById.delete(id);
     unregisterUserConnection(player.userId, ws);
+    leaveAllCalls(id);
     broadcast(room, { type: "leave", id });
     if (room.size === 0) rooms.delete(roomId);
   });
