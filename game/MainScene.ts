@@ -140,23 +140,20 @@ function layerTextureKey(layer: LayerKey): string {
   return `avatar-${layer}`;
 }
 
-// profundidade (z-order): boneco e móvel ordenados pela posição Y na
-// tela (quem está mais "pra baixo"/mais perto da câmera desenha na
-// FRENTE) -- é isso que implementa a regra "se o boneco passa no
-// quadrado de CIMA em relação ao móvel, ele fica por TRÁS; na própria
-// fileira do móvel (ou abaixo), ele fica na FRENTE" (móvel alto,
-// overflow de altura pra cima -- ver TILE em grid.ts).
+// profundidade (z-order): a "fronteira" de um móvel é a borda de CIMA da
+// própria fileira dele (onde o tile do móvel começa) -- o boneco fica
+// por TRÁS enquanto seu Y não cruzou essa borda (ainda tá na fileira de
+// CIMA, onde só a parte que "vaza" do móvel aparece), e passa pra FRENTE
+// assim que entra na fileira do móvel (ou below). Comparar direto contra
+// essa borda (em vez da base do móvel) é o que faz a troca acontecer
+// bem quando o boneco cruza a linha entre as duas fileiras -- inclusive
+// no MEIO de um passo (andando continuamente) -- e não só quando ele já
+// terminou de chegar.
 //
-// O móvel ancora na BASE do próprio tile (furnitureWorldPos = meio tile
-// abaixo do centro, ver furniture.ts), mas o boneco anda ancorado no
-// CENTRO do tile (tileToWorld) -- comparar os dois Y crus não seria
-// justo: o boneco pareceria "atrás" mesmo estando na mesma fileira do
-// móvel. DEPTH_AVATAR_ROW_OFFSET soma esse meio tile de volta só pra
-// esse cálculo de profundidade, e DEPTH_AVATAR_TIE_BIAS garante que, em
-// empate exato (mesma fileira), o boneco desenha na frente -- só perde
-// quando está estritamente na fileira anterior. Ver avatarDepthForY().
-const DEPTH_AVATAR_ROW_OFFSET = TILE / 2;
-const DEPTH_AVATAR_TIE_BIAS = 1;
+// furnitureWorldPos() ancora o móvel na BASE do tile dele (ver
+// furniture.ts) -- a borda de CIMA da fileira fica 1 tile inteiro acima
+// disso.
+const DEPTH_FURNITURE_ROW_HEIGHT = TILE;
 
 // exceção: móveis "flat" (tapete, por exemplo -- sem altura de verdade,
 // não faz sentido o boneco passar "por trás" deles) ficam sempre atrás
@@ -164,9 +161,14 @@ const DEPTH_AVATAR_TIE_BIAS = 1;
 // profundidade -- ver FurnitureDef.flat em furniture.ts.
 const DEPTH_FLAT_FURNITURE = -1_000_000;
 
-/** Profundidade "justa" do boneco numa posição Y, pra comparar com a base de um móvel (ver comentário acima). */
+/** Profundidade de um móvel a partir da posição já ancorada na base (furnitureWorldPos) -- ver comentário acima. */
+function furnitureDepthForBasePos(pos: { y: number }): number {
+  return pos.y - DEPTH_FURNITURE_ROW_HEIGHT;
+}
+
+/** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForBasePos(). */
 function avatarDepthForY(y: number): number {
-  return y + DEPTH_AVATAR_ROW_OFFSET + DEPTH_AVATAR_TIE_BIAS;
+  return y;
 }
 
 type Activity = "idle" | "sentado";
@@ -256,7 +258,7 @@ export default class MainScene extends Phaser.Scene {
       this.add
         .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
         .setOrigin(0.5, 1)
-        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : pos.y);
+        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForBasePos(pos));
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -378,7 +380,9 @@ export default class MainScene extends Phaser.Scene {
     // -- como o assento fica dentro da própria fileira do móvel, ele já
     // sai na frente naturalmente, sentado "visível" sobre o móvel.
     this.localContainer.setDepth(
-      furniture.facing === "up" ? pos.y - 1 : avatarDepthForY(this.localContainer.y)
+      furniture.facing === "up"
+        ? furnitureDepthForBasePos(pos) - 1
+        : avatarDepthForY(this.localContainer.y)
     );
   }
 
