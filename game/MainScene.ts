@@ -74,14 +74,18 @@ const WALK_FRAMES: Record<"down" | "left" | "right" | "up", [number, number, num
   up: [9, 10, 11],
 };
 
-// sentado tem uma pose por direção -- ainda falta a de "costas" (essa
-// leva só trouxe frente/esquerda/direita), então sentar virado pra
-// cima cai de volta pra frente por enquanto.
+// sentado tem uma pose por direção -- ainda falta uma pose SENTADA de
+// costas de verdade (essa leva só trouxe frente/esquerda/direita), então
+// "up" usa por enquanto a pose de PÉ de costas (frame 9, mesma da
+// caminhada) como aproximação. Funciona porque nesse caso o móvel é
+// desenhado NA FRENTE do boneco (ver DEPTH_* e sitAt) -- só a cabeça
+// aparece por cima do encosto, então os detalhes de "sentado" do corpo
+// (que ficariam escondidos mesmo) não fazem diferença visual.
 const SENTADO_FRAMES: Record<Direction, number> = {
   down: 12,
   left: 13,
   right: 14,
-  up: 12,
+  up: WALK_FRAMES.up[0],
 };
 
 /**
@@ -125,6 +129,15 @@ const LAYER_TEXTURE_FILE: Record<LayerKey, string | null> = {
 function layerTextureKey(layer: LayerKey): string {
   return `avatar-${layer}`;
 }
+
+// profundidade (z-order) do móvel e do boneco -- normalmente o boneco
+// desenha NA FRENTE do móvel (sentado "aparecendo" na cadeira). Só quando
+// senta virado "up" (de costas pra câmera, encosto da poltrona entre ele
+// e quem olha) é que isso inverte: o móvel vai pra frente, escondendo o
+// corpo e deixando só a cabeça à mostra por cima do encosto -- ver sitAt.
+const DEPTH_FURNITURE = 5;
+const DEPTH_AVATAR_FRONT = 10;
+const DEPTH_AVATAR_BEHIND_FURNITURE = 1;
 
 type Activity = "idle" | "sentado";
 
@@ -210,7 +223,10 @@ export default class MainScene extends Phaser.Scene {
       // origem embaixo-centro, igual ao avatar: a posição do móvel é o
       // pontinho onde ele "toca o chão", alinhado ao tile dele
       const pos = furnitureWorldPos(f);
-      this.add.image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing)).setOrigin(0.5, 1);
+      this.add
+        .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
+        .setOrigin(0.5, 1)
+        .setDepth(DEPTH_FURNITURE);
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -257,6 +273,7 @@ export default class MainScene extends Phaser.Scene {
 
     const container = this.add.container(x, y, [...layerSprites, label]);
     container.setSize(layerSprites[0].displayWidth, layerSprites[0].displayHeight);
+    container.setDepth(DEPTH_AVATAR_FRONT);
     container.setData("layers", layerSprites);
     container.setData("label", label);
     container.setData("dir", "down" as Direction);
@@ -306,6 +323,7 @@ export default class MainScene extends Phaser.Scene {
     this.localActivity = "idle";
     this.seatedAt = null;
     this.sitCooldownUntil = this.time.now + STAND_COOLDOWN_MS;
+    this.localContainer.setDepth(DEPTH_AVATAR_FRONT);
     this.stopWalk(this.localContainer);
   }
 
@@ -319,6 +337,13 @@ export default class MainScene extends Phaser.Scene {
     // direção que o jogador estava andando antes de sentar
     this.localContainer.setData("dir", furniture.facing);
     this.setPoseFrame(this.localContainer, SENTADO_FRAMES[furniture.facing]);
+    // virado "up" (de costas pra câmera): o móvel fica NA FRENTE do
+    // boneco, então só a cabeça aparece por cima do encosto -- nas
+    // outras direções o boneco continua na frente, sentado "visível"
+    // dentro/sobre o móvel normalmente.
+    this.localContainer.setDepth(
+      furniture.facing === "up" ? DEPTH_AVATAR_BEHIND_FURNITURE : DEPTH_AVATAR_FRONT
+    );
   }
 
   /**
