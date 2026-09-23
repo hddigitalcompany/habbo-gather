@@ -28,28 +28,6 @@ export const GENERATED_BEARD_CATALOG: BeardOption[] = [
     ]
   },
   {
-    "id": "bigode-com-cavanhaque",
-    "label": "Bigode Com Cavanhaque",
-    "file": "barba_bigode-com-cavanhaque-branco.png",
-    "colors": [
-      {
-        "id": "bigode-com-cavanhaque-branco",
-        "label": "Branco",
-        "file": "barba_bigode-com-cavanhaque-branco.png"
-      },
-      {
-        "id": "bigode-com-cavanhaque-negro",
-        "label": "Negro",
-        "file": "barba_bigode-com-cavanhaque-negro.png"
-      },
-      {
-        "id": "bigode-com-cavanhaque-pardo",
-        "label": "Pardo",
-        "file": "barba_bigode-com-cavanhaque-pardo.png"
-      }
-    ]
-  },
-  {
     "id": "bigodin-finin",
     "label": "Bigodin Finin",
     "file": "barba_bigodin-finin-branco.png",
@@ -68,6 +46,28 @@ export const GENERATED_BEARD_CATALOG: BeardOption[] = [
         "id": "bigodin-finin-pardo",
         "label": "Pardo",
         "file": "barba_bigodin-finin-pardo.png"
+      }
+    ]
+  },
+  {
+    "id": "cavanhaque",
+    "label": "Cavanhaque",
+    "file": "barba_cavanhaque-branco.png",
+    "colors": [
+      {
+        "id": "cavanhaque-branco",
+        "label": "Branco",
+        "file": "barba_cavanhaque-branco.png"
+      },
+      {
+        "id": "cavanhaque-negro",
+        "label": "Negro",
+        "file": "barba_cavanhaque-negro.png"
+      },
+      {
+        "id": "cavanhaque-pardo",
+        "label": "Pardo",
+        "file": "barba_cavanhaque-pardo.png"
       }
     ]
   },
@@ -94,24 +94,24 @@ export const GENERATED_BEARD_CATALOG: BeardOption[] = [
     ]
   },
   {
-    "id": "rala-fechada",
-    "label": "Rala Fechada",
-    "file": "barba_rala-fechada-branco.png",
+    "id": "rala",
+    "label": "Rala",
+    "file": "barba_rala-branco.png",
     "colors": [
       {
-        "id": "rala-fechada-branco",
+        "id": "rala-branco",
         "label": "Branco",
-        "file": "barba_rala-fechada-branco.png"
+        "file": "barba_rala-branco.png"
       },
       {
-        "id": "rala-fechada-negro",
+        "id": "rala-negro",
         "label": "Negro",
-        "file": "barba_rala-fechada-negro.png"
+        "file": "barba_rala-negro.png"
       },
       {
-        "id": "rala-fechada-pardo",
+        "id": "rala-pardo",
         "label": "Pardo",
-        "file": "barba_rala-fechada-pardo.png"
+        "file": "barba_rala-pardo.png"
       }
     ]
   }
