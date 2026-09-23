@@ -32,6 +32,13 @@ export interface FurnitureDef {
    * que ele tá olhando) dentro do assento em vez de ficar centralizado
    * exatamente em cima do pé do móvel. */
   seatOffsetX?: number;
+  /** exceção à regra de profundidade por fileira (ver DEPTH_* em
+   * MainScene.ts): móveis "flat" -- sem altura de verdade, tipo um
+   * tapete -- não fazem sentido o boneco "passar por trás" deles, então
+   * ficam sempre atrás de tudo, feito decoração colada no chão. Não usar
+   * pra móveis com overflow de altura (poltrona etc.) -- esses usam a
+   * profundidade dinâmica normal. */
+  flat?: boolean;
 }
 
 /**

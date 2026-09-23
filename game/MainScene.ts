@@ -8,7 +8,7 @@ import {
   furnitureTextureKey,
   furnitureArtFile,
 } from "./furniture";
-import { clampTile, tileToWorld, worldToTile, Direction } from "./grid";
+import { clampTile, tileToWorld, worldToTile, Direction, TILE } from "./grid";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -140,14 +140,34 @@ function layerTextureKey(layer: LayerKey): string {
   return `avatar-${layer}`;
 }
 
-// profundidade (z-order) do móvel e do boneco -- normalmente o boneco
-// desenha NA FRENTE do móvel (sentado "aparecendo" na cadeira). Só quando
-// senta virado "up" (de costas pra câmera, encosto da poltrona entre ele
-// e quem olha) é que isso inverte: o móvel vai pra frente, escondendo o
-// corpo e deixando só a cabeça à mostra por cima do encosto -- ver sitAt.
-const DEPTH_FURNITURE = 5;
-const DEPTH_AVATAR_FRONT = 10;
-const DEPTH_AVATAR_BEHIND_FURNITURE = 1;
+// profundidade (z-order): boneco e móvel ordenados pela posição Y na
+// tela (quem está mais "pra baixo"/mais perto da câmera desenha na
+// FRENTE) -- é isso que implementa a regra "se o boneco passa no
+// quadrado de CIMA em relação ao móvel, ele fica por TRÁS; na própria
+// fileira do móvel (ou abaixo), ele fica na FRENTE" (móvel alto,
+// overflow de altura pra cima -- ver TILE em grid.ts).
+//
+// O móvel ancora na BASE do próprio tile (furnitureWorldPos = meio tile
+// abaixo do centro, ver furniture.ts), mas o boneco anda ancorado no
+// CENTRO do tile (tileToWorld) -- comparar os dois Y crus não seria
+// justo: o boneco pareceria "atrás" mesmo estando na mesma fileira do
+// móvel. DEPTH_AVATAR_ROW_OFFSET soma esse meio tile de volta só pra
+// esse cálculo de profundidade, e DEPTH_AVATAR_TIE_BIAS garante que, em
+// empate exato (mesma fileira), o boneco desenha na frente -- só perde
+// quando está estritamente na fileira anterior. Ver avatarDepthForY().
+const DEPTH_AVATAR_ROW_OFFSET = TILE / 2;
+const DEPTH_AVATAR_TIE_BIAS = 1;
+
+// exceção: móveis "flat" (tapete, por exemplo -- sem altura de verdade,
+// não faz sentido o boneco passar "por trás" deles) ficam sempre atrás
+// de tudo, feito decoração colada no chão, fora desse jogo de
+// profundidade -- ver FurnitureDef.flat em furniture.ts.
+const DEPTH_FLAT_FURNITURE = -1_000_000;
+
+/** Profundidade "justa" do boneco numa posição Y, pra comparar com a base de um móvel (ver comentário acima). */
+function avatarDepthForY(y: number): number {
+  return y + DEPTH_AVATAR_ROW_OFFSET + DEPTH_AVATAR_TIE_BIAS;
+}
 
 type Activity = "idle" | "sentado";
 
@@ -236,7 +256,7 @@ export default class MainScene extends Phaser.Scene {
       this.add
         .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
         .setOrigin(0.5, 1)
-        .setDepth(DEPTH_FURNITURE);
+        .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : pos.y);
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -283,7 +303,7 @@ export default class MainScene extends Phaser.Scene {
 
     const container = this.add.container(x, y, [...layerSprites, label]);
     container.setSize(layerSprites[0].displayWidth, layerSprites[0].displayHeight);
-    container.setDepth(DEPTH_AVATAR_FRONT);
+    container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
     container.setData("label", label);
     container.setData("dir", "down" as Direction);
@@ -333,7 +353,7 @@ export default class MainScene extends Phaser.Scene {
     this.localActivity = "idle";
     this.seatedAt = null;
     this.sitCooldownUntil = this.time.now + STAND_COOLDOWN_MS;
-    this.localContainer.setDepth(DEPTH_AVATAR_FRONT);
+    this.localContainer.setDepth(avatarDepthForY(this.localContainer.y));
     this.stopWalk(this.localContainer);
   }
 
@@ -351,11 +371,14 @@ export default class MainScene extends Phaser.Scene {
     this.localContainer.setData("dir", furniture.facing);
     this.setPoseFrame(this.localContainer, SENTADO_FRAMES[furniture.facing]);
     // virado "up" (de costas pra câmera): o móvel fica NA FRENTE do
-    // boneco, então só a cabeça aparece por cima do encosto -- nas
-    // outras direções o boneco continua na frente, sentado "visível"
-    // dentro/sobre o móvel normalmente.
+    // boneco, então só a cabeça aparece por cima do encosto -- isso é
+    // uma EXCEÇÃO deliberada à regra geral de profundidade por fileira
+    // (força o boneco pra 1px atrás desse móvel específico, não importa
+    // o Y dele). Nas outras direções, usa a regra geral (avatarDepthForY)
+    // -- como o assento fica dentro da própria fileira do móvel, ele já
+    // sai na frente naturalmente, sentado "visível" sobre o móvel.
     this.localContainer.setDepth(
-      furniture.facing === "up" ? DEPTH_AVATAR_BEHIND_FURNITURE : DEPTH_AVATAR_FRONT
+      furniture.facing === "up" ? pos.y - 1 : avatarDepthForY(this.localContainer.y)
     );
   }
 
@@ -451,6 +474,21 @@ export default class MainScene extends Phaser.Scene {
       if (chair) this.sitAt(chair);
     }
 
+    // profundidade recalculada todo frame (contínuo, mesmo no meio de um
+    // passo) pra passar por trás/na frente dos móveis suavemente -- só
+    // NÃO faz isso se acabou de sentar agora mesmo (sitAt já setou a
+    // profundidade certa, inclusive a exceção de virado "up", e isso
+    // sobrescreveria ela).
+    // cast: TS estreita localActivity pra "idle" logo no topo desta
+    // função (por causa do early-return no if de cima) e não enxerga que
+    // sitAt() -- chamado poucas linhas acima, dentro do branch "parado"
+    // -- pode ter mudado pra "sentado" nesse meio tempo; sem o cast, ele
+    // acusa a comparação como "sempre falsa" (TS2367), o que não é
+    // verdade em runtime.
+    if ((this.localActivity as Activity) !== "sentado") {
+      this.localContainer.setDepth(avatarDepthForY(this.localContainer.y));
+    }
+
     this.reportPosition(_time);
   }
 
@@ -476,6 +514,11 @@ export default class MainScene extends Phaser.Scene {
         y,
         duration: 90,
         ease: "Linear",
+        // mesma profundidade dinâmica do boneco local (ver update()) --
+        // jogador remoto também passa por trás/na frente dos móveis
+        // conforme a fileira. Remoto ainda não sincroniza "sentado" pela
+        // rede, então sempre usa a regra geral aqui.
+        onUpdate: () => target.setDepth(avatarDepthForY(target.y)),
         onComplete: () => this.stopWalk(target),
       });
     }
