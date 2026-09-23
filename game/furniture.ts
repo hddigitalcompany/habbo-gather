@@ -57,7 +57,9 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
 // 4 poltronas de teste, uma virada pra cada direção -- pra validar as 4
 // artes (frente/lado esq/lado dir/costas) juntas na sala de uma vez.
 // Posição definitiva vem depois, junto com o resto da mobília da sala.
-const POLTRONA_SEAT_OFFSET_Y = -15; // ~16% da altura (77x96) -- estimativa
+// ~16% da altura (mesma proporção da leva anterior), reescalado pro
+// tamanho novo (poltrona caiu de 77x96 pra ~53x56) -- estimativa
+const POLTRONA_SEAT_OFFSET_Y = -9;
 
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {
