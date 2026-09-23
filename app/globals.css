@@ -872,6 +872,114 @@ body {
   color: #ff5c7a;
 }
 
+/* "pesquise a agenda de um colega" -- caixa de busca no topo da lista
+   (Minha agenda), com o dropdown de resultados logo abaixo, ver
+   colleagueMatches em ChatDrawer. */
+.agenda-search-row {
+  position: relative;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+
+.agenda-search-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.agenda-search-input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.agenda-search-results {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(100% - 2px);
+  z-index: 8;
+  background: rgba(20, 14, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.agenda-search-result-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 8px;
+  color: #f5f0ff;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agenda-search-result-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* call PRIVADA de um colega, vista por quem não participa dela --
+   ocupa o espaço na lista mas sem conteúdo (ver redact() em
+   server/agendaStore.js), então nem é clicável (não é <button>). */
+.agenda-call-item-private {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.agenda-call-title-private {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* toggle Público/Privado no formulário "Marcar call" */
+.agenda-visibility-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agenda-visibility-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.agenda-visibility-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #d8d0ea;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.agenda-visibility-btn.active {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #fff;
+}
+
+.agenda-visibility-hint {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.65;
+  line-height: 1.4;
+}
+
 .agenda-detail-when {
   margin: 0;
   font-size: 14px;

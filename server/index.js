@@ -57,7 +57,10 @@
 //                           servidor->cliente: { type: "agenda:availability", busyUserIds }
 //                           (checagem AO VIVO enquanto a pessoa preenche o
 //                           formulário, pra já mostrar quem fica indisponível)
-//   agenda:create       -> cliente->servidor: { type: "agenda:create", title, startTs, durationMinutes, needs, participantIds }
+//   agenda:create       -> cliente->servidor: { type: "agenda:create", title, startTs, durationMinutes, needs, participantIds, visibility? }
+//                           (visibility: "public" (padrão) ou "private" -- privada só ocupa o
+//                           horário pra quem pesquisar a agenda de um participante dela, ver
+//                           agenda:view_colleague embaixo, sem mostrar o conteúdo)
 //                           servidor->cada participante: { type: "agenda:call", call }
 //                           servidor->cada convidado (exceto quem criou): { type: "agenda:invite", call }
 //                           (recusa com { type: "agenda:error", reason: "conflict", busyUserIds }
@@ -65,6 +68,11 @@
 //   agenda:respond      -> cliente->servidor: { type: "agenda:respond", callId, status }  (status: "approved"|"declined")
 //                           servidor->cada participante: { type: "agenda:call", call }
 //                           (histórico de aprovação fica visível pra todo mundo da call)
+//   agenda:view_colleague -> cliente->servidor: { type: "agenda:view_colleague", userId }
+//                           servidor->cliente: { type: "agenda:colleague_calls", userId, calls }
+//                           (calls PRIVADAS do colega em que quem pediu não participa vêm
+//                           "tarjadas" -- sem título/necessidades/participantes, só o horário,
+//                           ver redact() em server/agendaStore.js)
 //   agenda:reminder     -> servidor->participantes (não recusados), alguns minutos antes do horário:
 //                           { type: "agenda:reminder", call }
 //                           (timer em memória -- some se o servidor reiniciar antes da hora)
@@ -603,6 +611,7 @@ wss.on("connection", (ws, req) => {
           needs: data.needs,
           participantIds,
           createdBy: player.userId,
+          visibility: data.visibility === "private" ? "private" : "public",
         });
         for (const p of call.participants) {
           sendToUser(p.id, { type: "agenda:call", call });
@@ -618,6 +627,18 @@ wss.on("connection", (ws, req) => {
         for (const p of call.participants) {
           sendToUser(p.id, { type: "agenda:call", call });
         }
+        break;
+      }
+      case "agenda:view_colleague": {
+        // "pesquise a agenda de um colega" -- devolve as calls dele
+        // (privadas vêm tarjadas se quem pediu não for participante, ver
+        // listCallsForColleague em server/agendaStore.js). Não precisa
+        // ser participante de nada em comum, qualquer um da sala pode
+        // pesquisar qualquer um.
+        if (typeof data.userId !== "string" || !data.userId) break;
+        const targetUserId = data.userId.trim().slice(0, 80);
+        const calls = agendaStore.listCallsForColleague(player.userId, targetUserId);
+        ws.send(JSON.stringify({ type: "agenda:colleague_calls", userId: targetUserId, calls }));
         break;
       }
     }

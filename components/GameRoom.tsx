@@ -95,6 +95,7 @@ type Conversation = {
 type CallNeeds = { camera: boolean; audio: boolean; screen: boolean };
 type CallParticipantStatus = "pending" | "approved" | "declined";
 type CallParticipant = { id: string; name: string; color: string; status: CallParticipantStatus };
+type CallVisibility = "public" | "private";
 type CallEvent = {
   id: string;
   title: string;
@@ -105,6 +106,15 @@ type CallEvent = {
   createdByName: string;
   participants: CallParticipant[];
   createdAt: number;
+  // "public" (padrão) = quem pesquisar a agenda de um participante dessa
+  // call vê o conteúdo; "private" = só ocupa o horário -- ver "redacted"
+  // embaixo, o que chega pra quem NÃO participa de uma call privada.
+  visibility: CallVisibility;
+  // true só nas calls PRIVADAS de um colega que a gente pesquisou (ver
+  // colleagueCalls/agenda:colleague_calls) e da qual a gente não
+  // participa -- título/necessidades/participantes vêm vazios, só o
+  // horário é real (ver redact() em server/agendaStore.js).
+  redacted?: boolean;
 };
 // rascunho do formulário "Marcar call" -- fica num objeto só (em vez de
 // um useState por campo) pra dar pra passar/atualizar de um jeito só
@@ -116,6 +126,7 @@ type AgendaFormState = {
   durationMinutes: number;
   participantIds: string[];
   needs: CallNeeds;
+  visibility: CallVisibility;
 };
 
 function pad2(n: number): string {
@@ -360,7 +371,7 @@ export default function GameRoom() {
   // "indisponível" na lista de participantes ANTES da pessoa tentar
   // selecionar (ver getConflictingUserIds em server/agendaStore.js).
   const [busyUserIds, setBusyUserIds] = useState<string[]>([]);
-  const [agendaView, setAgendaView] = useState<"list" | "new" | "detail">("list");
+  const [agendaView, setAgendaView] = useState<"list" | "new" | "detail" | "colleague">("list");
   const [agendaDetailId, setAgendaDetailId] = useState<string | null>(null);
   const [agendaForm, setAgendaForm] = useState<AgendaFormState>({
     title: "",
@@ -369,9 +380,24 @@ export default function GameRoom() {
     durationMinutes: 30,
     participantIds: [],
     needs: { camera: true, audio: true, screen: false },
+    visibility: "public",
   });
   const [agendaError, setAgendaError] = useState<string | null>(null);
   const agendaCreatingRef = useRef(false);
+  // "pesquise a agenda de um colega" -- campo de busca (filtrado no
+  // ChatDrawer contra quem tá na sala, mesma fonte da lista de
+  // participantes) + a agenda do colega escolhido, já vinda do servidor
+  // (calls privadas em que eu não participo chegam tarjadas, ver
+  // agenda:view_colleague em server/index.js).
+  const [agendaSearchQuery, setAgendaSearchQuery] = useState("");
+  const [agendaColleagueId, setAgendaColleagueId] = useState<string | null>(null);
+  const [agendaColleagueName, setAgendaColleagueName] = useState("");
+  const [colleagueCalls, setColleagueCalls] = useState<CallEvent[]>([]);
+  // espelha agendaColleagueId pro handler de socket (definido dentro do
+  // useEffect de conexão, que só roda uma vez -- ver comentário grande
+  // em myProfileRef) conseguir ler o valor ATUAL sem stale closure.
+  const agendaColleagueIdRef = useRef<string | null>(null);
+  agendaColleagueIdRef.current = agendaColleagueId;
 
   // --- card de perfil: MEUS campos (editáveis) e os dos OUTROS
   // jogadores (sincronizados pelo servidor, ver mensagem "profile" em
@@ -699,6 +725,14 @@ export default function GameRoom() {
           setBusyUserIds((data.busyUserIds as string[]) ?? []);
           setAgendaError("Algum convidado ficou indisponível nesse horário -- escolha outro e tente de novo.");
         }
+      } else if (data.type === "agenda:colleague_calls") {
+        // resposta de "pesquise a agenda de um colega" (ver
+        // viewColleagueAgenda) -- só aplica se ainda for o colega que a
+        // pessoa tá olhando agora (evita uma resposta atrasada de uma
+        // busca anterior sobrescrever a atual).
+        if (data.userId === agendaColleagueIdRef.current) {
+          setColleagueCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
+        }
       }
     }
 
@@ -1013,6 +1047,7 @@ export default function GameRoom() {
       durationMinutes: 30,
       participantIds: [],
       needs: { camera: true, audio: true, screen: false },
+      visibility: "public",
     });
     setAgendaError(null);
     setBusyUserIds([]);
@@ -1032,6 +1067,7 @@ export default function GameRoom() {
         durationMinutes: agendaForm.durationMinutes,
         needs: agendaForm.needs,
         participantIds: agendaForm.participantIds,
+        visibility: agendaForm.visibility,
       })
     );
     // fica na tela do formulário até a resposta chegar (sucesso pula pro
@@ -1046,6 +1082,29 @@ export default function GameRoom() {
 
   function respondToCall(callId: string, status: "approved" | "declined") {
     socketRef.current?.send(JSON.stringify({ type: "agenda:respond", callId, status }));
+  }
+
+  // "pesquise a agenda de um colega" -- pede a agenda dele pro servidor
+  // (calls privadas em que eu não participo chegam tarjadas, ver
+  // agenda:view_colleague em server/index.js) e troca a Agenda pra essa
+  // visão. onlinePlayerName é só pra já mostrar o cabeçalho certo sem
+  // esperar a resposta do servidor.
+  function viewColleagueAgenda(userId: string, name: string) {
+    setAgendaColleagueId(userId);
+    agendaColleagueIdRef.current = userId;
+    setAgendaColleagueName(name || "Sem nome");
+    setColleagueCalls([]);
+    setAgendaView("colleague");
+    socketRef.current?.send(JSON.stringify({ type: "agenda:view_colleague", userId }));
+  }
+
+  function backToMyAgenda() {
+    setAgendaColleagueId(null);
+    agendaColleagueIdRef.current = null;
+    setAgendaColleagueName("");
+    setColleagueCalls([]);
+    setAgendaSearchQuery("");
+    setAgendaView("list");
   }
 
   function toggleEditMode() {
@@ -1306,6 +1365,13 @@ export default function GameRoom() {
     onStartNewCall: startNewCall,
     onSubmitCreateCall: submitCreateCall,
     onRespondToCall: respondToCall,
+    agendaSearchQuery,
+    onChangeAgendaSearchQuery: setAgendaSearchQuery,
+    agendaColleagueId,
+    agendaColleagueName,
+    colleagueCalls,
+    onViewColleagueAgenda: viewColleagueAgenda,
+    onBackToMyAgenda: backToMyAgenda,
   };
 
   return (
@@ -2071,6 +2137,13 @@ function ChatDrawer({
   onStartNewCall,
   onSubmitCreateCall,
   onRespondToCall,
+  agendaSearchQuery,
+  onChangeAgendaSearchQuery,
+  agendaColleagueId,
+  agendaColleagueName,
+  colleagueCalls,
+  onViewColleagueAgenda,
+  onBackToMyAgenda,
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
@@ -2107,8 +2180,8 @@ function ChatDrawer({
   onChangeMainTab: (t: "conversas" | "agenda") => void;
   calls: CallEvent[];
   busyUserIds: string[];
-  agendaView: "list" | "new" | "detail";
-  onChangeAgendaView: (v: "list" | "new" | "detail") => void;
+  agendaView: "list" | "new" | "detail" | "colleague";
+  onChangeAgendaView: (v: "list" | "new" | "detail" | "colleague") => void;
   agendaDetailId: string | null;
   onOpenCallDetail: (callId: string) => void;
   agendaForm: AgendaFormState;
@@ -2118,11 +2191,18 @@ function ChatDrawer({
   onStartNewCall: () => void;
   onSubmitCreateCall: () => void;
   onRespondToCall: (callId: string, status: "approved" | "declined") => void;
+  agendaSearchQuery: string;
+  onChangeAgendaSearchQuery: (v: string) => void;
+  agendaColleagueId: string | null;
+  agendaColleagueName: string;
+  colleagueCalls: CallEvent[];
+  onViewColleagueAgenda: (userId: string, name: string) => void;
+  onBackToMyAgenda: () => void;
 }) {
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const detailCall = calls.find((c) => c.id === agendaDetailId) ?? null;
+  const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
   const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
   const pinBtn = (
     <button
@@ -2141,6 +2221,14 @@ function ChatDrawer({
   // dedupe por userId -- se alguém tiver 2 abas abertas, ainda aparece
   // uma vez só na lista de "quem tá na sala" (ver onlinePlayers).
   const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
+  // resultado de "pesquise a agenda de um colega" -- filtra quem tá na
+  // sala (mesma fonte do picker de participantes) pelo nome digitado,
+  // sem mim mesmo. Cálculo local, não precisa ir no servidor pra buscar.
+  const colleagueQuery = agendaSearchQuery.trim().toLowerCase();
+  const colleagueMatches =
+    colleagueQuery.length === 0
+      ? []
+      : pickable.filter((p) => p.userId !== myUserId && (p.name || "").toLowerCase().includes(colleagueQuery));
 
   return (
     <div className={pinned ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}>
@@ -2380,7 +2468,7 @@ function ChatDrawer({
           {agendaView === "list" && (
             <>
               <div className="chat-drawer-header">
-                <h3>Agenda</h3>
+                <h3>Minha agenda</h3>
                 <div className="chat-drawer-header-actions">
                   {pinBtn}
                   <button className="chat-icon-btn" title="Marcar call" onClick={onStartNewCall}>
@@ -2391,6 +2479,31 @@ function ChatDrawer({
                   </button>
                 </div>
               </div>
+              <div className="agenda-search-row">
+                <input
+                  className="agenda-search-input"
+                  value={agendaSearchQuery}
+                  onChange={(e) => onChangeAgendaSearchQuery(e.target.value)}
+                  placeholder="Pesquise a agenda de um colega..."
+                />
+                {colleagueQuery.length > 0 && (
+                  <div className="agenda-search-results">
+                    {colleagueMatches.length === 0 && <p className="chat-empty-hint">Ninguém encontrado.</p>}
+                    {colleagueMatches.map((p) => (
+                      <button
+                        key={p.userId}
+                        className="agenda-search-result-item"
+                        onClick={() => onViewColleagueAgenda(p.userId, p.name || "Sem nome")}
+                      >
+                        <span className="chat-conv-avatar" style={{ background: p.color }}>
+                          {(p.name || "?").slice(0, 1).toUpperCase()}
+                        </span>
+                        <span>{p.name || "Sem nome"}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="agenda-call-list">
                 {calls.length === 0 && <p className="chat-empty-hint">Nenhuma call marcada ainda.</p>}
                 {calls.map((c) => {
@@ -2399,7 +2512,10 @@ function ChatDrawer({
                   return (
                     <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
                       <span className="agenda-call-item-main">
-                        <span className="agenda-call-title">{c.title}</span>
+                        <span className="agenda-call-title">
+                          {c.visibility === "private" && "🔒 "}
+                          {c.title}
+                        </span>
                         <span className="agenda-call-when">
                           {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
                         </span>
@@ -2414,6 +2530,49 @@ function ChatDrawer({
                     </button>
                   );
                 })}
+              </div>
+            </>
+          )}
+
+          {agendaView === "colleague" && (
+            <>
+              <div className="chat-drawer-header">
+                <button className="chat-icon-btn" title="Voltar pra minha agenda" onClick={onBackToMyAgenda}>
+                  <BackIcon />
+                </button>
+                <h3>Agenda de {agendaColleagueName}</h3>
+                <div className="chat-drawer-header-actions">
+                  {pinBtn}
+                  <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div className="agenda-call-list">
+                {colleagueCalls.length === 0 && (
+                  <p className="chat-empty-hint">Nenhum compromisso marcado por enquanto.</p>
+                )}
+                {colleagueCalls.map((c) =>
+                  c.redacted ? (
+                    <div key={c.id} className="agenda-call-item agenda-call-item-private">
+                      <span className="agenda-call-item-main">
+                        <span className="agenda-call-title agenda-call-title-private">🔒 Conteúdo da agenda privado</span>
+                        <span className="agenda-call-when">
+                          {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+                        </span>
+                      </span>
+                    </div>
+                  ) : (
+                    <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
+                      <span className="agenda-call-item-main">
+                        <span className="agenda-call-title">{c.title}</span>
+                        <span className="agenda-call-when">
+                          {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
+                        </span>
+                      </span>
+                    </button>
+                  )
+                )}
               </div>
             </>
           )}
@@ -2502,6 +2661,31 @@ function ChatDrawer({
                   </label>
                 </div>
 
+                <div className="agenda-visibility-row">
+                  <span className="agenda-field-label">Visibilidade</span>
+                  <div className="agenda-visibility-toggle">
+                    <button
+                      type="button"
+                      className={agendaForm.visibility === "public" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
+                      onClick={() => onChangeAgendaForm({ visibility: "public" })}
+                    >
+                      Público
+                    </button>
+                    <button
+                      type="button"
+                      className={agendaForm.visibility === "private" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
+                      onClick={() => onChangeAgendaForm({ visibility: "private" })}
+                    >
+                      Privado
+                    </button>
+                  </div>
+                  <p className="agenda-visibility-hint">
+                    {agendaForm.visibility === "public"
+                      ? "Quem pesquisar a agenda de um participante vê o conteúdo dessa call."
+                      : 'Quem pesquisar a agenda de um participante só vê o horário ocupado, com "conteúdo da agenda privado".'}
+                  </p>
+                </div>
+
                 <span className="agenda-field-label">Participantes</span>
                 {pickable.length === 0 ? (
                   <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
@@ -2544,7 +2728,11 @@ function ChatDrawer({
           {agendaView === "detail" && detailCall && (
             <>
               <div className="chat-drawer-header">
-                <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeAgendaView("list")}>
+                <button
+                  className="chat-icon-btn"
+                  title="Voltar"
+                  onClick={() => onChangeAgendaView(agendaColleagueId ? "colleague" : "list")}
+                >
                   <BackIcon />
                 </button>
                 <h3>{detailCall.title}</h3>
@@ -2559,7 +2747,10 @@ function ChatDrawer({
                 <p className="agenda-detail-when">
                   {formatCallDateTime(detailCall.startTs)} · {detailCall.durationMinutes}min
                 </p>
-                <p className="agenda-detail-creator">Marcada por {detailCall.createdByName || "?"}</p>
+                <p className="agenda-detail-creator">
+                  Marcada por {detailCall.createdByName || "?"} ·{" "}
+                  {detailCall.visibility === "private" ? "🔒 Privada" : "Pública"}
+                </p>
                 <div className="agenda-needs-row">
                   {detailCall.needs.camera && (
                     <span className="agenda-need-pill">

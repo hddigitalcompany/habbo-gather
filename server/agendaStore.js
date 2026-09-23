@@ -84,10 +84,36 @@ function enrich(call) {
       return { id: p.id, name: u.name || "", color: u.color || "#5c9bff", status: p.status };
     }),
     createdAt: call.createdAt,
+    // "público" (padrão) = quem pesquisar a agenda de um participante
+    // dessa call vê o conteúdo (título/necessidades/participantes);
+    // "privado" = só ocupa o horário, ver listCallsForColleague embaixo
+    // pra quem NÃO é participante, o conteúdo some (vira "redacted").
+    visibility: call.visibility === "private" ? "private" : "public",
+    redacted: false,
   };
 }
 
-export function createCall({ title, startTs, durationMinutes, needs, participantIds, createdBy }) {
+/** Versão "tarjada" de uma call PRIVADA pra quem tá pesquisando a
+ * agenda de um colega e NÃO é participante -- mantém só o horário
+ * (pra saber que a pessoa tá ocupada), esconde título/necessidades/
+ * quem mais participa. */
+function redact(call) {
+  return {
+    id: call.id,
+    title: "",
+    startTs: call.startTs,
+    durationMinutes: call.durationMinutes,
+    needs: { camera: false, audio: false, screen: false },
+    createdBy: "",
+    createdByName: "",
+    participants: [],
+    createdAt: call.createdAt,
+    visibility: "private",
+    redacted: true,
+  };
+}
+
+export function createCall({ title, startTs, durationMinutes, needs, participantIds, createdBy, visibility }) {
   const ids = Array.from(new Set([...participantIds.filter((x) => x !== createdBy), createdBy]));
   const call = {
     id: randomUUID(),
@@ -103,6 +129,7 @@ export function createCall({ title, startTs, durationMinutes, needs, participant
     createdByName: getUser(createdBy).name || "",
     participants: ids.map((id) => ({ id, status: id === createdBy ? "approved" : "pending" })),
     createdAt: Date.now(),
+    visibility: visibility === "private" ? "private" : "public",
   };
   store.calls[call.id] = call;
   persist();
@@ -131,5 +158,24 @@ export function listCallsForUser(userId) {
   return Object.values(store.calls)
     .filter((c) => c.participants.some((p) => p.id === userId))
     .map(enrich)
+    .sort((a, b) => a.startTs - b.startTs);
+}
+
+/** Agenda de um COLEGA (targetUserId), do ponto de vista de quem tá
+ * pesquisando (viewerUserId) -- ver "pesquise a agenda de um colega"
+ * no chat. Só entram as calls que o colega não recusou (recusada não
+ * ocupa mais o horário dele). Cada call pública (ou em que o próprio
+ * viewer também participa -- aí ele já vê o conteúdo de qualquer jeito
+ * na PRÓPRIA agenda) vem completa; call privada em que o viewer NÃO
+ * participa vem tarjada (ver redact acima), só com o horário, pra dar
+ * pra saber que o colega tá ocupado sem expor o conteúdo. */
+export function listCallsForColleague(viewerUserId, targetUserId) {
+  return Object.values(store.calls)
+    .filter((c) => c.participants.some((p) => p.id === targetUserId && p.status !== "declined"))
+    .map((c) => {
+      const viewerIsParticipant = c.participants.some((p) => p.id === viewerUserId);
+      if (c.visibility === "private" && !viewerIsParticipant) return redact(c);
+      return enrich(c);
+    })
     .sort((a, b) => a.startTs - b.startTs);
 }
