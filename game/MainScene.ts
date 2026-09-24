@@ -369,10 +369,26 @@ export const MIN_ZOOM_LEVEL = DEFAULT_ZOOM_LEVEL - 3 * ZOOM_STEP;
 export const MAX_ZOOM_LEVEL = 2;
 
 // mesma resolução interna do jogo (ver width/height em game/config.ts) --
-// é o limite de scroll da câmera (setBounds), pra não deixar
-// pan/zoom mostrar área fora da sala.
+// tamanho "base" da sala em coordenadas de mundo, usado pro cálculo de
+// limite de arrastar (ver clampCameraScroll), pra não deixar pan/zoom
+// mostrar área fora da sala LONGE DEMAIS.
 const CAMERA_WORLD_W = 800;
 const CAMERA_WORLD_H = 600;
+
+// limite de arrastar a câmera (clampCameraScroll, chamado depois de
+// TODA mudança de scroll -- arrastar com o mouse, zoom, recentralizar
+// -- em vez do setBounds automático do Phaser, que só permite
+// arrastar quando a área visível, no zoom atual, é MENOR que a sala
+// inteira -- ou seja, nunca no zoom padrão (1), onde a sala já ocupa
+// a tela inteira certinha (pedido do Douglas: "mapa arrastavel em
+// qualquer zoom"). PAN_MARGIN é quanto dá pra arrastar além da borda
+// da sala nos zooms "normais" (perto ou dentro da sala); em zooms bem
+// afastados (área visível já maior que sala+margem, ver
+// MIN_ZOOM_LEVEL) não sobra mais nada pra revelar arrastando, mas
+// ainda soltamos uma folga pequena (PAN_SLACK_ZOOMED_OUT) só pra não
+// travar o arrastar de vez nesse caso também.
+const PAN_MARGIN = 220;
+const PAN_SLACK_ZOOMED_OUT = 60;
 
 export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -735,10 +751,12 @@ export default class MainScene extends Phaser.Scene {
     this.drawEditGrid();
     this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
 
-    // câmera começa igual sempre foi (zoom 1, sala inteira visível) --
-    // setBounds só define até onde dá pra arrastar/dar zoom sem mostrar
-    // área fora da sala (ver CAMERA_WORLD_W/H).
-    this.cameras.main.setBounds(0, 0, CAMERA_WORLD_W, CAMERA_WORLD_H);
+    // câmera começa igual sempre foi (zoom 1, sala inteira visível,
+    // scroll em 0,0 -- ver clampCameraScroll: SEM setBounds automático
+    // do Phaser, o limite de arrastar agora é todo calculado ali,
+    // aplicado depois de cada mudança de scroll (arrastar/zoom/
+    // recentralizar), não travado no viewport-vs-bounds do próprio
+    // Phaser).
     this.cameras.main.setZoom(DEFAULT_ZOOM_LEVEL);
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
@@ -1452,11 +1470,45 @@ export default class MainScene extends Phaser.Scene {
     const zoom = this.cameras.main.zoom;
     const dx = (pointer.x - this.panStart.x) / zoom;
     const dy = (pointer.y - this.panStart.y) / zoom;
-    this.cameras.main.setScroll(this.panStartScroll.x - dx, this.panStartScroll.y - dy);
+    this.setClampedScroll(this.panStartScroll.x - dx, this.panStartScroll.y - dy);
   }
 
   private stopCameraPan() {
     this.isPanningCamera = false;
+  }
+
+  /** Limita um scroll candidato (x,y) pro range de arrastar permitido
+   * NESSE zoom -- ver PAN_MARGIN/PAN_SLACK_ZOOMED_OUT. Chamado depois
+   * de toda mudança de scroll (arrastar/zoom/recentralizar) em vez de
+   * um setBounds automático do Phaser (que só deixa arrastar quando a
+   * área visível é menor que a sala, nunca no zoom padrão). */
+  private clampCameraScroll(x: number, y: number) {
+    const cam = this.cameras.main;
+    const viewW = cam.width / cam.zoom;
+    const viewH = cam.height / cam.zoom;
+    const clampAxis = (view: number, roomSize: number, pos: number) => {
+      // área visível, nesse zoom, cabe dentro da sala + margem: limite
+      // "de verdade", baseado na borda da sala (dá pra explorar a
+      // margem toda arrastando).
+      if (view <= roomSize + PAN_MARGIN * 2) {
+        return Phaser.Math.Clamp(pos, -PAN_MARGIN, roomSize + PAN_MARGIN - view);
+      }
+      // zoom bem afastado: a área visível já é maior que a sala
+      // inteira (não sobra nada pra revelar arrastando pra valer) --
+      // ainda assim libera uma folga pequena centralizada, só pra não
+      // travar o arrastar de vez nesse zoom.
+      const center = (roomSize - view) / 2;
+      return Phaser.Math.Clamp(pos, center - PAN_SLACK_ZOOMED_OUT, center + PAN_SLACK_ZOOMED_OUT);
+    };
+    return {
+      x: clampAxis(viewW, CAMERA_WORLD_W, x),
+      y: clampAxis(viewH, CAMERA_WORLD_H, y),
+    };
+  }
+
+  private setClampedScroll(x: number, y: number) {
+    const clamped = this.clampCameraScroll(x, y);
+    this.cameras.main.setScroll(clamped.x, clamped.y);
   }
 
   private stopFloorPaint() {
@@ -1479,6 +1531,11 @@ export default class MainScene extends Phaser.Scene {
     const centerY = cam.worldView.centerY;
     cam.setZoom(clamped);
     cam.centerOn(centerX, centerY);
+    // centerOn não passa pelo clampCameraScroll (só handleCameraPan
+    // chamava antes) -- sem isso, dar zoom out depois de arrastar até
+    // a borda da margem podia deixar o scroll fora do range válido
+    // pro novo zoom.
+    this.setClampedScroll(cam.scrollX, cam.scrollY);
     return clamped;
   }
 
@@ -1496,7 +1553,9 @@ export default class MainScene extends Phaser.Scene {
   /** Botão de centralizar (ícone de mira) do MapControls -- volta a
    * câmera pro boneco local, SEM mudar o zoom atual (igual o Gather). */
   recenterCamera() {
-    this.cameras.main.centerOn(this.localContainer.x, this.localContainer.y);
+    const cam = this.cameras.main;
+    cam.centerOn(this.localContainer.x, this.localContainer.y);
+    this.setClampedScroll(cam.scrollX, cam.scrollY);
   }
 
   /** Tecla de direção pressionada agora, só uma por vez (sem diagonal). */
