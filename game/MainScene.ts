@@ -292,6 +292,29 @@ const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
 const STATUS_DOT_RADIUS = 4;
 const STATUS_DOT_GAP = 5;
 
+// plaquinha de nome (dot + texto) -- desenhada como uma "pill" de
+// cantos arredondados (Graphics, ver drawNameplateBg) em vez do
+// retângulo reto que o backgroundColor do Text desenharia sozinho, pra
+// parecer um card de verdade e não uma caixa de debug. Paleta igual ao
+// resto da UI (ver .seat-tuning-panel/.color-picker-label em
+// globals.css -- roxo bem escuro, borda um tom mais claro, texto
+// lavanda clarinho em vez de branco puro).
+const NAMEPLATE_PAD_X = 8;
+const NAMEPLATE_PAD_Y = 4;
+const NAMEPLATE_RADIUS = 9;
+const NAMEPLATE_BG_COLOR = 0x120a1f;
+const NAMEPLATE_BG_ALPHA = 0.88;
+const NAMEPLATE_BORDER_COLOR = 0x3a2b57;
+const NAMEPLATE_BORDER_ALPHA = 0.9;
+// resolução PRÓPRIA do texto (independente da resolução interna do
+// jogo, que fica travada em 800x600 -- ver game/config.ts) -- sem
+// isso, o Scale.FIT esticando esse canvas pra preencher a tela real
+// (bem maior que 800x600 numa tela grande) deixa a fonte serrilhada/
+// pixelada, mesmo com antialias:true na config (que só afeta as
+// SPRITES, não o texto renderizado à parte pelo Text). Valor alto e
+// fixo porque é só uma string curta -- barato de sobra.
+const NAMEPLATE_TEXT_RESOLUTION = 4;
+
 type Activity = "idle" | "sentado";
 
 /** Ferramenta de piso selecionada no editor (ver selectFloorTool) --
@@ -910,13 +933,20 @@ export default class MainScene extends Phaser.Scene {
       layerSprites.push(sprite);
     }
 
+    // fundo em "pill" arredondada por trás do nome (ver drawNameplateBg
+    // mais abaixo) -- criado ANTES do texto/bolinha pra ficar atrás
+    // deles na pilha do container (ordem de criação = ordem de
+    // desenho). Sem backgroundColor/padding no Text (que só desenha um
+    // retângulo reto, sem cantos arredondados) -- quem cuida do fundo
+    // agora é esse Graphics.
+    const nameplateBg = this.add.graphics();
+
     const label = this.add
       .text(0, AVATAR_FOOT_OFFSET_Y - layerSprites[0].displayHeight - 8, name, {
         fontSize: "11px",
-        color: "#ffffff",
+        color: "#f1ecff",
         fontFamily: "monospace",
-        backgroundColor: "#00000088",
-        padding: { x: 4, y: 2 },
+        resolution: NAMEPLATE_TEXT_RESOLUTION,
       })
       .setOrigin(0.5);
 
@@ -950,12 +980,13 @@ export default class MainScene extends Phaser.Scene {
       ? layerSprites.map((sprite) => sprite.postFX.addGlow(0x7c5cff, 0, 0, false, 0.3, 10))
       : [];
 
-    const container = this.add.container(x, y, [...layerSprites, label, statusDot]);
+    const container = this.add.container(x, y, [...layerSprites, nameplateBg, statusDot, label]);
     container.setSize(dispW, dispH);
     container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
     container.setData("label", label);
     container.setData("statusDot", statusDot);
+    container.setData("nameplateBg", nameplateBg);
     container.setData("dir", "down" as Direction);
     container.setData("stepToggle", false);
     container.setData("hairSprite", hairSprite);
@@ -970,7 +1001,7 @@ export default class MainScene extends Phaser.Scene {
     container.setData("outfitId", isLocal ? this.localOutfitId : DEFAULT_OUTFIT_ID);
     container.setData("playerId", playerId);
     container.setData("isLocal", isLocal);
-    this.layoutNameplate(label, statusDot);
+    this.layoutNameplate(label, statusDot, nameplateBg);
 
     // clicável (card de perfil, ver onAvatarClick) -- a área de clique
     // precisa ser um retângulo próprio porque as sprites são ancoradas
@@ -1025,25 +1056,41 @@ export default class MainScene extends Phaser.Scene {
   /**
    * Reposiciona a bolinha de status + o texto do nome como UM grupo só,
    * centralizado sobre o boneco (em vez de cada um centralizado por
-   * si) -- precisa ser recalculado toda vez que o texto do nome muda,
-   * porque a largura do label muda junto.
+   * si), e redesenha o fundo em "pill" arredondada atrás dos dois --
+   * precisa ser recalculado toda vez que o texto do nome muda, porque
+   * a largura do label (e portanto do fundo) muda junto.
    */
-  private layoutNameplate(label: Phaser.GameObjects.Text, dot: Phaser.GameObjects.Arc) {
+  private layoutNameplate(
+    label: Phaser.GameObjects.Text,
+    dot: Phaser.GameObjects.Arc,
+    bg: Phaser.GameObjects.Graphics
+  ) {
     const groupWidth = STATUS_DOT_RADIUS * 2 + STATUS_DOT_GAP + label.width;
     const left = -groupWidth / 2;
     dot.setPosition(left + STATUS_DOT_RADIUS, label.y);
     label.setOrigin(0, 0.5);
     label.setX(left + STATUS_DOT_RADIUS * 2 + STATUS_DOT_GAP);
+
+    const pillWidth = groupWidth + NAMEPLATE_PAD_X * 2;
+    const pillHeight = label.height + NAMEPLATE_PAD_Y * 2;
+    const pillX = left - NAMEPLATE_PAD_X;
+    const pillY = label.y - pillHeight / 2;
+    bg.clear();
+    bg.fillStyle(NAMEPLATE_BG_COLOR, NAMEPLATE_BG_ALPHA);
+    bg.fillRoundedRect(pillX, pillY, pillWidth, pillHeight, NAMEPLATE_RADIUS);
+    bg.lineStyle(1, NAMEPLATE_BORDER_COLOR, NAMEPLATE_BORDER_ALPHA);
+    bg.strokeRoundedRect(pillX, pillY, pillWidth, pillHeight, NAMEPLATE_RADIUS);
   }
 
   /** Atualiza nome + cor da bolinha de status de um boneco já existente (local ou remoto), sem recriar nada. */
   private setNameplate(container: Phaser.GameObjects.Container, name: string, statusColor: string) {
     const label = container.getData("label") as Phaser.GameObjects.Text | undefined;
     const dot = container.getData("statusDot") as Phaser.GameObjects.Arc | undefined;
-    if (!label || !dot) return;
+    const bg = container.getData("nameplateBg") as Phaser.GameObjects.Graphics | undefined;
+    if (!label || !dot || !bg) return;
     if (label.text !== name) label.setText(name);
     dot.setFillStyle(Phaser.Display.Color.HexStringToColor(statusColor).color);
-    this.layoutNameplate(label, dot);
+    this.layoutNameplate(label, dot, bg);
   }
 
   /** Chamado de fora (GameRoom.tsx) toda vez que MEU nome ou status muda no card de perfil, pra refletir ao vivo no boneco dentro do jogo. */
