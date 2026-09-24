@@ -1640,7 +1640,8 @@ body {
 }
 
 /* Preview do item selecionado na paleta de móveis (ver item-preview em
-   EditPanel, GameRoom.tsx) -- imagem grande + setas de girar dos lados,
+   EditPanel, GameRoom.tsx) -- imagem grande + setas de girar do lado
+   esquerdo, grade de cores do lado DIREITO (ver item-preview-colors),
    igual o painel de detalhe de item do Gather (print que o Douglas
    mandou). Só aparece quando um item tá selecionado/armado pra colocar. */
 .item-preview {
@@ -1650,15 +1651,40 @@ body {
   border: 1px solid #2f2245;
   border-radius: 10px;
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.item-preview-main {
+  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .item-preview-row {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+/* grade de cores à direita do preview (ver FURNITURE_COLORS em
+   game/furniture.ts) -- reusa .color-picker-label/.color-picker-empty/
+   .color-swatches/.color-swatch, já usados na customização de cabelo/
+   barba/acessório (mesma pegada: "Em breve" até ter cor cadastrada). */
+.item-preview-colors {
+  width: 84px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.item-preview-colors .color-picker-label {
+  margin-bottom: 0;
 }
 
 .item-preview-rotate {

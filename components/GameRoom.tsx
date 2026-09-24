@@ -10,9 +10,11 @@ import { createGameConfig } from "@/game/config";
 import {
   catalogIndicesForType,
   FURNITURE_CATALOG,
+  FURNITURE_COLORS,
   FURNITURE_TYPE_CATEGORY,
   FURNITURE_TYPE_LABEL,
   furnitureArtFile,
+  furnitureColorArtFile,
   FurnitureCategoryId,
   FurnitureDef,
   FurnitureType,
@@ -2468,34 +2470,66 @@ function EditPanel({
             (() => {
               const canRotate = catalogIndicesForType(selectedEntry.type).length > 1;
               const artFile = furnitureArtFile(selectedEntry.type, selectedEntry.facing);
+              // cores dessa peça (ver FurnitureColorOption em
+              // game/furniture.ts) -- nenhum tipo tem cor cadastrada
+              // ainda, por isso sempre cai no "Em breve" por enquanto
+              // (mesmo padrão já usado pra cor de cabelo/barba sem
+              // gerar ainda, ver color-picker-empty mais abaixo nesse
+              // arquivo).
+              const colorOptions = FURNITURE_COLORS[selectedEntry.type] ?? [];
               return (
                 <div className="item-preview">
-                  <div className="item-preview-row">
-                    <button
-                      className="item-preview-rotate"
-                      onClick={() => rotateSelected(-1)}
-                      disabled={!canRotate}
-                      title="Girar (anti-horário)"
-                    >
-                      <RotateLeftIcon />
-                    </button>
-                    {artFile && (
-                      <img
-                        className="item-preview-img"
-                        src={`/assets/${artFile}`}
-                        alt={FURNITURE_TYPE_LABEL[selectedEntry.type]}
-                      />
-                    )}
-                    <button
-                      className="item-preview-rotate"
-                      onClick={() => rotateSelected(1)}
-                      disabled={!canRotate}
-                      title="Girar (horário)"
-                    >
-                      <RotateRightIcon />
-                    </button>
+                  <div className="item-preview-main">
+                    <div className="item-preview-row">
+                      <button
+                        className="item-preview-rotate"
+                        onClick={() => rotateSelected(-1)}
+                        disabled={!canRotate}
+                        title="Girar (anti-horário)"
+                      >
+                        <RotateLeftIcon />
+                      </button>
+                      {artFile && (
+                        <img
+                          className="item-preview-img"
+                          src={`/assets/${artFile}`}
+                          alt={FURNITURE_TYPE_LABEL[selectedEntry.type]}
+                        />
+                      )}
+                      <button
+                        className="item-preview-rotate"
+                        onClick={() => rotateSelected(1)}
+                        disabled={!canRotate}
+                        title="Girar (horário)"
+                      >
+                        <RotateRightIcon />
+                      </button>
+                    </div>
+                    <p className="item-preview-label">{FURNITURE_TYPE_LABEL[selectedEntry.type]}</p>
                   </div>
-                  <p className="item-preview-label">{FURNITURE_TYPE_LABEL[selectedEntry.type]}</p>
+
+                  <div className="item-preview-colors">
+                    <span className="color-picker-label">Cores</span>
+                    {colorOptions.length > 0 ? (
+                      <div className="color-swatches">
+                        {colorOptions.map((c) => (
+                          <button
+                            key={c.id}
+                            className="color-swatch"
+                            style={{
+                              width: 22,
+                              height: 22,
+                              backgroundImage: `url(/assets/${furnitureColorArtFile(c, selectedEntry.facing)})`,
+                              backgroundSize: "cover",
+                            }}
+                            title={c.label}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="color-picker-empty">Em breve</span>
+                    )}
+                  </div>
                 </div>
               );
             })()}

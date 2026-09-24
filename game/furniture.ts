@@ -77,6 +77,38 @@ export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, stri
 };
 
 /**
+ * Variação de COR de uma peça de móvel -- mesma ideia do `colors` de
+ * cabelo/barba (ver ColorOption em game/customization.ts): NÃO é um
+ * tint/filtro aplicado em cima da mesma arte, é uma arte DIFERENTE por
+ * cor (por isso `art` tem o mesmo formato de FURNITURE_ART[tipo], uma
+ * imagem por direção). Testamos uma tintura simples em cima da arte
+ * atual da poltrona e não dava pra ver direito (ela é bem escura/preta
+ * -- tingir um preto continua preto), então o combinado com o Douglas
+ * foi: estrutura pronta agora, arte de cada cor sobe depois (mesmo
+ * padrão já usado pro piso e pras categorias de móvel ainda vazias).
+ */
+export interface FurnitureColorOption {
+  id: string;
+  label: string;
+  art: Partial<Record<Direction, string>>;
+}
+
+/**
+ * Cores cadastradas por TIPO de móvel (não por combinação tipo+direção
+ * -- uma cor cobre as 4 direções de uma vez, ver `art` acima). Vazio
+ * pra todo mundo por enquanto -- ver comentário de FurnitureColorOption.
+ * Quando subir arte de cor de verdade aqui, falta só ligar a escolha de
+ * cor no preview (EditPanel, GameRoom.tsx) na hora de colocar o item
+ * (hoje o preview já mostra "Em breve" no lugar da grade de cores).
+ */
+export const FURNITURE_COLORS: Partial<Record<FurnitureType, FurnitureColorOption[]>> = {};
+
+/** Nome do arquivo em public/assets pra uma COR+direção (com fallback pra "down"), mesma lógica de furnitureArtFile. */
+export function furnitureColorArtFile(color: FurnitureColorOption, facing: Direction): string | null {
+  return color.art[facing] ?? color.art.down ?? null;
+}
+
+/**
  * Categorias da barra de ícones do editor de espaço ("Editar espaço",
  * ver EditPanel em GameRoom.tsx) -- cada uma vira um botão com ícone lá
  * em cima, igual ao padrão de referência que o Douglas mandou (barra de
