@@ -4,4 +4,14 @@
 
 import type { OutfitOption } from "./customization";
 
-export const GENERATED_OUTFIT_CATALOG: OutfitOption[] = [];
+export const GENERATED_OUTFIT_CATALOG: OutfitOption[] = [
+  {
+    "id": "linho",
+    "label": "Linho",
+    "bySkin": {
+      "branco": "traje_linho_branco.png",
+      "negro": "traje_linho_negro.png",
+      "pardo": "traje_linho_pardo.png"
+    }
+  }
+];

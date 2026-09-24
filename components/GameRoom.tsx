@@ -69,6 +69,19 @@ function statusColorFor(status: string | undefined): string {
   return STATUS_DOT_COLORS[(status as ProfileStatus) ?? "online"] ?? STATUS_DOT_COLORS.online;
 }
 
+// traje inicial do boneco ao entrar na sala (ver useState(selectedOutfitId)
+// mais abaixo) -- sorteia entre os trajes DE VERDADE do catálogo,
+// excluindo "nenhum" (esse continua escolhível à mão no editor, só não
+// faz mais sentido como padrão do spawn, ver comentário lá). Sem
+// nenhum traje de verdade cadastrado ainda (catálogo vazio, só
+// "nenhum"), cai pra DEFAULT_OUTFIT_ID mesmo (hoje sempre "nenhum",
+// primeira entrada do catálogo).
+function pickRandomOutfitId(): string {
+  const real = OUTFIT_CATALOG.filter((o) => o.id !== "nenhum");
+  if (real.length === 0) return DEFAULT_OUTFIT_ID;
+  return real[Math.floor(Math.random() * real.length)].id;
+}
+
 // userId = identidade PERSISTENTE (ver getOrCreateUserId), diferente do
 // "id" de conexão (novo a cada reconexão) -- é o que o chat direto/
 // grupo usa pra saber quem é quem entre uma visita e outra (ver
@@ -685,8 +698,17 @@ export default function GameRoom() {
   const [selectedAccessoryColorId, setSelectedAccessoryColorId] = useState<string | null>(null);
   // traje (roupa do pescoço pra baixo, ver OUTFIT_CATALOG) -- sem cor
   // manual (nenhum *ColorId), a arte já muda sozinha com o tom de pele
-  // escolhido acima (ver outfitFileForSkin).
-  const [selectedOutfitId, setSelectedOutfitId] = useState(DEFAULT_OUTFIT_ID);
+  // escolhido acima (ver outfitFileForSkin). Começa num traje ALEATÓRIO
+  // (ver pickRandomOutfitId) em vez de "nenhum" -- desde que a camada
+  // base virou só cabeça (ver scripts/syncSkinAssets.mjs), um boneco
+  // sem traje ficaria sem corpo nenhum na sala; "Nenhum" continua
+  // escolhível à mão no editor, só não é mais o padrão do spawn. Função
+  // lazy (não `useState(DEFAULT_OUTFIT_ID)`) pra sortear só uma vez na
+  // hora de montar, não a cada render -- seguro mesmo sem estar dentro
+  // de um useEffect porque este componente é sempre client-only (ver
+  // `dynamic(..., { ssr: false })` em app/page.tsx), sem risco de
+  // hydration mismatch entre servidor/cliente.
+  const [selectedOutfitId, setSelectedOutfitId] = useState(pickRandomOutfitId);
   // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).

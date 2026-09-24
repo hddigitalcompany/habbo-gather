@@ -1,20 +1,34 @@
 // Sincroniza tons de pele/corpo base (camada "base" do avatar) a partir
 // de uma pasta de arte crua (ver AVATAR_SKIN_SRC_ROOT em
 // scripts/avatarAssetsConfig.mjs) -- cada pasta de primeiro nível
-// (Branco/Pardo/Negro...) é UM tom, com as 15 poses reais (diferente do
-// cabelo: aqui cada pose é uma imagem DIFERENTE mesmo, sem repetir --
-// frente/lado esq/lado dir/costas, cada um parado + andando A + andando
-// B, mais frente/lado esq/lado dir sentado).
+// (Branco/Pardo/Negro...) é UM tom.
 //
-// Nomes de arquivo aceitos (ver POSE_FILE_ALIASES): "Frente parado",
-// "Frente andando A/B", "Lado esq parado/andando A/B/sentado", "lado dir
-// parado/andando A/B/sentado", "costas parado/andando A/B", "Frente
-// sentado" -- sem diferenciar maiúscula/acento/espaço x hífen (ver
-// normalizeBase em spriteSheetUtils.mjs).
+// Convenção NOVA (desde que todo avatar sempre usa um traje, ver
+// OUTFIT_CATALOG/DEFAULT_OUTFIT_ID em customization.ts -- o traje já
+// desenha o corpo inteiro do pescoço pra baixo, com a mão exposta na cor
+// certa, ver LAYER_DRAW_ORDER em MainScene.ts): a camada base só
+// aparece na parte que o traje deixa de fora, ou seja, só a CABEÇA. Por
+// isso agora só pede 4 arquivos por tom -- uma cabeça por direção, SEM
+// variação de passo/sentado (a mesma cabeça é reusada nos 4-5 frames
+// daquela direção: parado + andando A + andando B, e também sentado nas
+// direções que têm, já que sentado só muda o corpo, não a cabeça):
+//
+//   frente / lado esq / lado dir / costas
+//
+// Nomes de arquivo aceitos (ver DIRECTION_FILE_ALIASES) -- sem
+// diferenciar maiúscula/acento/espaço x hífen nem sufixo tipo " (1)"
+// que o macOS gruda em arquivo duplicado (ver normalizeBase em
+// spriteSheetUtils.mjs): "Frente", "Lado esq", "lado dir", "costas".
+//
+// As poses antigas de corpo inteiro (frente/lado/costas andando A/B,
+// parado, sentado) que ainda sobrarem na pasta são simplesmente
+// ignoradas -- o Douglas disse que vai manter esses arquivos por
+// enquanto só de precaução, não fazem mais parte do pipeline.
 //
 // Gera public/assets/avatar_<slug>.png (mesmo formato 8x2/200x260 que
-// avatar_visual1.png já usa) e game/skinCatalog.generated.ts com um
-// SkinOption por pasta -- reescrito toda vez, não editar à mão.
+// avatar_visual1.png já usa, com a cabeça reaproveitada nos frames de
+// cada direção) e game/skinCatalog.generated.ts com um SkinOption por
+// pasta -- reescrito toda vez, não editar à mão.
 
 import { readdir, mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
@@ -22,7 +36,6 @@ import path from "path";
 import { ROOT, AVATAR_SKIN_SRC_ROOT as SRC_ROOT } from "./avatarAssetsConfig.mjs";
 import {
   imageFiles,
-  findAllPoses,
   loadFrame,
   composeSheet,
   readOptionalLabel,
@@ -46,22 +59,22 @@ const FRAME_SLOTS = [
   "down_sentado", "left_sentado", "right_sentado",
 ];
 
-const POSE_FILE_ALIASES = {
-  down_parado: ["frente parado"],
-  down_passoA: ["frente andando a"],
-  down_passoB: ["frente andando b"],
-  left_parado: ["lado esq parado"],
-  left_passoA: ["lado esq andando a"],
-  left_passoB: ["lado esq andando b"],
-  right_parado: ["lado dir parado"],
-  right_passoA: ["lado dir andando a"],
-  right_passoB: ["lado dir andando b"],
-  up_parado: ["costas parado"],
-  up_passoA: ["costas andando a"],
-  up_passoB: ["costas andando b"],
-  down_sentado: ["frente sentado"],
-  left_sentado: ["lado esq sentado"],
-  right_sentado: ["lado dir sentado"],
+// pra cada direção, quais slots da grade acima reusam a MESMA cabeça --
+// "up" (costas) não tem slot de sentado (ver FRAME_SLOTS/comentário no
+// topo do arquivo, MESMA observação de sempre: "up" sentado reusa o
+// frame 9 direto em MainScene.ts, nunca teve célula própria).
+const SLOTS_BY_DIRECTION = {
+  down: ["down_parado", "down_passoA", "down_passoB", "down_sentado"],
+  left: ["left_parado", "left_passoA", "left_passoB", "left_sentado"],
+  right: ["right_parado", "right_passoA", "right_passoB", "right_sentado"],
+  up: ["up_parado", "up_passoA", "up_passoB"],
+};
+
+const DIRECTION_FILE_ALIASES = {
+  down: ["frente"],
+  left: ["lado esq"],
+  right: ["lado dir"],
+  up: ["costas"],
 };
 
 // cor do swatch selecionável (ver ProfileCard em GameRoom.tsx) -- o
@@ -74,20 +87,33 @@ const SKIN_HEX_BY_NAME = {
   negro: "#765e48",
 };
 
+/** Acha, entre os arquivos de uma pasta de tom, qual bate com cada direção (ver DIRECTION_FILE_ALIASES) -- devolve {found: {direction: fileName}, missing: [direction]}. */
+function findDirectionFiles(fileNames) {
+  const found = {};
+  const missing = [];
+  for (const [direction, aliases] of Object.entries(DIRECTION_FILE_ALIASES)) {
+    const targets = new Set(aliases);
+    const hit = fileNames.find((name) => targets.has(normalizeBase(name)));
+    if (hit) found[direction] = hit;
+    else missing.push(direction);
+  }
+  return { found, missing };
+}
+
 async function ensureReferenceTemplates() {
   const baseAvatarPath = path.join(OUT_DIR, "avatar_visual1.png");
-  const need = Object.keys(POSE_FILE_ALIASES).some((k) => !existsSync(path.join(REFERENCE_DIR, `${k}.png`)));
+  const need = Object.keys(DIRECTION_FILE_ALIASES).some(
+    (dir) => !existsSync(path.join(REFERENCE_DIR, `${DIRECTION_FILE_ALIASES[dir][0]}.png`))
+  );
   if (!need || !existsSync(baseAvatarPath)) return;
-  const refPoses = {
-    down_parado: 0, down_passoA: 1, down_passoB: 2,
-    left_parado: 3, left_passoA: 4, left_passoB: 5,
-    right_parado: 6, right_passoA: 7, right_passoB: 8,
-    up_parado: 9, up_passoA: 10, up_passoB: 11,
-    down_sentado: 12, left_sentado: 13, right_sentado: 14,
-  };
+  // recorta o frame "parado" de cada direção do avatar base antigo (full
+  // body) só como guia de ONDE a cabeça cai dentro do quadro 200x260 --
+  // o arquivo novo (cabeça só) não precisa preencher o quadro inteiro,
+  // só ficar na mesma posição/escala da cabeça que aparecia aqui.
+  const refPoses = { frente: 0, "lado esq": 3, "lado dir": 6, costas: 9 };
   await extractReferenceFrames(baseAvatarPath, REFERENCE_DIR, refPoses);
   console.log(
-    `Gerei referências de alinhamento em ${path.relative(ROOT, REFERENCE_DIR)}/ (recortadas do avatar base) -- use como guia no editor de imagem.`
+    `Gerei referências de alinhamento em ${path.relative(ROOT, REFERENCE_DIR)}/ (recortadas do avatar base) -- use como guia de onde a cabeça cai no quadro.`
   );
 }
 
@@ -118,17 +144,27 @@ async function main() {
     }
 
     const entries = await readdir(dir, { withFileTypes: true });
-    const { found, missing } = findAllPoses(imageFiles(entries), POSE_FILE_ALIASES);
+    const { found, missing } = findDirectionFiles(imageFiles(entries));
     if (missing.length > 0) {
-      console.warn(`- "${entry.name}": faltam os arquivos [${missing.join(", ")}], pulei (item incompleto).`);
+      console.warn(`- "${entry.name}": faltam as cabeças [${missing.join(", ")}], pulei (item incompleto).`);
       continue;
     }
 
     console.log(`- "${entry.name}" -> id "${id}"`);
     try {
+      // carrega cada cabeça UMA vez só, depois reusa o mesmo buffer nos
+      // 3-4 slots da direção dela (ver SLOTS_BY_DIRECTION) -- não
+      // precisa recarregar/reprocessar a mesma imagem várias vezes.
       const frameBuffers = {};
-      for (const [poseKey, fileName] of Object.entries(found)) {
-        frameBuffers[poseKey] = await loadFrame(path.join(dir, fileName), `${entry.name}/${fileName}`, path.relative(ROOT, REFERENCE_DIR));
+      for (const [direction, fileName] of Object.entries(found)) {
+        const buffer = await loadFrame(
+          path.join(dir, fileName),
+          `${entry.name}/${fileName}`,
+          path.relative(ROOT, REFERENCE_DIR)
+        );
+        for (const slot of SLOTS_BY_DIRECTION[direction]) {
+          frameBuffers[slot] = buffer;
+        }
       }
       const sheet = await composeSheet(frameBuffers, FRAME_SLOTS);
       const fileName = `avatar_${id}.png`;
