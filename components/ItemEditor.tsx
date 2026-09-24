@@ -312,6 +312,14 @@ const THREE_DIR_SHEET_SLOTS: SheetSlot[] = [
 // índices de SKIN_SHEET_SLOT_DIRECTIONS acima.
 const DIRECTION_FIRST_FRAME_INDEX: Record<DirectionKey, number> = { down: 0, left: 3, right: 6, up: 9 };
 
+// pose SENTADO por direção (mesmo índice de frame que SENTADO_FRAMES em
+// game/MainScene.ts -- não dá pra importar de lá porque é um const
+// privado do módulo, não exportado, então replica aqui como o resto
+// desse arquivo já faz com DIRECTION_FIRST_FRAME_INDEX acima). "up" não
+// tem arte sentado-de-costas própria ainda, cai na mesma pose em pé
+// virado pra trás (frame 9), igual o jogo faz.
+const SEAT_FRAME_INDEX: Record<DirectionKey, number> = { down: 12, left: 13, right: 14, up: 9 };
+
 // posição/tamanho de UMA foto de direção dentro do quadro 200x260 --
 // pedido do Douglas: "preciso posicionar e redimensionar" -- ajustado
 // arrastando/com slider no editor (ver handleArtPointerDown mais
@@ -1255,6 +1263,15 @@ export default function ItemEditor({
   const mobiFrameOffsetXPx = mobiFrameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
   const mobiFrameOffsetYPx = mobiFrameRow * (FRAME_H + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
 
+  // mesma ideia, mas pra pose SENTADO da direção ativa (usado no boneco
+  // arrastável do marcador de assento logo abaixo, no lugar da bolinha
+  // antiga -- pedido do Douglas).
+  const activeSeatFrameIndex = SEAT_FRAME_INDEX[activeMobiDirection];
+  const seatFrameCol = activeSeatFrameIndex % SKIN_SHEET_COLS;
+  const seatFrameRow = Math.floor(activeSeatFrameIndex / SKIN_SHEET_COLS);
+  const seatFrameOffsetXPx = seatFrameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
+  const seatFrameOffsetYPx = seatFrameRow * (FRAME_H + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
+
   // --- arrastar o item em cima do quadrado/boneco de referência
   // (pedido do Douglas: "delimitar ali no editor a posição do mobi no
   // tile", depois "editar todos os lados do mobi") -- pointer capture
@@ -1632,28 +1649,45 @@ export default function ItemEditor({
                 </div>
               </div>
 
-              {/* marcador de onde o boneco senta (só quando "Sentar"
-                  tá ligado acima) -- arrasta pra ajustar o ponto
-                  padrão; o fino por direção continua no "Assento" do
-                  editor de espaço (resolveSeatOffset em
-                  game/furniture.ts), esse aqui só define o PADRÃO
-                  usado antes de qualquer ajuste ao vivo. Mesmo
-                  referencial que item-stage-item-img logo abaixo (não
-                  filho de item-stage-avatar, que tem seu PRÓPRIO
-                  referencial não escalado por causa do transform:
-                  scale() no crop) -- ancorado no mesmo "bottom" que os
-                  pés do boneco (STAGE_BASELINE_PAD +
-                  AVATAR_FOOT_FROM_TILE_BOTTOM). */}
+              {/* boneco SENTADO arrastável (só quando "Sentar" tá
+                  ligado acima) -- arrasta o próprio boneco (já na pose
+                  sentado da direção ativa) pra ajustar o ponto padrão;
+                  o fino por direção continua no "Assento" do editor de
+                  espaço (resolveSeatOffset em game/furniture.ts), esse
+                  aqui só define o PADRÃO usado antes de qualquer ajuste
+                  ao vivo. Mesmo referencial de item-stage-item-img
+                  logo abaixo -- ancorado no mesmo "bottom" que os pés
+                  do boneco em pé (STAGE_BASELINE_PAD +
+                  AVATAR_FOOT_FROM_TILE_BOTTOM), só deslocado pelo
+                  seatOffsetX/Y atual (mesma conta que a bolinha antiga
+                  fazia). Pedido do Douglas: trocar a bolinha abstrata
+                  por um boneco de verdade, bem mais intuitivo de
+                  posicionar. */}
               {sittable && (
                 <div
-                  className="item-stage-seat-marker"
+                  className="item-stage-seat-avatar"
                   style={{
                     bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM - seatOffsetY * PREVIEW_SCALE,
+                    width: FRAME_W,
+                    height: FRAME_H,
                     transform: `translate(calc(-50% + ${seatOffsetX * PREVIEW_SCALE}px), 0)`,
                   }}
                   onPointerDown={handleSeatMarkerPointerDown}
-                  title="Arraste pra ajustar onde o boneco senta"
-                />
+                  title="Arraste o boneco sentado pra ajustar onde ele senta"
+                >
+                  <div
+                    className="item-stage-avatar-crop"
+                    style={{
+                      transform: `translate(-${seatFrameOffsetXPx}px, -${seatFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
+                    }}
+                  >
+                    {REFERENCE_OUTFIT_FILE && (
+                      <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_OUTFIT_FILE}`} alt="" />
+                    )}
+                    {REFERENCE_SKIN && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_SKIN.file}`} alt="" />}
+                    {REFERENCE_HAIR && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_HAIR.file}`} alt="" />}
+                  </div>
+                </div>
               )}
 
               <div

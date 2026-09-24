@@ -3516,27 +3516,29 @@ body {
   cursor: grabbing;
 }
 
-/* Marcador de "onde o boneco senta" no editor de mobi (pedido do
-   Douglas: "editar também a posição sentado lá dentro") -- uma bolinha
-   arrastável ancorada no mesmo referencial de item-stage-item-img/
-   item-stage-tile (ver ItemEditor.tsx). Só aparece quando "Sentar" tá
+/* Boneco SENTADO arrastável no editor de mobi (pedido do Douglas: "melhor
+   o boneco sentado e eu colocar ele na posição" -- trocou a bolinha
+   abstrata que tinha antes por um boneco de verdade, já na pose sentado
+   da direção ativa, que é o próprio elemento arrastado). Mesmo
+   referencial/tamanho de item-stage-avatar (200x260 escalado, ver
+   ItemEditor.tsx), só que com pointer-events habilitado (é ele que
+   recebe o arraste, ao contrário do boneco "em pé" logo atrás que é só
+   referência visual) e um destaque (contorno tracejado dourado + leve
+   brilho) pra não confundir os dois. Só aparece quando "Sentar" tá
    selecionado. */
-.item-stage-seat-marker {
+.item-stage-seat-avatar {
   position: absolute;
   left: 50%;
-  width: 14px;
-  height: 14px;
-  margin-bottom: -7px;
-  border-radius: 50%;
-  background: rgba(255, 196, 0, 0.85);
-  border: 2px solid rgba(20, 10, 40, 0.85);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
   cursor: grab;
   touch-action: none;
+  outline: 2px dashed rgba(255, 196, 0, 0.85);
+  outline-offset: 3px;
+  border-radius: 6px;
   z-index: 2;
+  filter: drop-shadow(0 0 4px rgba(255, 196, 0, 0.55));
 }
 
-.item-stage-seat-marker:active {
+.item-stage-seat-avatar:active {
   cursor: grabbing;
 }
 
