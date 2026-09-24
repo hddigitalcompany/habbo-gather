@@ -340,15 +340,22 @@ const STAND_COOLDOWN_MS = 350;
 const STEP_DURATION_MS = 180;
 
 // zoom da câmera (controles "estilo Gather" no canto do mapa, ver
-// MapControls em GameRoom.tsx) -- 1 é o zoom padrão, que já mostra a
-// sala inteira (mesmo comportamento de sempre, ver game/config.ts:
-// resolução interna 800x600 == GRID_ORIGIN/GRID_COLS/GRID_ROWS
-// ocupando toda a área visível), então não faz sentido zoom < 1 (só
-// sobraria fundo vazio nas bordas). Exportado pra GameRoom.tsx habilitar/
-// desabilitar os botões "+"/"-" no limite, sem duplicar o número aqui.
-export const MIN_ZOOM_LEVEL = 1;
-export const MAX_ZOOM_LEVEL = 2;
+// MapControls em GameRoom.tsx) -- DEFAULT_ZOOM_LEVEL (1) é o zoom
+// inicial, que mostra a sala inteira encostada nas bordas da tela
+// (mesmo comportamento de sempre, ver game/config.ts: resolução
+// interna 800x600 == GRID_ORIGIN/GRID_COLS/GRID_ROWS ocupando toda a
+// área visível). MIN_ZOOM_LEVEL é o piso do botão "-" -- pedido do
+// Douglas pra dar mais 3 cliques de zoom out (3 * ZOOM_STEP) além do
+// padrão, então abaixo de 1 mesmo: o Phaser centraliza os bounds da
+// câmera (ver CAMERA_WORLD_W/H/setBounds) dentro da tela nesse caso,
+// sobrando fundo (backgroundColor do config.ts) nas bordas -- é o
+// efeito "mais distante" pedido, não um bug. Exportados pra
+// GameRoom.tsx habilitar/desabilitar os botões "+"/"-" no limite, sem
+// duplicar os números aqui.
 const ZOOM_STEP = 0.25;
+export const DEFAULT_ZOOM_LEVEL = 1;
+export const MIN_ZOOM_LEVEL = DEFAULT_ZOOM_LEVEL - 3 * ZOOM_STEP;
+export const MAX_ZOOM_LEVEL = 2;
 
 // mesma resolução interna do jogo (ver width/height em game/config.ts) --
 // é o limite de scroll da câmera (setBounds), pra não deixar
@@ -721,7 +728,7 @@ export default class MainScene extends Phaser.Scene {
     // setBounds só define até onde dá pra arrastar/dar zoom sem mostrar
     // área fora da sala (ver CAMERA_WORLD_W/H).
     this.cameras.main.setBounds(0, 0, CAMERA_WORLD_W, CAMERA_WORLD_H);
-    this.cameras.main.setZoom(MIN_ZOOM_LEVEL);
+    this.cameras.main.setZoom(DEFAULT_ZOOM_LEVEL);
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       this.handleEditPointerMove(pointer);

@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
 import PartySocket from "partysocket";
-import MainScene, { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
+import MainScene, { DEFAULT_ZOOM_LEVEL, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import {
   catalogEntryGroupKey,
@@ -677,7 +677,7 @@ export default function GameRoom() {
   // centralizar, ver MapControls logo abaixo) -- só espelha o zoom
   // atual da câmera (MainScene.zoomIn/zoomOut já limitam o valor, ver
   // MIN_ZOOM_LEVEL/MAX_ZOOM_LEVEL) pra desabilitar os botões no teto.
-  const [mapZoom, setMapZoom] = useState(MIN_ZOOM_LEVEL);
+  const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM_LEVEL);
   function handleZoomIn() {
     const zoom = sceneRef.current?.zoomIn();
     if (zoom !== undefined) setMapZoom(zoom);
