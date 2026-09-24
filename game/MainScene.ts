@@ -771,9 +771,22 @@ export default class MainScene extends Phaser.Scene {
       Phaser.Display.Color.HexStringToColor(statusColor).color
     );
 
-    const container = this.add.container(x, y, [...layerSprites, label, statusDot]);
     const dispW = layerSprites[0].displayWidth;
     const dispH = layerSprites[0].displayHeight;
+
+    // destaque ao passar o mouse (ver hitArea/pointerdown mais abaixo --
+    // o avatar inteiro já é clicável, isso só acrescenta o feedback
+    // visual de hover, igual o Gather): um brilho roxo suave nos pés
+    // (mesma cor de destaque do resto da UI, ver .category-icon-btn.selected
+    // em globals.css) -- criado JÁ como primeiro item da lista de filhos
+    // do container (mais abaixo), pra ficar atrás de todas as sprites do
+    // boneco. Começa com alpha 0 (invisível) -- pointerover/pointerout
+    // mais abaixo animam ele (e um leve aumento de escala nas sprites)
+    // com tween.
+    const hoverGlow = this.add.ellipse(0, AVATAR_FOOT_OFFSET_Y - 4, dispW * 0.85, dispW * 0.34, 0x7c5cff, 0.5);
+    hoverGlow.setAlpha(0);
+
+    const container = this.add.container(x, y, [hoverGlow, ...layerSprites, label, statusDot]);
     container.setSize(dispW, dispH);
     container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
@@ -808,6 +821,34 @@ export default class MainScene extends Phaser.Scene {
     container.on("pointerdown", () => {
       if (this.avatarClicksLocked) return;
       this.onAvatarClick?.({ playerId, isLocal, name, color });
+    });
+    // destaque de hover (ver hoverGlow acima) -- desliga junto com o
+    // clique quando avatarClicksLocked (não faz sentido destacar algo
+    // que não vai responder ao clique agora).
+    container.on("pointerover", () => {
+      if (this.avatarClicksLocked) return;
+      this.tweens.killTweensOf(hoverGlow);
+      this.tweens.add({ targets: hoverGlow, alpha: 1, duration: 120, ease: "Sine.easeOut" });
+      this.tweens.killTweensOf(layerSprites);
+      this.tweens.add({
+        targets: layerSprites,
+        scaleX: AVATAR_SCALE * 1.05,
+        scaleY: AVATAR_SCALE * 1.05,
+        duration: 120,
+        ease: "Sine.easeOut",
+      });
+    });
+    container.on("pointerout", () => {
+      this.tweens.killTweensOf(hoverGlow);
+      this.tweens.add({ targets: hoverGlow, alpha: 0, duration: 120, ease: "Sine.easeIn" });
+      this.tweens.killTweensOf(layerSprites);
+      this.tweens.add({
+        targets: layerSprites,
+        scaleX: AVATAR_SCALE,
+        scaleY: AVATAR_SCALE,
+        duration: 120,
+        ease: "Sine.easeIn",
+      });
     });
 
     return container;
