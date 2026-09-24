@@ -73,6 +73,13 @@ export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
  * desenhar o botão seletor (ver ProfileCard em GameRoom.tsx) -- o
  * Douglas mandou os tons certos pelo chat, não é uma cor tirada da
  * imagem.
+ *
+ * Não existe mais um tom "Padrão" manual (era o amarelado do avatar
+ * base antigo, avatar_visual1.png -- esse arquivo continua existindo só
+ * como TEMPLATE de alinhamento pros scripts de sync, ver
+ * ensureReferenceTemplates em cada um deles, mas não aparece mais como
+ * opção pro jogador). "Branco" é sempre o primeiro/padrão (ver sort
+ * abaixo) -- não depende da ordem em que a pasta de origem foi lida.
  */
 export interface SkinOption {
   id: string;
@@ -85,12 +92,11 @@ export interface SkinOption {
 // esse import nem o arquivo dele à mão.
 import { GENERATED_SKIN_CATALOG } from "./skinCatalog.generated";
 
-export const SKIN_CATALOG: SkinOption[] = [
-  { id: "padrao", label: "Padrão", file: "avatar_visual1.png" },
-  ...GENERATED_SKIN_CATALOG,
-];
+export const SKIN_CATALOG: SkinOption[] = [...GENERATED_SKIN_CATALOG].sort((a, b) =>
+  a.id === "branco" ? -1 : b.id === "branco" ? 1 : 0
+);
 
-export const DEFAULT_SKIN_ID = SKIN_CATALOG[0].id;
+export const DEFAULT_SKIN_ID = SKIN_CATALOG[0]?.id ?? "branco";
 
 /**
  * Barba (camada "barba") -- só 3 poses de verdade (sem "costas" -- não
