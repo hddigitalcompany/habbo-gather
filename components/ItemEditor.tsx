@@ -38,6 +38,34 @@ type CategoryId = "poltrona" | "divisoria" | "sofa" | "mesa" | "planta" | "compu
 // gerou/montou, em qualquer resolução, e esse teto só corta o excesso.
 const UPLOAD_SUPERSAMPLE = 3;
 
+// pedido do Douglas: as imagens que ele gera não vêm num padrão de
+// proporção (uma poltrona pode sair "quadrada", outra "alongada"), então
+// o mesmo alvo de largura por CATEGORIA (CUSTOM_ITEM_TARGET_WIDTH) dava
+// resultado de tamanho bem diferente de item pra item -- precisa ajustar
+// cada um à mão, olhando o resultado. displayWidth (abaixo) é esse
+// ajuste, mostrado ao vivo no preview grande (ver item-size-card) antes
+// de cadastrar -- persistido por ITEM (não por categoria, ver
+// display_width em supabase/migrations/0003_room_items_display_width.sql
+// e o uso em addFurnitureSprite, MainScene.ts).
+const DISPLAY_WIDTH_MIN = 40;
+const DISPLAY_WIDTH_MAX = 400;
+const DISPLAY_WIDTH_STEP = 5;
+
+// altura (px, na tela do jogo) que o boneco realmente ocupa -- ver
+// comentário "caractere ocupa ~210px de altura dentro do frame de 260 ->
+// essa escala deixa ele com uns 90px de altura em tela" em
+// game/MainScene.ts (AVATAR_SCALE). Usado só pra desenhar a silhueta de
+// referência no preview (não é o boneco de verdade -- roupa/cabelo/tom
+// variam por pessoa -- mas o TAMANHO bate com o jogo de verdade).
+const AVATAR_REF_HEIGHT = 90;
+
+// fator só pra deixar o card GRANDE o suficiente pra enxergar bem
+// (pedido do Douglas: "preciso disso num card maior, com a imagem
+// maior") -- multiplica avatar E item pelo MESMO número, então a
+// PROPORÇÃO entre os dois continua idêntica à do jogo de verdade, só
+// maior na tela.
+const PREVIEW_SCALE = 2.5;
+
 const CATEGORIES: { id: CategoryId; label: string }[] = [
   { id: "poltrona", label: "Poltrona" },
   { id: "divisoria", label: "Divisória" },
@@ -134,6 +162,45 @@ export default function ItemEditor({
   const [error, setError] = useState<string | null>(null);
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
 
+  // tamanho de exibição ajustado à mão (ver DISPLAY_WIDTH_MIN/MAX/
+  // PREVIEW_SCALE acima) -- começa no alvo padrão da categoria escolhida
+  // e reseta pro alvo da categoria nova toda vez que ela muda (ver
+  // handleCategoryChange), já que categorias diferentes têm escala bem
+  // diferente (planta é bem menor que sofá).
+  const [displayWidth, setDisplayWidth] = useState<number>(CUSTOM_ITEM_TARGET_WIDTH.poltrona);
+  // URL (blob local, nunca sobe pra lugar nenhum) da imagem de FRENTE
+  // escolhida, só pra mostrar no preview grande (ver item-size-card) --
+  // revogada (URL.revokeObjectURL) toda vez que troca ou o componente
+  // desmonta, pra não vazar memória.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // espelha previewUrl (ver comentário acima) só pra revogar a URL certa
+  // no cleanup do useEffect de desmontagem abaixo, sem precisar colocar
+  // previewUrl nas deps dele (que rodaria o cleanup a cada troca de
+  // arquivo, revogando a URL um passo cedo demais).
+  const previewUrlRef = useRef<string | null>(null);
+  previewUrlRef.current = previewUrl;
+
+  function handleCategoryChange(next: CategoryId) {
+    setCategory(next);
+    setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH[next]);
+  }
+
+  function handleDownFileChange(file: File | undefined) {
+    setFiles((prev) => ({ ...prev, down: file }));
+    setPreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  // limpa a última URL de preview ao desmontar (ex: fechou o editor) --
+  // sem isso o blob fica preso na memória do navegador até a aba fechar.
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
+
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
   async function loadItems() {
@@ -170,10 +237,11 @@ export default function ItemEditor({
     try {
       const slug = slugify(label);
       // teto de resolução com folga (ver UPLOAD_SUPERSAMPLE/
-      // resizeImageForUpload acima) -- calculado UMA vez por categoria
-      // escolhida, as 4 direções usam o mesmo teto (a peça tem
+      // resizeImageForUpload acima) -- a partir do tamanho de exibição
+      // ESCOLHIDO no preview (displayWidth), não mais do alvo genérico
+      // da categoria: as 4 direções usam o mesmo teto (a peça tem
       // proporções parecidas de qualquer ângulo).
-      const maxUploadWidth = CUSTOM_ITEM_TARGET_WIDTH[category] * UPLOAD_SUPERSAMPLE;
+      const maxUploadWidth = displayWidth * UPLOAD_SUPERSAMPLE;
       const art: Record<string, string> = {};
       for (const field of DIRECTION_FIELDS) {
         const rawFile = files[field.key];
@@ -193,13 +261,18 @@ export default function ItemEditor({
       const res = await fetch("/api/items", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ label: label.trim(), category, art }),
+        body: JSON.stringify({ label: label.trim(), category, art, display_width: displayWidth }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "erro ao cadastrar item");
 
       setLabel("");
       setFiles({});
+      setPreviewUrl((prevUrl) => {
+        if (prevUrl) URL.revokeObjectURL(prevUrl);
+        return null;
+      });
+      setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH[category]);
       for (const key of Object.keys(fileInputRefs.current)) {
         const input = fileInputRefs.current[key];
         if (input) input.value = "";
@@ -231,7 +304,7 @@ export default function ItemEditor({
 
   return (
     <div className="items-panel-backdrop" onClick={onClose}>
-      <div className="items-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="items-panel items-panel-editor" onClick={(e) => e.stopPropagation()}>
         <div className="items-panel-header">
           <h2>Editor de itens</h2>
           <button type="button" className="items-panel-close" onClick={onClose} title="Fechar">
@@ -248,7 +321,7 @@ export default function ItemEditor({
             maxLength={40}
             onChange={(e) => setLabel(e.target.value)}
           />
-          <select className="items-panel-input" value={category} onChange={(e) => setCategory(e.target.value as CategoryId)}>
+          <select className="items-panel-input" value={category} onChange={(e) => handleCategoryChange(e.target.value as CategoryId)}>
             {CATEGORIES.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.label}
@@ -257,7 +330,7 @@ export default function ItemEditor({
           </select>
 
           <p className="settings-hint">
-            Pode subir a imagem na qualidade original (do ChatGPT/Canva, sem redimensionar à mão) -- o jogo encolhe sozinho pro tamanho certo.
+            Pode subir a imagem na qualidade original (do ChatGPT/Canva, sem redimensionar à mão) -- ajuste o tamanho de exibição no preview abaixo, o jogo encolhe sozinho pro tamanho certo.
           </p>
 
           <div className="items-panel-uploads">
@@ -273,12 +346,58 @@ export default function ItemEditor({
                   }}
                   type="file"
                   accept="image/png,image/webp,image/jpeg"
-                  onChange={(e) =>
-                    setFiles((prev) => ({ ...prev, [field.key]: e.target.files?.[0] ?? undefined }))
-                  }
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? undefined;
+                    if (field.key === "down") handleDownFileChange(file);
+                    else setFiles((prev) => ({ ...prev, [field.key]: file }));
+                  }}
                 />
               </label>
             ))}
+          </div>
+
+          {/* Preview grande de tamanho (pedido do Douglas: "preciso disso
+              num card maior, com a imagem maior e com o boneco... pra eu
+              ver o resultado exato") -- mostra a imagem de FRENTE junto
+              de uma silhueta na altura REAL do boneco em jogo (ver
+              AVATAR_REF_HEIGHT acima), os dois multiplicados pelo MESMO
+              fator (PREVIEW_SCALE) então a proporção entre os dois bate
+              com o jogo de verdade, só maior na tela pra dar pra ver
+              direito. O slider ajusta displayWidth ao vivo -- é o valor
+              que vai salvo com o item (ver handleSubmit). */}
+          <div className="item-size-card">
+            <div className="item-size-stage">
+              <div
+                className="item-size-avatar"
+                style={{ height: AVATAR_REF_HEIGHT * PREVIEW_SCALE }}
+                title="Referência de tamanho (não é o seu boneco de verdade -- roupa/cabelo variam, o TAMANHO é que bate com o jogo)"
+              >
+                <div className="item-size-avatar-head" />
+                <div className="item-size-avatar-body" />
+              </div>
+              {previewUrl ? (
+                <img
+                  className="item-size-item-img"
+                  src={previewUrl}
+                  alt="Preview do item"
+                  style={{ width: displayWidth * PREVIEW_SCALE }}
+                />
+              ) : (
+                <p className="edit-hint item-size-empty">Escolha a imagem de frente pra ver o preview aqui.</p>
+              )}
+            </div>
+            <div className="settings-slider-row">
+              <span className="settings-slider-name">Tamanho no jogo</span>
+              <input
+                type="range"
+                min={DISPLAY_WIDTH_MIN}
+                max={DISPLAY_WIDTH_MAX}
+                step={DISPLAY_WIDTH_STEP}
+                value={displayWidth}
+                onChange={(e) => setDisplayWidth(Number(e.target.value))}
+              />
+              <span className="settings-slider-value">{displayWidth}px</span>
+            </div>
           </div>
 
           {error && <p className="items-panel-error">{error}</p>}

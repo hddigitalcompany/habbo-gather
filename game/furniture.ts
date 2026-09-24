@@ -179,6 +179,17 @@ export interface FurnitureModelDef {
    * recortada/dimensionada certinha pelo script, não precisa de ajuste
    * nenhum na exibição. */
   custom?: boolean;
+  /** Tamanho de exibição (px, largura) escolhido À MÃO no preview do
+   * Editor de Itens (ver ItemEditor.tsx/handleSubmit e a coluna
+   * display_width em supabase/migrations/0003_room_items_display_width.sql)
+   * -- só existe em item CUSTOM. Quando ausente (item cadastrado ANTES
+   * dessa opção existir), cai no fallback por categoria
+   * (CUSTOM_ITEM_TARGET_WIDTH abaixo, ver uso em addFurnitureSprite,
+   * MainScene.ts). Pedido do Douglas: a imagem gerada não vem num
+   * padrão de proporção, então o mesmo alvo por categoria dava
+   * resultado bem diferente de item pra item -- precisa ajustar cada
+   * um. */
+  displayWidth?: number;
 }
 
 /**

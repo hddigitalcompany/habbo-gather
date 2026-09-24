@@ -464,6 +464,18 @@ export default class MainScene extends Phaser.Scene {
   private gridGraphics?: Phaser.GameObjects.Graphics;
   private hoverGraphics?: Phaser.GameObjects.Graphics;
 
+  // --- ferramenta "Mover" do editor de espaço (ver selectMoveTool) --
+  // pedido do Douglas: até aqui, clicar num item já colocado só APAGAVA
+  // (ver handleEditPointerDown) -- não dava pra reposicionar sem
+  // apagar e colocar de novo do zero (perdendo cor/modelo escolhido).
+  // Com a ferramenta ligada, o PRIMEIRO clique num item pega ele
+  // (movingFurnitureId guarda qual) em vez de apagar; o clique
+  // SEGUINTE num tile livre solta ali (ou cancela, clicando de novo no
+  // tile de origem). Mutuamente exclusiva com as outras ferramentas
+  // (catálogo/piso/área), mesmo padrão de selectFloorTool/selectAreaTool.
+  private moveToolActive = false;
+  private movingFurnitureId: string | null = null;
+
   /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido/carregado no editor, pra React manter a lista/autosave em dia. */
   onDraftChange?: (items: FurnitureDef[]) => void;
 
@@ -852,7 +864,11 @@ export default class MainScene extends Phaser.Scene {
       const source = this.textures.get(key).getSourceImage() as { width?: number; height?: number };
       const nativeW = source.width || image.width;
       const nativeH = source.height || image.height;
-      const targetWidth = CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 150;
+      // preferência: tamanho ajustado à mão no preview do Editor de Itens
+      // (model.displayWidth, ver FurnitureModelDef em furniture.ts) --
+      // só cai no alvo genérico por categoria pra item cadastrado ANTES
+      // dessa opção existir (display_width null no banco).
+      const targetWidth = model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 150;
       if (nativeW > 0 && nativeH > 0) {
         image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
       }
@@ -1869,6 +1885,8 @@ export default class MainScene extends Phaser.Scene {
     this.selectedCatalogEntry = null;
     this.selectedFloorTool = null;
     this.selectedAreaTool = null;
+    this.moveToolActive = false;
+    this.cancelMovingFurniture();
     this.gridGraphics?.setVisible(active);
     if (!active) this.hoverGraphics?.setVisible(false);
     // a tinta/contorno de área fica mais forte durante a edição (pra
@@ -1879,11 +1897,35 @@ export default class MainScene extends Phaser.Scene {
     this.redrawAreaBorders();
   }
 
-  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma as ferramentas de piso/área (ver selectFloorTool/selectAreaTool) -- só uma ferramenta ativa por vez. */
+  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma as outras ferramentas (piso/área/mover, ver selectFloorTool/selectAreaTool/selectMoveTool) -- só uma ferramenta ativa por vez. */
   selectCatalogEntry(entry: FurnitureCatalogEntry | null) {
     this.selectedCatalogEntry = entry;
     this.selectedFloorTool = null;
     this.selectedAreaTool = null;
+    this.selectMoveTool(false);
+  }
+
+  /** Liga/desliga a ferramenta "Mover" do editor de espaço -- ver
+   * comentário em moveToolActive/movingFurnitureId acima. Desarma as
+   * outras ferramentas ao ligar (mesmo padrão de selectFloorTool/
+   * selectAreaTool/selectCatalogEntry) e sempre solta (sem mover)
+   * qualquer item que estivesse em mãos ao desligar. */
+  selectMoveTool(active: boolean) {
+    this.moveToolActive = active;
+    if (active) {
+      this.selectedCatalogEntry = null;
+      this.selectedFloorTool = null;
+      this.selectedAreaTool = null;
+    } else {
+      this.cancelMovingFurniture();
+    }
+  }
+
+  /** Solta (sem mover) o item em mãos da ferramenta "Mover", se houver -- tira o destaque visual e limpa movingFurnitureId. Chamado ao desligar a ferramenta, clicar de novo no tile de origem, ou sair do modo de edição. */
+  private cancelMovingFurniture() {
+    if (!this.movingFurnitureId) return;
+    this.draftSprites.get(this.movingFurnitureId)?.clearTint();
+    this.movingFurnitureId = null;
   }
 
   getDraftFurnitureList(): FurnitureDef[] {
@@ -1920,14 +1962,16 @@ export default class MainScene extends Phaser.Scene {
     for (const sprite of this.draftSprites.values()) sprite.destroy();
     this.draftSprites.clear();
     this.draftFurniture.clear();
+    this.movingFurnitureId = null; // o item em mãos (se houver) acabou de ser destruído junto
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
-  /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma o item de móvel/a ferramenta de área (ver selectCatalogEntry/selectAreaTool) -- só uma ferramenta ativa por vez. */
+  /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma as outras (móvel/área/mover, ver selectCatalogEntry/selectAreaTool/selectMoveTool) -- só uma ferramenta ativa por vez. */
   selectFloorTool(tool: FloorTool) {
     this.selectedFloorTool = tool;
     this.selectedCatalogEntry = null;
     this.selectedAreaTool = null;
+    this.selectMoveTool(false);
   }
 
   getDraftFloorList(): FloorTileDef[] {
@@ -1941,11 +1985,12 @@ export default class MainScene extends Phaser.Scene {
     this.onDraftFloorChange?.(this.getDraftFloorList());
   }
 
-  /** Escolhe a ferramenta de área ativa -- mesma ideia da selectFloorTool acima, {kind:"paint", areaId} pinta a área escolhida NA LISTA (ver setAreaDefs), {kind:"erase"} apaga. Desarma móvel/piso (só uma ferramenta ativa por vez). */
+  /** Escolhe a ferramenta de área ativa -- mesma ideia da selectFloorTool acima, {kind:"paint", areaId} pinta a área escolhida NA LISTA (ver setAreaDefs), {kind:"erase"} apaga. Desarma móvel/piso/mover (só uma ferramenta ativa por vez). */
   selectAreaTool(tool: AreaTool) {
     this.selectedAreaTool = tool;
     this.selectedCatalogEntry = null;
     this.selectedFloorTool = null;
+    this.selectMoveTool(false);
   }
 
   getDraftAreaList(): AreaTileDef[] {
@@ -2494,6 +2539,58 @@ export default class MainScene extends Phaser.Scene {
     if (this.isPointerOnAnyAvatar(pointer)) return;
     const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
     if (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS) return;
+
+    // ferramenta "Mover" armada (ver selectMoveTool) -- pedido do
+    // Douglas: precisa editar a POSIÇÃO de um item já colocado, sem ter
+    // que apagar e colocar de novo (perdendo cor/modelo escolhido).
+    if (this.moveToolActive) {
+      if (this.movingFurnitureId) {
+        const moving = this.draftFurniture.get(this.movingFurnitureId);
+        if (!moving) {
+          // sumiu por algum outro caminho (ex: clearDraftFurniture) --
+          // não devia acontecer (esses caminhos já limpam
+          // movingFurnitureId), mas não deixa travado num id órfão.
+          this.movingFurnitureId = null;
+          return;
+        }
+        if (moving.col === col && moving.row === row) {
+          // clicou de novo no MESMO tile onde já estava -- cancela em
+          // vez de mover (solta sem soltar em lugar nenhum diferente).
+          this.cancelMovingFurniture();
+          return;
+        }
+        if (this.anyFurnitureAt(col, row)) return; // tile de destino ocupado, ignora o clique
+        moving.col = col;
+        moving.row = row;
+        const sprite = this.draftSprites.get(this.movingFurnitureId);
+        if (sprite) {
+          const pos = furnitureWorldPos(moving);
+          sprite.setPosition(pos.x, pos.y);
+          sprite.setDepth(moving.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(moving.row));
+          sprite.clearTint();
+        }
+        // se o boneco local tava sentado NESSE item, acompanha ele pro
+        // tile novo NA HORA -- sem isso ficaria "flutuando" pra trás,
+        // longe do móvel que acabou de mudar de lugar (pedido do
+        // Douglas: a posição do boneco, na interação de sentar, tem que
+        // seguir o ITEM, não ficar presa a um ponto fixo do espaço).
+        if (this.localActivity === "sentado" && this.seatedAt?.id === this.movingFurnitureId) {
+          this.applySeatVisualPosition(moving);
+        }
+        this.movingFurnitureId = null;
+        this.onDraftChange?.(this.getDraftFurnitureList());
+        return;
+      }
+      // nada em mãos ainda -- clicar num item já colocado PEGA ele (só
+      // rascunho, mesma restrição de sempre: móvel FIXO de ROOM_FURNITURE
+      // não é editável por aqui). Clicar em tile vazio não faz nada.
+      const pickId = this.draftIdAt(col, row);
+      if (pickId) {
+        this.movingFurnitureId = pickId;
+        this.draftSprites.get(pickId)?.setTint(0x7c5cff);
+      }
+      return;
+    }
 
     // ferramenta de área armada: mesma ideia da ferramenta de piso logo
     // abaixo (clique único já pinta e entra em modo de arrasto) -- checa

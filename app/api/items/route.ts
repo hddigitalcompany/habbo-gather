@@ -28,6 +28,18 @@ export async function POST(req: NextRequest) {
   const label = typeof body?.label === "string" ? body.label.trim() : "";
   const category = typeof body?.category === "string" ? body.category : "";
   const art = body?.art && typeof body.art === "object" ? (body.art as Record<string, unknown>) : null;
+  // tamanho ajustado à mão no preview do Editor de Itens (ver
+  // ItemEditor.tsx/displayWidth e a coluna display_width em
+  // supabase/migrations/0003_room_items_display_width.sql) -- opcional
+  // (undefined/inválido cai no fallback por categoria, ver
+  // CUSTOM_ITEM_TARGET_WIDTH/addFurnitureSprite em MainScene.ts), por
+  // isso não entra na validação obrigatória acima. Mesma faixa 20-600
+  // da constraint no banco.
+  const rawDisplayWidth = body?.display_width;
+  const displayWidth =
+    typeof rawDisplayWidth === "number" && Number.isFinite(rawDisplayWidth) && rawDisplayWidth >= 20 && rawDisplayWidth <= 600
+      ? Math.round(rawDisplayWidth)
+      : null;
 
   if (!label) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!ALLOWED_CATEGORIES.includes(category)) {
@@ -47,7 +59,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await admin
     .from("room_items")
-    .insert({ label, category, art: cleanArt, created_by: callerId })
+    .insert({ label, category, art: cleanArt, display_width: displayWidth, created_by: callerId })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

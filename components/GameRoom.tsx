@@ -733,14 +733,27 @@ export default function GameRoom({
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     try {
-      const { data, error } = await supabase.from("room_items").select("id, label, category, art");
+      const { data, error } = await supabase
+        .from("room_items")
+        .select("id, label, category, art, display_width");
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
-        (row: { id: string; label: string; category: string; art: Partial<Record<Direction, string>> }) => ({
+        (row: {
+          id: string;
+          label: string;
+          category: string;
+          art: Partial<Record<Direction, string>>;
+          display_width: number | null;
+        }) => ({
           id: row.id,
           type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
           label: row.label,
           colors: [{ id: "default", label: "Padrão", art: row.art }],
+          // ajustado à mão no preview do Editor de Itens (ver
+          // ItemEditor.tsx) -- null pra item cadastrado antes dessa
+          // opção existir, cai no fallback por categoria (ver
+          // addFurnitureSprite, MainScene.ts).
+          displayWidth: typeof row.display_width === "number" ? row.display_width : undefined,
         })
       );
       registerCustomFurnitureModels(models);
@@ -838,7 +851,7 @@ export default function GameRoom({
   // nenhum FurnitureType/arte cadastrado -- aparecem na barra mas com a
   // grade vazia, até subir os arquivos de origem (combinado com o
   // Douglas: estrutura agora, arte depois).
-  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento">("poltrona");
+  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento" | "mover">("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -2233,10 +2246,13 @@ export default function GameRoom({
   // troca de categoria na barra de ícones -- separado de setActiveCategory
   // direto (era só isso antes) porque "assento" precisa ligar/desligar o
   // modo de ajuste na cena (ver setSeatTuningMode em MainScene.ts, muda o
-  // que as setas de direção fazem enquanto sentado).
-  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento") {
+  // que as setas de direção fazem enquanto sentado) e "mover" precisa
+  // ligar/desligar a ferramenta de reposicionar item já colocado (ver
+  // selectMoveTool em MainScene.ts).
+  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento" | "mover") {
     setActiveCategory(category);
     sceneRef.current?.setSeatTuningMode(category === "assento");
+    sceneRef.current?.selectMoveTool(category === "mover");
   }
 
   /** Aplica a COR escolhida (ver selectFurnitureColor) numa entrada de catálogo, se ela tiver cores (ver FurnitureCatalogEntry.colors) -- devolve a entrada como veio quando não tiver (ex: vidro) ou quando o id não bater com nenhuma cor dela. */
@@ -2381,7 +2397,12 @@ export default function GameRoom({
       setFloorSaveStatus("saving");
       fetch(`${REALTIME_HTTP_BASE}/room/floor`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
         body: JSON.stringify({ items: draftFloorItems }),
       })
         .then((r) => {
@@ -2410,7 +2431,12 @@ export default function GameRoom({
       setAreaSaveStatus("saving");
       fetch(`${REALTIME_HTTP_BASE}/room/areas`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
         body: JSON.stringify({ list: draftAreaDefs, tiles: draftAreaItems }),
       })
         .then((r) => {
@@ -2434,7 +2460,12 @@ export default function GameRoom({
       setFurnitureSaveStatus("saving");
       fetch(`${REALTIME_HTTP_BASE}/room/furniture`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
         body: JSON.stringify({ items: draftItems, seatOffsets }),
       })
         .then((r) => {
@@ -3117,7 +3148,7 @@ const FACING_LABEL: Record<Direction, string> = {
 };
 
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso" | "area" | "assento";
+  id: FurnitureCategoryId | "piso" | "area" | "assento" | "mover";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -3135,6 +3166,11 @@ const EDIT_CATEGORY_TABS: {
   // trava de sempre, canEditRoom), não é uma categoria de móvel de
   // verdade (não tem paleta pra colocar item nenhum).
   { id: "assento", label: "Assento", icon: SeatTuneIcon },
+  // "Mover": pedido do Douglas -- reposicionar um item JÁ colocado sem
+  // precisar apagar e colocar de novo (perdia cor/modelo escolhido).
+  // Também não é categoria de móvel, é uma ferramenta (ver
+  // selectMoveTool em MainScene.ts).
+  { id: "mover", label: "Mover", icon: MoveIcon },
 ];
 
 function EditPanel({
@@ -3168,8 +3204,8 @@ function EditPanel({
   onClearAllArea,
   areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento";
-  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento") => void;
+  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "mover";
+  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento" | "mover") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   selectedColorId: string | null;
@@ -3212,7 +3248,7 @@ function EditPanel({
   // FURNITURE_CATALOG_STATIC, game/furniture.ts), continua existindo só
   // nos itens fixos antigos de ROOM_FURNITURE.
   const categoryEntries =
-    activeCategory === "piso" || activeCategory === "area" || activeCategory === "assento"
+    activeCategory === "piso" || activeCategory === "area" || activeCategory === "assento" || activeCategory === "mover"
       ? []
       : FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory);
   const hasModelsInCategory = categoryEntries.some((e) => e.modelId);
@@ -3416,6 +3452,15 @@ function EditPanel({
           ) : (
             <p className="edit-hint">Sente numa peça pra ver o ajuste aqui.</p>
           )}
+        </>
+      ) : activeCategory === "mover" ? (
+        <>
+          <p className="edit-hint">
+            Clique num item já colocado pra pegar ele (fica destacado), e
+            clique num quadrado livre pra soltar ali. Clicar de novo no
+            quadrado de origem cancela sem mover. Se alguém estiver sentado
+            nele, o boneco acompanha pro lugar novo na hora. Salva sozinho.
+          </p>
         </>
       ) : (
         <>
@@ -3711,6 +3756,23 @@ function SeatTuneIcon() {
       <path d="M12 21.5 9.3 17.4h5.4L12 21.5z" />
       <path d="M2.5 12 6.6 9.3v5.4L2.5 12z" />
       <path d="M21.5 12 17.4 9.3v5.4L21.5 12z" />
+    </svg>
+  );
+}
+
+// Aba "Mover" (ver EDIT_CATEGORY_TABS/selectMoveTool) -- cruz de 4
+// setas, ícone universal de "arrastar/reposicionar" (diferente da
+// bússola de 4 pontas do SeatTuneIcon acima, pra não confundir as duas
+// abas na barra).
+function MoveIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+      <polyline points="5 9 2 12 5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="9 5 12 2 15 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="15 19 12 22 9 19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="19 9 22 12 19 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

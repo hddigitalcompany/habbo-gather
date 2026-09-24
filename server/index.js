@@ -606,12 +606,31 @@ function handleGetFurniture(req, res) {
 
 const MAX_ROOM_BODY_BYTES = 500_000; // generoso pro tamanho da sala hoje (12x7), evita payload absurdo
 
-/** POST /room/floor -- ver comentário grande no topo do arquivo. Desativado
- * fora de dev (NODE_ENV=production) -- segunda trava, do lado do
- * servidor, além de já esconder o botão/painel pro cliente final (ver
- * IS_ROOM_EDITOR_ENABLED em GameRoom.tsx). */
-function handlePostFloor(req, res) {
-  if (process.env.NODE_ENV === "production") {
+/** Confere se quem chamou é o DONO da sala, via header "Authorization:
+ * Bearer <token>" (mesmo esquema já usado em handleGetPresence acima) --
+ * usado pelos handlePost* abaixo pra decidir se libera salvar em
+ * PRODUÇÃO (ver comentário neles). Sem token, ou token de quem não é
+ * owner, devolve false -- nunca lança. */
+async function callerIsOwner(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return false;
+  const callerUserId = await verifyAccessToken(token);
+  if (!callerUserId) return false;
+  const role = await getRole(callerUserId);
+  return role === "owner";
+}
+
+/** POST /room/floor -- ver comentário grande no topo do arquivo. Em
+ * PRODUÇÃO, só salva se quem chamou for o DONO da sala (ver
+ * callerIsOwner acima) -- em dev, sempre libera (facilita testar sem
+ * precisar de token). Isso é a trava do lado do SERVIDOR; o cliente já
+ * só mostra o botão/painel pro dono (ver canEditRoom em GameRoom.tsx) --
+ * antes disso aqui, em produção o servidor recusava TODO mundo, mesmo o
+ * dono (bug -- o editor abria, parecia salvar, mas sempre dava "Erro ao
+ * salvar" assim que saía do ambiente de dev). */
+async function handlePostFloor(req, res) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -667,11 +686,12 @@ function handlePostFloor(req, res) {
   });
 }
 
-/** POST /room/areas -- mesma ideia/travas do handlePostFloor acima, só
- * troca roomStore.setFloor por roomStore.setAreaState (ver validação em
- * server/roomStore.js -- espera { list, tiles } em vez de { items }). */
-function handlePostAreas(req, res) {
-  if (process.env.NODE_ENV === "production") {
+/** POST /room/areas -- mesma ideia/travas do handlePostFloor acima (ver
+ * callerIsOwner), só troca roomStore.setFloor por
+ * roomStore.setAreaState (ver validação em server/roomStore.js --
+ * espera { list, tiles } em vez de { items }). */
+async function handlePostAreas(req, res) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -727,12 +747,12 @@ function handlePostAreas(req, res) {
   });
 }
 
-/** POST /room/furniture -- mesma ideia/travas do handlePostAreas acima, só
- * troca roomStore.setAreaState por roomStore.setFurnitureState (ver
- * validação em server/roomStore.js -- espera { items, seatOffsets } em
- * vez de { list, tiles }). */
-function handlePostFurniture(req, res) {
-  if (process.env.NODE_ENV === "production") {
+/** POST /room/furniture -- mesma ideia/travas do handlePostAreas acima
+ * (ver callerIsOwner), só troca roomStore.setAreaState por
+ * roomStore.setFurnitureState (ver validação em server/roomStore.js --
+ * espera { items, seatOffsets } em vez de { list, tiles }). */
+async function handlePostFurniture(req, res) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
