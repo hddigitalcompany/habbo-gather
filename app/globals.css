@@ -1511,6 +1511,13 @@ body {
 }
 
 .edit-panel {
+  /* irmã de .room-wrapper dentro de .room-and-editor (mesma pegada do
+     .chat-drawer-sidebar, ver comentário lá) -- sem flex-shrink:0 o
+     item flexível "de sobra" (min-width:auto por padrão) acaba sendo
+     o canvas do jogo dentro de .room-wrapper, então é ESTE painel que
+     é espremido até sumir (largura ~0) em vez do jogo encolher. Foi
+     isso que fazia "Editar espaço" parecer não abrir nada. */
+  flex-shrink: 0;
   width: 280px;
   max-width: 100%;
   max-height: 600px;
