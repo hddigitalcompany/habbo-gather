@@ -21,13 +21,14 @@
 // Esse arquivo fica de fora do git (ver .gitignore) porque o caminho é
 // específico da sua máquina.
 //
-// A pasta de TRAJE tem o MESMO esquema aninhado da de barba (pasta de
-// primeiro nível = o traje/look; dentro dela, uma SUBPASTA POR TOM DE
-// PELE, com os MESMOS NOMES da pasta de tom de pele/Avatar --
-// "Branco"/"Pardo"/"Negro"/etc -- cada uma com as 15 poses completas,
-// igual à pasta de Avatar/tom de pele). É isso que deixa escolher o
-// tom de pele do avatar selecionar sozinho a arte certa do traje (a
-// mão fica exposta) -- ver scripts/syncOutfitAssets.mjs.
+// A pasta de TRAJE e a de BARBA têm o MESMO esquema aninhado: pasta de
+// primeiro nível = o traje/look ou o estilo de barba; dentro dela, uma
+// SUBPASTA POR TOM DE PELE, com os MESMOS NOMES da pasta de tom de
+// pele/Avatar -- "Branco"/"Pardo"/"Negro"/etc -- cada uma com as poses
+// completas daquela camada (15 no traje, 3 na barba -- ver
+// scripts/syncOutfitAssets.mjs/syncBeardAssets.mjs). É isso que deixa
+// escolher o tom de pele do avatar selecionar sozinho a arte certa do
+// traje (a mão fica exposta) e da barba, sem escolha manual.
 //
 // A pasta de piso é mais simples que as de avatar: não tem poses nem
 // cores aninhadas, só duas subpastas FIXAS (o nome vira a categoria) --

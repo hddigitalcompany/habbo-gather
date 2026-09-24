@@ -19,6 +19,7 @@ import {
   DEFAULT_SKIN_ID,
   BEARD_CATALOG,
   DEFAULT_BEARD_ID,
+  resolveBeardSkinId,
   ACCESSORY_CATALOG,
   DEFAULT_ACCESSORY_ID,
   OUTFIT_CATALOG,
@@ -172,9 +173,11 @@ function skinTextureKey(skinId: string): string {
   return `avatar-base-${skinId}`;
 }
 
-/** Chave da textura no Phaser pra UMA OPÇÃO de barba do catálogo (ver BEARD_CATALOG). */
-function beardTextureKey(beardId: string): string {
-  return `avatar-barba-${beardId}`;
+/** Chave da textura no Phaser pra UMA OPÇÃO de barba NUM TOM de pele
+ * específico (ver BEARD_CATALOG/resolveBeardSkinId) -- igual ao traje,
+ * a arte varia pelos dois, então a chave carrega os dois ids. */
+function beardTextureKey(beardId: string, resolvedSkinId: string): string {
+  return `avatar-barba-${beardId}-${resolvedSkinId}`;
 }
 
 /** Chave da textura no Phaser pra UMA OPÇÃO de acessório do catálogo (ver ACCESSORY_CATALOG). */
@@ -444,24 +447,24 @@ export default class MainScene extends Phaser.Scene {
       });
     }
 
-    // barba e acessório: mesmo esquema de cabelo (catálogo + cores
-    // aninhadas, ver BEARD_CATALOG/ACCESSORY_CATALOG) -- inclui a opção
-    // "Nenhuma(o)" (arquivo transparente), que também é só mais um
+    // barba: igual ao traje, cada OPÇÃO tem VÁRIOS arquivos (um por tom
+    // de pele, ver BeardOption.bySkin) -- carrega cada combinação
+    // barba+tom que existe de verdade como seu próprio spritesheet (ver
+    // beardTextureKey). "Nenhuma" (arquivo transparente) é só mais um
     // spritesheet normal pro Phaser, sem tratamento especial.
     for (const beard of BEARD_CATALOG) {
-      this.load.spritesheet(beardTextureKey(beard.id), `/assets/${beard.file}`, {
-        frameWidth: FRAME_W,
-        frameHeight: FRAME_H,
-        spacing: 2,
-      });
-      for (const color of beard.colors ?? []) {
-        this.load.spritesheet(beardTextureKey(color.id), `/assets/${color.file}`, {
+      for (const [skinId, file] of Object.entries(beard.bySkin)) {
+        if (!file) continue;
+        this.load.spritesheet(beardTextureKey(beard.id, skinId), `/assets/${file}`, {
           frameWidth: FRAME_W,
           frameHeight: FRAME_H,
           spacing: 2,
         });
       }
     }
+    // acessório: catálogo + cores aninhadas (ver ACCESSORY_CATALOG) --
+    // inclui a opção "Nenhum" (arquivo transparente), que também é só
+    // mais um spritesheet normal pro Phaser, sem tratamento especial.
     for (const accessory of ACCESSORY_CATALOG) {
       this.load.spritesheet(accessoryTextureKey(accessory.id), `/assets/${accessory.file}`, {
         frameWidth: FRAME_W,
@@ -652,15 +655,16 @@ export default class MainScene extends Phaser.Scene {
     // uma Sprite por camada EQUIPADA (só as que já têm arte carregada em
     // LAYER_TEXTURE_FILE), empilhadas na ordem de LAYER_DRAW_ORDER --
     // todas na mesma posição/frame, então de longe parecem um boneco só.
-    // "cabelo", "base", "barba" e "oculos" são especiais: sempre entram
-    // (têm catálogo de verdade agora, ver HAIR_CATALOG/SKIN_CATALOG/
-    // BEARD_CATALOG/ACCESSORY_CATALOG), começando na opção padrão --
-    // guardam a própria Sprite à parte (hairSprite/skinSprite/
-    // beardSprite/accessorySprite) pra dar pra trocar de textura DEPOIS
-    // sem recriar o boneco inteiro (ver setLocalHairId/setLocalSkinId/
-    // setLocalBeardId/setLocalAccessoryId). "Nenhuma(o)" (barba/
-    // acessório) é só mais uma opção do catálogo (arquivo transparente),
-    // não precisa de tratamento diferente aqui.
+    // "cabelo", "base", "barba", "oculos" e "traje" são especiais:
+    // sempre entram (têm catálogo de verdade agora, ver HAIR_CATALOG/
+    // SKIN_CATALOG/BEARD_CATALOG/ACCESSORY_CATALOG/OUTFIT_CATALOG),
+    // começando na opção padrão -- guardam a própria Sprite à parte
+    // (hairSprite/skinSprite/beardSprite/accessorySprite/outfitSprite)
+    // pra dar pra trocar de textura DEPOIS sem recriar o boneco inteiro
+    // (ver setLocalHairId/setLocalSkinId/setLocalBeardId/
+    // setLocalAccessoryId/setLocalOutfitId). "Nenhuma(o)" (barba/
+    // acessório/traje) é só mais uma opção do catálogo (arquivo
+    // transparente), não precisa de tratamento diferente aqui.
     const layerSprites: Phaser.GameObjects.Sprite[] = [];
     let hairSprite: Phaser.GameObjects.Sprite | null = null;
     let skinSprite: Phaser.GameObjects.Sprite | null = null;
@@ -710,10 +714,12 @@ export default class MainScene extends Phaser.Scene {
         continue;
       }
       if (layer === "barba") {
+        const defaultBeard = BEARD_CATALOG.find((b) => b.id === DEFAULT_BEARD_ID) ?? BEARD_CATALOG[0];
+        const resolvedBeardSkinId = resolveBeardSkinId(defaultBeard, DEFAULT_SKIN_ID) ?? DEFAULT_SKIN_ID;
         const sprite = this.add.sprite(
           0,
           AVATAR_FOOT_OFFSET_Y,
-          beardTextureKey(DEFAULT_BEARD_ID),
+          beardTextureKey(defaultBeard.id, resolvedBeardSkinId),
           WALK_FRAMES.down[0]
         );
         sprite.setOrigin(0.5, 1);
@@ -855,10 +861,11 @@ export default class MainScene extends Phaser.Scene {
 
   /** Troca o tom de pele do jogador LOCAL ao vivo (ver SKIN_CATALOG) --
    * chamado pelo editor de personagem (GameRoom.tsx). Também reaplica a
-   * textura do TRAJE equipado (se algum), porque a arte dele varia por
-   * tom de pele (a mão fica exposta) -- ver resolveOutfitSkinId. Isso
-   * garante que trocar o tom mantém a mão combinando com a roupa,
-   * independente da ordem em que skin/traje forem trocados. */
+   * textura do TRAJE e da BARBA equipados (se algum), porque a arte dos
+   * dois varia por tom de pele -- ver resolveOutfitSkinId/
+   * resolveBeardSkinId. Isso garante que trocar o tom mantém a mão e a
+   * barba combinando, independente da ordem em que skin/traje/barba
+   * forem trocados. */
   setLocalSkinId(skinId: string) {
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("skinSprite") as Phaser.GameObjects.Sprite | null;
@@ -880,15 +887,36 @@ export default class MainScene extends Phaser.Scene {
         }
       }
     }
+
+    const beardSprite = this.localContainer.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
+    const beardId = this.localContainer.getData("beardId") as string | undefined;
+    if (beardSprite && beardId) {
+      const beard = BEARD_CATALOG.find((b) => b.id === beardId);
+      if (beard) {
+        const resolvedBeardSkinId = resolveBeardSkinId(beard, skinId);
+        if (resolvedBeardSkinId) {
+          const currentFrame = beardSprite.frame.name;
+          beardSprite.setTexture(beardTextureKey(beard.id, resolvedBeardSkinId), currentFrame);
+        }
+      }
+    }
   }
 
-  /** Troca a barba do jogador LOCAL ao vivo (ver BEARD_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
+  /** Troca a barba do jogador LOCAL ao vivo (ver BEARD_CATALOG) -- chamado
+   * pelo editor de personagem (GameRoom.tsx). Usa o tom de pele ATUAL do
+   * jogador pra escolher a arte certa (ver resolveBeardSkinId) -- não
+   * precisa escolha manual de cor/tom, igual o traje. */
   setLocalBeardId(beardId: string) {
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
+    const beard = BEARD_CATALOG.find((b) => b.id === beardId);
+    if (!beard) return;
+    const skinId = (this.localContainer.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
+    const resolvedSkinId = resolveBeardSkinId(beard, skinId);
+    if (!resolvedSkinId) return;
     const currentFrame = sprite.frame.name;
-    sprite.setTexture(beardTextureKey(beardId), currentFrame);
+    sprite.setTexture(beardTextureKey(beard.id, resolvedSkinId), currentFrame);
     this.localContainer.setData("beardId", beardId);
   }
 

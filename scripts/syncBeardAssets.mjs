@@ -1,19 +1,23 @@
 // Sincroniza itens de barba a partir de uma pasta de "arte crua" (ver
 // BARBA_SRC_ROOT em scripts/avatarAssetsConfig.mjs) -- MESMO esquema do
-// cabelo (scripts/syncAvatarAssets.mjs: pasta "plana" com as poses
-// direto vira item isolado; pasta de ESTILO com subpastas de COR vira
-// as cores daquele item), com uma diferença: barba só tem 3 poses
+// traje (scripts/syncOutfitAssets.mjs: pasta de ESTILO com uma SUBPASTA
+// POR TOM DE PELE dentro, mesmos nomes da pasta de tom de pele/Avatar --
+// "Branco"/"Pardo"/"Negro"/etc), com uma diferença: barba só tem 3 poses
 // (frente, lado esq, lado dir) -- NÃO existe "costas", porque não dá
 // pra ver a barba de trás da cabeça mesmo. O frame de "up" (andando de
 // costas) fica com o item invisível (frame transparente, ver
 // blankFrame em spriteSheetUtils.mjs), sem precisar desse arquivo.
 //
-// Gera public/assets/barba_<slug>.png e game/beardCatalog.generated.ts
-// -- reescrito toda vez, não editar à mão. Como não existe nenhuma
-// barba manual pré-existente em game/customization.ts (só a opção
-// "Nenhuma", ver DEFAULT_BEARD_ID), TODA pasta de estilo com subpastas
-// de cor vira um item novo já com as cores dentro de `colors` -- não
-// tem equivalente ao MANUAL_STYLE_MATCH do cabelo aqui.
+// Gera public/assets/barba_<estilo>_<tom>.png e
+// game/beardCatalog.generated.ts (um BeardOption por pasta de estilo,
+// com `bySkin = {tomId: arquivo}`) -- reescrito toda vez, não editar à
+// mão. Como não existe nenhuma barba manual pré-existente em
+// game/customization.ts (só a opção "Nenhuma", ver DEFAULT_BEARD_ID),
+// toda pasta de estilo com subpastas de tom vira um item novo já com os
+// tons dentro de `bySkin`. Uma barba sem NENHUM tom completo é
+// ignorada; um tom faltando de uma barba que já tem outro tom ok só
+// fica de fora do `bySkin` dela (resolveBeardSkinId cai pro primeiro
+// tom que existir).
 //
 // Roda uma vez com `npm run sync-assets`, ou automaticamente sempre que
 // algo muda na pasta de origem (ver scripts/watchAvatarAssets.mjs, que já
@@ -67,38 +71,34 @@ async function ensureReferenceTemplates() {
   );
 }
 
-/** Compõe o spritesheet de UMA barba (3 poses) -- devolve {id, label, file} ou null se inválido/incompleto. */
-async function buildOne({ idLabel, defaultLabel, dir }, takenIds) {
-  const id = slugify(idLabel);
-  if (!id) {
-    console.warn(`- "${idLabel}": nome inválido pra virar id, pulei.`);
-    return null;
-  }
-  if (takenIds.has(id)) {
-    console.warn(`- "${idLabel}" (id "${id}"): id repetido/já usado no catálogo, pulei -- renomeie a pasta.`);
+/** Compõe o spritesheet de UMA barba NUM tom de pele (3 poses) -- devolve {skinId, fileName} ou null se incompleto. */
+async function buildVariant({ styleName, skinFolderName, styleId, dir }) {
+  const skinId = slugify(skinFolderName);
+  if (!skinId) {
+    console.warn(`- "${styleName}/${skinFolderName}": nome de tom inválido pra virar id, pulei esse tom.`);
     return null;
   }
 
   const entries = await readdir(dir, { withFileTypes: true });
   const { found, missing } = findAllPoses(imageFiles(entries), POSE_FILE_ALIASES);
   if (missing.length > 0) {
-    console.warn(`- "${idLabel}": faltam os arquivos [${missing.join(", ")}], pulei (item incompleto).`);
+    console.warn(`- "${styleName}/${skinFolderName}": faltam os arquivos [${missing.join(", ")}], pulei esse tom (incompleto).`);
     return null;
   }
 
-  console.log(`- "${idLabel}" -> id "${id}"`);
   const frameBuffers = { blank: await blankFrame() };
   for (const [poseKey, fileName] of Object.entries(found)) {
-    frameBuffers[poseKey] = await loadFrame(path.join(dir, fileName), `${idLabel}/${fileName}`, path.relative(ROOT, REFERENCE_DIR));
+    frameBuffers[poseKey] = await loadFrame(
+      path.join(dir, fileName),
+      `${styleName}/${skinFolderName}/${fileName}`,
+      path.relative(ROOT, REFERENCE_DIR)
+    );
   }
 
   const sheet = await composeSheet(frameBuffers, FRAME_SLOTS);
-  const fileName = `barba_${id}.png`;
+  const fileName = `barba_${styleId}_${skinId}.png`;
   await writeFile(path.join(OUT_DIR, fileName), sheet);
-
-  const label = (await readOptionalLabel(dir, entries)) || humanize(defaultLabel);
-  takenIds.add(id);
-  return { id, label, file: fileName };
+  return { skinId, fileName };
 }
 
 async function main() {
@@ -108,7 +108,9 @@ async function main() {
 
   if (!existsSync(SRC_ROOT)) {
     await mkdir(SRC_ROOT, { recursive: true });
-    console.log(`Criei ${SRC_ROOT} (estava vazia) -- crie uma pasta por barba aí dentro.`);
+    console.log(
+      `Criei ${SRC_ROOT} (estava vazia) -- crie uma pasta por barba aí dentro, e dentro de cada uma, uma subpasta por tom de pele (mesmos nomes da pasta de Avatar/tom de pele).`
+    );
   }
   await mkdir(OUT_DIR, { recursive: true });
   await ensureReferenceTemplates();
@@ -120,49 +122,46 @@ async function main() {
   const catalog = [];
 
   for (const entry of topDirs) {
-    const dir = path.join(SRC_ROOT, entry.name);
-    const children = await readdir(dir, { withFileTypes: true });
-    const { missing } = findAllPoses(imageFiles(children), POSE_FILE_ALIASES);
-
-    if (missing.length === 0) {
-      // pasta "plana" -- as poses direto dentro dela, item isolado (sem cor).
-      try {
-        const result = await buildOne({ idLabel: entry.name, defaultLabel: entry.name, dir }, takenIds);
-        if (result) catalog.push(result);
-      } catch (e) {
-        console.error(`- "${entry.name}": erro processando -- ${e.message}`);
-      }
+    const styleName = entry.name;
+    const styleId = slugify(styleName);
+    if (!styleId) {
+      console.warn(`- "${styleName}": nome inválido pra virar id, pulei.`);
       continue;
     }
-
-    const subDirs = children.filter((c) => c.isDirectory() && !c.name.startsWith("."));
-    if (subDirs.length === 0) {
-      console.warn(`- "${entry.name}": faltam os arquivos [${missing.join(", ")}], pulei (item incompleto, sem subpastas de cor).`);
-      continue;
-    }
-
-    // pasta de ESTILO com subpastas de COR -- vira UM item novo com as
-    // cores dentro de `colors` (não existe equivalente manual pra
-    // "roubar" as cores aqui, diferente do cabelo).
-    const colorResults = [];
-    for (const sub of subDirs) {
-      const combined = `${entry.name} ${sub.name}`.replace(/\s+/g, " ").trim();
-      try {
-        const result = await buildOne({ idLabel: combined, defaultLabel: sub.name, dir: path.join(dir, sub.name) }, takenIds);
-        if (result) colorResults.push(result);
-      } catch (e) {
-        console.error(`- "${combined}": erro processando -- ${e.message}`);
-      }
-    }
-    if (colorResults.length === 0) continue;
-
-    const styleId = slugify(entry.name);
     if (takenIds.has(styleId)) {
-      console.warn(`- "${entry.name}" (id "${styleId}"): id repetido/já usado no catálogo, pulei o item de estilo (as cores já foram geradas).`);
+      console.warn(`- "${styleName}" (id "${styleId}"): id repetido/já usado no catálogo, pulei -- renomeie a pasta.`);
       continue;
     }
+
+    const dir = path.join(SRC_ROOT, styleName);
+    const children = await readdir(dir, { withFileTypes: true });
+    const subDirs = children.filter((c) => c.isDirectory() && !c.name.startsWith("_") && !c.name.startsWith("."));
+    if (subDirs.length === 0) {
+      console.warn(
+        `- "${styleName}": nenhuma subpasta de tom de pele dentro (crie uma pasta por tom, ex: "Branco"/"Pardo"/"Negro" -- mesmos nomes da pasta de Avatar), pulei.`
+      );
+      continue;
+    }
+
+    const bySkin = {};
+    for (const sub of subDirs) {
+      try {
+        const result = await buildVariant({ styleName, skinFolderName: sub.name, styleId, dir: path.join(dir, sub.name) });
+        if (result) bySkin[result.skinId] = result.fileName;
+      } catch (e) {
+        console.error(`- "${styleName}/${sub.name}": erro processando -- ${e.message}`);
+      }
+    }
+
+    if (Object.keys(bySkin).length === 0) {
+      console.warn(`- "${styleName}": nenhum tom de pele completo, pulei a barba inteira.`);
+      continue;
+    }
+
+    console.log(`- "${styleName}" -> id "${styleId}" (${Object.keys(bySkin).length} tom(ns) de pele)`);
+    const label = (await readOptionalLabel(dir, children)) || humanize(styleName);
     takenIds.add(styleId);
-    catalog.push({ id: styleId, label: humanize(entry.name), file: colorResults[0].file, colors: colorResults });
+    catalog.push({ id: styleId, label, bySkin });
   }
 
   const header =

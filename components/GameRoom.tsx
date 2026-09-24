@@ -28,6 +28,7 @@ import {
   DEFAULT_SKIN_ID,
   BEARD_CATALOG,
   DEFAULT_BEARD_ID,
+  beardFileForSkin,
   ACCESSORY_CATALOG,
   DEFAULT_ACCESSORY_ID,
   OUTFIT_CATALOG,
@@ -660,10 +661,11 @@ export default function GameRoom() {
   // ao lado do boneco no topo do editor (ver AvatarPreviewWrap), não
   // dentro da grade de categorias.
   const [selectedSkinId, setSelectedSkinId] = useState(DEFAULT_SKIN_ID);
-  // barba e acessório: MESMO esquema do cabelo (id do item + cor
-  // opcional dentro dele, ver comentário em selectedHairColorId acima).
+  // barba: sem cor manual (a arte já muda sozinha com o tom de pele
+  // escolhido acima, mesmo esquema do traje -- ver beardFileForSkin).
   const [selectedBeardId, setSelectedBeardId] = useState(DEFAULT_BEARD_ID);
-  const [selectedBeardColorId, setSelectedBeardColorId] = useState<string | null>(null);
+  // acessório: MESMO esquema do cabelo (id do item + cor opcional dentro
+  // dele, ver comentário em selectedHairColorId acima).
   const [selectedAccessoryId, setSelectedAccessoryId] = useState(DEFAULT_ACCESSORY_ID);
   const [selectedAccessoryColorId, setSelectedAccessoryColorId] = useState<string | null>(null);
   // traje (roupa do pescoço pra baixo, ver OUTFIT_CATALOG) -- sem cor
@@ -1900,16 +1902,14 @@ export default function GameRoom() {
     setSelectedSkinId(skinId);
   }
 
-  // barba e acessório: mesmo par de funções do cabelo (troca de
-  // item/estilo reseta a cor escolhida; trocar só a cor mantém o
-  // item/estilo atual).
+  // barba: sem variação de cor manual (a arte já combina sozinha com o
+  // tom de pele escolhido acima, mesmo esquema do traje -- ver
+  // beardFileForSkin/resolveBeardSkinId).
   function selectBeard(beardId: string) {
     setSelectedBeardId(beardId);
-    setSelectedBeardColorId(null);
   }
-  function selectBeardColor(colorId: string) {
-    setSelectedBeardColorId(colorId);
-  }
+  // acessório: mesmo par de funções do cabelo (troca de item/estilo
+  // reseta a cor escolhida; trocar só a cor mantém o item/estilo atual).
   function selectAccessory(accessoryId: string) {
     setSelectedAccessoryId(accessoryId);
     setSelectedAccessoryColorId(null);
@@ -1937,7 +1937,6 @@ export default function GameRoom() {
   const hairColorBeforeEditRef = useRef(selectedHairColorId);
   const skinBeforeEditRef = useRef(selectedSkinId);
   const beardBeforeEditRef = useRef(selectedBeardId);
-  const beardColorBeforeEditRef = useRef(selectedBeardColorId);
   const accessoryBeforeEditRef = useRef(selectedAccessoryId);
   const accessoryColorBeforeEditRef = useRef(selectedAccessoryColorId);
   const outfitBeforeEditRef = useRef(selectedOutfitId);
@@ -1946,7 +1945,6 @@ export default function GameRoom() {
     hairColorBeforeEditRef.current = selectedHairColorId;
     skinBeforeEditRef.current = selectedSkinId;
     beardBeforeEditRef.current = selectedBeardId;
-    beardColorBeforeEditRef.current = selectedBeardColorId;
     accessoryBeforeEditRef.current = selectedAccessoryId;
     accessoryColorBeforeEditRef.current = selectedAccessoryColorId;
     outfitBeforeEditRef.current = selectedOutfitId;
@@ -1960,7 +1958,6 @@ export default function GameRoom() {
     setSelectedHairColorId(hairColorBeforeEditRef.current);
     setSelectedSkinId(skinBeforeEditRef.current);
     setSelectedBeardId(beardBeforeEditRef.current);
-    setSelectedBeardColorId(beardColorBeforeEditRef.current);
     setSelectedAccessoryId(accessoryBeforeEditRef.current);
     setSelectedAccessoryColorId(accessoryColorBeforeEditRef.current);
     setSelectedOutfitId(outfitBeforeEditRef.current);
@@ -1968,15 +1965,17 @@ export default function GameRoom() {
   }
   function saveEditingCharacter() {
     // aplica o rascunho no boneco de verdade dentro do jogo -- só agora
-    // (ver comentário grande acima). Cor escolhida (se houver) manda
-    // mais que o item/estilo base, exatamente como no preview do topo.
-    // Tom de pele primeiro: setLocalOutfitId depois já resolve a arte do
-    // traje pro tom recém-aplicado (ver comentário em setLocalSkinId na
-    // MainScene, que também reaplica o traje sozinho, mas chamar na
-    // ordem certa evita depender só disso).
+    // (ver comentário grande acima). Cor escolhida (se houver, cabelo/
+    // acessório) manda mais que o item/estilo base, exatamente como no
+    // preview do topo -- barba e traje não têm cor manual, a arte já
+    // casa sozinha com o tom de pele. Tom de pele primeiro: setLocalBeardId/
+    // setLocalOutfitId depois já resolvem a arte certa pro tom recém-
+    // aplicado (ver comentário em setLocalSkinId na MainScene, que
+    // também reaplica os dois sozinho, mas chamar na ordem certa evita
+    // depender só disso).
     sceneRef.current?.setLocalHairId(selectedHairColorId ?? selectedHairId);
     sceneRef.current?.setLocalSkinId(selectedSkinId);
-    sceneRef.current?.setLocalBeardId(selectedBeardColorId ?? selectedBeardId);
+    sceneRef.current?.setLocalBeardId(selectedBeardId);
     sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
     sceneRef.current?.setLocalOutfitId(selectedOutfitId);
     setEditingCharacter(false);
@@ -2147,8 +2146,6 @@ export default function GameRoom() {
             onSelectSkin={selectSkin}
             selectedBeardId={selectedBeardId}
             onSelectBeard={selectBeard}
-            selectedBeardColorId={selectedBeardColorId}
-            onSelectBeardColor={selectBeardColor}
             selectedAccessoryId={selectedAccessoryId}
             onSelectAccessory={selectAccessory}
             selectedAccessoryColorId={selectedAccessoryColorId}
@@ -2490,7 +2487,7 @@ function EditPanel({
               // cores dessa peça (ver FurnitureColorOption em
               // game/furniture.ts) -- nenhum tipo tem cor cadastrada
               // ainda, por isso sempre cai no "Em breve" por enquanto
-              // (mesmo padrão já usado pra cor de cabelo/barba sem
+              // (mesmo padrão já usado pra cor de cabelo/acessório sem
               // gerar ainda, ver color-picker-empty mais abaixo nesse
               // arquivo).
               const colorOptions = FURNITURE_COLORS[selectedEntry.type] ?? [];
@@ -2755,8 +2752,6 @@ function ProfileCard({
   onSelectSkin,
   selectedBeardId,
   onSelectBeard,
-  selectedBeardColorId,
-  onSelectBeardColor,
   selectedAccessoryId,
   onSelectAccessory,
   selectedAccessoryColorId,
@@ -2789,8 +2784,6 @@ function ProfileCard({
   onSelectSkin: (id: string) => void;
   selectedBeardId: string;
   onSelectBeard: (id: string) => void;
-  selectedBeardColorId: string | null;
-  onSelectBeardColor: (id: string) => void;
   selectedAccessoryId: string;
   onSelectAccessory: (id: string) => void;
   selectedAccessoryColorId: string | null;
@@ -2853,13 +2846,13 @@ function ProfileCard({
       : undefined;
     const effectiveHairFile = selectedColorOption?.file ?? selectedHairOption?.file;
     const selectedSkinOption = SKIN_CATALOG.find((opt) => opt.id === selectedSkinId) ?? SKIN_CATALOG[0];
-    // barba/acessório: mesmo cálculo de "arquivo efetivo" do cabelo
-    // (cor escolhida dentro do item, se houver).
+    // barba: sem cor manual -- o arquivo efetivo já é resolvido pelo tom
+    // de pele ATUAL, mesmo esquema do traje mais abaixo (ver
+    // beardFileForSkin/resolveBeardSkinId).
     const selectedBeardOption = BEARD_CATALOG.find((opt) => opt.id === selectedBeardId);
-    const selectedBeardColorOption = selectedBeardColorId
-      ? selectedBeardOption?.colors?.find((c) => c.id === selectedBeardColorId)
-      : undefined;
-    const effectiveBeardFile = selectedBeardColorOption?.file ?? selectedBeardOption?.file;
+    const effectiveBeardFile = selectedBeardOption ? beardFileForSkin(selectedBeardOption, selectedSkinId) : undefined;
+    // acessório: cálculo de "arquivo efetivo" do cabelo (cor escolhida
+    // dentro do item, se houver).
     const selectedAccessoryOption = ACCESSORY_CATALOG.find((opt) => opt.id === selectedAccessoryId);
     const selectedAccessoryColorOption = selectedAccessoryColorId
       ? selectedAccessoryOption?.colors?.find((c) => c.id === selectedAccessoryColorId)
@@ -3039,9 +3032,14 @@ function ProfileCard({
                 )}
               </>
             ) : editorCategory === "barba" ? (
-              <>
-                <div className="hair-picker">
-                  {BEARD_CATALOG.map((opt) => (
+              // barba: sem seletor de cor (a arte já combina sozinha com
+              // o tom de pele escolhido lá em cima, mesmo esquema do
+              // traje -- ver beardFileForSkin) -- a miniatura de cada
+              // barba já mostra a arte casada com o tom atual.
+              <div className="hair-picker">
+                {BEARD_CATALOG.map((opt) => {
+                  const thumbFile = beardFileForSkin(opt, selectedSkinId);
+                  return (
                     <button
                       key={opt.id}
                       className={selectedBeardId === opt.id ? "hair-option selected" : "hair-option"}
@@ -3053,43 +3051,16 @@ function ProfileCard({
                         style={{
                           width: HAIR_THUMB_W,
                           height: HAIR_THUMB_H,
-                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundImage: thumbFile ? `url(/assets/${thumbFile})` : undefined,
                           backgroundPosition: "0 0",
                           backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
                         }}
                       />
                       <span className="hair-label">{opt.label}</span>
                     </button>
-                  ))}
-                </div>
-
-                {selectedBeardOption && selectedBeardOption.id !== "nenhuma" && (
-                  <div className="color-picker">
-                    <span className="color-picker-label">Cores de &quot;{selectedBeardOption.label}&quot;</span>
-                    {selectedBeardOption.colors && selectedBeardOption.colors.length > 0 ? (
-                      <div className="color-swatches">
-                        {selectedBeardOption.colors.map((c) => (
-                          <button
-                            key={c.id}
-                            className={selectedBeardColorId === c.id ? "color-swatch selected" : "color-swatch"}
-                            style={{
-                              width: COLOR_SWATCH_W,
-                              height: COLOR_SWATCH_H,
-                              backgroundImage: `url(/assets/${c.file})`,
-                              backgroundPosition: "0 0",
-                              backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
-                            }}
-                            onClick={() => onSelectBeardColor(c.id)}
-                            title={c.label}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="color-picker-empty">Em breve</span>
-                    )}
-                  </div>
-                )}
-              </>
+                  );
+                })}
+              </div>
             ) : editorCategory === "acessorio" ? (
               <>
                 <div className="hair-picker">

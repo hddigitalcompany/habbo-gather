@@ -93,41 +93,58 @@ export const SKIN_CATALOG: SkinOption[] = [
 export const DEFAULT_SKIN_ID = SKIN_CATALOG[0].id;
 
 /**
- * Barba (camada "barba") -- MESMO esquema do cabelo (estilo com cores
- * aninhadas vira `colors`, ver scripts/syncBeardAssets.mjs), mas só 3
- * poses de verdade (sem "costas" -- não dá pra ver a barba de trás da
- * cabeça, o frame de "up" fica transparente). "Nenhuma" é a opção
- * padrão/manual (arquivo transparente, ver public/assets/
- * barba_nenhuma.png) -- diferente do cabelo, nem todo mundo tem barba.
+ * Barba (camada "barba") -- só 3 poses de verdade (sem "costas" -- não
+ * dá pra ver a barba de trás da cabeça, o frame de "up" fica
+ * transparente). Igual ao traje (ver OutfitOption mais abaixo), cada
+ * estilo de barba tem uma variação de arte POR TOM DE PELE (`bySkin`,
+ * mesma convenção de pasta: subpasta com o MESMO NOME do tom de pele --
+ * "Branco"/"Pardo"/"Negro" -- ver scripts/syncBeardAssets.mjs), casada
+ * automaticamente com o tom escolhido no avatar (não é mais uma cor
+ * manual escolhida à parte). "Nenhuma" é a opção padrão/manual (arquivo
+ * transparente, ver public/assets/barba_nenhuma.png, mesmo arquivo pra
+ * qualquer tom) -- diferente do cabelo, nem todo mundo tem barba.
  */
 export interface BeardOption {
   id: string;
   label: string;
-  file: string;
-  colors?: ColorOption[];
+  bySkin: Partial<Record<string, string>>;
 }
 
 // gerado automaticamente -- ver scripts/syncBeardAssets.mjs, NÃO editar
-// esse import nem o arquivo dele à mão. Diferente do cabelo, não existe
-// nenhuma barba manual pré-existente pra "receber" cores por nome de
-// pasta -- toda barba com estilo/cor aninhados já vem com `colors`
-// dentro do próprio item gerado.
+// esse import nem o arquivo dele à mão.
 import { GENERATED_BEARD_CATALOG } from "./beardCatalog.generated";
 
 export const BEARD_CATALOG: BeardOption[] = [
-  { id: "nenhuma", label: "Nenhuma", file: "barba_nenhuma.png" },
+  { id: "nenhuma", label: "Nenhuma", bySkin: { [DEFAULT_SKIN_ID]: "barba_nenhuma.png" } },
   ...GENERATED_BEARD_CATALOG,
 ];
 
 export const DEFAULT_BEARD_ID = BEARD_CATALOG[0].id;
 
+/** Devolve o ID de tom de pele cujo arquivo deve ser usado pra barba: o
+ * exato se existir, senão o primeiro disponível no `bySkin` (mesma
+ * lógica de resolveOutfitSkinId mais abaixo). */
+export function resolveBeardSkinId(beard: BeardOption, skinId: string): string | undefined {
+  if (beard.bySkin[skinId]) return skinId;
+  return Object.keys(beard.bySkin)[0];
+}
+
+/** Devolve o arquivo da barba pro tom de pele atual (ver resolveBeardSkinId). */
+export function beardFileForSkin(beard: BeardOption, skinId: string): string | undefined {
+  const resolved = resolveBeardSkinId(beard, skinId);
+  return resolved ? beard.bySkin[resolved] : undefined;
+}
+
 /**
- * Acessório (camada "oculos") -- mesmo esquema da barba (3 poses, sem
- * costas, "Nenhum" é a opção padrão). O nome da categoria/camada
- * ("acessorio"/"oculos") já existia antes desse catálogo (ver
- * CUSTOMIZATION_CATEGORIES/LAYER_DRAW_ORDER em MainScene.ts) -- por
- * enquanto só óculos, mas qualquer acessório de rosto/cabeça pode entrar
- * na mesma pasta de origem (ver scripts/syncAccessoryAssets.mjs).
+ * Acessório (camada "oculos") -- mesmas 3 poses da barba (sem costas),
+ * mas AQUI a variação continua sendo uma COR manual escolhida (estilo
+ * com cores aninhadas vira `colors`, ver scripts/syncAccessoryAssets.mjs
+ * -- diferente da barba, que virou tom de pele automático). "Nenhum" é
+ * a opção padrão. O nome da categoria/camada ("acessorio"/"oculos") já
+ * existia antes desse catálogo (ver CUSTOMIZATION_CATEGORIES/
+ * LAYER_DRAW_ORDER em MainScene.ts) -- por enquanto só óculos, mas
+ * qualquer acessório de rosto/cabeça pode entrar na mesma pasta de
+ * origem.
  */
 export interface AccessoryOption {
   id: string;
