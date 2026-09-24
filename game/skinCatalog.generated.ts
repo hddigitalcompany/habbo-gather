@@ -25,5 +25,12 @@ export const GENERATED_SKIN_CATALOG: SkinOption[] = [
     "file": "avatar_pardo.png",
     "hex": "#d1a276",
     "gender": "masculino"
+  },
+  {
+    "id": "feminino-pardo",
+    "label": "Pardo",
+    "file": "avatar_feminino-pardo.png",
+    "hex": "#d1a276",
+    "gender": "feminino"
   }
 ];

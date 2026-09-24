@@ -141,8 +141,16 @@ async function ensureReferenceTemplates() {
  * é compartilhado entre as duas chamadas (ids finais, já com prefixo)
  * só pra pegar um erro de configuração bizarro (as duas pastas apontando
  * pro mesmo lugar), não deveria colidir em uso normal.
+ *
+ * `relaxMissingHeads` (pedido do Douglas, só a pasta feminino usa --
+ * ver chamada em main()): em vez de PULAR um tom com cabeça faltando,
+ * reaproveita uma cabeça já encontrada (de preferência "frente") nas
+ * direções que faltam, só pra dar pra ver o resultado no jogo enquanto
+ * as outras 3 não sobem -- fica com a MESMA arte de frente virada nas
+ * costas/lados, não é resultado final. Só pula de vez se não achar
+ * NENHUMA das 4.
  */
-async function syncGenderRoot(srcRoot, gender, idPrefix, takenIds) {
+async function syncGenderRoot(srcRoot, gender, idPrefix, takenIds, { relaxMissingHeads = false } = {}) {
   if (!existsSync(srcRoot)) {
     await mkdir(srcRoot, { recursive: true });
     console.log(`Criei ${srcRoot} (estava vazia) -- crie uma pasta por tom de pele aí dentro.`);
@@ -169,8 +177,15 @@ async function syncGenderRoot(srcRoot, gender, idPrefix, takenIds) {
     const entries = await readdir(dir, { withFileTypes: true });
     const { found, missing } = findDirectionFiles(imageFiles(entries));
     if (missing.length > 0) {
-      console.warn(`- "${entry.name}" (${gender}): faltam as cabeças [${missing.join(", ")}], pulei (item incompleto).`);
-      continue;
+      if (!relaxMissingHeads || Object.keys(found).length === 0) {
+        console.warn(`- "${entry.name}" (${gender}): faltam as cabeças [${missing.join(", ")}], pulei (item incompleto).`);
+        continue;
+      }
+      const fallbackDirection = found.down ? "down" : Object.keys(found)[0];
+      for (const missingDir of missing) found[missingDir] = found[fallbackDirection];
+      console.warn(
+        `- "${entry.name}" (${gender}): faltam as cabeças [${missing.join(", ")}] -- reaproveitando "${fallbackDirection}" nelas só pra prévia (troque pelos recortes certos depois).`
+      );
     }
 
     console.log(`- "${entry.name}" (${gender}) -> id "${id}"`);
@@ -211,7 +226,9 @@ async function main() {
 
   const takenIds = new Set();
   const masculino = await syncGenderRoot(SRC_ROOT, "masculino", "", takenIds);
-  const feminino = await syncGenderRoot(SRC_ROOT_FEMININO, "feminino", "feminino-", takenIds);
+  const feminino = await syncGenderRoot(SRC_ROOT_FEMININO, "feminino", "feminino-", takenIds, {
+    relaxMissingHeads: true,
+  });
   const results = [...masculino, ...feminino];
 
   const header =
