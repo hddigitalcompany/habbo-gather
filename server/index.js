@@ -204,6 +204,7 @@ import { fileURLToPath } from "url";
 import * as chatStore from "./chatStore.js";
 import * as agendaStore from "./agendaStore.js";
 import * as roomStore from "./roomStore.js";
+import { verifyAccessToken, getActiveMemberIds, isBanned, getRole } from "./roomAuth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
@@ -533,6 +534,55 @@ function handleGetFloor(req, res) {
   res.end(JSON.stringify({ items: roomStore.getFloor() }));
 }
 
+/** GET /room/presence -- contagem de membro x visitante ONLINE agora
+ * (ver painel de configuração de membros em RoomMembersPanel.tsx) --
+ * "membro" = conta confirmada (player.accountVerified, ver
+ * roomAuth.js) E presente em room_members com status ativo; todo o
+ * resto (sem conta, ou com conta mas nunca promovido) conta como
+ * "visitante". Dedupe por userId -- a mesma pessoa com 2 abas abertas
+ * conta uma vez só.
+ *
+ * Com ?detail=1 E um Authorization: Bearer <token> de quem é OWNER,
+ * também devolve "onlineVisitors" (visitante com conta confirmada,
+ * ainda não promovido, que tá na sala AGORA) -- é a lista que alimenta
+ * o botão "Promover" do painel, pra não precisar de um "buscar por
+ * email" separado. Sem token de owner, esse campo simplesmente não
+ * vem (o resto da resposta -- os números -- não é sensível, fica
+ * público). */
+async function handleGetPresence(req, res, url) {
+  const memberIds = await getActiveMemberIds();
+  const byUserId = new Map();
+  for (const room of rooms.values()) {
+    for (const { player } of room.values()) {
+      byUserId.set(player.userId, player);
+    }
+  }
+  let memberCount = 0;
+  let visitorCount = 0;
+  const onlineVisitors = [];
+  for (const [userId, player] of byUserId) {
+    const isMember = player.accountVerified && memberIds.has(userId);
+    if (isMember) {
+      memberCount++;
+    } else {
+      visitorCount++;
+      if (player.accountVerified) onlineVisitors.push({ userId, name: player.name || "" });
+    }
+  }
+
+  const payload = { memberCount, visitorCount, totalOnline: byUserId.size };
+  if (url.searchParams.get("detail") === "1") {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const callerUserId = token ? await verifyAccessToken(token) : null;
+    const role = callerUserId ? await getRole(callerUserId) : null;
+    if (role === "owner") payload.onlineVisitors = onlineVisitors;
+  }
+
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify(payload));
+}
+
 /** GET /room/areas -- mesma ideia do handleGetFloor acima, ver
  * loadSavedAreas/setAreaDefs em MainScene.ts. Devolve lista + tiles
  * juntos (ver getAreaState em roomStore.js) -- posse (quem clicou
@@ -787,6 +837,11 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/room/presence") {
+    handleGetPresence(req, res, url);
+    return;
+  }
+
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
   res.end("Servidor multiplayer do habbo-gather está no ar.\n");
 });
@@ -860,34 +915,61 @@ wss.on("connection", (ws, req) => {
 
     switch (data?.type) {
       case "identify": {
-        // troca o userId "provisório" (= id da conexão) pelo PERSISTENTE
-        // que o cliente guarda no localStorage -- ver getOrCreateUserId
-        // em GameRoom.tsx. Sem isso o histórico de chat reiniciaria do
+        // resolve o userId em duas etapas: se veio um accessToken (ver
+        // AuthGate.tsx/GameRoom.tsx -- só quem tem conta manda),
+        // confere ele de verdade com o Supabase ANTES de aceitar (ver
+        // roomAuth.js) -- o userId da conta manda, ignora o que o
+        // cliente mandou em "data.userId" nesse caso (não dá pra
+        // confiar num userId auto-declarado quando existe um jeito de
+        // confirmar). Sem token (visitante anônimo, ou Supabase ainda
+        // não configurado nesse processo -- ver isAccountsConfigured),
+        // segue EXATAMENTE como sempre foi: troca o userId
+        // "provisório" (= id da conexão) pelo PERSISTENTE que o
+        // cliente guarda no localStorage (ver getOrCreateUserId em
+        // GameRoom.tsx). Sem isso o histórico de chat reiniciaria do
         // zero a cada F5.
-        const newUserId =
-          typeof data.userId === "string" && data.userId.trim() ? data.userId.trim().slice(0, 80) : id;
-        if (newUserId !== player.userId) {
-          unregisterUserConnection(player.userId, ws);
-          player.userId = newUserId;
-          registerUserConnection(player.userId, ws);
-          // "join" (mandado pro resto da sala no exato instante em que a
-          // conexão abriu, ver embaixo) sempre sai ANTES desse "identify"
-          // chegar (é round-trip de rede, o outro é local/síncrono) --
-          // nesse momento o player.userId de todo mundo ainda tá com o
-          // valor provisório (= id da conexão). Sem avisar a sala da
-          // troca, quem já tava na sala ficaria pra sempre com o userId
-          // ERRADO desse jogador (ver remotePlayersRef em GameRoom.tsx),
-          // e uma conversa direta iniciada CONTRA ele usaria um id que
-          // muda a cada reconexão -- exatamente o problema que o
-          // "userId" persistente existe pra evitar.
-          broadcast(room, { type: "identity", id, userId: player.userId }, id);
-        }
-        syncChatUser(player);
-        // roster de "todo mundo cadastrado no ambiente" (ver
-        // listAllUsers em chatStore.js) -- manda de novo pra sala inteira
-        // toda vez que alguém entra/identifica, assim quem já tava
-        // conectado também enxerga gente nova sem precisar recarregar.
-        broadcast(room, { type: "users:list", users: chatStore.listAllUsers() });
+        //
+        // async (verificar o token é uma chamada de rede) -- roda em
+        // segundo plano, sem travar o resto das mensagens dessa
+        // conexão (igual o resto do handler, que é síncrono).
+        (async () => {
+          const verifiedUserId = await verifyAccessToken(data.accessToken);
+          // conta confirmada E banida (ver ação "ban" em
+          // app/api/room/members/route.ts) -- derruba a conexão na
+          // hora, antes de deixar ela "entrar" na sala de verdade.
+          // Visitante sem conta não passa por aqui (não tem como
+          // banir quem não tem conta ainda).
+          if (verifiedUserId && (await isBanned(verifiedUserId))) {
+            ws.close(4403, "banido da sala");
+            return;
+          }
+          const newUserId =
+            verifiedUserId ??
+            (typeof data.userId === "string" && data.userId.trim() ? data.userId.trim().slice(0, 80) : id);
+          player.accountVerified = Boolean(verifiedUserId);
+          if (newUserId !== player.userId) {
+            unregisterUserConnection(player.userId, ws);
+            player.userId = newUserId;
+            registerUserConnection(player.userId, ws);
+            // "join" (mandado pro resto da sala no exato instante em que a
+            // conexão abriu, ver embaixo) sempre sai ANTES desse "identify"
+            // chegar (é round-trip de rede, o outro é local/síncrono) --
+            // nesse momento o player.userId de todo mundo ainda tá com o
+            // valor provisório (= id da conexão). Sem avisar a sala da
+            // troca, quem já tava na sala ficaria pra sempre com o userId
+            // ERRADO desse jogador (ver remotePlayersRef em GameRoom.tsx),
+            // e uma conversa direta iniciada CONTRA ele usaria um id que
+            // muda a cada reconexão -- exatamente o problema que o
+            // "userId" persistente existe pra evitar.
+            broadcast(room, { type: "identity", id, userId: player.userId }, id);
+          }
+          syncChatUser(player);
+          // roster de "todo mundo cadastrado no ambiente" (ver
+          // listAllUsers em chatStore.js) -- manda de novo pra sala inteira
+          // toda vez que alguém entra/identifica, assim quem já tava
+          // conectado também enxerga gente nova sem precisar recarregar.
+          broadcast(room, { type: "users:list", users: chatStore.listAllUsers() });
+        })();
         break;
       }
       case "move": {
