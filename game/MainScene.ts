@@ -22,7 +22,7 @@ import {
   ACCESSORY_CATALOG,
   DEFAULT_ACCESSORY_ID,
 } from "./customization";
-import { FLOOR_CATALOG, ROOM_FLOOR, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
+import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -344,11 +344,13 @@ export default class MainScene extends Phaser.Scene {
   onDraftChange?: (items: FurnitureDef[]) => void;
 
   // --- piso do editor de espaço (aba "Piso", ver selectFloorTool) --
-  // MESMA ideia do rascunho de móvel acima (Map próprio, não mexe em
-  // ROOM_FLOOR direto), só que a chave é "col,row" (um piso por tile,
-  // não por id -- pintar de novo em cima troca o estilo daquele
-  // quadrado em vez de empilhar) e o clique pinta/arrasta em vez de só
-  // colocar um item por clique (ver paintFloorAt/handleEditPointerDown).
+  // draftFloor/draftFloorSprites guardam TODO o piso da sala (tanto o já
+  // salvo no servidor, carregado por loadSavedFloor, quanto o pintado
+  // agora nesta sessão -- tudo no MESMO Map, não tem mais uma lista
+  // "fixa" separada), chave "col,row" (um piso por tile, não por id --
+  // pintar de novo em cima troca o estilo daquele quadrado em vez de
+  // empilhar) e o clique pinta/arrasta em vez de só colocar um item por
+  // clique (ver paintFloorAt/handleEditPointerDown).
   private selectedFloorTool: FloorTool = null;
   private draftFloor: Map<string, FloorTileDef> = new Map();
   private draftFloorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
@@ -485,12 +487,12 @@ export default class MainScene extends Phaser.Scene {
   create() {
     this.add.image(400, 300, "room").setOrigin(0.5);
 
-    // piso pintado (ver ROOM_FLOOR em floor.ts) vai ATRÁS de tudo o
-    // resto, cobrindo só os quadrados escolhidos -- por isso desenha
-    // antes até dos móveis fixos (ver DEPTH_FLOOR).
-    for (const f of ROOM_FLOOR) {
-      this.addFloorSprite(f);
-    }
+    // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
+    // escolhidos -- por isso desenha antes até dos móveis fixos (ver
+    // DEPTH_FLOOR). O piso salvo de verdade chega depois, assíncrono (ver
+    // loadSavedFloor mais abaixo, chamado pelo React em GameRoom.tsx
+    // assim que a busca em GET /room/floor responder) -- create() não
+    // espera por ele.
 
     for (const f of ROOM_FURNITURE) {
       this.addFurnitureSprite(f);
@@ -562,12 +564,11 @@ export default class MainScene extends Phaser.Scene {
 
   /**
    * Cria (ou recria) a imagem de UM quadrado de piso pintado, já com
-   * origem/tamanho/profundidade certos -- usado tanto pro piso fixo
-   * (ROOM_FLOOR, no create()) quanto pros tiles "rascunho" pintados no
-   * editor de espaço (ver paintFloorAt), mesma ideia do
-   * addFurnitureSprite. Devolve null se o styleId não bate com nenhum
-   * item do catálogo (defensivo -- não deveria acontecer, ROOM_FLOOR só
-   * é editado colando o código gerado pelo próprio editor).
+   * origem/tamanho/profundidade certos -- usado tanto pro piso já salvo
+   * (ver loadSavedFloor) quanto pros tiles pintados na hora no editor de
+   * espaço (ver paintFloorAt), mesma ideia do addFurnitureSprite. Devolve
+   * null se o styleId não bate com nenhum item do catálogo (defensivo --
+   * não deveria acontecer normalmente).
    */
   private addFloorSprite(f: FloorTileDef): Phaser.GameObjects.Image | null {
     const entry = floorEntryById(f.styleId);
@@ -578,6 +579,33 @@ export default class MainScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5)
       .setDisplaySize(TILE, TILE)
       .setDepth(DEPTH_FLOOR);
+  }
+
+  /**
+   * Carrega o piso já salvo no servidor (ver GET /room/floor em
+   * server/index.js) -- chamado UMA vez pelo React (GameRoom.tsx) assim
+   * que a cena fica pronta E a busca responder (podem chegar em
+   * qualquer ordem, por isso não faz parte do create() direto, que não
+   * espera rede nenhuma).
+   *
+   * Cada tile carregado entra direto em draftFloor/draftFloorSprites --
+   * o MESMO Map que o pincel usa pros tiles pintados nesta sessão -- em
+   * vez de ficar num Map/desenho separado tipo "fixo". Isso é de
+   * propósito: assim o botão "Apagar" e o "Limpar tudo" funcionam em
+   * QUALQUER tile (salvo antes ou pintado agora), sem distinção, e o
+   * autosave (ver onDraftFloorChange, disparado no fim daqui) sempre
+   * manda pro servidor o piso INTEIRO certo, não só o que mudou agora.
+   */
+  loadSavedFloor(items: FloorTileDef[]) {
+    for (const f of items) {
+      const key = `${f.col},${f.row}`;
+      if (this.draftFloor.has(key)) continue; // já carregado (ex: chamado 2x) -- não duplica sprite
+      const sprite = this.addFloorSprite(f);
+      if (!sprite) continue;
+      this.draftFloor.set(key, f);
+      this.draftFloorSprites.set(key, sprite);
+    }
+    this.onDraftFloorChange?.(this.getDraftFloorList());
   }
 
   private createAvatar(

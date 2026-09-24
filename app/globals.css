@@ -1610,6 +1610,24 @@ body {
   color: white;
 }
 
+/* status do autosave do piso ("Salvando…"/"Salvo ✓"/"Erro ao salvar"),
+   ao lado do título "Piso pintado (N)" -- ver EditPanel/floorSaveStatus
+   em GameRoom.tsx. */
+.floor-save-status {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.floor-save-status-saved {
+  color: #4fd97a;
+}
+
+.floor-save-status-error {
+  color: #ff8080;
+}
+
 .palette {
   display: flex;
   flex-wrap: wrap;

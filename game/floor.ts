@@ -54,9 +54,9 @@ export function floorWorldPos(f: FloorTileDef) {
   return tileToWorld(f.col, f.row);
 }
 
-/**
- * Piso pintado à mão (igual ROOM_FURNITURE em furniture.ts) -- o editor
- * de espaço só posiciona visualmente e gera o código pra colar aqui,
- * não salva sozinho (ver game/floorCodegen.ts).
- */
-export const ROOM_FLOOR: FloorTileDef[] = [];
+// Diferente de ROOM_FURNITURE (furniture.ts, ainda copiado à mão), o piso
+// pintado no editor de espaço ("Editar espaço" -> aba "Piso") salva
+// sozinho no servidor (ver GET/POST /room/floor em server/index.js +
+// server/roomStore.js) -- por isso não tem mais um ROOM_FLOOR fixo aqui.
+// MainScene.loadSavedFloor(items) é quem recebe a lista salva (buscada
+// pelo React em GameRoom.tsx assim que a cena fica pronta) e desenha.

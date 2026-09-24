@@ -77,6 +77,24 @@
 //     -> 200 { url, name, size, mime }  (url relativa, ver GET abaixo)
 //   GET  /uploads/<arquivo>        -> serve o arquivo salvo
 //
+// Piso da sala ("Editar espaço" -> aba "Piso", ver EditPanel em
+// GameRoom.tsx e server/roomStore.js pra persistência): antes o editor
+// só gerava um código pra colar à mão em game/floor.ts, agora salva
+// sozinho por aqui.
+//   GET  /room/floor    -> 200 { items: FloorTileDef[] }  (piso salvo agora)
+//   POST /room/floor    (corpo JSON: { items: FloorTileDef[] }, sempre o
+//                        piso INTEIRO, não um diff -- ver onDraftFloorChange
+//                        em MainScene.ts)
+//     -> 200 { ok: true, items }
+//     -> 403, DESATIVADO se NODE_ENV=production -- essa ferramenta é só
+//        de uso interno do Douglas (ver IS_ROOM_EDITOR_ENABLED em
+//        GameRoom.tsx, que já esconde o botão/painel pro cliente final;
+//        isso aqui é a segunda trava, do lado do servidor, pro caso de
+//        alguém chamar o endpoint direto sem passar pela tela). Rodando
+//        `node server/index.js` localmente (npm run dev) fica disponível
+//        normal; no deploy de verdade (ex: Render) o host precisa estar
+//        com NODE_ENV=production setado.
+//
 // Agenda (marcar call: data/horário/participantes, necessidades de
 // câmera/áudio/tela, aprovação dos convidados) -- ver server/agendaStore.js:
 //   agenda:list         -> cliente->servidor: { type: "agenda:list" }
@@ -125,6 +143,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as chatStore from "./chatStore.js";
 import * as agendaStore from "./agendaStore.js";
+import * as roomStore from "./roomStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
@@ -430,6 +449,77 @@ function handleServeUpload(req, res, pathname) {
   createReadStream(filePath).pipe(res);
 }
 
+/** GET /room/floor -- ver comentário grande no topo do arquivo. Devolve o
+ * piso salvo pra popular a cena assim que ela fica pronta (ver
+ * loadSavedFloor em MainScene.ts, chamado pelo React em GameRoom.tsx). */
+function handleGetFloor(req, res) {
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ items: roomStore.getFloor() }));
+}
+
+const MAX_ROOM_BODY_BYTES = 500_000; // generoso pro tamanho da sala hoje (12x7), evita payload absurdo
+
+/** POST /room/floor -- ver comentário grande no topo do arquivo. Desativado
+ * fora de dev (NODE_ENV=production) -- segunda trava, do lado do
+ * servidor, além de já esconder o botão/painel pro cliente final (ver
+ * IS_ROOM_EDITOR_ENABLED em GameRoom.tsx). */
+function handlePostFloor(req, res) {
+  if (process.env.NODE_ENV === "production") {
+    res.writeHead(403, corsHeaders());
+    res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_ROOM_BODY_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Corpo grande demais");
+    return;
+  }
+
+  const chunks = [];
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
+      aborted = true;
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Corpo grande demais");
+      }
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, corsHeaders());
+      res.end("JSON inválido");
+      return;
+    }
+    const saved = roomStore.setFloor(data?.items);
+    if (saved === null) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "items" (array)');
+      return;
+    }
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, items: saved }));
+  });
+
+  req.on("error", () => {
+    aborted = true;
+  });
+}
+
 const httpServer = createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
@@ -446,6 +536,16 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname.startsWith("/uploads/")) {
     handleServeUpload(req, res, url.pathname);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/room/floor") {
+    handleGetFloor(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/room/floor") {
+    handlePostFloor(req, res);
     return;
   }
 

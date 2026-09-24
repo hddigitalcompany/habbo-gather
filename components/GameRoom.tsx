@@ -10,7 +10,6 @@ import { createGameConfig } from "@/game/config";
 import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import { FLOOR_CATALOG, FLOOR_CATEGORIES, FloorCatalogEntry, FloorCategory, FloorTileDef } from "@/game/floor";
-import { generateFloorCode } from "@/game/floorCodegen";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -590,14 +589,21 @@ export default function GameRoom() {
   // --- aba "Piso" do editor de espaço -- mesma ideia do rascunho de
   // móvel acima (a cena Phaser é quem manda de verdade, ver
   // selectFloorTool/paintFloorAt em MainScene.ts; aqui só espelha pra
-  // destacar o botão certo e mostrar a lista/código). editTab escolhe
-  // qual paleta aparece (móveis ou piso); floorCategory só filtra QUAL
-  // categoria de modelo aparece na paleta de piso.
+  // destacar o botão certo e mostrar a lista). editTab escolhe qual
+  // paleta aparece (móveis ou piso); floorCategory só filtra QUAL
+  // categoria de modelo aparece na paleta de piso. Diferente de móveis
+  // (que ainda gera código pra colar à mão), o piso salva sozinho no
+  // servidor -- ver useEffect de autosave/floorSaveStatus mais abaixo.
   const [editTab, setEditTab] = useState<"moveis" | "piso">("moveis");
   const [floorCategory, setFloorCategory] = useState<FloorCategory>(FLOOR_CATEGORIES[0].id);
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
-  const [floorCopied, setFloorCopied] = useState(false);
+  const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // true só depois que a busca inicial do piso salvo (GET /room/floor,
+  // ver game.events.once(READY, ...) mais abaixo) terminar -- ver o
+  // useEffect de autosave logo depois, que confere essa flag antes de
+  // mandar qualquer POST.
+  const floorLoadedRef = useRef(false);
 
   // --- controles de câmera do mapa ("estilo Gather" -- zoom +/- e
   // centralizar, ver MapControls logo abaixo) -- só espelha o zoom
@@ -1148,6 +1154,24 @@ export default function GameRoom() {
         };
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
+        // piso já salvo (ver GET /room/floor em server/index.js) -- busca
+        // assim que a cena fica pronta e manda pra dentro dela (ver
+        // loadSavedFloor em MainScene.ts). Falha em silêncio (ex: servidor
+        // fora do ar) -- a sala ainda funciona sem piso pintado nenhum.
+        // floorLoadedRef só vira true DEPOIS dessa tentativa (sucesso ou
+        // falha) -- o autosave abaixo confere essa flag antes de mandar
+        // qualquer coisa, senão o primeiro render (draftFloorItems ainda
+        // vazio, ninguém carregou nada de verdade) apagaria um piso já
+        // salvo antes mesmo da busca responder.
+        fetch(`${REALTIME_HTTP_BASE}/room/floor`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data?.items) sceneRef.current?.loadSavedFloor(data.items);
+          })
+          .catch(() => {})
+          .finally(() => {
+            floorLoadedRef.current = true;
+          });
         scene.onAvatarClick = (info) => {
           setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
           setEditingCharacter(false);
@@ -1714,17 +1738,30 @@ export default function GameRoom() {
     sceneRef.current?.clearDraftFloor();
   }
 
-  async function copyGeneratedFloorCode() {
-    try {
-      await navigator.clipboard.writeText(generatedFloorCode);
-      setFloorCopied(true);
-      setTimeout(() => setFloorCopied(false), 1500);
-    } catch (e) {
-      console.warn("Não deu pra copiar pro clipboard", e);
-    }
-  }
-
-  const generatedFloorCode = useMemo(() => generateFloorCode(draftFloorItems), [draftFloorItems]);
+  // autosave do piso: qualquer mudança em draftFloorItems (pintar, apagar,
+  // "Limpar tudo", ou o carregamento inicial acima) manda o piso INTEIRO
+  // pro servidor (POST /room/floor, ver server/index.js) depois de uma
+  // pausa curta -- em vez de uma chamada de rede por quadrado durante um
+  // arrasto rápido (paintFloorLine em MainScene.ts já dispara vários
+  // paintFloorAt em sequência). floorLoadedRef evita salvar ANTES da
+  // busca inicial responder (ver comentário lá em cima).
+  useEffect(() => {
+    if (!floorLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setFloorSaveStatus("saving");
+      fetch(`${REALTIME_HTTP_BASE}/room/floor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: draftFloorItems }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setFloorSaveStatus("saved");
+        })
+        .catch(() => setFloorSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftFloorItems]);
 
   // reflete nome/status do MEU card ao vivo no boneco dentro do jogo
   // (nome + bolinha de status, ver setNameplate/setLocalProfile na
@@ -2226,9 +2263,7 @@ export default function GameRoom() {
           onSelectFloorEraser={selectFloorEraser}
           draftFloorItems={draftFloorItems}
           onClearAllFloor={clearDraftFloorItems}
-          generatedFloorCode={generatedFloorCode}
-          onCopyFloorCode={copyGeneratedFloorCode}
-          floorCopied={floorCopied}
+          floorSaveStatus={floorSaveStatus}
         />
       )}
     </div>
@@ -2254,9 +2289,7 @@ function EditPanel({
   onSelectFloorEraser,
   draftFloorItems,
   onClearAllFloor,
-  generatedFloorCode,
-  onCopyFloorCode,
-  floorCopied,
+  floorSaveStatus,
 }: {
   editTab: "moveis" | "piso";
   onChangeEditTab: (tab: "moveis" | "piso") => void;
@@ -2276,9 +2309,7 @@ function EditPanel({
   onSelectFloorEraser: () => void;
   draftFloorItems: FloorTileDef[];
   onClearAllFloor: () => void;
-  generatedFloorCode: string;
-  onCopyFloorCode: () => void;
-  floorCopied: boolean;
+  floorSaveStatus: "idle" | "saving" | "saved" | "error";
 }) {
   const floorEntriesInCategory = FLOOR_CATALOG.filter((e) => e.category === floorCategory);
 
@@ -2356,8 +2387,7 @@ function EditPanel({
           <p className="edit-hint">
             Escolha um modelo abaixo e clique num quadrado da sala pra pintar só
             ele ("unitário"), ou clique e arraste pra pintar vários de uma vez.
-            "Apagar" volta o quadrado pro fundo padrão da sala. Isso ainda não
-            salva sozinho — copie o código no fim e cole em <code>ROOM_FLOOR</code>.
+            "Apagar" volta o quadrado pro fundo padrão da sala. Salva sozinho.
           </p>
 
           <div className="floor-category-tabs">
@@ -2394,19 +2424,20 @@ function EditPanel({
             <p className="edit-hint">Nenhum modelo de {floorCategory} ainda -- suba as imagens na pasta de origem.</p>
           )}
 
-          <h3>Piso pintado ({draftFloorItems.length})</h3>
+          <h3>
+            Piso pintado ({draftFloorItems.length})
+            <span className={`floor-save-status floor-save-status-${floorSaveStatus}`}>
+              {floorSaveStatus === "saving" && "Salvando…"}
+              {floorSaveStatus === "saved" && "Salvo ✓"}
+              {floorSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
           {draftFloorItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
           {draftFloorItems.length > 0 && (
             <button className="clear-btn" onClick={onClearAllFloor}>
               Limpar tudo
             </button>
           )}
-
-          <h3>Código pra colar em floor.ts</h3>
-          <textarea readOnly value={generatedFloorCode} className="code-box" spellCheck={false} />
-          <button className="copy-btn" onClick={onCopyFloorCode}>
-            {floorCopied ? "Copiado!" : "Copiar código"}
-          </button>
         </>
       )}
     </div>
