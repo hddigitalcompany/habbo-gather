@@ -143,8 +143,8 @@ const SENTADO_FRAMES: Record<Direction, number> = {
  * trocar a ordem das duas linhas).
  */
 const LAYER_DRAW_ORDER = [
-  "base",
   "traje",
+  "base",
   "barba",
   "cabelo",
   "oculos",
