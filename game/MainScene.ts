@@ -211,6 +211,15 @@ const DEPTH_FLAT_FURNITURE = -1_000_000;
 // é o próprio chão, tudo o mais (móvel flat incluso) fica em cima dele.
 const DEPTH_FLOOR = -2_000_000;
 
+// a arte de fundo da sala (textura "room", ver create()) precisa ficar
+// AINDA MAIS atrás que o piso pintado -- sem isso ela ficava com
+// profundidade padrão (0), ou seja, na FRENTE do piso (DEPTH_FLOOR é
+// negativo!), e cobria completamente qualquer quadrado pintado: o piso
+// era desenhado certinho, na posição certa, com a textura certa, só que
+// sempre escondido atrás do fundo opaco da sala -- por isso nunca
+// aparecia nada pintado, por mais que o clique/arrasto funcionasse.
+const DEPTH_ROOM_BACKGROUND = -3_000_000;
+
 /** Fronteira de profundidade de um móvel a partir da FILEIRA lógica dele (não da posição visual) -- ver comentário acima. */
 function furnitureDepthForRow(row: number): number {
   return tileToWorld(0, row).y + TILE / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
@@ -485,7 +494,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   create() {
-    this.add.image(400, 300, "room").setOrigin(0.5);
+    this.add.image(400, 300, "room").setOrigin(0.5).setDepth(DEPTH_ROOM_BACKGROUND);
 
     // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
     // escolhidos -- por isso desenha antes até dos móveis fixos (ver
