@@ -109,40 +109,29 @@ body {
   z-index: 5;
 }
 
+/* "Membros"/"Itens"/"Editar espaço" -- MESMO modelo "vidro fosco" da
+   .av-bar (pedido do Douglas: "quero no mesmo modelo de botões do lado
+   esquerdo, com ícones e o balão apple"), só que no canto inferior
+   DIREITO: mesma pílula translúcida com blur, mesmos botões .av-btn
+   (ícone só, sem texto -- ver UsersIcon/BoxIcon/WrenchIcon em
+   GameRoom.tsx) em vez da pílula achatada com emoji+texto de antes. */
 .controls {
   position: absolute;
-  bottom: 12px;
-  right: 12px;
+  bottom: 16px;
+  right: 16px;
+  z-index: 6;
   display: flex;
-  gap: 8px;
-  z-index: 5;
-}
-
-.controls button {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: none;
-  background: #2a1d40;
-  color: white;
-  font-size: 18px;
-  cursor: pointer;
-}
-
-.controls button:hover {
-  background: #3d2a5c;
-}
-
-.edit-toggle-btn {
-  width: auto !important;
-  border-radius: 20px !important;
-  padding: 0 14px;
-  font-size: 13px !important;
-  white-space: nowrap;
-}
-
-.edit-toggle-btn.active {
-  background: #7c5cff !important;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 999px;
+  background: rgba(40, 34, 56, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
 }
 
 /* Controles de câmera do mapa ("estilo Gather": centralizar + zoom
@@ -150,12 +139,12 @@ body {
    GameRoom.tsx e zoomIn/zoomOut/recenterCamera em MainScene.ts) --
    dois elementos flutuantes independentes (não uma barra só), mesma
    pegada de vidro fosco da .av-bar, empilhados no canto inferior
-   direito, ACIMA do botão "Editar espaço" (.controls, bottom:12px +
-   40px de altura = topo em 52px -> aqui começa em 64px pra sobrar um
-   respiro de 12px entre os dois). */
+   direito, ACIMA da pílula "Membros/Itens/Editar espaço" (.controls,
+   bottom:16px + ~56px de altura = topo em 72px -> aqui começa em 84px
+   pra sobrar um respiro de 12px entre os dois). */
 .map-controls {
   position: absolute;
-  bottom: 64px;
+  bottom: 84px;
   right: 16px;
   z-index: 6;
   display: flex;
@@ -301,6 +290,68 @@ body {
 
 .av-btn.on:hover {
   background: #8c6dff;
+}
+
+/* Balão de dica "estilo Apple" (dock do macOS/Control Center): pill
+   escura com o rótulo, aparece ACIMA do botão com uma setinha apontando
+   pra baixo, em vez do tooltip feio/lento nativo do navegador (title=).
+   Qualquer botão com o atributo data-tooltip="texto" ganha isso sozinho
+   -- usado nos ícones "flutuantes" por cima do jogo (.av-bar, .controls,
+   .map-controls): title vira aria-label (acessibilidade só, sem tooltip
+   nativo por cima) e data-tooltip cuida da parte visual. position:relative
+   já vem de graça de cada botão fazer parte de um "dock" -- não precisa
+   redeclarar nada além do pseudo-elemento em si. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after,
+[data-tooltip]::before {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, 4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 30;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 11px);
+  white-space: nowrap;
+  background: rgba(24, 18, 36, 0.92);
+  color: #f5f0ff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: blur(16px) saturate(180%);
+}
+
+[data-tooltip]::before {
+  content: "";
+  bottom: calc(100% + 6px);
+  border: 5px solid transparent;
+  border-top-color: rgba(24, 18, 36, 0.92);
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::after,
+[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition-delay: 0.32s;
+}
+
+[data-tooltip]:disabled:hover::after,
+[data-tooltip]:disabled:hover::before {
+  opacity: 0;
 }
 
 /* Gaveta de chat "de verdade" (Sala + diretas/grupo, ver ChatDrawer em

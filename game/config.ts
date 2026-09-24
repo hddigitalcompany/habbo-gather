@@ -19,13 +19,19 @@ export function createGameConfig(
     width: 800,
     height: 600,
     parent,
-    // FIT: escala o canvas pra caber no elemento pai (que agora é
-    // 100vw/100vh, ver .room-wrapper/.phaser-container em globals.css)
-    // mantendo a proporção 800:600 -- preenche a tela toda sem
-    // distorcer nem esticar a arte, e reajusta sozinho quando a janela
-    // muda de tamanho.
+    // ENVELOP (não FIT): escala o canvas pra COBRIR o elemento pai
+    // inteiro (que é 100vw/100vh, ver .room-wrapper/.phaser-container em
+    // globals.css) mantendo a proporção 800:600, cortando só o excesso
+    // que sobrar de um lado -- igual "background-size: cover" do CSS.
+    // FIT (antes) fazia o oposto: encaixava o 800:600 INTEIRO dentro da
+    // tela sem cortar nada, o que sobra faixa vazia (cor de fundo) dos
+    // dois lados sempre que a janela não é exatamente 4:3 -- foi isso
+    // que o Douglas reportou como "limite de corte na lateral" (pediu
+    // responsivo, sem faixa, preenchendo a tela toda até a borda do
+    // navegador). Reajusta sozinho quando a janela muda de tamanho, sem
+    // precisar de nenhum listener de resize manual.
     scale: {
-      mode: Phaser.Scale.FIT,
+      mode: Phaser.Scale.ENVELOP,
       autoCenter: Phaser.Scale.CENTER_BOTH,
       width: 800,
       height: 600,

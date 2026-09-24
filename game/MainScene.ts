@@ -1160,18 +1160,28 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Contra-escala (e reposiciona) o GRUPO do cartão de nome (ver
-   * nameplateGroup em createAvatar) de todo boneco -- local e remoto --
-   * pra ele ficar sempre do MESMO tamanho/distância NA TELA, não
-   * importa o zoom da câmera (pedido do Douglas: "esse card do nome
-   * tem que ser fixo, quando dá zoom ele não aparece" -- sem isso, o
-   * texto (11px em espaço de mundo) encolhia junto com o zoom out até
-   * ficar ilegível). nameplateBaseY foi calculado pro zoom padrão
-   * (DEFAULT_ZOOM_LEVEL = 1, ver topo do arquivo) -- dividir a escala E
-   * a posição pelo zoom atual (mesmo fator pros dois) cancela o
-   * encolhimento/aproximação que a câmera aplicaria sozinha. Chamado
-   * toda vez que o zoom muda (ver applyZoom) e uma vez na criação de
-   * cada boneco nesse zoom.
+   * Contra-escala o GRUPO do cartão de nome (ver nameplateGroup em
+   * createAvatar) de todo boneco -- local e remoto -- pra ele ficar
+   * sempre do MESMO TAMANHO na tela, não importa o zoom da câmera
+   * (pedido do Douglas: "esse card do nome tem que ser fixo, quando dá
+   * zoom ele não aparece" -- sem contra-escala, o texto (11px em espaço
+   * de mundo) encolhia junto com o zoom out até ficar ilegível).
+   *
+   * A POSIÇÃO (setY) fica em nameplateBaseY puro, SEM dividir pelo
+   * zoom -- dividir a posição junto com a escala (como era antes) dava
+   * uma distância fixa em PIXELS DE TELA entre o cartão e o pé do
+   * boneco, que é exatamente o oposto do que o Douglas pediu agora
+   * ("tem que ficar grudado a uma distância fixa do boneco independente
+   * do zoom"): o boneco em si encolhe com o zoom out (as sprites não são
+   * contra-escaladas), então um cartão preso a uma distância FIXA em
+   * tela ia se afastando cada vez mais do boneco (encolhido) conforme
+   * afastava a câmera -- era isso que aparecia "flutuando" longe do
+   * personagem no zoom out. Deixando a posição em espaço de MUNDO (sem
+   * dividir), ela encolhe/aproxima junto com o boneco (mesmo fator de
+   * zoom dos dois), só o TAMANHO do cartão que fica constante -- resultado:
+   * sempre colado bem em cima da cabeça, do mesmo tamanho legível,
+   * em qualquer zoom. Chamado toda vez que o zoom muda (ver applyZoom) e
+   * uma vez na criação de cada boneco nesse zoom.
    */
   private refreshNameplateScale() {
     const zoom = this.cameras.main.zoom || 1;
@@ -1183,7 +1193,7 @@ export default class MainScene extends Phaser.Scene {
       const baseY = container.getData("nameplateBaseY") as number | undefined;
       if (!group || baseY === undefined) continue;
       group.setScale(1 / zoom);
-      group.setY(baseY / zoom);
+      group.setY(baseY);
     }
   }
 
@@ -1637,6 +1647,17 @@ export default class MainScene extends Phaser.Scene {
   /** Botão "-" do MapControls -- mesma ideia, limitado no piso. */
   zoomOut(): number {
     return this.applyZoom(this.cameras.main.zoom - ZOOM_STEP);
+  }
+
+  /** Zoom pela roda do mouse/trackpad (ver o listener de "wheel" no
+   * container do canvas em GameRoom.tsx) -- mesma lógica de
+   * zoomIn/zoomOut (aplica e limita, devolve o valor já aplicado pra
+   * sincronizar o estado dos botões +/-), só que o passo vem de fora em
+   * vez do ZOOM_STEP fixo, porque a intensidade do gesto varia (roda de
+   * mouse dá "cliques" grandes, dois dedos no trackpad é mais suave e
+   * contínuo). */
+  zoomBy(delta: number): number {
+    return this.applyZoom(this.cameras.main.zoom + delta);
   }
 
   /** Botão de centralizar (ícone de mira) do MapControls -- volta a

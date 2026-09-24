@@ -356,6 +356,13 @@ function compressPhotoToDataUrl(file: File): Promise<string> {
 const PROXIMITY_CONNECT = 160;
 const PROXIMITY_DISCONNECT = 220;
 
+// passo do zoom pela roda do mouse/trackpad (ver handleWheelZoom acima
+// de handleRecenterCamera) -- menor que o ZOOM_STEP dos botões "+"/"-"
+// (0.25, ver MainScene.ts) porque a roda dispara MUITAS vezes em
+// sequência num gesto só, um passo do mesmo tamanho dos botões deixaria
+// o zoom "pulando" longe demais a cada tique.
+const WHEEL_ZOOM_STEP = 0.12;
+
 // ferramenta "Editar espaço" (móveis + piso) é só de uso interno do
 // Douglas -- gera código pra colar à mão em furniture.ts/floor.ts, não
 // salva nada de verdade, e o cliente final NUNCA pode ver ou acessar
@@ -842,6 +849,37 @@ export default function GameRoom({
   function handleRecenterCamera() {
     sceneRef.current?.recenterCamera();
   }
+
+  // roda do mouse E os dois dedos no trackpad também dão zoom no mapa,
+  // não só os botões "+"/"-" do MapControls (pedido do Douglas: "afastar
+  // tambem com dois dedos no scrol e de mouse tambem"). Ouve "wheel" no
+  // DIV do canvas (containerRef -- os outros painéis/cards flutuantes
+  // são elementos IRMÃOS dele, fora dessa div, então passar o mouse por
+  // cima deles não aciona esse zoom). preventDefault trava o scroll/
+  // zoom nativo da página enquanto o mouse tá sobre o jogo (senão o
+  // gesto de "afastar" no trackpad tentaria dar zoom no navegador
+  // inteiro, ou rolar uma página que nem existe aqui).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    function handleWheelZoom(e: WheelEvent) {
+      e.preventDefault();
+      const scene = sceneRef.current;
+      if (!scene) return;
+      // deltaY vem em unidades bem diferentes dependendo do dispositivo
+      // (roda de mouse "clica" em ~100, trackpad manda valores pequenos
+      // e contínuos a cada frame do gesto) -- limita o bruto antes de
+      // escalar pro passo do zoom, senão uma rodada forte do mouse dava
+      // um pulo grande demais de uma vez só.
+      const clampedDelta = Math.max(-100, Math.min(100, e.deltaY));
+      const step = -(clampedDelta / 100) * WHEEL_ZOOM_STEP;
+      if (step === 0) return;
+      const zoom = scene.zoomBy(step);
+      setMapZoom(zoom);
+    }
+    el.addEventListener("wheel", handleWheelZoom, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheelZoom);
+  }, []);
 
   // --- card de perfil / editor de personagem -- abre clicando em
   // QUALQUER avatar (ver onAvatarClick na MainScene); "editar
@@ -2740,29 +2778,32 @@ export default function GameRoom({
         <div className="controls">
           {roomRole === "owner" && (
             <button
-              className="edit-toggle-btn"
+              className="av-btn"
               onClick={() => setMembersPanelOpen(true)}
-              title="Configurar membros da sala"
+              aria-label="Configurar membros da sala"
+              data-tooltip="Membros"
             >
-              👥 Membros
+              <UsersIcon />
             </button>
           )}
           {roomRole === "owner" && (
             <button
-              className="edit-toggle-btn"
+              className="av-btn"
               onClick={() => setItemEditorOpen(true)}
-              title="Cadastrar item de móvel novo"
+              aria-label="Cadastrar item de móvel novo"
+              data-tooltip="Itens"
             >
-              🧩 Itens
+              <BoxIcon />
             </button>
           )}
           {IS_ROOM_EDITOR_ENABLED && (
             <button
-              className={editMode ? "edit-toggle-btn active" : "edit-toggle-btn"}
+              className={editMode ? "av-btn on" : "av-btn"}
               onClick={toggleEditMode}
-              title="Editar espaço"
+              aria-label={editMode ? "Sair da edição" : "Editar espaço"}
+              data-tooltip={editMode ? "Sair da edição" : "Editar espaço"}
             >
-              🛠️ {editMode ? "Sair da edição" : "Editar espaço"}
+              <WrenchIcon />
             </button>
           )}
         </div>
@@ -2786,7 +2827,12 @@ export default function GameRoom({
         )}
 
         <div className="map-controls">
-          <button className="map-recenter-btn" onClick={handleRecenterCamera} title="Centralizar no meu personagem">
+          <button
+            className="map-recenter-btn"
+            onClick={handleRecenterCamera}
+            aria-label="Centralizar no meu personagem"
+            data-tooltip="Centralizar"
+          >
             <TargetIcon />
           </button>
           <div className="map-zoom-control">
@@ -2794,7 +2840,8 @@ export default function GameRoom({
               className="map-zoom-btn"
               onClick={handleZoomIn}
               disabled={mapZoom >= MAX_ZOOM_LEVEL}
-              title="Aproximar"
+              aria-label="Aproximar"
+              data-tooltip="Aproximar"
             >
               <PlusIcon />
             </button>
@@ -2803,7 +2850,8 @@ export default function GameRoom({
               className="map-zoom-btn"
               onClick={handleZoomOut}
               disabled={mapZoom <= MIN_ZOOM_LEVEL}
-              title="Afastar"
+              aria-label="Afastar"
+              data-tooltip="Afastar"
             >
               <MinusIcon />
             </button>
@@ -2814,35 +2862,40 @@ export default function GameRoom({
           <button
             className={micOn ? "av-btn" : "av-btn off"}
             onClick={toggleMic}
-            title={micOn ? "Desligar microfone" : "Ligar microfone"}
+            aria-label={micOn ? "Desligar microfone" : "Ligar microfone"}
+            data-tooltip={micOn ? "Desligar microfone" : "Ligar microfone"}
           >
             <MicIcon off={!micOn} />
           </button>
           <button
             className={camOn ? "av-btn" : "av-btn off"}
             onClick={toggleCam}
-            title={camOn ? "Desligar câmera" : "Ligar câmera"}
+            aria-label={camOn ? "Desligar câmera" : "Ligar câmera"}
+            data-tooltip={camOn ? "Desligar câmera" : "Ligar câmera"}
           >
             <CamIcon off={!camOn} />
           </button>
           <button
             className={screenOn ? "av-btn on" : "av-btn"}
             onClick={toggleScreenShare}
-            title={screenOn ? "Parar de compartilhar tela" : "Compartilhar tela"}
+            aria-label={screenOn ? "Parar de compartilhar tela" : "Compartilhar tela"}
+            data-tooltip={screenOn ? "Parar de compartilhar" : "Compartilhar tela"}
           >
             <ScreenIcon active={screenOn} />
           </button>
           <button
             className={chatOpen ? "av-btn on" : "av-btn"}
             onClick={() => setChatOpen((v) => !v)}
-            title={chatOpen ? "Fechar chat" : "Abrir chat"}
+            aria-label={chatOpen ? "Fechar chat" : "Abrir chat"}
+            data-tooltip={chatOpen ? "Fechar chat" : "Chat"}
           >
             <ChatIcon />
           </button>
           <button
             className={agendaOpen ? "av-btn on" : "av-btn"}
             onClick={() => setAgendaOpen((v) => !v)}
-            title={agendaOpen ? "Fechar agenda" : "Abrir agenda"}
+            aria-label={agendaOpen ? "Fechar agenda" : "Abrir agenda"}
+            data-tooltip={agendaOpen ? "Fechar agenda" : "Agenda"}
           >
             <AgendaIcon />
           </button>
@@ -4224,6 +4277,55 @@ function BrushIcon() {
 
 /** Ícone de mira/GPS do botão "centralizar" do MapControls (ver
  * handleRecenterCamera) -- mesmo estilo linha-fina dos ícones da av-bar. */
+// Ícones dos botões "Membros"/"Editar espaço"/"Itens" (ver .controls
+// mais abaixo) -- pedido do Douglas pra ficarem no MESMO modelo dos
+// botões do lado esquerdo (.av-bar: ícone só, sem texto, dentro de um
+// círculo "vidro fosco", ver .av-btn no CSS) em vez do formato antigo
+// (emoji + texto numa pílula achatada).
+function UsersIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M15.5 6.2a3 3 0 0 1 0 5.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16.3 14.3c2.3.6 3.7 2.1 3.7 4.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function WrenchIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function BoxIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M3.5 8.2 12 4l8.5 4.2L12 12.4 3.5 8.2Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M3.5 8.2v7.6L12 20m0-7.6V20m8.5-11.8v7.6L12 20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function TargetIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
