@@ -646,7 +646,16 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // só confundiriam a posição de quem tá sendo cadastrado agora,
   // inclusive quando a categoria É cabelo/traje (arte de referência
   // diferente da que tá subindo, sobreposta/atrás sem sentido nenhum).
-  const referenceSkin = genderSkins[0];
+  // sem NENHUM tom cadastrado ainda pro sexo escolhido (pedido do
+  // Douglas: "cadê o tile na rotação, tô sem referência pra subir
+  // avatar" -- ficava sem boneco NENHUM nesse caso, só a foto subida
+  // sozinha, sem nada atrás pra servir de referência de posição/
+  // tamanho) -- cai num tom de QUALQUER sexo só pra não deixar o
+  // preview vazio (proporção do corpo pode não bater exatamente, mas
+  // ainda dá um boneco de verdade pra alinhar a foto por cima). Aviso
+  // embaixo (ver referenceSkinIsFallback) quando isso acontece.
+  const referenceSkin = genderSkins[0] ?? SKIN_CATALOG[0];
+  const referenceSkinIsFallback = Boolean(referenceSkin) && genderSkins.length === 0;
   const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
   const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
   const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
@@ -811,6 +820,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             </button>
           ))}
         </div>
+
+        {referenceSkinIsFallback && (
+          <p className="settings-hint">
+            Ainda não tem nenhum tom de pele "{gender}" cadastrado -- o boneco abaixo é de OUTRO sexo, só pra não
+            deixar o preview vazio (o corpo pode não bater exatamente). Cadastre um tom de pele "{gender}" em
+            "Avatar" primeiro pra ter a referência certa.
+          </p>
+        )}
 
         <div className="item-size-card">
           <div className="item-stage" style={{ height: STAGE_HEIGHT }}>

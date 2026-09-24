@@ -1,6 +1,16 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
@@ -575,9 +585,21 @@ export default function GameRoom({
 
   const [status, setStatus] = useState("Conectando...");
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
-  const [remoteMeta, setRemoteMeta] = useState<
-    Record<string, { name: string; distance: number }>
-  >({});
+  // nome/distância de cada jogador remoto pra opacidade/legenda dos
+  // vídeos (ver RemoteVideoTile) -- NÃO é mais estado aqui (ver
+  // remoteMetaSetterRef logo abaixo e RemoteVideosLayer no fim do
+  // arquivo). Motivo (pedido do Douglas: "rodei de novo e tá lento
+  // ainda, o caminhar todo"): checkProximity roda a cada "move" de
+  // CADA jogador remoto (até 20x/s por pessoa) e, andando, a distância
+  // muda o tempo todo -- um setState AQUI (componente raiz, com chat/
+  // editor/painéis inteiros por baixo) re-renderizava a árvore GIGANTE
+  // do GameRoom inteira a cada uma dessas mensagens. Isolado num
+  // componente FILHO memoizado que guarda esse estado por conta
+  // própria, só a lista pequena de vídeos re-renderiza, nunca o
+  // GameRoom.
+  const remoteMetaSetterRef = useRef<
+    ((meta: Record<string, { name: string; distance: number }>) => void) | null
+  >(null);
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
 
@@ -1455,19 +1477,21 @@ export default function GameRoom({
       });
 
       // pedido de performance (Douglas: "abri uma guia anônima e loguei
-      // em outro lá ficou BEM travado") -- checkProximity roda a cada
-      // "move" recebido de CADA jogador remoto (até 20x/s por pessoa, ver
-      // reportPosition em MainScene.ts), e setRemoteMeta(objeto novo)
-      // incondicional aqui forçava um re-render da árvore INTEIRA do
-      // GameRoom (componente gigante: chat, painéis de edição, criador
-      // de avatar...) a cada uma dessas mensagens, MESMO quando o valor
-      // exibido não mudava de verdade. Com 2+ jogadores por perto isso
-      // vira uma tempestade de re-renders somada aos custos de
-      // Phaser+WebRTC -- só chama setState quando algo realmente mudou
-      // (nome ou distância arredondada).
+      // em outro lá ficou BEM travado", depois "rodei de novo e tá
+      // lento ainda, o caminhar todo") -- checkProximity roda a cada
+      // "move" recebido de CADA jogador remoto (até 20x/s por pessoa,
+      // ver reportPosition em MainScene.ts). Só chama o setState
+      // quando algo realmente mudou (nome ou distância arredondada) --
+      // e o setState em si NÃO mexe mais em estado do GameRoom (ver
+      // remoteMetaSetterRef/RemoteVideosLayer): quem "escuta" aqui é um
+      // componente FILHO isolado, que só re-renderiza a listinha de
+      // vídeos, nunca a árvore inteira do GameRoom (chat, editor,
+      // criador de avatar...) -- é isso que resolvia de verdade o
+      // travamento andando perto de alguém, não só cortar updates
+      // redundantes.
       if (changed) {
         lastRemoteMetaRef.current = metaUpdate;
-        setRemoteMeta(metaUpdate);
+        remoteMetaSetterRef.current?.(metaUpdate);
       }
     }
 
@@ -3270,17 +3294,13 @@ export default function GameRoom({
 
         <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
 
-        <div className="remote-videos">
-          {Object.entries(remoteStreams).map(([id, stream]) => (
-            <RemoteVideoTile
-              key={id}
-              stream={stream}
-              meta={remoteMeta[id]}
-              volume={spaceVolume * (remoteVolumes[id] ?? 1)}
-              sinkId={selectedSpeakerId || undefined}
-            />
-          ))}
-        </div>
+        <RemoteVideosLayer
+          remoteStreams={remoteStreams}
+          remoteVolumes={remoteVolumes}
+          spaceVolume={spaceVolume}
+          selectedSpeakerId={selectedSpeakerId}
+          metaSetterRef={remoteMetaSetterRef}
+        />
 
         <div className="status-badge">{status}</div>
 
@@ -3469,7 +3489,14 @@ export default function GameRoom({
             onSelectSpeaker={switchSpeakerDevice}
             spaceVolume={spaceVolume}
             onChangeSpaceVolume={setSpaceVolume}
-            remoteUsers={Object.keys(remoteStreams).map((id) => ({ id, name: remoteMeta[id]?.name || "Jogador" }))}
+            remoteUsers={Object.keys(remoteStreams).map((id) => ({
+              id,
+              // nome vem do ref (não de estado React, ver comentário em
+              // remoteMetaSetterRef acima) -- painel de Configurações só
+              // reabre de vez em quando, não precisa de nome "ao vivo"
+              // atualizando a cada frame igual a distância nos vídeos.
+              name: remotePlayersRef.current.get(id)?.name || "Jogador",
+            }))}
             remoteVolumes={remoteVolumes}
             onChangeRemoteVolume={changeRemoteVolume}
           />
@@ -5212,6 +5239,56 @@ function ScreenIcon({ active }: { active: boolean }) {
 type VideoElementWithSink = HTMLVideoElement & {
   setSinkId?: (deviceId: string) => Promise<void>;
 };
+
+// Componente ISOLADO pra lista de vídeos remotos (pedido de performance
+// do Douglas: "rodei de novo e tá lento ainda, o caminhar todo") -- dono
+// do PRÓPRIO estado de nome/distância (metaSetterRef acima é como o
+// GameRoom "empurra" as atualizações pra cá sem guardar esse estado ele
+// mesmo). checkProximity (em GameRoom) roda a cada "move" recebido --
+// até 20x/s por jogador remoto -- e enquanto alguém anda a distância
+// muda o tempo todo; antes esse setState morava no componente RAIZ
+// (GameRoom, com chat/editor/criador de avatar por baixo -- um arquivo
+// gigante), então cada uma dessas mensagens forçava um re-render da
+// árvore INTEIRA. Aqui o re-render fica restrito a essa listinha de
+// vídeos (memo() só re-renderiza se as props realmente mudarem --
+// remoteStreams/remoteVolumes só mudam em eventos raros de verdade,
+// entrar/sair de chamada ou mexer no volume).
+const RemoteVideosLayer = memo(function RemoteVideosLayer({
+  remoteStreams,
+  remoteVolumes,
+  spaceVolume,
+  selectedSpeakerId,
+  metaSetterRef,
+}: {
+  remoteStreams: Record<string, MediaStream>;
+  remoteVolumes: Record<string, number>;
+  spaceVolume: number;
+  selectedSpeakerId: string;
+  metaSetterRef: MutableRefObject<((meta: Record<string, { name: string; distance: number }>) => void) | null>;
+}) {
+  const [remoteMeta, setRemoteMeta] = useState<Record<string, { name: string; distance: number }>>({});
+
+  useEffect(() => {
+    metaSetterRef.current = setRemoteMeta;
+    return () => {
+      metaSetterRef.current = null;
+    };
+  }, [metaSetterRef]);
+
+  return (
+    <div className="remote-videos">
+      {Object.entries(remoteStreams).map(([id, stream]) => (
+        <RemoteVideoTile
+          key={id}
+          stream={stream}
+          meta={remoteMeta[id]}
+          volume={spaceVolume * (remoteVolumes[id] ?? 1)}
+          sinkId={selectedSpeakerId || undefined}
+        />
+      ))}
+    </div>
+  );
+});
 
 function RemoteVideoTile({
   stream,
