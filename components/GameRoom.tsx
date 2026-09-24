@@ -3262,9 +3262,12 @@ const EDIT_SECTIONS: {
   icon: () => JSX.Element;
   defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento";
 }[] = [
-  { id: "moveis", label: "Minha mesa", icon: DeskIcon, defaultCategory: "poltrona" },
-  { id: "construir", label: "Construir", icon: BuildIcon, defaultCategory: "piso" },
-  { id: "mapa", label: "Mapa", icon: MapIcon, defaultCategory: "divisoria" },
+  // rótulos ajustados a pedido do Douglas: "Minha mesa"->"Mobília",
+  // "Construir"->"Piso", "Mapa"->"Parede" (ids internos continuam os
+  // mesmos, só o texto exibido mudou).
+  { id: "moveis", label: "Mobília", icon: DeskIcon, defaultCategory: "poltrona" },
+  { id: "construir", label: "Piso", icon: BuildIcon, defaultCategory: "piso" },
+  { id: "mapa", label: "Parede", icon: MapIcon, defaultCategory: "divisoria" },
 ];
 
 // categoria -> seção (inverso de EDIT_SECTIONS[].defaultCategory, mas
