@@ -1570,31 +1570,143 @@ body {
   border-color: #7c5cff;
 }
 
-/* Paleta de área ("Mesa privada"/"Sala", ver game/areas.ts) -- mesmo
-   tamanho/formato do .floor-swatch, só que sem textura (área não tem
-   "modelo", só uma cor por tipo, ver AREA_TYPES) -- por isso mostra o
-   nome do tipo escrito dentro em vez de uma miniatura de imagem. */
-.area-swatch {
-  width: 76px;
-  height: 48px;
-  border-radius: 8px;
-  border: 2px solid #2f2245;
-  cursor: pointer;
-  padding: 4px;
-  color: #16101f;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.2;
-  text-align: center;
+/* Formulário de criar área (nome + tipo, ver AreaCreateForm/AreaDef em
+   game/areas.ts) -- nome primeiro, tipo depois, botão "+ Criar" só ativo
+   com nome preenchido (ver disabled em AreaCreateForm). */
+.area-create-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
-.area-swatch:hover {
+.area-create-input {
+  flex: 1;
+  min-width: 0;
+  background: #1c1430;
+  border: 1px solid #2f2245;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f2eefc;
+  font-size: 13px;
+}
+
+.area-create-input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.area-create-select {
+  background: #1c1430;
+  border: 1px solid #2f2245;
+  border-radius: 8px;
+  padding: 8px 6px;
+  color: #f2eefc;
+  font-size: 13px;
+}
+
+.area-create-btn {
+  background: #7c5cff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.area-create-btn:hover:not(:disabled) {
+  background: #6b4ce6;
+}
+
+.area-create-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Lista de áreas já criadas (ver AreaDef[] em GameRoom.tsx) -- cada linha
+   arma a área pra pintura ao clicar (mesmo padrão "selected" do
+   .floor-swatch/.category-icon-btn), com um "✕" separado pra apagar a
+   área inteira (não confundir com o "✕ Apagar" que é a ferramenta de
+   apagar TILE, ver .floor-eraser-btn). */
+.area-def-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.area-def-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.area-def-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1c1430;
+  border: 2px solid #2f2245;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.area-def-row:hover {
   border-color: #3a2a55;
 }
 
-.area-swatch.selected {
+.area-def-row.selected {
   border-color: #7c5cff;
   box-shadow: 0 0 0 2px #7c5cff inset;
+}
+
+.area-def-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.area-def-name {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f2eefc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-def-meta {
+  font-size: 11px;
+  color: #9b8fc4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-def-remove {
+  background: #3a1f2b;
+  border: 1px solid #5c2b3a;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  color: #ff9db3;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.area-def-remove:hover {
+  background: #4a2836;
 }
 
 /* Ferramenta de apagar piso -- separada das miniaturas (não é uma

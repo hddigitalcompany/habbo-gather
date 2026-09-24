@@ -21,7 +21,7 @@ import {
 } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef } from "@/game/floor";
-import { AREA_TYPES, AreaTileDef, AreaType } from "@/game/areas";
+import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -628,9 +628,11 @@ export default function GameRoom() {
   const floorLoadedRef = useRef(false);
 
   // --- área do editor de espaço (aba "Área", ver game/areas.ts) --
-  // MESMO esquema do piso acima (selectedAreaToolId: id do TIPO
-  // selecionado -- "mesa-privada"/"sala" -- ou "erase"/null).
-  const [selectedAreaToolId, setSelectedAreaToolId] = useState<AreaType | "erase" | null>(null);
+  // primeiro cria a área na LISTA (nome + tipo, ver createArea), DEPOIS
+  // seleciona ela pra pintar (selectedAreaToolId: id da ÁREA armada pra
+  // pintura, não mais um tipo fixo -- ou "erase"/null).
+  const [selectedAreaToolId, setSelectedAreaToolId] = useState<string | "erase" | null>(null);
+  const [draftAreaDefs, setDraftAreaDefs] = useState<AreaDef[]>([]);
   const [draftAreaItems, setDraftAreaItems] = useState<AreaTileDef[]>([]);
   const [areaSaveStatus, setAreaSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const areaLoadedRef = useRef(false);
@@ -869,10 +871,10 @@ export default function GameRoom() {
 
     // "Área" (mesa privada/sala, ver game/areas.ts) isola áudio/vídeo: se
     // EU ou a outra pessoa estiver dentro de uma área, só conectamos se
-    // for a MESMA zona (não importa a distância -- mesmo bem perto, do
+    // for a MESMA área (não importa a distância -- mesmo bem perto, do
     // lado de fora da mesa, não ouve quem tá dentro dela, e vice-versa).
     // Se NENHUM dos dois tá numa área, cai na regra normal de distância
-    // (com a "zona morta" de sempre entre CONNECT/DISCONNECT). zoneAtTile
+    // (com a "zona morta" de sempre entre CONNECT/DISCONNECT). areaZoneAt
     // é síncrono/local (todo mundo já tem a mesma área carregada, ver
     // loadSavedAreas), não precisa de nada pela rede pra isso.
     function checkProximity() {
@@ -924,6 +926,15 @@ export default function GameRoom() {
         }
         setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
 
+        // posse de mesa privada já existente antes de eu entrar (ver
+        // roomAreaOwners em server/index.js) -- sem isso, quem chega
+        // depois nunca saberia quem já é dono de qual mesa.
+        const owners = (data.areaOwners as { areaId: string; playerId: string; name: string }[]) ?? [];
+        for (const o of owners) {
+          const playerId = o.playerId === data.selfId ? "local" : o.playerId;
+          scene?.setAreaOwner(o.areaId, playerId, o.name);
+        }
+
         // o servidor me deu um nome/status/etc. PADRÃO (ver server/index.js)
         // -- se eu já tinha algo salvo localmente (nome escolhido antes,
         // bio, foto...) sobrescrevo por cima e já mando de volta pro
@@ -948,11 +959,17 @@ export default function GameRoom() {
         if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name);
       } else if (data.type === "seat") {
         // ver protocolo "seat" em server/index.js -- outra pessoa sentou
-        // (tomou posse de uma mesa privada, se a cadeira ficar dentro de
-        // uma) ou levantou (furnitureId null).
+        // ou levantou (furnitureId null); só pose-sync, não mexe em posse
+        // de mesa privada (ver "area-owner" abaixo pra isso).
         const existing = remotePlayersRef.current.get(data.id);
         if (existing) existing.seatFurnitureId = data.furnitureId;
         scene?.setRemoteSeat(data.id, data.furnitureId, existing?.name ?? "?");
+      } else if (data.type === "area-owner") {
+        // ver protocolo "claim-area"/"release-area"/"area-owner" em
+        // server/index.js -- alguém tomou posse de uma mesa privada (ou
+        // ela voltou a ficar sem dono, playerId/name null).
+        const playerId = data.playerId === selfIdRef.current ? "local" : data.playerId;
+        scene?.setAreaOwner(data.areaId, playerId, data.name ?? null);
       } else if (data.type === "profile") {
         const existing = remotePlayersRef.current.get(data.id);
         if (existing) Object.assign(existing, data);
@@ -1214,12 +1231,24 @@ export default function GameRoom() {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
           checkProximity();
         };
-        // senta/levanta (tomar/soltar posse de mesa privada, ver
-        // protocolo "seat" em server/index.js) -- muda bem menos vezes
-        // que a posição, então manda direto, sem passar pelo mesmo
-        // throttle de reportPosition do onLocalMove.
+        // senta/levanta (só pose-sync, ver protocolo "seat" em
+        // server/index.js -- não mexe mais em posse de mesa privada) --
+        // muda bem menos vezes que a posição, então manda direto, sem
+        // passar pelo mesmo throttle de reportPosition do onLocalMove.
         scene.onLocalSeatChange = (furnitureId) => {
           socketRef.current?.send(JSON.stringify({ type: "seat", furnitureId }));
+        };
+        // botão "Tomar posse" / soltar posse numa mesa privada (ver
+        // protocolo "claim-area"/"release-area" em server/index.js) --
+        // servidor é quem decide de verdade (primeiro a clicar ganha);
+        // não atualiza nada aqui na hora, espera o broadcast "area-owner"
+        // voltar (ver handlePartyMessage acima), pra nunca dessincronizar
+        // se duas pessoas clicarem quase ao mesmo tempo.
+        scene.onClaimArea = (areaId) => {
+          socketRef.current?.send(JSON.stringify({ type: "claim-area", areaId }));
+        };
+        scene.onReleaseArea = (areaId) => {
+          socketRef.current?.send(JSON.stringify({ type: "release-area", areaId }));
         };
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
@@ -1243,11 +1272,20 @@ export default function GameRoom() {
             floorLoadedRef.current = true;
           });
         // área já salva (ver GET /room/areas em server/index.js) -- mesmo
-        // timing/tratamento de falha do piso acima.
+        // timing/tratamento de falha do piso acima, só que a resposta tem
+        // DUAS listas ({list, tiles}, ver getAreaState em roomStore.js):
+        // a lista de áreas CRIADAS precisa entrar primeiro (setAreaDefs),
+        // porque a cor de cada tile pintado vem da área dona dele (ver
+        // addAreaTileRect em MainScene.ts, que já precisa da lista
+        // carregada antes de desenhar).
         fetch(`${REALTIME_HTTP_BASE}/room/areas`)
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
-            if (data?.items) sceneRef.current?.loadSavedAreas(data.items);
+            if (data?.list) {
+              setDraftAreaDefs(data.list);
+              sceneRef.current?.setAreaDefs(data.list);
+            }
+            if (data?.tiles) sceneRef.current?.loadSavedAreas(data.tiles);
           })
           .catch(() => {})
           .finally(() => {
@@ -1828,12 +1866,14 @@ export default function GameRoom() {
     sceneRef.current?.clearDraftFloor();
   }
 
-  // mesmo padrão "clica de novo desarma" das duas funções de piso acima.
-  function selectAreaPaint(type: AreaType) {
-    const next = selectedAreaToolId === type ? null : type;
+  // mesmo padrão "clica de novo desarma" das duas funções de piso acima,
+  // só que agora arma pelo ID da ÁREA (já criada na lista, ver
+  // createArea), não mais por um tipo fixo.
+  function selectAreaPaint(id: string) {
+    const next = selectedAreaToolId === id ? null : id;
     setSelectedAreaToolId(next);
     setSelectedCatalogIndex(null);
-    sceneRef.current?.selectAreaTool(next === null ? null : { kind: "paint", type });
+    sceneRef.current?.selectAreaTool(next === null ? null : { kind: "paint", areaId: id });
   }
 
   function selectAreaEraser() {
@@ -1845,6 +1885,38 @@ export default function GameRoom() {
 
   function clearDraftAreaItems() {
     sceneRef.current?.clearDraftArea();
+  }
+
+  // cria uma área NOVA na lista (nome + tipo, ver AreaDef em
+  // game/areas.ts) e já a arma como ferramenta de pintura -- é só depois
+  // dessa criação que dá pra arrastar tile nenhum (ver comentário grande
+  // em game/areas.ts: nome primeiro, tile depois, nunca o contrário).
+  function createArea(name: string, type: AreaType) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const slug = trimmed
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "") // remove acento (ver comentário parecido em generateFurnitureCode)
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const id = `${slug || "area"}-${Date.now()}-${Math.round(Math.random() * 999)}`;
+    const def: AreaDef = { id, name: trimmed, type };
+    setDraftAreaDefs((prev) => [...prev, def]);
+    selectAreaPaint(id);
+  }
+
+  // apaga uma área da lista -- os tiles que apontavam pra ela viram
+  // "órfãos" e são limpos sozinhos do lado da cena (ver setAreaDefs em
+  // MainScene.ts, chamado pelo useEffect logo abaixo toda vez que
+  // draftAreaDefs muda). Se a área apagada era a que tava armada pra
+  // pintura, desarma.
+  function removeArea(id: string) {
+    setDraftAreaDefs((prev) => prev.filter((a) => a.id !== id));
+    if (selectedAreaToolId === id) {
+      setSelectedAreaToolId(null);
+      sceneRef.current?.selectAreaTool(null);
+    }
   }
 
   // autosave do piso: qualquer mudança em draftFloorItems (pintar, apagar,
@@ -1872,9 +1944,17 @@ export default function GameRoom() {
     return () => clearTimeout(timer);
   }, [draftFloorItems]);
 
+  // mantém a cena em dia com a LISTA de áreas toda vez que ela muda por
+  // aqui (criar/apagar, ver createArea/removeArea) -- MainScene.setAreaDefs
+  // já cuida de podar tile órfão sozinho.
+  useEffect(() => {
+    sceneRef.current?.setAreaDefs(draftAreaDefs);
+  }, [draftAreaDefs]);
+
   // autosave da área -- MESMA lógica/timing do autosave do piso acima,
-  // só troca o endpoint (ver POST /room/areas em server/index.js) e a
-  // flag de "já carregou" (areaLoadedRef).
+  // só que manda as DUAS listas juntas (lista de áreas + tiles pintados,
+  // ver POST /room/areas em server/index.js) e depende das duas, já que
+  // criar/apagar uma área (draftAreaDefs) também precisa persistir.
   useEffect(() => {
     if (!areaLoadedRef.current) return;
     const timer = setTimeout(() => {
@@ -1882,7 +1962,7 @@ export default function GameRoom() {
       fetch(`${REALTIME_HTTP_BASE}/room/areas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: draftAreaItems }),
+        body: JSON.stringify({ list: draftAreaDefs, tiles: draftAreaItems }),
       })
         .then((r) => {
           if (!r.ok) throw new Error(String(r.status));
@@ -1891,7 +1971,7 @@ export default function GameRoom() {
         .catch(() => setAreaSaveStatus("error"));
     }, 600);
     return () => clearTimeout(timer);
-  }, [draftAreaItems]);
+  }, [draftAreaDefs, draftAreaItems]);
 
   // reflete nome/status do MEU card ao vivo no boneco dentro do jogo
   // (nome + bolinha de status, ver setNameplate/setLocalProfile na
@@ -2403,6 +2483,9 @@ export default function GameRoom() {
           draftFloorItems={draftFloorItems}
           onClearAllFloor={clearDraftFloorItems}
           floorSaveStatus={floorSaveStatus}
+          draftAreaDefs={draftAreaDefs}
+          onCreateArea={createArea}
+          onRemoveArea={removeArea}
           selectedAreaToolId={selectedAreaToolId}
           onSelectAreaPaint={selectAreaPaint}
           onSelectAreaEraser={selectAreaEraser}
@@ -2457,6 +2540,9 @@ function EditPanel({
   draftFloorItems,
   onClearAllFloor,
   floorSaveStatus,
+  draftAreaDefs,
+  onCreateArea,
+  onRemoveArea,
   selectedAreaToolId,
   onSelectAreaPaint,
   onSelectAreaEraser,
@@ -2481,8 +2567,11 @@ function EditPanel({
   draftFloorItems: FloorTileDef[];
   onClearAllFloor: () => void;
   floorSaveStatus: "idle" | "saving" | "saved" | "error";
-  selectedAreaToolId: AreaType | "erase" | null;
-  onSelectAreaPaint: (type: AreaType) => void;
+  draftAreaDefs: AreaDef[];
+  onCreateArea: (name: string, type: AreaType) => void;
+  onRemoveArea: (id: string) => void;
+  selectedAreaToolId: string | "erase" | null;
+  onSelectAreaPaint: (id: string) => void;
   onSelectAreaEraser: () => void;
   draftAreaItems: AreaTileDef[];
   onClearAllArea: () => void;
@@ -2585,12 +2674,51 @@ function EditPanel({
       ) : activeCategory === "area" ? (
         <>
           <p className="edit-hint">
-            "Mesa privada": ponha uma cadeira dentro e quem sentar toma posse
-            do espaço (áudio/vídeo isolado, nome aparece ao passar o mouse).
-            "Sala": mesma isolação de áudio/vídeo, sem dono. Pinte/arraste
-            igual ao piso -- tiles vizinhos do mesmo tipo viram uma zona só.
-            Salva sozinho.
+            Primeiro crie a área (nome + tipo) abaixo, depois selecione ela na
+            lista pra pintar/arrastar os tiles dela -- áreas diferentes NÃO se
+            fundem mesmo encostadas. "Mesa privada" ganha um botão "Tomar
+            posse" na sala (só aparece enquanto ninguém for dono; áudio/vídeo
+            de quem tá dentro fica isolado). "Sala": mesma isolação de
+            áudio/vídeo, sem dono. Salva sozinho.
           </p>
+
+          <AreaCreateForm onCreate={onCreateArea} />
+
+          {draftAreaDefs.length === 0 ? (
+            <p className="edit-hint">Nenhuma área criada ainda.</p>
+          ) : (
+            <ul className="area-def-list">
+              {draftAreaDefs.map((def) => {
+                const meta = AREA_TYPES.find((t) => t.id === def.type)!;
+                const tileCount = draftAreaItems.filter((t) => t.areaId === def.id).length;
+                return (
+                  <li key={def.id}>
+                    <button
+                      className={selectedAreaToolId === def.id ? "area-def-row selected" : "area-def-row"}
+                      onClick={() => onSelectAreaPaint(def.id)}
+                      title={`Pintar tiles de "${def.name}"`}
+                    >
+                      <span
+                        className="area-def-dot"
+                        style={{ backgroundColor: `#${meta.color.toString(16).padStart(6, "0")}` }}
+                      />
+                      <span className="area-def-name">{def.name}</span>
+                      <span className="area-def-meta">
+                        {meta.label} · {tileCount} {tileCount === 1 ? "quadrado" : "quadrados"}
+                      </span>
+                    </button>
+                    <button
+                      className="area-def-remove"
+                      onClick={() => onRemoveArea(def.id)}
+                      title={`Apagar área "${def.name}"`}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
 
           <div className="floor-palette">
             <button
@@ -2600,21 +2728,10 @@ function EditPanel({
             >
               ✕ Apagar
             </button>
-            {AREA_TYPES.map((entry) => (
-              <button
-                key={entry.id}
-                className={selectedAreaToolId === entry.id ? "area-swatch selected" : "area-swatch"}
-                style={{ backgroundColor: `#${entry.color.toString(16).padStart(6, "0")}` }}
-                onClick={() => onSelectAreaPaint(entry.id)}
-                title={entry.label}
-              >
-                {entry.label}
-              </button>
-            ))}
           </div>
 
           <h3>
-            Área pintada ({draftAreaItems.length})
+            Quadrados pintados ({draftAreaItems.length})
             <span className={`floor-save-status floor-save-status-${areaSaveStatus}`}>
               {areaSaveStatus === "saving" && "Salvando…"}
               {areaSaveStatus === "saved" && "Salvo ✓"}
@@ -2750,6 +2867,52 @@ function EditPanel({
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+// Formulário pra criar uma área nova (nome + tipo, ver AreaDef em
+// game/areas.ts) -- separado do EditPanel só pra poder ter seu próprio
+// estado local (o texto do nome enquanto digita) sem sujar o state do
+// componente pai. Ao criar, limpa o campo de nome (mas mantém o tipo
+// escolhido, já que criar várias áreas do mesmo tipo em seguida --
+// várias mesas privadas -- é o caso comum).
+function AreaCreateForm({ onCreate }: { onCreate: (name: string, type: AreaType) => void }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<AreaType>("mesa-privada");
+
+  function submit() {
+    if (!name.trim()) return;
+    onCreate(name, type);
+    setName("");
+  }
+
+  return (
+    <div className="area-create-form">
+      <input
+        className="area-create-input"
+        type="text"
+        placeholder="Nome da área (ex: Mesa da Ana)"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit();
+        }}
+      />
+      <select
+        className="area-create-select"
+        value={type}
+        onChange={(e) => setType(e.target.value as AreaType)}
+      >
+        {AREA_TYPES.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.label}
+          </option>
+        ))}
+      </select>
+      <button className="area-create-btn" onClick={submit} disabled={!name.trim()}>
+        + Criar
+      </button>
     </div>
   );
 }

@@ -15,11 +15,11 @@
 //              servidor->sala: { type: "seat", id, furnitureId }
 //              (o server guarda o último valor em player.seatFurnitureId,
 //              igual x/y -- por isso ele já sai certo dentro de "init"/
-//              "join" pra quem entra depois de alguém já sentado. Usado
-//              só pra "posse" de mesa privada, ver refreshAreaOwnership em
-//              MainScene.ts/game/areas.ts -- a POSIÇÃO de quem senta já
-//              chega normal pelo "move" de sempre, isso aqui é só a POSE/
-//              o "quem é dono de qual mesa")
+//              "join" pra quem entra depois de alguém já sentado. Só
+//              corrige a POSE do boneco remoto -- que antes nunca
+//              mostrava sentado pela rede, ver setRemoteSeat em
+//              MainScene.ts -- NÃO tem nada a ver com posse de mesa
+//              privada, que é "claim-area"/"release-area" abaixo)
 //   leave   -> { type: "leave", id }
 //   signal  -> { type: "signal", from, data }   (relay de WebRTC)
 //   chat    -> cliente->servidor: { type: "chat", text?, attachment?, kind? }
@@ -107,14 +107,36 @@
 //        com NODE_ENV=production setado.
 //
 // Áreas da sala ("Editar espaço" -> aba "Área", ver game/areas.ts pro
-// conceito de zona/tipo "mesa-privada"/"sala") -- MESMO esquema do piso
-// acima (mesmo arquivo data/room.json, mesma trava de produção):
-//   GET  /room/areas    -> 200 { items: AreaTileDef[] }  (área salva agora)
-//   POST /room/areas    (corpo JSON: { items: AreaTileDef[] }, sempre a
-//                        área INTEIRA, não um diff -- ver onDraftAreaChange
-//                        em MainScene.ts)
-//     -> 200 { ok: true, items }
+// conceito de área NOMEADA/tipo "mesa-privada"/"sala") -- MESMO arquivo
+// data/room.json do piso, mesma trava de produção:
+//   GET  /room/areas    -> 200 { list: AreaDef[], tiles: AreaTileDef[] }
+//                        (lista de áreas criadas + tiles pintados, ver
+//                        game/areas.ts)
+//   POST /room/areas    (corpo JSON: { list: AreaDef[], tiles: AreaTileDef[] },
+//                        sempre os DOIS inteiros, não um diff -- ver
+//                        autosave combinado em GameRoom.tsx)
+//     -> 200 { ok: true, list, tiles }
 //     -> 403, mesma trava de produção do /room/floor acima.
+//
+// Posse de mesa privada (clicar "Tomar posse" numa área tipo
+// "mesa-privada", ver onClaimArea/onReleaseArea em MainScene.ts) NÃO usa
+// os endpoints acima -- é estado só em memória, pelo WebSocket (ver
+// roomAreaOwners mais abaixo), igual à chamada de chat (activeCalls):
+//   claim-area   -> cliente->servidor: { type: "claim-area", areaId }
+//                   (ignorado em silêncio se a área já tiver dono --
+//                   primeira mensagem a chegar no servidor ganha)
+//   release-area -> cliente->servidor: { type: "release-area", areaId }
+//                   (ignorado em silêncio se quem mandou não for o dono
+//                   atual)
+//                   as duas -> servidor->sala (incluindo quem mandou):
+//                   { type: "area-owner", areaId, playerId, name }
+//                   (playerId/name null = área voltou a ficar sem dono)
+//   (a posse de cada área também sai dentro de "init", em `areaOwners:
+//   [{areaId, playerId, name}]`, pra quem entra DEPOIS de alguém já ter
+//   clicado "Tomar posse" ver o estado certo; e é solta sozinha -- com o
+//   mesmo "area-owner" de broadcast -- se a conexão de quem é dono cair,
+//   ver "close" mais abaixo, pra uma mesa nunca ficar "presa" pra
+//   sempre)
 //
 // Agenda (marcar call: data/horário/participantes, necessidades de
 // câmera/áudio/tela, aprovação dos convidados) -- ver server/agendaStore.js:
@@ -192,6 +214,22 @@ function getRoom(roomId) {
     rooms.set(roomId, room);
   }
   return room;
+}
+
+// roomId -> Map<areaId, { playerId, name }> -- quem tem posse de cada
+// área "mesa-privada" agora (ver comentário grande de protocolo lá em
+// cima, "claim-area"/"release-area"). SÓ em memória, mesmo motivo do
+// activeCalls acima -- diferente da LISTA de áreas em si (nome/tipo/
+// tiles), que persiste em disco (ver roomStore.js).
+const roomAreaOwners = new Map();
+
+function getAreaOwners(roomId) {
+  let owners = roomAreaOwners.get(roomId);
+  if (!owners) {
+    owners = new Map();
+    roomAreaOwners.set(roomId, owners);
+  }
+  return owners;
 }
 
 // connectionId -> { ws, player } -- igual "rooms", mas achatado (sem
@@ -479,10 +517,14 @@ function handleGetFloor(req, res) {
 }
 
 /** GET /room/areas -- mesma ideia do handleGetFloor acima, ver
- * loadSavedAreas em MainScene.ts. */
+ * loadSavedAreas/setAreaDefs em MainScene.ts. Devolve lista + tiles
+ * juntos (ver getAreaState em roomStore.js) -- posse (quem clicou
+ * "Tomar posse") NÃO vem por aqui, é estado só em memória do WebSocket
+ * (ver "init"/roomAreaOwners). */
 function handleGetAreas(req, res) {
+  const { list, tiles } = roomStore.getAreaState();
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ items: roomStore.getAreas() }));
+  res.end(JSON.stringify({ list, tiles }));
 }
 
 const MAX_ROOM_BODY_BYTES = 500_000; // generoso pro tamanho da sala hoje (12x7), evita payload absurdo
@@ -549,9 +591,8 @@ function handlePostFloor(req, res) {
 }
 
 /** POST /room/areas -- mesma ideia/travas do handlePostFloor acima, só
- * troca roomStore.setFloor por roomStore.setAreas (ver validação em
- * server/roomStore.js -- rejeita item com `type` que não seja
- * "mesa-privada"/"sala"). */
+ * troca roomStore.setFloor por roomStore.setAreaState (ver validação em
+ * server/roomStore.js -- espera { list, tiles } em vez de { items }). */
 function handlePostAreas(req, res) {
   if (process.env.NODE_ENV === "production") {
     res.writeHead(403, corsHeaders());
@@ -594,14 +635,14 @@ function handlePostAreas(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setAreas(data?.items);
+    const saved = roomStore.setAreaState(data);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
-      res.end('Corpo precisa ter "items" (array)');
+      res.end('Corpo precisa ter "list" e "tiles" (arrays)');
       return;
     }
     res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, items: saved }));
+    res.end(JSON.stringify({ ok: true, list: saved.list, tiles: saved.tiles }));
   });
 
   req.on("error", () => {
@@ -695,6 +736,15 @@ wss.on("connection", (ws, req) => {
       type: "init",
       selfId: id,
       players: Array.from(room.values()).map((c) => c.player),
+      // posse de mesa privada já em andamento agora (ver comentário de
+      // protocolo lá em cima) -- sem isso, quem entra DEPOIS de alguém
+      // já ter clicado "Tomar posse" só veria o dono na tela depois do
+      // PRÓXIMO claim/release de qualquer área, não do estado atual.
+      areaOwners: Array.from(getAreaOwners(roomId).entries()).map(([areaId, owner]) => ({
+        areaId,
+        playerId: owner.playerId,
+        name: owner.name,
+      })),
     })
   );
 
@@ -753,6 +803,30 @@ wss.on("connection", (ws, req) => {
           typeof data.furnitureId === "string" && data.furnitureId ? data.furnitureId.slice(0, 200) : null;
         player.seatFurnitureId = furnitureId;
         broadcast(room, { type: "seat", id, furnitureId }, id);
+        break;
+      }
+      case "claim-area": {
+        const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
+        if (!areaId) break;
+        const owners = getAreaOwners(roomId);
+        if (owners.has(areaId)) break; // já tem dono -- primeira mensagem a chegar ganha, ignora o resto
+        owners.set(areaId, { playerId: id, name: player.name });
+        // pra TODO MUNDO, incluindo quem clicou (diferente do "move"/
+        // "seat" acima, que excluem o remetente porque ele já aplicou
+        // local -- aqui o cliente só reage a esse broadcast, não aplica
+        // otimista, pra não desincronizar numa corrida de dois cliques
+        // quase juntos).
+        broadcast(room, { type: "area-owner", areaId, playerId: id, name: player.name });
+        break;
+      }
+      case "release-area": {
+        const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
+        if (!areaId) break;
+        const owners = getAreaOwners(roomId);
+        const current = owners.get(areaId);
+        if (!current || current.playerId !== id) break; // só quem é dono pode soltar
+        owners.delete(areaId);
+        broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
         break;
       }
       case "signal": {
@@ -1062,8 +1136,22 @@ wss.on("connection", (ws, req) => {
     connectionsById.delete(id);
     unregisterUserConnection(player.userId, ws);
     leaveAllCalls(id);
+    // solta qualquer mesa privada que essa pessoa tinha posse -- senão
+    // ficaria "presa" pra sempre depois que ela sai da sala (fecha a
+    // aba sem clicar em soltar, cai a conexão, etc.).
+    const owners = roomAreaOwners.get(roomId);
+    if (owners) {
+      for (const [areaId, owner] of Array.from(owners.entries())) {
+        if (owner.playerId !== id) continue;
+        owners.delete(areaId);
+        broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
+      }
+    }
     broadcast(room, { type: "leave", id });
-    if (room.size === 0) rooms.delete(roomId);
+    if (room.size === 0) {
+      rooms.delete(roomId);
+      roomAreaOwners.delete(roomId); // sala vazia -- limpa a posse junto, ninguém mais pra ver
+    }
   });
 
   ws.on("error", (err) => {
