@@ -286,6 +286,17 @@ const EDIT_UI_DEPTH = 10_000_000;
 const EDIT_HOVER_COLOR_FREE = 0x59d97a;
 const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
 
+// fonte usada em todo texto desenhado DENTRO do canvas do jogo
+// (plaquinha de nome, label de área/assento) -- mesma pilha do resto
+// do site (ver body em app/globals.css), que resolve pra San
+// Francisco no Mac (-apple-system) e pro equivalente nativo em
+// Windows/Linux, em vez de cair no "Courier" padrão do Phaser (sem
+// fontFamily) ou em genéricos tipo "sans-serif"/"monospace" que o
+// navegador escolhe por conta própria, sem bater com a fonte do
+// resto da UI. Pedido do Douglas: "deixe as fontes iguais a fonte do
+// Mac".
+const GAME_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
 // bolinha de status (foco/ausente/online) ao lado do nome, dentro do
 // jogo -- a COR vem sempre de fora (GameRoom.tsx, ver STATUS_COLORS),
 // pra não duplicar a paleta aqui; a cena só sabe desenhar um círculo.
@@ -952,7 +963,7 @@ export default class MainScene extends Phaser.Scene {
       .text(0, AVATAR_FOOT_OFFSET_Y - layerSprites[0].displayHeight - 8, name, {
         fontSize: "11px",
         color: "#f1ecff",
-        fontFamily: "monospace",
+        fontFamily: GAME_FONT_FAMILY,
         resolution: NAMEPLATE_TEXT_RESOLUTION,
       })
       .setOrigin(0.5);
@@ -2124,7 +2135,7 @@ export default class MainScene extends Phaser.Scene {
       if (!label) {
         label = this.add
           .text(labelX, labelY, text, {
-            fontFamily: "sans-serif",
+            fontFamily: GAME_FONT_FAMILY,
             fontSize: "13px",
             color: "#ffffff",
             backgroundColor: owner ? "#000000cc" : "#7c5cffdd",
