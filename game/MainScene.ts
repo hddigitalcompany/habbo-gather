@@ -1220,6 +1220,40 @@ export default class MainScene extends Phaser.Scene {
     this.onDraftFloorChange?.(this.getDraftFloorList());
   }
 
+  /**
+   * Pinta (via paintFloorAt) cada tile ao longo da linha reta entre o
+   * último tile pintado e o tile atual, não só o tile de chegada --
+   * durante um arrasto rápido o pointermove pode "pular" um tile inteiro
+   * sem nenhum evento disparando em cima dele (o quadrado tem 60px), o
+   * que deixava buracos na pintura. Bresenham simples em coordenadas de
+   * grade (col/row), não em pixels.
+   */
+  private paintFloorLine(fromCol: number, fromRow: number, toCol: number, toRow: number) {
+    let x0 = fromCol;
+    let y0 = fromRow;
+    const dx = Math.abs(toCol - x0);
+    const dy = -Math.abs(toRow - y0);
+    const sx = x0 < toCol ? 1 : -1;
+    const sy = y0 < toRow ? 1 : -1;
+    let err = dx + dy;
+    // limite de segurança -- a grade é pequena (12x7), nunca deveria
+    // precisar de mais passos que isso; só evita um loop infinito se
+    // algum bug futuro passar coordenadas malucas.
+    for (let i = 0; i < 200; i++) {
+      this.paintFloorAt(x0, y0);
+      if (x0 === toCol && y0 === toRow) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+  }
+
   /** Desenha o contorno de TODO tile colocável (mesmos limites que clampTile usa pro boneco) -- só visível durante o modo de edição. */
   private drawEditGrid() {
     const g = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
@@ -1251,7 +1285,14 @@ export default class MainScene extends Phaser.Scene {
 
   private handleEditPointerMove(pointer: Phaser.Input.Pointer) {
     if (!this.editMode || !this.hoverGraphics) return;
-    const { col, row } = worldToTile(pointer.x, pointer.y);
+    // worldX/worldY (não pointer.x/y) -- pointer.x/y é a posição na TELA
+    // (câmera), só bate com a posição no MUNDO por coincidência no zoom
+    // padrão (1x, sem arrastar a câmera); com os controles de zoom/pan
+    // do mapa (ver MapControls em GameRoom.tsx) os dois divergem, e o
+    // tile calculado ficava errado assim que zoomava ou arrastava a
+    // câmera -- inclusive plausivelmente a causa do piso "não pintar"
+    // que o Douglas viu, se ele tinha zoomado/arrastado o mapa antes.
+    const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
     const inBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
     if (!inBounds) {
       this.hoverGraphics.setVisible(false);
@@ -1261,12 +1302,19 @@ export default class MainScene extends Phaser.Scene {
     // arrastar com a ferramenta de piso armada pinta CADA tile novo que
     // o cursor entra durante o arrasto (não só onde o botão foi
     // pressionado) -- é o "arrastando" que o Douglas pediu, em vez de só
-    // o clique único ("unitário").
+    // o clique único ("unitário"). paintFloorLine (não só paintFloorAt no
+    // tile atual) preenche também os tiles PULADOS entre um evento de
+    // pointermove e o outro -- o quadrado (60px) é grande o suficiente
+    // pra um arrasto normal "pular" um inteiro sem disparar um evento
+    // bem em cima dele, o que deixava buracos na pintura.
     if (this.isPaintingFloor && pointer.isDown && this.selectedFloorTool) {
       const key = `${col},${row}`;
       if (key !== this.lastPaintedFloorKey) {
+        const [lastCol, lastRow] = this.lastPaintedFloorKey
+          ? this.lastPaintedFloorKey.split(",").map(Number)
+          : [col, row];
         this.lastPaintedFloorKey = key;
-        this.paintFloorAt(col, row);
+        this.paintFloorLine(lastCol, lastRow, col, row);
       }
     }
 
@@ -1298,9 +1346,12 @@ export default class MainScene extends Phaser.Scene {
       const hitArea = c.input?.hitArea as Phaser.Geom.Rectangle | undefined;
       if (!hitArea) continue;
       // containers não têm rotação/escala própria aqui -- ponto local é
-      // só a diferença direto, sem precisar de matriz de transformação
-      const localX = pointer.x - c.x;
-      const localY = pointer.y - c.y;
+      // só a diferença direto, sem precisar de matriz de transformação.
+      // worldX/worldY (não pointer.x/y) pelo mesmo motivo do
+      // handleEditPointerMove -- c.x/c.y são posição no MUNDO, então o
+      // ponteiro precisa estar no mesmo espaço pra diferença bater.
+      const localX = pointer.worldX - c.x;
+      const localY = pointer.worldY - c.y;
       if (Phaser.Geom.Rectangle.Contains(hitArea, localX, localY)) return true;
     }
     return false;
@@ -1309,7 +1360,7 @@ export default class MainScene extends Phaser.Scene {
   private handleEditPointerDown(pointer: Phaser.Input.Pointer) {
     if (!this.editMode) return;
     if (this.isPointerOnAnyAvatar(pointer)) return;
-    const { col, row } = worldToTile(pointer.x, pointer.y);
+    const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
     if (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS) return;
 
     // ferramenta de piso armada: pinta/apaga esse tile (clique único --

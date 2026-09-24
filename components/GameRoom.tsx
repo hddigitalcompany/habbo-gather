@@ -301,6 +301,15 @@ function compressPhotoToDataUrl(file: File): Promise<string> {
 const PROXIMITY_CONNECT = 160;
 const PROXIMITY_DISCONNECT = 220;
 
+// ferramenta "Editar espaço" (móveis + piso) é só de uso interno do
+// Douglas -- gera código pra colar à mão em furniture.ts/floor.ts, não
+// salva nada de verdade, e o cliente final NUNCA pode ver ou acessar
+// isso. Next.js troca process.env.NODE_ENV pelo valor real ("production"
+// num `next build`/deploy, "development" num `next dev`) em tempo de
+// build, inclusive no bundle do cliente -- então isso já esconde o botão
+// e o painel sozinho em produção, sem precisar de nenhuma config extra.
+const IS_ROOM_EDITOR_ENABLED = process.env.NODE_ENV !== "production";
+
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
 // mesmo host do WebSocket, só que em HTTP -- pro upload de foto/arquivo/
 // áudio do chat (ver POST /upload em server/index.js) e pra montar a URL
@@ -1640,6 +1649,10 @@ export default function GameRoom() {
   }
 
   function toggleEditMode() {
+    // defensivo -- o botão que chama isso já fica escondido fora de dev
+    // (ver IS_ROOM_EDITOR_ENABLED), isso é só pra garantir que nada mais
+    // consiga ligar o modo de edição em produção.
+    if (!IS_ROOM_EDITOR_ENABLED) return;
     const next = !editMode;
     setEditMode(next);
     setSelectedCatalogIndex(null);
@@ -2097,13 +2110,15 @@ export default function GameRoom() {
         <div className="status-badge">{status}</div>
 
         <div className="controls">
-          <button
-            className={editMode ? "edit-toggle-btn active" : "edit-toggle-btn"}
-            onClick={toggleEditMode}
-            title="Editar espaço"
-          >
-            🛠️ {editMode ? "Sair da edição" : "Editar espaço"}
-          </button>
+          {IS_ROOM_EDITOR_ENABLED && (
+            <button
+              className={editMode ? "edit-toggle-btn active" : "edit-toggle-btn"}
+              onClick={toggleEditMode}
+              title="Editar espaço"
+            >
+              🛠️ {editMode ? "Sair da edição" : "Editar espaço"}
+            </button>
+          )}
         </div>
 
         <div className="map-controls">
@@ -2191,7 +2206,7 @@ export default function GameRoom() {
         />
       </div>
 
-      {editMode && (
+      {IS_ROOM_EDITOR_ENABLED && editMode && (
         <EditPanel
           editTab={editTab}
           onChangeEditTab={setEditTab}
