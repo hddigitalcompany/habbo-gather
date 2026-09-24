@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
-import { clampItemOffset } from "@/lib/supabase/itemFields";
+import { clampItemOffset, clampSeatOffset, cleanDirectionOffsets } from "@/lib/supabase/itemFields";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +52,15 @@ export async function POST(req: NextRequest) {
   const iconUrl = typeof body?.icon_url === "string" && body.icon_url ? body.icon_url : null;
   const offsetX = clampItemOffset(body?.offset_x);
   const offsetY = clampItemOffset(body?.offset_y);
+  // ajuste por direção (pedido do Douglas: "editar todos os lados do
+  // mobi") + interação/assento (pedido: "se vai ter interação... e a
+  // posição sentado") -- ver supabase/migrations/
+  // 0007_room_items_direction_offsets_seat.sql e o comentário de cada
+  // helper em lib/supabase/itemFields.ts.
+  const directionOffsets = cleanDirectionOffsets(body?.direction_offsets);
+  const sittable = typeof body?.sittable === "boolean" ? body.sittable : null;
+  const seatOffsetX = clampSeatOffset(body?.seat_offset_x) ?? null;
+  const seatOffsetY = clampSeatOffset(body?.seat_offset_y) ?? null;
 
   if (!label) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!ALLOWED_CATEGORIES.includes(category)) {
@@ -79,6 +88,10 @@ export async function POST(req: NextRequest) {
       icon_url: iconUrl,
       offset_x: offsetX,
       offset_y: offsetY,
+      direction_offsets: directionOffsets,
+      sittable,
+      seat_offset_x: seatOffsetX,
+      seat_offset_y: seatOffsetY,
       created_by: callerId,
     })
     .select()

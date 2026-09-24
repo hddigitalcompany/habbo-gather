@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
-import { clampItemOffset } from "@/lib/supabase/itemFields";
+import { clampItemOffset, clampSeatOffset, cleanDirectionOffsets } from "@/lib/supabase/itemFields";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +112,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if ("offset_x" in body) update.offset_x = clampItemOffset(body.offset_x);
   if ("offset_y" in body) update.offset_y = clampItemOffset(body.offset_y);
+  // ajuste por direção + interação/assento (ver comentário equivalente
+  // em app/api/items/route.ts/POST) -- "in body" de propósito (não
+  // truthiness): null explícito é uma edição de verdade (limpa o
+  // override/volta pro fallback), diferente de "não mandou esse campo".
+  if ("direction_offsets" in body) update.direction_offsets = cleanDirectionOffsets(body.direction_offsets);
+  if (typeof body.sittable === "boolean") update.sittable = body.sittable;
+  if ("seat_offset_x" in body) update.seat_offset_x = clampSeatOffset(body.seat_offset_x) ?? null;
+  if ("seat_offset_y" in body) update.seat_offset_y = clampSeatOffset(body.seat_offset_y) ?? null;
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });

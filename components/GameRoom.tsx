@@ -827,7 +827,9 @@ export default function GameRoom({
     try {
       const { data, error } = await supabase
         .from("room_items")
-        .select("id, label, category, art, display_width, icon_url, offset_x, offset_y");
+        .select(
+          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y"
+        );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
         (row: {
@@ -839,6 +841,10 @@ export default function GameRoom({
           icon_url: string | null;
           offset_x: number | null;
           offset_y: number | null;
+          direction_offsets: Partial<Record<Direction, { x: number; y: number }>> | null;
+          sittable: boolean | null;
+          seat_offset_x: number | null;
+          seat_offset_y: number | null;
         }) => ({
           id: row.id,
           type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
@@ -852,6 +858,13 @@ export default function GameRoom({
           iconUrl: row.icon_url ?? undefined,
           offsetX: row.offset_x ?? 0,
           offsetY: row.offset_y ?? 0,
+          // "editar todos os lados" + "tem interação/posição sentado"
+          // (pedido do Douglas) -- ver supabase/migrations/
+          // 0007_room_items_direction_offsets_seat.sql.
+          directionOffsets: row.direction_offsets ?? undefined,
+          sittable: row.sittable ?? undefined,
+          seatOffsetX: row.seat_offset_x ?? undefined,
+          seatOffsetY: row.seat_offset_y ?? undefined,
         })
       );
       const updatedIds = registerCustomFurnitureModels(models);

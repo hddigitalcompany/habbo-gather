@@ -128,6 +128,19 @@ const CATEGORIES: { id: CategoryId; label: string }[] = [
   { id: "computador", label: "Computador" },
 ];
 
+// palpite inicial de "Tem interação?" a partir da categoria escolhida
+// (mesmo critério de sempre -- ver isSittableFurnitureType em
+// game/furniture.ts) -- só o ponto de partida no formulário de item
+// NOVO, o Douglas pode mudar à mão (ver seletor "Tem interação?").
+const DEFAULT_SITTABLE_BY_CATEGORY: Record<CategoryId, boolean> = {
+  poltrona: true,
+  sofa: true,
+  divisoria: false,
+  mesa: false,
+  planta: false,
+  computador: false,
+};
+
 // "down/left/right/up" = mesma convenção de direção do resto do jogo
 // (ver game/grid.ts) -- rótulo em português só pro formulário.
 const DIRECTION_FIELDS: { key: DirectionKey; label: string; required: boolean }[] = [
@@ -146,7 +159,17 @@ type CustomItemRow = {
   display_width: number | null;
   offset_x: number | null;
   offset_y: number | null;
+  direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
+  sittable: boolean | null;
+  seat_offset_x: number | null;
+  seat_offset_y: number | null;
 };
+
+// mesma faixa -100..100 da constraint em supabase/migrations/
+// 0007_room_items_direction_offsets_seat.sql -- ajuste de assento é
+// sempre um nudge pequeno, não precisa da faixa toda do offset de
+// posição (OFFSET_LIMIT acima).
+const SEAT_OFFSET_LIMIT = 100;
 
 /**
  * Encolhe (só encolhe, nunca aumenta) a imagem pra no máximo maxWidth
@@ -616,9 +639,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // primeiro tom cadastrado do sexo escolhido, não sempre o masculino
   // padrão como o resto do editor faz pro móvel) e NA POSE da direção
   // ativa (ver DIRECTION_FIRST_FRAME_INDEX acima) -- pedido do Douglas:
-  // "editor de posicionamento dos itens... em relação ao avatar".
+  // "editor de posicionamento dos itens... em relação ao avatar". CRU
+  // de propósito (só o tom de pele -- SEM cabelo/traje padrão em cima,
+  // pedido do Douglas: "nessa aba o avatar tem que estar cru, pra
+  // adicionar os itens") -- cabelo/traje/barba/acessório "de fábrica"
+  // só confundiriam a posição de quem tá sendo cadastrado agora,
+  // inclusive quando a categoria É cabelo/traje (arte de referência
+  // diferente da que tá subindo, sobreposta/atrás sem sentido nenhum).
   const referenceSkin = genderSkins[0];
-  const referenceOutfitFile = REFERENCE_OUTFIT && referenceSkin ? outfitFileForSkin(REFERENCE_OUTFIT, referenceSkin.id) : undefined;
   const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
   const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
   const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
@@ -801,13 +829,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                   transform: `translate(-${frameOffsetXPx}px, -${frameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                 }}
               >
-                {referenceOutfitFile && (
-                  <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceOutfitFile)} alt="" />
-                )}
                 {referenceSkin && (
                   <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceSkin.file)} alt="" />
                 )}
-                {REFERENCE_HAIR && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_HAIR.file}`} alt="" />}
               </div>
             </div>
 
@@ -982,6 +1006,29 @@ export default function ItemEditor({
   // de FurnitureModelDef (ver game/furniture.ts).
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
+  // override de offsetX/offsetY por direção (pedido do Douglas: "editar
+  // todos os lados do mobi") -- left/right/up só, "down" usa offsetX/
+  // offsetY acima direto (ver comentário em FurnitureModelDef.directionOffsets,
+  // game/furniture.ts). Qual direção tá sendo ajustada agora no preview
+  // -- ver activeMobiDirection/DIRECTION_FIELDS.
+  const [directionOffsets, setDirectionOffsets] = useState<
+    Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>>
+  >({});
+  const [activeMobiDirection, setActiveMobiDirection] = useState<DirectionKey>("down");
+
+  // "Tem interação?" (pedido do Douglas: "se vai ter interação, e qual
+  // interação -- por enquanto só temos sentar") -- desacopla "senta" da
+  // CATEGORIA (antes só poltrona/sofá sentavam, sem escolha, ver
+  // isSittableFurnitureType em game/furniture.ts). Começa pré-marcado
+  // pelo palpite de categoria (poltrona/sofá = sentável), mas dá pra
+  // mudar -- ver handleCategoryChange, que só reajusta esse palpite
+  // quando NÃO tá editando (mesma regra do displayWidth acima).
+  const [sittable, setSittable] = useState(() => DEFAULT_SITTABLE_BY_CATEGORY.poltrona);
+  // ajuste PADRÃO (não por direção -- isso continua sendo o "Assento" do
+  // editor de espaço) de onde o boneco senta -- só importa quando
+  // sittable=true, ver seat-marker arrastável no preview.
+  const [seatOffsetX, setSeatOffsetX] = useState(0);
+  const [seatOffsetY, setSeatOffsetY] = useState(0);
 
   // URL (blob local, nunca sobe pra lugar nenhum) da imagem de FRENTE
   // escolhida, só pra mostrar no preview grande -- revogada
@@ -1008,7 +1055,10 @@ export default function ItemEditor({
 
   function handleCategoryChange(next: CategoryId) {
     setCategory(next);
-    if (!editingId) setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH[next]);
+    if (!editingId) {
+      setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH[next]);
+      setSittable(DEFAULT_SITTABLE_BY_CATEGORY[next]);
+    }
   }
 
   function handleDownFileChange(file: File | undefined) {
@@ -1056,7 +1106,9 @@ export default function ItemEditor({
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("room_items")
-      .select("id, label, category, art, icon_url, display_width, offset_x, offset_y");
+      .select(
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y"
+      );
     if (fetchError) {
       setError(fetchError.message);
       return;
@@ -1079,6 +1131,11 @@ export default function ItemEditor({
     setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH.poltrona);
     setOffsetX(0);
     setOffsetY(0);
+    setDirectionOffsets({});
+    setActiveMobiDirection("down");
+    setSittable(DEFAULT_SITTABLE_BY_CATEGORY.poltrona);
+    setSeatOffsetX(0);
+    setSeatOffsetY(0);
     setPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -1109,6 +1166,11 @@ export default function ItemEditor({
     setDisplayWidth(item.display_width ?? CUSTOM_ITEM_TARGET_WIDTH[item.category]);
     setOffsetX(clamp(item.offset_x ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setOffsetY(clamp(item.offset_y ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
+    setDirectionOffsets(item.direction_offsets ?? {});
+    setActiveMobiDirection("down");
+    setSittable(item.sittable ?? DEFAULT_SITTABLE_BY_CATEGORY[item.category]);
+    setSeatOffsetX(clamp(item.seat_offset_x ?? 0, -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
+    setSeatOffsetY(clamp(item.seat_offset_y ?? 0, -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
     setPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -1128,34 +1190,114 @@ export default function ItemEditor({
     if (iconInputRef.current) iconInputRef.current.value = "";
   }
 
-  // imagem de FRENTE mostrada no preview grande: arquivo novo escolhido
-  // (previewUrl, blob) tem prioridade -- senão, editando um item que já
-  // tem imagem, cai na URL já salva.
-  const stageArtSrc = previewUrl ?? existingArt.down ?? null;
+  // imagem mostrada no preview grande -- pra "down" continua usando o
+  // blob dedicado de sempre (previewUrl, ver handleDownFileChange);
+  // pras outras 3 direções (pedido do Douglas: "editar todos os lados
+  // do mobi"), um blob PRÓPRIO da direção ativa (ver activeMobiBlobUrl
+  // logo abaixo, mesmo esquema que AvatarCreatorPanel já usa pra
+  // isso). Sem arquivo novo escolhido, cai na URL já salva daquela
+  // direção (existingArt).
+  const activeMobiFile = activeMobiDirection === "down" ? undefined : files[activeMobiDirection];
+  const [activeMobiBlobUrl, setActiveMobiBlobUrl] = useState<string | null>(null);
+  const activeMobiBlobUrlRef = useRef<string | null>(null);
+  activeMobiBlobUrlRef.current = activeMobiBlobUrl;
+
+  useEffect(() => {
+    setActiveMobiBlobUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return activeMobiFile ? URL.createObjectURL(activeMobiFile) : null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMobiFile]);
+
+  useEffect(() => {
+    return () => {
+      if (activeMobiBlobUrlRef.current) URL.revokeObjectURL(activeMobiBlobUrlRef.current);
+    };
+  }, []);
+
+  const stageArtSrc =
+    activeMobiDirection === "down"
+      ? previewUrl ?? existingArt.down ?? null
+      : activeMobiBlobUrl ?? existingArt[activeMobiDirection] ?? null;
   const stageIconSrc = iconPreviewUrl ?? (!iconCleared ? existingIconUrl : null);
+
+  // offset em uso pela direção ATIVA -- "down" lê offsetX/offsetY
+  // direto, as outras 3 caem no PRÓPRIO override (directionOffsets) ou,
+  // sem um ainda, no mesmo valor de "down" (mesma prévia do que vai
+  // acontecer no jogo, ver addFurnitureSprite em MainScene.ts).
+  const activeMobiOffset =
+    activeMobiDirection === "down" ? { x: offsetX, y: offsetY } : directionOffsets[activeMobiDirection] ?? { x: offsetX, y: offsetY };
+
+  // boneco de referência NA POSE da direção ativa (mesmo esquema do
+  // "Criar Avatar", ver DIRECTION_FIRST_FRAME_INDEX/frameOffsetXPx em
+  // AvatarCreatorPanel acima).
+  const activeMobiFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeMobiDirection];
+  const mobiFrameCol = activeMobiFrameIndex % SKIN_SHEET_COLS;
+  const mobiFrameRow = Math.floor(activeMobiFrameIndex / SKIN_SHEET_COLS);
+  const mobiFrameOffsetXPx = mobiFrameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
+  const mobiFrameOffsetYPx = mobiFrameRow * (FRAME_H + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
 
   // --- arrastar o item em cima do quadrado/boneco de referência
   // (pedido do Douglas: "delimitar ali no editor a posição do mobi no
-  // tile") -- pointer capture no próprio elemento arrastado, assim o
-  // arraste continua funcionando mesmo se o cursor sair da área do
-  // preview no meio do gesto. Converte pixel de TELA (delta do mouse)
-  // pra pixel de JOGO dividindo por PREVIEW_SCALE -- offsetX/offsetY são
-  // sempre em px de jogo (mesma unidade salva no banco/usada em
-  // MainScene.ts), não em px de tela.
+  // tile", depois "editar todos os lados do mobi") -- pointer capture
+  // no próprio elemento arrastado, assim o arraste continua
+  // funcionando mesmo se o cursor sair da área do preview no meio do
+  // gesto. Converte pixel de TELA (delta do mouse) pra pixel de JOGO
+  // dividindo por PREVIEW_SCALE -- offsetX/offsetY são sempre em px de
+  // jogo (mesma unidade salva no banco/usada em MainScene.ts), não em
+  // px de tela. Escreve em offsetX/offsetY quando a direção ativa é
+  // "down", senão no override daquela direção (directionOffsets).
   function handleItemPointerDown(e: ReactPointerEvent<HTMLImageElement>) {
+    e.preventDefault();
+    const dir = activeMobiDirection;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startOffsetX = activeMobiOffset.x;
+    const startOffsetY = activeMobiOffset.y;
+
+    function onMove(ev: PointerEvent) {
+      const dx = (ev.clientX - startClientX) / PREVIEW_SCALE;
+      const dy = (ev.clientY - startClientY) / PREVIEW_SCALE;
+      const nextX = clamp(Math.round(startOffsetX + dx), -OFFSET_LIMIT, OFFSET_LIMIT);
+      const nextY = clamp(Math.round(startOffsetY + dy), -OFFSET_LIMIT, OFFSET_LIMIT);
+      if (dir === "down") {
+        setOffsetX(nextX);
+        setOffsetY(nextY);
+      } else {
+        setDirectionOffsets((prev) => ({ ...prev, [dir]: { x: nextX, y: nextY } }));
+      }
+    }
+    function onUp(ev: PointerEvent) {
+      target.releasePointerCapture(ev.pointerId);
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+    }
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+  }
+
+  // --- arrastar o MARCADOR de onde o boneco senta (pedido do Douglas:
+  // "editar também a posição sentado lá dentro") -- só aparece quando
+  // sittable=true (ver seletor "Tem interação?"). Um ajuste só, vale
+  // nas 4 direções (o fino por direção continua sendo o "Assento" do
+  // editor de espaço, ver resolveSeatOffset em game/furniture.ts).
+  function handleSeatMarkerPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     e.preventDefault();
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
     const startClientX = e.clientX;
     const startClientY = e.clientY;
-    const startOffsetX = offsetX;
-    const startOffsetY = offsetY;
+    const startX = seatOffsetX;
+    const startY = seatOffsetY;
 
     function onMove(ev: PointerEvent) {
       const dx = (ev.clientX - startClientX) / PREVIEW_SCALE;
       const dy = (ev.clientY - startClientY) / PREVIEW_SCALE;
-      setOffsetX(clamp(Math.round(startOffsetX + dx), -OFFSET_LIMIT, OFFSET_LIMIT));
-      setOffsetY(clamp(Math.round(startOffsetY + dy), -OFFSET_LIMIT, OFFSET_LIMIT));
+      setSeatOffsetX(clamp(Math.round(startX + dx), -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
+      setSeatOffsetY(clamp(Math.round(startY + dy), -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
     }
     function onUp(ev: PointerEvent) {
       target.releasePointerCapture(ev.pointerId);
@@ -1234,6 +1376,17 @@ export default function ItemEditor({
         display_width: displayWidth,
         offset_x: offsetX,
         offset_y: offsetY,
+        // ajuste por direção + interação/assento (pedido do Douglas:
+        // "editar todos os lados do mobi" e "editar também a posição
+        // sentado lá dentro, com uma seleção, se vai ter interação") --
+        // ver cleanDirectionOffsets/clampSeatOffset em
+        // lib/supabase/itemFields.ts. directionOffsets vazio (sem
+        // nenhuma direção ajustada) manda null de propósito, limpando
+        // qualquer override antigo ao invés de deixar lixo pra trás.
+        direction_offsets: Object.keys(directionOffsets).length > 0 ? directionOffsets : null,
+        sittable,
+        seat_offset_x: sittable ? seatOffsetX : null,
+        seat_offset_y: sittable ? seatOffsetY : null,
       };
       if (iconUrl !== undefined) payload.icon_url = iconUrl;
 
@@ -1347,6 +1500,11 @@ export default function ItemEditor({
                       const file = e.target.files?.[0] ?? undefined;
                       if (field.key === "down") handleDownFileChange(file);
                       else setFiles((prev) => ({ ...prev, [field.key]: file }));
+                      // pula o preview pra direção que acabou de
+                      // receber arquivo -- assim dá pra ajustar a
+                      // posição dela na hora, sem precisar clicar na
+                      // aba manualmente.
+                      if (file) setActiveMobiDirection(field.key);
                     }}
                   />
                 </label>
@@ -1375,18 +1533,63 @@ export default function ItemEditor({
             </button>
           )}
 
+          {/* "Tem interação?" (pedido do Douglas: "editar também a
+              posição sentado lá dentro, com uma seleção, se vai ter
+              interação, e qual interação 'por enquanto só temos
+              sentar'") -- decidido AQUI, não mais preso à categoria
+              (poltrona/sofá): DEFAULT_SITTABLE_BY_CATEGORY só decide o
+              valor inicial ao trocar de categoria/criar um item novo,
+              o dono pode sempre ligar/desligar (ver
+              isFurnitureSittable em game/furniture.ts). */}
+          <p className="settings-hint">Tem interação? (o que acontece quando alguém clica no item na sala)</p>
+          <div className="gender-switch">
+            <button
+              type="button"
+              className={!sittable ? "gender-btn selected" : "gender-btn"}
+              onClick={() => setSittable(false)}
+            >
+              Nenhuma
+            </button>
+            <button
+              type="button"
+              className={sittable ? "gender-btn selected" : "gender-btn"}
+              onClick={() => setSittable(true)}
+            >
+              Sentar
+            </button>
+          </div>
+
           {/* Preview grande (pedido do Douglas: "preciso disso num card
               maior, com a imagem maior", "quero boneco real ali dentro
               em perspectiva certa, e o quadrado também", "delimitar ali
-              no editor a posição do mobi no tile") -- mostra o item de
-              verdade em cima de um QUADRADO do tamanho real do tile e um
-              BONECO de referência (arte de verdade do jogo, não mais uma
+              no editor a posição do mobi no tile", depois "editar todos
+              os lados do mobi") -- mostra o item de verdade em cima de
+              um QUADRADO do tamanho real do tile e um BONECO de
+              referência (arte de verdade do jogo, não mais uma
               silhueta em CSS), na MESMA proporção/âncora do jogo (ver
               AVATAR_FOOT_FROM_TILE_BOTTOM acima -- boneco ancora no
               CENTRO do tile, móvel ancora na BORDA DE BAIXO, por isso
-              não ficam na mesma "linha"). Arrasta o item (clicar e
-              arrastar em cima dele) pra ajustar offsetX/offsetY -- o
-              slider de tamanho continua do lado. */}
+              não ficam na mesma "linha"). As abas de direção abaixo
+              trocam qual foto tá sendo ajustada (o boneco muda de
+              POSE junto) -- arrasta o item (clicar e arrastar em cima
+              dele) pra ajustar a posição DAQUELA direção; "baixo" usa
+              offsetX/offsetY direto, as outras 3 caem num override
+              próprio (directionOffsets) só quando ajustadas -- sem
+              ajuste, reaproveitam a mesma posição de "baixo" (mesmo
+              fallback que addFurnitureSprite usa no jogo). */}
+          <div className="edit-section-tabs">
+            {DIRECTION_FIELDS.map((field) => (
+              <button
+                key={field.key}
+                type="button"
+                className={activeMobiDirection === field.key ? "edit-section-tab selected" : "edit-section-tab"}
+                onClick={() => setActiveMobiDirection(field.key)}
+              >
+                {field.label}
+              </button>
+            ))}
+          </div>
+
           <div className="item-size-card">
             <div className="item-stage" style={{ height: STAGE_HEIGHT }}>
               <div
@@ -1400,7 +1603,9 @@ export default function ItemEditor({
               >
                 <div
                   className="item-stage-avatar-crop"
-                  style={{ transform: `scale(${AVATAR_SCALE * PREVIEW_SCALE})` }}
+                  style={{
+                    transform: `translate(-${mobiFrameOffsetXPx}px, -${mobiFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
+                  }}
                 >
                   {REFERENCE_OUTFIT_FILE && (
                     <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_OUTFIT_FILE}`} alt="" />
@@ -1409,6 +1614,30 @@ export default function ItemEditor({
                   {REFERENCE_HAIR && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_HAIR.file}`} alt="" />}
                 </div>
               </div>
+
+              {/* marcador de onde o boneco senta (só quando "Sentar"
+                  tá ligado acima) -- arrasta pra ajustar o ponto
+                  padrão; o fino por direção continua no "Assento" do
+                  editor de espaço (resolveSeatOffset em
+                  game/furniture.ts), esse aqui só define o PADRÃO
+                  usado antes de qualquer ajuste ao vivo. Mesmo
+                  referencial que item-stage-item-img logo abaixo (não
+                  filho de item-stage-avatar, que tem seu PRÓPRIO
+                  referencial não escalado por causa do transform:
+                  scale() no crop) -- ancorado no mesmo "bottom" que os
+                  pés do boneco (STAGE_BASELINE_PAD +
+                  AVATAR_FOOT_FROM_TILE_BOTTOM). */}
+              {sittable && (
+                <div
+                  className="item-stage-seat-marker"
+                  style={{
+                    bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM - seatOffsetY * PREVIEW_SCALE,
+                    transform: `translate(calc(-50% + ${seatOffsetX * PREVIEW_SCALE}px), 0)`,
+                  }}
+                  onPointerDown={handleSeatMarkerPointerDown}
+                  title="Arraste pra ajustar onde o boneco senta"
+                />
+              )}
 
               <div
                 className="item-stage-tile"
@@ -1423,13 +1652,15 @@ export default function ItemEditor({
                   onPointerDown={handleItemPointerDown}
                   style={{
                     width: displayWidth * PREVIEW_SCALE,
-                    bottom: STAGE_BASELINE_PAD - offsetY * PREVIEW_SCALE,
-                    transform: `translate(calc(-50% + ${offsetX * PREVIEW_SCALE}px), 0)`,
+                    bottom: STAGE_BASELINE_PAD - activeMobiOffset.y * PREVIEW_SCALE,
+                    transform: `translate(calc(-50% + ${activeMobiOffset.x * PREVIEW_SCALE}px), 0)`,
                   }}
                   title="Arraste pra ajustar a posição no tile"
                 />
               ) : (
-                <p className="edit-hint item-size-empty">Escolha a imagem de frente pra ver o preview aqui.</p>
+                <p className="edit-hint item-size-empty">
+                  Escolha a imagem de "{DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}" pra ver o preview aqui.
+                </p>
               )}
             </div>
 
@@ -1448,21 +1679,49 @@ export default function ItemEditor({
 
             <div className="item-stage-offset-row">
               <span>
-                posição no tile -- x: {offsetX}px · y: {offsetY}px
+                posição no tile ({DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}) -- x: {activeMobiOffset.x}px · y: {activeMobiOffset.y}px
               </span>
-              {(offsetX !== 0 || offsetY !== 0) && (
+              {(activeMobiOffset.x !== 0 || activeMobiOffset.y !== 0) && (
                 <button
                   type="button"
                   className="clear-btn"
                   onClick={() => {
-                    setOffsetX(0);
-                    setOffsetY(0);
+                    if (activeMobiDirection === "down") {
+                      setOffsetX(0);
+                      setOffsetY(0);
+                    } else {
+                      setDirectionOffsets((prev) => {
+                        const next = { ...prev };
+                        delete next[activeMobiDirection as Exclude<DirectionKey, "down">];
+                        return next;
+                      });
+                    }
                   }}
                 >
                   Redefinir posição
                 </button>
               )}
             </div>
+
+            {sittable && (
+              <div className="item-stage-offset-row">
+                <span>
+                  posição sentado -- x: {seatOffsetX}px · y: {seatOffsetY}px
+                </span>
+                {(seatOffsetX !== 0 || seatOffsetY !== 0) && (
+                  <button
+                    type="button"
+                    className="clear-btn"
+                    onClick={() => {
+                      setSeatOffsetX(0);
+                      setSeatOffsetY(0);
+                    }}
+                  >
+                    Redefinir assento
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {error && <p className="items-panel-error">{error}</p>}

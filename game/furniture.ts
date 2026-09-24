@@ -204,9 +204,37 @@ export interface FurnitureModelDef {
    * editor a posição do mobi no tile"). Só existe em item CUSTOM, por
    * MODELO (não por instância colocada -- todo item desse modelo usa o
    * mesmo ajuste, ver addFurnitureSprite em MainScene.ts). 0/undefined =
-   * sem deslocamento, comportamento de sempre. */
+   * sem deslocamento, comportamento de sempre. Vale pra direção "down"
+   * (frente) -- as outras 3 podem ter o PRÓPRIO ajuste (ver
+   * directionOffsets abaixo, pedido do Douglas: "editar todos os lados
+   * do mobi"), sem override aí cai nesse mesmo valor. */
   offsetX?: number;
   offsetY?: number;
+  /** Override de offsetX/offsetY (ver acima) por direção -- SÓ pra
+   * left/right/up (down usa offsetX/offsetY direto, sem entrada aqui).
+   * Ajustado arrastando o item na aba de cada direção no preview do
+   * Editor de Itens (mesmo esquema do editor de posição do "Criar
+   * Avatar", ver AvatarCreatorPanel em ItemEditor.tsx). Direção sem
+   * entrada aqui cai no offsetX/offsetY de "down" -- útil quando o item
+   * é simétrico o bastante pra não precisar de ajuste por lado. */
+  directionOffsets?: Partial<Record<Exclude<Direction, "down">, { x: number; y: number }>>;
+  /** Se ESSE modelo senta (ver isFurnitureSittable acima) -- pedido do
+   * Douglas: seletor "Tem interação? Sentar/Nenhuma" no Editor de
+   * Itens. undefined = sem escolha feita ainda (modelo "de fábrica" ou
+   * item custom cadastrado ANTES dessa opção existir) -- cai no
+   * fallback por categoria (isSittableFurnitureType). */
+  sittable?: boolean;
+  /** Deslocamento (px) PADRÃO de onde o boneco senta nesse modelo --
+   * ajustado à mão no Editor de Itens junto com "Tem interação?"
+   * (arrastando um marcador em cima do preview, ver handleSeatMarkerPointerDown
+   * em ItemEditor.tsx). Um valor só, aplicado nas 4 direções -- ajuste
+   * fino POR DIREÇÃO continua sendo o painel "Assento" já existente no
+   * editor de espaço (ver FurnitureSeatOffsetsMap/resolveSeatOffset),
+   * esse aqui é só o ponto de partida pra não sentar torto assim que o
+   * item é criado. undefined = cai no heurístico de sempre (frente/
+   * costas vs lado, ver resolveSeatOffset). */
+  seatOffsetX?: number;
+  seatOffsetY?: number;
 }
 
 /**
@@ -377,9 +405,27 @@ export function furnitureBlocksMovement(type: FurnitureType): boolean {
   return FURNITURE_BLOCKS_MOVEMENT[type] ?? false;
 }
 
-/** Tipos em que o boneco senta sozinho ao parar em cima (ver findChairAtCurrentTile em MainScene.ts) -- vidro/mesa/planta/computador são decoração, não sentam. */
+/** Tipos em que o boneco senta sozinho ao parar em cima (ver findChairAtCurrentTile em MainScene.ts) -- vidro/mesa/planta/computador são decoração, não sentam. Só o PADRÃO/fallback pra item sem modelo (ver isFurnitureSittable abaixo, que checa o modelo primeiro). */
 export function isSittableFurnitureType(type: FurnitureType): boolean {
   return type === "poltrona" || type === "sofa";
+}
+
+/**
+ * Se ESSE item senta -- pedido do Douglas: "editar... se vai ter
+ * interação, e qual interação" (Editor de Itens, seletor "Tem
+ * interação?" -- ver AvatarCreatorPanel não, esse é o de MÓVEL mesmo,
+ * ver handleSubmit em ItemEditor.tsx). Antes disso, sentar dependia só
+ * da CATEGORIA (isSittableFurnitureType acima) -- um item custom criado
+ * em "poltrona" sentava sempre, um em "mesa" nunca, sem escolha. Agora,
+ * se o MODELO (ver FurnitureModelDef.sittable) tiver um valor explícito
+ * (marcado no Editor de Itens), esse vale -- só cai no fallback por
+ * categoria pros modelos "de fábrica" e pros itens custom cadastrados
+ * ANTES dessa opção existir (sittable ainda null no banco).
+ */
+export function isFurnitureSittable(f: FurnitureDef): boolean {
+  const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+  if (model?.sittable !== undefined) return model.sittable;
+  return isSittableFurnitureType(f.type);
 }
 
 /** Chave da textura no Phaser pra um móvel numa direção (ex: "poltrona" + "left" -> "furniture-poltrona-left"). */
@@ -662,7 +708,10 @@ export type FurnitureSeatOffsetsMap = Record<string, Partial<Record<Direction, {
  *  2. Valor gravado na própria instância (seatOffsetX/Y no FurnitureDef)
  *     -- só existe nos itens antigos de ROOM_FURNITURE escritos à mão
  *     antes dos modelos existirem.
- *  3. Padrão genérico por GRUPO de direção (frente/costas x lado) -- pra
+ *  3. Padrão do MODELO custom (FurnitureModelDef.seatOffsetX/Y, ajustado
+ *     no Editor de Itens junto com "Tem interação?" -- pedido do
+ *     Douglas: "editar também a posição sentado lá dentro").
+ *  4. Padrão genérico por GRUPO de direção (frente/costas x lado) -- pra
  *     um modelo novo, recém-sincronizado, já sentar numa posição
  *     razoável antes de qualquer ajuste fino (mesmos valores que já
  *     eram usados fixos pra poltrona, ver SEAT_Y_FRENTE_COSTAS/
@@ -673,6 +722,10 @@ export function resolveSeatOffset(f: FurnitureDef, seatOffsets: FurnitureSeatOff
   if (override) return override;
   if (f.seatOffsetX !== undefined || f.seatOffsetY !== undefined) {
     return { x: f.seatOffsetX ?? 0, y: f.seatOffsetY ?? 0 };
+  }
+  const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+  if (model && (model.seatOffsetX !== undefined || model.seatOffsetY !== undefined)) {
+    return { x: model.seatOffsetX ?? 0, y: model.seatOffsetY ?? 0 };
   }
   const isSide = f.facing === "left" || f.facing === "right";
   if (!isSide) return { x: 0, y: SEAT_Y_FRENTE_COSTAS };

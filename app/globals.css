@@ -3516,6 +3516,30 @@ body {
   cursor: grabbing;
 }
 
+/* Marcador de "onde o boneco senta" no editor de mobi (pedido do
+   Douglas: "editar também a posição sentado lá dentro") -- uma bolinha
+   arrastável ancorada no mesmo referencial de item-stage-item-img/
+   item-stage-tile (ver ItemEditor.tsx). Só aparece quando "Sentar" tá
+   selecionado. */
+.item-stage-seat-marker {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin-bottom: -7px;
+  border-radius: 50%;
+  background: rgba(255, 196, 0, 0.85);
+  border: 2px solid rgba(20, 10, 40, 0.85);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+  cursor: grab;
+  touch-action: none;
+  z-index: 2;
+}
+
+.item-stage-seat-marker:active {
+  cursor: grabbing;
+}
+
 /* Editor de posição/tamanho do "Criar Avatar" (ver AvatarCreatorPanel em
    ItemEditor.tsx, handleArtPointerDown) -- mesma ideia de
    .item-stage-item-img acima (arrastar em cima do boneco de

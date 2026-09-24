@@ -18,7 +18,7 @@ import {
   furnitureTextureKeyFor,
   furnitureBlocksMovement,
   furnitureModelById,
-  isSittableFurnitureType,
+  isFurnitureSittable,
   blockingFurnitureAt,
   resolveSeatOffset,
   seatOffsetGroupKey,
@@ -985,8 +985,17 @@ export default class MainScene extends Phaser.Scene {
       // FurnitureModelDef.offsetX/offsetY em game/furniture.ts) -- só
       // desloca a EXIBIÇÃO a partir da âncora padrão (pos.x/pos.y, borda
       // de baixo do tile), não muda o tile lógico nem a profundidade.
-      if (model.offsetX || model.offsetY) {
-        image.setPosition(pos.x + (model.offsetX ?? 0), pos.y + (model.offsetY ?? 0));
+      // "down" (frente) sempre usa offsetX/offsetY direto -- as outras 3
+      // direções caem no PRÓPRIO ajuste se tiver (ver
+      // FurnitureModelDef.directionOffsets, pedido do Douglas: "editar
+      // todos os lados do mobi"), senão reaproveitam o mesmo valor de
+      // "down" (comportamento de sempre, sem regressão pros modelos
+      // ajustados antes dessa opção existir).
+      const directionOverride = f.facing !== "down" ? model.directionOffsets?.[f.facing] : undefined;
+      const offX = directionOverride?.x ?? model.offsetX ?? 0;
+      const offY = directionOverride?.y ?? model.offsetY ?? 0;
+      if (offX || offY) {
+        image.setPosition(pos.x + offX, pos.y + offY);
       }
     }
 
@@ -1785,19 +1794,21 @@ export default class MainScene extends Phaser.Scene {
   private findChairAtCurrentTile(): FurnitureDef | null {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
-    // só tipo sentável (ver isSittableFurnitureType, hoje poltrona/sofá)
-    // -- vidro/mesa/planta/computador (móveis de decoração) não devem
-    // disparar o auto-sentar só por o boneco parar em cima do tile
-    // dele. Procura tanto na mobília FIXA
+    // só item sentável (ver isFurnitureSittable em furniture.ts -- por
+    // MODELO se o Editor de Itens já escolheu, senão cai no fallback por
+    // categoria, hoje poltrona/sofá) -- vidro/mesa/planta/computador (ou
+    // um custom marcado "Nenhuma" interação) não devem disparar o
+    // auto-sentar só por o boneco parar em cima do tile dele. Procura
+    // tanto na mobília FIXA
     // (ROOM_FURNITURE) quanto na colocada pelo editor (draftFurniture --
     // desde que ganhou persistência de verdade, ver POST /room/furniture,
     // esses itens também precisam ser sentáveis na hora, sem precisar de
     // restart/deploy).
     for (const f of ROOM_FURNITURE) {
-      if (isSittableFurnitureType(f.type) && f.col === col && f.row === row) return f;
+      if (isFurnitureSittable(f) && f.col === col && f.row === row) return f;
     }
     for (const f of this.draftFurniture.values()) {
-      if (isSittableFurnitureType(f.type) && f.col === col && f.row === row) return f;
+      if (isFurnitureSittable(f) && f.col === col && f.row === row) return f;
     }
     return null;
   }
