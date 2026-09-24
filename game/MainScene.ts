@@ -776,17 +776,21 @@ export default class MainScene extends Phaser.Scene {
 
     // destaque ao passar o mouse (ver hitArea/pointerdown mais abaixo --
     // o avatar inteiro já é clicável, isso só acrescenta o feedback
-    // visual de hover, igual o Gather): um brilho roxo suave nos pés
-    // (mesma cor de destaque do resto da UI, ver .category-icon-btn.selected
-    // em globals.css) -- criado JÁ como primeiro item da lista de filhos
-    // do container (mais abaixo), pra ficar atrás de todas as sprites do
-    // boneco. Começa com alpha 0 (invisível) -- pointerover/pointerout
-    // mais abaixo animam ele (e um leve aumento de escala nas sprites)
-    // com tween.
-    const hoverGlow = this.add.ellipse(0, AVATAR_FOOT_OFFSET_Y - 4, dispW * 0.85, dispW * 0.34, 0x7c5cff, 0.5);
-    hoverGlow.setAlpha(0);
+    // visual de hover, igual o Gather): um CONTORNO em cada camada
+    // (Phaser FX "Glow", só funciona no renderer WebGL -- ver
+    // supportsGlowFX), que segue o alfa de cada sprite -- por isso
+    // contorna o boneco certinho (roupa/pose/cabelo do momento, o que
+    // estiver equipado), em vez de uma forma fixa por cima que só cobre
+    // um pedaço dele. outerStrength começa em 0 (sem contorno visível)
+    // -- pointerover/pointerout mais abaixo animam ele com tween (e um
+    // leve aumento de escala nas sprites, junto). Em Canvas (sem
+    // suporte a FX) essa parte não faz nada -- sobra só o zoom leve.
+    const supportsGlowFX = this.game.renderer.type === Phaser.WEBGL;
+    const glowFx: Phaser.FX.Glow[] = supportsGlowFX
+      ? layerSprites.map((sprite) => sprite.postFX.addGlow(0x7c5cff, 0, 0, false, 0.3, 10))
+      : [];
 
-    const container = this.add.container(x, y, [hoverGlow, ...layerSprites, label, statusDot]);
+    const container = this.add.container(x, y, [...layerSprites, label, statusDot]);
     container.setSize(dispW, dispH);
     container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
@@ -822,13 +826,15 @@ export default class MainScene extends Phaser.Scene {
       if (this.avatarClicksLocked) return;
       this.onAvatarClick?.({ playerId, isLocal, name, color });
     });
-    // destaque de hover (ver hoverGlow acima) -- desliga junto com o
+    // destaque de hover (ver glowFx acima) -- desliga junto com o
     // clique quando avatarClicksLocked (não faz sentido destacar algo
     // que não vai responder ao clique agora).
     container.on("pointerover", () => {
       if (this.avatarClicksLocked) return;
-      this.tweens.killTweensOf(hoverGlow);
-      this.tweens.add({ targets: hoverGlow, alpha: 1, duration: 120, ease: "Sine.easeOut" });
+      if (glowFx.length > 0) {
+        this.tweens.killTweensOf(glowFx);
+        this.tweens.add({ targets: glowFx, outerStrength: 3, duration: 120, ease: "Sine.easeOut" });
+      }
       this.tweens.killTweensOf(layerSprites);
       this.tweens.add({
         targets: layerSprites,
@@ -839,8 +845,10 @@ export default class MainScene extends Phaser.Scene {
       });
     });
     container.on("pointerout", () => {
-      this.tweens.killTweensOf(hoverGlow);
-      this.tweens.add({ targets: hoverGlow, alpha: 0, duration: 120, ease: "Sine.easeIn" });
+      if (glowFx.length > 0) {
+        this.tweens.killTweensOf(glowFx);
+        this.tweens.add({ targets: glowFx, outerStrength: 0, duration: 120, ease: "Sine.easeIn" });
+      }
       this.tweens.killTweensOf(layerSprites);
       this.tweens.add({
         targets: layerSprites,
