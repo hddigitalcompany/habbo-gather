@@ -4,13 +4,13 @@
   "private": true,
   "scripts": {
     "dev:next": "next dev",
-    "dev:server": "node server/index.js",
+    "dev:server": "node --env-file-if-exists=.env.local server/index.js",
     "dev:assets": "node scripts/watchAvatarAssets.mjs",
     "dev": "concurrently -n next,server,assets -c blue,magenta,green \"npm:dev:next\" \"npm:dev:server\" \"npm:dev:assets\"",
     "sync-assets": "node scripts/syncAvatarAssets.mjs && node scripts/syncSkinAssets.mjs && node scripts/syncBeardAssets.mjs && node scripts/syncAccessoryAssets.mjs && node scripts/syncOutfitAssets.mjs && node scripts/syncFloorAssets.mjs && node scripts/syncFurnitureAssets.mjs",
     "build": "next build",
     "start": "next start",
-    "start:server": "node server/index.js",
+    "start:server": "node --env-file-if-exists=.env.local server/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
     "react-dom": "^18.3.0",
     "phaser": "^3.80.0",
     "partysocket": "^1.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
