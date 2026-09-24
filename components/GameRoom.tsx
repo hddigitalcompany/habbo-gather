@@ -7,9 +7,15 @@ import * as Phaser from "phaser";
 import PartySocket from "partysocket";
 import MainScene, { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
-import { FURNITURE_CATALOG, FurnitureDef } from "@/game/furniture";
+import {
+  FURNITURE_CATALOG,
+  FURNITURE_CATEGORIES,
+  FURNITURE_TYPE_CATEGORY,
+  FurnitureCategoryId,
+  FurnitureDef,
+} from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
-import { FLOOR_CATALOG, FLOOR_CATEGORIES, FloorCatalogEntry, FloorCategory, FloorTileDef } from "@/game/floor";
+import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef } from "@/game/floor";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -586,16 +592,18 @@ export default function GameRoom() {
   const [draftItems, setDraftItems] = useState<FurnitureDef[]>([]);
   const [copied, setCopied] = useState(false);
 
-  // --- aba "Piso" do editor de espaço -- mesma ideia do rascunho de
-  // móvel acima (a cena Phaser é quem manda de verdade, ver
-  // selectFloorTool/paintFloorAt em MainScene.ts; aqui só espelha pra
-  // destacar o botão certo e mostrar a lista). editTab escolhe qual
-  // paleta aparece (móveis ou piso); floorCategory só filtra QUAL
-  // categoria de modelo aparece na paleta de piso. Diferente de móveis
-  // (que ainda gera código pra colar à mão), o piso salva sozinho no
-  // servidor -- ver useEffect de autosave/floorSaveStatus mais abaixo.
-  const [editTab, setEditTab] = useState<"moveis" | "piso">("moveis");
-  const [floorCategory, setFloorCategory] = useState<FloorCategory>(FLOOR_CATEGORIES[0].id);
+  // --- barra de categoria do editor de espaço -- um ícone por
+  // categoria lá em cima (poltrona/sofá/mesa/planta/computador/
+  // divisória/piso, ver FURNITURE_CATEGORIES em game/furniture.ts),
+  // igual ao padrão de referência que o Douglas mandou. activeCategory
+  // escolhe qual grade aparece embaixo: "piso" mostra TODOS os modelos
+  // de piso juntos (não separa mais por porcelanato/laminado), as
+  // outras filtram FURNITURE_CATALOG pelo tipo de móvel daquela
+  // categoria (ver FURNITURE_TYPE_CATEGORY). Sofá/mesa/planta/
+  // computador ainda não têm nenhum FurnitureType/arte cadastrado --
+  // aparecem na barra mas com a grade vazia, até subir os arquivos de
+  // origem (combinado com o Douglas: estrutura agora, arte depois).
+  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso">("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1681,6 +1689,7 @@ export default function GameRoom() {
     setEditMode(next);
     setSelectedCatalogIndex(null);
     setSelectedFloorToolId(null);
+    setActiveCategory("poltrona");
     sceneRef.current?.setEditMode(next);
   }
 
@@ -2245,8 +2254,8 @@ export default function GameRoom() {
 
       {IS_ROOM_EDITOR_ENABLED && editMode && (
         <EditPanel
-          editTab={editTab}
-          onChangeEditTab={setEditTab}
+          activeCategory={activeCategory}
+          onChangeCategory={setActiveCategory}
           selectedCatalogIndex={selectedCatalogIndex}
           onSelectCatalog={selectCatalog}
           draftItems={draftItems}
@@ -2256,8 +2265,6 @@ export default function GameRoom() {
           generatedCode={generatedCode}
           onCopyCode={copyGeneratedCode}
           copied={copied}
-          floorCategory={floorCategory}
-          onChangeFloorCategory={setFloorCategory}
           selectedFloorToolId={selectedFloorToolId}
           onSelectFloorPaint={selectFloorPaint}
           onSelectFloorEraser={selectFloorEraser}
@@ -2270,9 +2277,26 @@ export default function GameRoom() {
   );
 }
 
+// Barra de categoria do editor de espaço -- um ícone por categoria, na
+// ORDEM que o Douglas pediu (poltrona, sofá, mesa, planta, computador),
+// com "divisória" (vidro, já existia antes desse pedido) e "piso" no
+// fim. Fica fora do componente por ser uma lista estática (não depende
+// de nenhuma prop) -- os ícones em si (glifos de linha simples, mesmo
+// estilo dos outros ícones desse arquivo, ver TargetIcon/AgendaIcon
+// etc.) ficam definidos logo abaixo do EditPanel.
+const EDIT_CATEGORY_TABS: { id: FurnitureCategoryId | "piso"; label: string; icon: () => JSX.Element }[] = [
+  { id: "poltrona", label: "Poltrona", icon: ArmchairIcon },
+  { id: "sofa", label: "Sofá", icon: SofaIcon },
+  { id: "mesa", label: "Mesa", icon: TableIcon },
+  { id: "planta", label: "Planta", icon: PlantIcon },
+  { id: "computador", label: "Computador", icon: ComputerIcon },
+  { id: "divisoria", label: "Divisória", icon: DividerIcon },
+  { id: "piso", label: "Piso", icon: FloorIcon },
+];
+
 function EditPanel({
-  editTab,
-  onChangeEditTab,
+  activeCategory,
+  onChangeCategory,
   selectedCatalogIndex,
   onSelectCatalog,
   draftItems,
@@ -2282,8 +2306,6 @@ function EditPanel({
   generatedCode,
   onCopyCode,
   copied,
-  floorCategory,
-  onChangeFloorCategory,
   selectedFloorToolId,
   onSelectFloorPaint,
   onSelectFloorEraser,
@@ -2291,8 +2313,8 @@ function EditPanel({
   onClearAllFloor,
   floorSaveStatus,
 }: {
-  editTab: "moveis" | "piso";
-  onChangeEditTab: (tab: "moveis" | "piso") => void;
+  activeCategory: FurnitureCategoryId | "piso";
+  onChangeCategory: (category: FurnitureCategoryId | "piso") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   draftItems: FurnitureDef[];
@@ -2302,8 +2324,6 @@ function EditPanel({
   generatedCode: string;
   onCopyCode: () => void;
   copied: boolean;
-  floorCategory: FloorCategory;
-  onChangeFloorCategory: (category: FloorCategory) => void;
   selectedFloorToolId: string | "erase" | null;
   onSelectFloorPaint: (entry: FloorCatalogEntry) => void;
   onSelectFloorEraser: () => void;
@@ -2311,28 +2331,85 @@ function EditPanel({
   onClearAllFloor: () => void;
   floorSaveStatus: "idle" | "saving" | "saved" | "error";
 }) {
-  const floorEntriesInCategory = FLOOR_CATALOG.filter((e) => e.category === floorCategory);
+  const activeCategoryLabel = EDIT_CATEGORY_TABS.find((c) => c.id === activeCategory)?.label ?? "";
+
+  // índice ORIGINAL em FURNITURE_CATALOG (não o índice dentro da lista
+  // filtrada) -- onSelectCatalog/selectedCatalogIndex usam esse índice
+  // pra saber qual entrada é, então filtrar sem guardar o índice de
+  // origem ia embaralhar qual item cada botão realmente coloca.
+  const furnitureEntriesInCategory =
+    activeCategory === "piso"
+      ? []
+      : FURNITURE_CATALOG.map((entry, i) => ({ entry, i })).filter(
+          ({ entry }) => FURNITURE_TYPE_CATEGORY[entry.type] === activeCategory
+        );
 
   return (
     <div className="edit-panel">
       <h2>Editar espaço</h2>
 
-      <div className="edit-mode-tabs">
-        <button
-          className={editTab === "moveis" ? "edit-mode-tab selected" : "edit-mode-tab"}
-          onClick={() => onChangeEditTab("moveis")}
-        >
-          Móveis
-        </button>
-        <button
-          className={editTab === "piso" ? "edit-mode-tab selected" : "edit-mode-tab"}
-          onClick={() => onChangeEditTab("piso")}
-        >
-          Piso
-        </button>
+      <div className="category-icon-bar">
+        {EDIT_CATEGORY_TABS.map((cat) => {
+          const Icon = cat.icon;
+          return (
+            <button
+              key={cat.id}
+              className={activeCategory === cat.id ? "category-icon-btn selected" : "category-icon-btn"}
+              onClick={() => onChangeCategory(cat.id)}
+              title={cat.label}
+            >
+              <Icon />
+            </button>
+          );
+        })}
       </div>
 
-      {editTab === "moveis" ? (
+      {activeCategory === "piso" ? (
+        <>
+          <p className="edit-hint">
+            Escolha um modelo abaixo e clique num quadrado da sala pra pintar só
+            ele ("unitário"), ou clique e arraste pra pintar vários de uma vez.
+            "Apagar" volta o quadrado pro fundo padrão da sala. Salva sozinho.
+          </p>
+
+          <div className="floor-palette">
+            <button
+              className={selectedFloorToolId === "erase" ? "floor-eraser-btn selected" : "floor-eraser-btn"}
+              onClick={onSelectFloorEraser}
+              title="Apagar piso pintado (volta pro fundo padrão)"
+            >
+              ✕ Apagar
+            </button>
+            {FLOOR_CATALOG.map((entry) => (
+              <button
+                key={entry.id}
+                className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
+                style={{ backgroundImage: `url(/assets/${entry.file})` }}
+                onClick={() => onSelectFloorPaint(entry)}
+                title={entry.label}
+              />
+            ))}
+          </div>
+          {FLOOR_CATALOG.length === 0 && (
+            <p className="edit-hint">Nenhum modelo de piso ainda -- suba as imagens na pasta de origem.</p>
+          )}
+
+          <h3>
+            Piso pintado ({draftFloorItems.length})
+            <span className={`floor-save-status floor-save-status-${floorSaveStatus}`}>
+              {floorSaveStatus === "saving" && "Salvando…"}
+              {floorSaveStatus === "saved" && "Salvo ✓"}
+              {floorSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
+          {draftFloorItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
+          {draftFloorItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAllFloor}>
+              Limpar tudo
+            </button>
+          )}
+        </>
+      ) : (
         <>
           <p className="edit-hint">
             Escolha um item abaixo e clique num quadrado livre da sala pra colocar.
@@ -2342,7 +2419,7 @@ function EditPanel({
           </p>
 
           <div className="palette">
-            {FURNITURE_CATALOG.map((entry, i) => (
+            {furnitureEntriesInCategory.map(({ entry, i }) => (
               <button
                 key={i}
                 className={selectedCatalogIndex === i ? "palette-btn selected" : "palette-btn"}
@@ -2352,6 +2429,11 @@ function EditPanel({
               </button>
             ))}
           </div>
+          {furnitureEntriesInCategory.length === 0 && (
+            <p className="edit-hint">
+              Nenhum modelo de {activeCategoryLabel} ainda -- suba as artes na pasta de origem.
+            </p>
+          )}
 
           <h3>Itens colocados ({draftItems.length})</h3>
           {draftItems.length === 0 ? (
@@ -2382,65 +2464,109 @@ function EditPanel({
             {copied ? "Copiado!" : "Copiar código"}
           </button>
         </>
-      ) : (
-        <>
-          <p className="edit-hint">
-            Escolha um modelo abaixo e clique num quadrado da sala pra pintar só
-            ele ("unitário"), ou clique e arraste pra pintar vários de uma vez.
-            "Apagar" volta o quadrado pro fundo padrão da sala. Salva sozinho.
-          </p>
-
-          <div className="floor-category-tabs">
-            {FLOOR_CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                className={floorCategory === cat.id ? "floor-category-tab selected" : "floor-category-tab"}
-                onClick={() => onChangeFloorCategory(cat.id)}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="floor-palette">
-            <button
-              className={selectedFloorToolId === "erase" ? "floor-eraser-btn selected" : "floor-eraser-btn"}
-              onClick={onSelectFloorEraser}
-              title="Apagar piso pintado (volta pro fundo padrão)"
-            >
-              ✕ Apagar
-            </button>
-            {floorEntriesInCategory.map((entry) => (
-              <button
-                key={entry.id}
-                className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
-                style={{ backgroundImage: `url(/assets/${entry.file})` }}
-                onClick={() => onSelectFloorPaint(entry)}
-                title={entry.label}
-              />
-            ))}
-          </div>
-          {floorEntriesInCategory.length === 0 && (
-            <p className="edit-hint">Nenhum modelo de {floorCategory} ainda -- suba as imagens na pasta de origem.</p>
-          )}
-
-          <h3>
-            Piso pintado ({draftFloorItems.length})
-            <span className={`floor-save-status floor-save-status-${floorSaveStatus}`}>
-              {floorSaveStatus === "saving" && "Salvando…"}
-              {floorSaveStatus === "saved" && "Salvo ✓"}
-              {floorSaveStatus === "error" && "Erro ao salvar"}
-            </span>
-          </h3>
-          {draftFloorItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
-          {draftFloorItems.length > 0 && (
-            <button className="clear-btn" onClick={onClearAllFloor}>
-              Limpar tudo
-            </button>
-          )}
-        </>
       )}
     </div>
+  );
+}
+
+// Ícones de linha simples (glifo branco/contorno, mesmo padrão de
+// TargetIcon/AgendaIcon/GroupIcon etc. nesse arquivo) pra barra de
+// categoria do editor de espaço acima -- não são miniatura da arte de
+// verdade do item, só um símbolo genérico representando a categoria
+// (combinado com o Douglas).
+function ArmchairIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M6 11V7.5A2.5 2.5 0 0 1 8.5 5h7A2.5 2.5 0 0 1 18 7.5V11"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x="4.5" y="11" width="15" height="6.5" rx="1.8" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M4.5 14.5h-1a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1M19.5 14.5h1a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-1"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path d="M6 17.5V20M18 17.5V20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SofaIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M5 12V8.5A1.5 1.5 0 0 1 6.5 7h11A1.5 1.5 0 0 1 19 8.5V12"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x="2.5" y="12" width="19" height="5.5" rx="1.6" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 12v5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.7" />
+      <path d="M4.5 17.5V20M19.5 17.5V20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function TableIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="6" width="18" height="3.2" rx="1" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M5.5 9.2V19M18.5 9.2V19" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PlantIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M12 20v-8.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M12 13c0-3-2.5-5-6-5 0 3.2 2.3 5.6 6 5Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 11.2c0-3.4 2.7-5.7 6.3-5.7 0 3.4-2.5 6-6.3 5.7Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path d="M7.5 20h9l-1-6h-7l-1 6Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ComputerIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <rect x="3.5" y="4.5" width="17" height="11.5" rx="1.6" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 19.5h6M12 16v3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DividerIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="4" width="6.5" height="16" rx="1" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="12.5" y="4" width="6.5" height="16" rx="1" stroke="currentColor" strokeWidth="1.6" opacity="0.6" />
+    </svg>
+  );
+}
+
+function FloorIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 3.5v17M3.5 12h17" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
   );
 }
 

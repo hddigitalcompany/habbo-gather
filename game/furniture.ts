@@ -77,12 +77,41 @@ export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, stri
 };
 
 /**
- * Categoria de cada tipo de móvel -- só documentação/agrupamento, não
- * muda nenhuma lógica sozinha.
+ * Categorias da barra de ícones do editor de espaço ("Editar espaço",
+ * ver EditPanel em GameRoom.tsx) -- cada uma vira um botão com ícone lá
+ * em cima, igual ao padrão de referência que o Douglas mandou (barra de
+ * categoria + grade de itens embaixo). "Piso" NÃO entra aqui -- é uma
+ * aba separada, sem tipo de móvel (ver game/floor.ts), tratada à parte
+ * dentro do EditPanel.
+ *
+ * poltrona/divisória (vidro) já têm arte de verdade; sofá/mesa/planta/
+ * computador ainda não (ver FURNITURE_ART/FURNITURE_CATALOG -- nenhum
+ * FurnitureType criado pra eles ainda) -- por enquanto a categoria
+ * aparece na barra mas fica vazia ("monta a estrutura agora, arte
+ * depois", combinado com o Douglas), até subir os arquivos de origem e
+ * virar um FurnitureType de verdade igual poltrona/vidro.
  */
-export const FURNITURE_CATEGORY: Record<FurnitureType, string> = {
-  poltrona: "assento",
-  vidro: "divisória de vidro",
+export type FurnitureCategoryId =
+  | "poltrona"
+  | "sofa"
+  | "mesa"
+  | "planta"
+  | "computador"
+  | "divisoria";
+
+export const FURNITURE_CATEGORIES: { id: FurnitureCategoryId; label: string }[] = [
+  { id: "poltrona", label: "Poltrona" },
+  { id: "sofa", label: "Sofá" },
+  { id: "mesa", label: "Mesa" },
+  { id: "planta", label: "Planta" },
+  { id: "computador", label: "Computador" },
+  { id: "divisoria", label: "Divisória" },
+];
+
+/** Categoria de cada tipo de móvel que JÁ existe (tem arte/catálogo) -- decide em qual aba da barra de ícones ele aparece. */
+export const FURNITURE_TYPE_CATEGORY: Record<FurnitureType, FurnitureCategoryId> = {
+  poltrona: "poltrona",
+  vidro: "divisoria",
 };
 
 /**

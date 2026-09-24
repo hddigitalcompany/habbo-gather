@@ -1497,62 +1497,43 @@ body {
   border-radius: 4px;
 }
 
-/* Aba "Móveis" x "Piso" no topo do editor de espaço (ver EditPanel em
-   GameRoom.tsx) -- escolhe qual paleta aparece embaixo. */
-.edit-mode-tabs {
+/* Barra de categoria no topo do editor de espaço (ver EDIT_CATEGORY_TABS/
+   EditPanel em GameRoom.tsx) -- um botão-ícone por categoria (poltrona,
+   sofá, mesa, planta, computador, divisória, piso), escolhe qual grade
+   aparece embaixo. Troca a antiga aba de texto "Móveis"/"Piso" (e a
+   sub-aba "Porcelanato"/"Laminado" dentro de Piso, que sumiu -- agora é
+   uma categoria só). flex-wrap porque com 7 ícones pode não caber numa
+   linha só dependendo da largura do painel. */
+.category-icon-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
 }
 
-.edit-mode-tab {
-  flex: 1;
+.category-icon-btn {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #0d0715;
   border: 1px solid #2f2245;
-  border-radius: 6px;
-  color: #f5f0ff;
-  padding: 7px;
-  font-size: 12px;
-  font-weight: 600;
+  border-radius: 8px;
+  color: #cdbdf0;
   cursor: pointer;
+  padding: 0;
 }
 
-.edit-mode-tab:hover {
+.category-icon-btn:hover {
   background: #1c1329;
-}
-
-.edit-mode-tab.selected {
-  background: #7c5cff;
-  border-color: #9376ff;
-}
-
-/* Sub-abas de categoria dentro de "Piso" (Porcelanato/Laminado, ver
-   FLOOR_CATEGORIES em game/floor.ts) -- mesma pegada do .edit-mode-tabs
-   só que menor, já que fica um nível abaixo. */
-.floor-category-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.floor-category-tab {
-  flex: 1;
-  background: #2a1d40;
-  border: 1px solid #3a2a55;
-  border-radius: 6px;
   color: #f5f0ff;
-  padding: 6px;
-  font-size: 12px;
-  cursor: pointer;
 }
 
-.floor-category-tab:hover {
-  background: #3d2a5c;
-}
-
-.floor-category-tab.selected {
+.category-icon-btn.selected {
   background: #7c5cff;
   border-color: #9376ff;
+  color: white;
 }
 
 /* Paleta de piso -- miniaturas da TEXTURA de verdade (ver
