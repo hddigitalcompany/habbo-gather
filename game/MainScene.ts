@@ -327,6 +327,12 @@ const NAMEPLATE_BORDER_ALPHA = 0.9;
 // fixo porque é só uma string curta -- barato de sobra.
 const NAMEPLATE_TEXT_RESOLUTION = 4;
 
+// largura MÁXIMA (px, medida na mesma unidade da fonte -- ver
+// fitNameplateText) do texto do nome -- nome maior que isso é cortado
+// com "…" no final em vez de deixar o card crescer sem limite (pedido
+// do Douglas: "passou do limite, quero '...' no final").
+const NAMEPLATE_MAX_TEXT_WIDTH = 120;
+
 type Activity = "idle" | "sentado";
 
 /** Ferramenta de piso selecionada no editor (ver selectFloorTool) --
@@ -358,38 +364,20 @@ const STEP_DURATION_MS = 180;
 // interna 800x600 == GRID_ORIGIN/GRID_COLS/GRID_ROWS ocupando toda a
 // área visível). MIN_ZOOM_LEVEL é o piso do botão "-" -- pedido do
 // Douglas pra dar mais 3 cliques de zoom out (3 * ZOOM_STEP) além do
-// padrão, então abaixo de 1 mesmo: o Phaser centraliza os bounds da
-// câmera (ver CAMERA_WORLD_W/H/setBounds) dentro da tela nesse caso,
-// sobrando fundo (backgroundColor do config.ts) nas bordas -- é o
-// efeito "mais distante" pedido, não um bug. Exportados pra
-// GameRoom.tsx habilitar/desabilitar os botões "+"/"-" no limite, sem
-// duplicar os números aqui.
+// padrão, então abaixo de 1 mesmo sobra fundo (backgroundColor do
+// config.ts) nas bordas -- é o efeito "mais distante" pedido, não um
+// bug. Exportados pra GameRoom.tsx habilitar/desabilitar os botões
+// "+"/"-" no limite, sem duplicar os números aqui.
 const ZOOM_STEP = 0.25;
 export const DEFAULT_ZOOM_LEVEL = 1;
 export const MIN_ZOOM_LEVEL = DEFAULT_ZOOM_LEVEL - 3 * ZOOM_STEP;
 export const MAX_ZOOM_LEVEL = 2;
 
-// mesma resolução interna do jogo (ver width/height em game/config.ts) --
-// tamanho "base" da sala em coordenadas de mundo, usado pro cálculo de
-// limite de arrastar (ver clampCameraScroll), pra não deixar pan/zoom
-// mostrar área fora da sala LONGE DEMAIS.
-const CAMERA_WORLD_W = 800;
-const CAMERA_WORLD_H = 600;
-
-// limite de arrastar a câmera (clampCameraScroll, chamado depois de
-// TODA mudança de scroll -- arrastar com o mouse, zoom, recentralizar
-// -- em vez do setBounds automático do Phaser, que só permite
-// arrastar quando a área visível, no zoom atual, é MENOR que a sala
-// inteira -- ou seja, nunca no zoom padrão (1), onde a sala já ocupa
-// a tela inteira certinha (pedido do Douglas: "mapa arrastavel em
-// qualquer zoom"). PAN_MARGIN é quanto dá pra arrastar além da borda
-// da sala nos zooms "normais" (perto ou dentro da sala); em zooms bem
-// afastados (área visível já maior que sala+margem, ver
-// MIN_ZOOM_LEVEL) não sobra mais nada pra revelar arrastando, mas
-// ainda soltamos uma folga pequena (PAN_SLACK_ZOOMED_OUT) só pra não
-// travar o arrastar de vez nesse caso também.
-const PAN_MARGIN = 220;
-const PAN_SLACK_ZOOMED_OUT = 60;
+// arrastar a câmera (clampCameraScroll, chamado depois de TODA mudança
+// de scroll -- arrastar com o mouse, zoom, recentralizar) não tem
+// limite nenhum -- já teve (ver histórico do git), mas o Douglas
+// reportou "dois limites nas laterais" (os dois regimes de clamp
+// batendo em zooms diferentes) e pediu pra tirar.
 
 export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -1008,14 +996,20 @@ export default class MainScene extends Phaser.Scene {
     // agora é esse Graphics.
     const nameplateBg = this.add.graphics();
 
+    // texto criado em (0,0) -- a posição REAL acima da cabeça do
+    // boneco é do GRUPO (nameplateGroup, logo abaixo), não do texto em
+    // si, pra dar pra contra-escalar o grupo inteiro no zoom (ver
+    // refreshNameplateScale) sem precisar mexer na posição interna de
+    // cada peça.
     const label = this.add
-      .text(0, AVATAR_FOOT_OFFSET_Y - layerSprites[0].displayHeight - 8, name, {
+      .text(0, 0, name, {
         fontSize: "11px",
         color: "#f1ecff",
         fontFamily: GAME_FONT_FAMILY,
         resolution: NAMEPLATE_TEXT_RESOLUTION,
       })
       .setOrigin(0.5);
+    this.fitNameplateText(label, name);
 
     // bolinha de status: fica à esquerda do nome, o par inteiro
     // (bolinha + espaço + texto) centralizado sobre o boneco -- ver
@@ -1030,6 +1024,18 @@ export default class MainScene extends Phaser.Scene {
 
     const dispW = layerSprites[0].displayWidth;
     const dispH = layerSprites[0].displayHeight;
+
+    // grupo do "cartão" de nome (fundo+bolinha+texto) num container
+    // PRÓPRIO, separado do container do boneco -- é ele (não as peças
+    // individuais) que refreshNameplateScale() contra-escala/reposiciona
+    // no zoom, pra ficar sempre do MESMO tamanho na tela (pedido do
+    // Douglas: "esse card do nome tem que ser fixo"). nameplateBaseY é
+    // a posição calculada pro zoom padrão (DEFAULT_ZOOM_LEVEL, ver
+    // MainScene.ts) -- em qualquer outro zoom Z, a posição de verdade
+    // vira nameplateBaseY / Z (mesma lógica da escala, ver
+    // refreshNameplateScale).
+    const nameplateBaseY = AVATAR_FOOT_OFFSET_Y - dispH - 8;
+    const nameplateGroup = this.add.container(0, nameplateBaseY, [nameplateBg, statusDot, label]);
 
     // destaque ao passar o mouse (ver hitArea/pointerdown mais abaixo --
     // o avatar inteiro já é clicável, isso só acrescenta o feedback
@@ -1047,13 +1053,15 @@ export default class MainScene extends Phaser.Scene {
       ? layerSprites.map((sprite) => sprite.postFX.addGlow(0x7c5cff, 0, 0, false, 0.3, 10))
       : [];
 
-    const container = this.add.container(x, y, [...layerSprites, nameplateBg, statusDot, label]);
+    const container = this.add.container(x, y, [...layerSprites, nameplateGroup]);
     container.setSize(dispW, dispH);
     container.setDepth(avatarDepthForY(y));
     container.setData("layers", layerSprites);
     container.setData("label", label);
     container.setData("statusDot", statusDot);
     container.setData("nameplateBg", nameplateBg);
+    container.setData("nameplateGroup", nameplateGroup);
+    container.setData("nameplateBaseY", nameplateBaseY);
     container.setData("dir", "down" as Direction);
     container.setData("stepToggle", false);
     container.setData("hairSprite", hairSprite);
@@ -1117,7 +1125,66 @@ export default class MainScene extends Phaser.Scene {
       });
     });
 
+    this.refreshNameplateScale();
+
     return container;
+  }
+
+  /**
+   * Corta o nome com "…" no final se ultrapassar NAMEPLATE_MAX_TEXT_WIDTH
+   * -- evita o cartão crescer sem limite pra nome grande (pedido do
+   * Douglas: "passou do limite, quero '...' no final" -- e evita
+   * qualquer sobreposição que um card gigante causava com o resto da
+   * UI). Usa o próprio Text object pra medir (setText já remede a
+   * largura sozinho) -- busca binária pelo maior prefixo que ainda
+   * cabe, pra não ficar testando caractere por caractere à toa.
+   */
+  private fitNameplateText(label: Phaser.GameObjects.Text, fullText: string) {
+    label.setText(fullText);
+    if (label.width <= NAMEPLATE_MAX_TEXT_WIDTH) return;
+    let lo = 0;
+    let hi = fullText.length;
+    let best = "…";
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const candidate = `${fullText.slice(0, mid).trimEnd()}…`;
+      label.setText(candidate);
+      if (label.width <= NAMEPLATE_MAX_TEXT_WIDTH) {
+        best = candidate;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    label.setText(best);
+  }
+
+  /**
+   * Contra-escala (e reposiciona) o GRUPO do cartão de nome (ver
+   * nameplateGroup em createAvatar) de todo boneco -- local e remoto --
+   * pra ele ficar sempre do MESMO tamanho/distância NA TELA, não
+   * importa o zoom da câmera (pedido do Douglas: "esse card do nome
+   * tem que ser fixo, quando dá zoom ele não aparece" -- sem isso, o
+   * texto (11px em espaço de mundo) encolhia junto com o zoom out até
+   * ficar ilegível). nameplateBaseY foi calculado pro zoom padrão
+   * (DEFAULT_ZOOM_LEVEL = 1, ver topo do arquivo) -- dividir a escala E
+   * a posição pelo zoom atual (mesmo fator pros dois) cancela o
+   * encolhimento/aproximação que a câmera aplicaria sozinha. Chamado
+   * toda vez que o zoom muda (ver applyZoom) e uma vez na criação de
+   * cada boneco nesse zoom.
+   */
+  private refreshNameplateScale() {
+    const zoom = this.cameras.main.zoom || 1;
+    const containers = [this.localContainer, ...this.remoteContainers.values()].filter(
+      (c): c is Phaser.GameObjects.Container => Boolean(c)
+    );
+    for (const container of containers) {
+      const group = container.getData("nameplateGroup") as Phaser.GameObjects.Container | undefined;
+      const baseY = container.getData("nameplateBaseY") as number | undefined;
+      if (!group || baseY === undefined) continue;
+      group.setScale(1 / zoom);
+      group.setY(baseY / zoom);
+    }
   }
 
   /**
@@ -1155,7 +1222,7 @@ export default class MainScene extends Phaser.Scene {
     const dot = container.getData("statusDot") as Phaser.GameObjects.Arc | undefined;
     const bg = container.getData("nameplateBg") as Phaser.GameObjects.Graphics | undefined;
     if (!label || !dot || !bg) return;
-    if (label.text !== name) label.setText(name);
+    this.fitNameplateText(label, name);
     dot.setFillStyle(Phaser.Display.Color.HexStringToColor(statusColor).color);
     this.layoutNameplate(label, dot, bg);
   }
@@ -1509,33 +1576,19 @@ export default class MainScene extends Phaser.Scene {
     this.isPanningCamera = false;
   }
 
-  /** Limita um scroll candidato (x,y) pro range de arrastar permitido
-   * NESSE zoom -- ver PAN_MARGIN/PAN_SLACK_ZOOMED_OUT. Chamado depois
-   * de toda mudança de scroll (arrastar/zoom/recentralizar) em vez de
-   * um setBounds automático do Phaser (que só deixa arrastar quando a
-   * área visível é menor que a sala, nunca no zoom padrão). */
+  /**
+   * Antes limitava o quanto dava pra arrastar (ver PAN_MARGIN/
+   * PAN_SLACK_ZOOMED_OUT) com DOIS regimes diferentes dependendo do
+   * zoom (view cabendo ou não dentro da sala+margem) -- o Douglas
+   * reportou isso como "dois limites nas laterais" e pediu pra tirar.
+   * Agora é passagem direta, sem limite nenhum: arrasta livre em
+   * qualquer zoom. Mantido como função (em vez de sumir e trocar as
+   * chamadas por cam.setScroll direto) só pra não precisar mexer em
+   * quem já chama setClampedScroll/clampCameraScroll -- se um dia
+   * quiser algum limite de novo, é só voltar a clampar aqui.
+   */
   private clampCameraScroll(x: number, y: number) {
-    const cam = this.cameras.main;
-    const viewW = cam.width / cam.zoom;
-    const viewH = cam.height / cam.zoom;
-    const clampAxis = (view: number, roomSize: number, pos: number) => {
-      // área visível, nesse zoom, cabe dentro da sala + margem: limite
-      // "de verdade", baseado na borda da sala (dá pra explorar a
-      // margem toda arrastando).
-      if (view <= roomSize + PAN_MARGIN * 2) {
-        return Phaser.Math.Clamp(pos, -PAN_MARGIN, roomSize + PAN_MARGIN - view);
-      }
-      // zoom bem afastado: a área visível já é maior que a sala
-      // inteira (não sobra nada pra revelar arrastando pra valer) --
-      // ainda assim libera uma folga pequena centralizada, só pra não
-      // travar o arrastar de vez nesse zoom.
-      const center = (roomSize - view) / 2;
-      return Phaser.Math.Clamp(pos, center - PAN_SLACK_ZOOMED_OUT, center + PAN_SLACK_ZOOMED_OUT);
-    };
-    return {
-      x: clampAxis(viewW, CAMERA_WORLD_W, x),
-      y: clampAxis(viewH, CAMERA_WORLD_H, y),
-    };
+    return { x, y };
   }
 
   private setClampedScroll(x: number, y: number) {
@@ -1568,6 +1621,10 @@ export default class MainScene extends Phaser.Scene {
     // a borda da margem podia deixar o scroll fora do range válido
     // pro novo zoom.
     this.setClampedScroll(cam.scrollX, cam.scrollY);
+    // cartão de nome tem que ficar do mesmo tamanho na tela em
+    // qualquer zoom (ver refreshNameplateScale) -- recalcula toda vez
+    // que o zoom muda.
+    this.refreshNameplateScale();
     return clamped;
   }
 
