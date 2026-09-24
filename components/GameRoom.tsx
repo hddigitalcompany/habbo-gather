@@ -21,6 +21,7 @@ import {
 } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef } from "@/game/floor";
+import { AREA_TYPES, AreaTileDef, AreaType } from "@/game/areas";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -72,7 +73,11 @@ function statusColorFor(status: string | undefined): string {
 // "id" de conexão (novo a cada reconexão) -- é o que o chat direto/
 // grupo usa pra saber quem é quem entre uma visita e outra (ver
 // comentário grande em server/index.js).
-type RemotePlayer = { id: string; userId: string; x: number; y: number; color: string } & RemoteProfile;
+// seatFurnitureId: móvel em que essa pessoa tá sentada agora, ou null/
+// undefined se tá de pé -- vem do server (ver "seat" no protocolo de
+// server/index.js), guardado igual x/y (ver checkProximity/handlePartyMessage
+// mais abaixo, que repassam pra dentro da cena via scene.setRemoteSeat).
+type RemotePlayer = { id: string; userId: string; x: number; y: number; color: string; seatFurnitureId?: string | null } & RemoteProfile;
 type Toast = { id: string; text: string };
 
 // --- chat de verdade (direta/grupo/histórico/anexos) -- ver comentário
@@ -612,7 +617,7 @@ export default function GameRoom() {
   // computador ainda não têm nenhum FurnitureType/arte cadastrado --
   // aparecem na barra mas com a grade vazia, até subir os arquivos de
   // origem (combinado com o Douglas: estrutura agora, arte depois).
-  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso">("poltrona");
+  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area">("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -621,6 +626,14 @@ export default function GameRoom() {
   // useEffect de autosave logo depois, que confere essa flag antes de
   // mandar qualquer POST.
   const floorLoadedRef = useRef(false);
+
+  // --- área do editor de espaço (aba "Área", ver game/areas.ts) --
+  // MESMO esquema do piso acima (selectedAreaToolId: id do TIPO
+  // selecionado -- "mesa-privada"/"sala" -- ou "erase"/null).
+  const [selectedAreaToolId, setSelectedAreaToolId] = useState<AreaType | "erase" | null>(null);
+  const [draftAreaItems, setDraftAreaItems] = useState<AreaTileDef[]>([]);
+  const [areaSaveStatus, setAreaSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const areaLoadedRef = useRef(false);
 
   // --- controles de câmera do mapa ("estilo Gather" -- zoom +/- e
   // centralizar, ver MapControls logo abaixo) -- só espelha o zoom
@@ -854,21 +867,36 @@ export default function GameRoom() {
       }
     }
 
+    // "Área" (mesa privada/sala, ver game/areas.ts) isola áudio/vídeo: se
+    // EU ou a outra pessoa estiver dentro de uma área, só conectamos se
+    // for a MESMA zona (não importa a distância -- mesmo bem perto, do
+    // lado de fora da mesa, não ouve quem tá dentro dela, e vice-versa).
+    // Se NENHUM dos dois tá numa área, cai na regra normal de distância
+    // (com a "zona morta" de sempre entre CONNECT/DISCONNECT). zoneAtTile
+    // é síncrono/local (todo mundo já tem a mesma área carregada, ver
+    // loadSavedAreas), não precisa de nada pela rede pra isso.
     function checkProximity() {
       const scene = sceneRef.current;
       if (!scene) return;
       const { x: lx, y: ly } = scene.getLocalPosition();
+      const localZone = scene.areaZoneAt(lx, ly);
       const metaUpdate: Record<string, { name: string; distance: number }> = {};
 
       remotePlayersRef.current.forEach((p, id) => {
         const dist = Math.hypot(p.x - lx, p.y - ly);
         metaUpdate[id] = { name: p.name, distance: dist };
 
+        const remoteZone = scene.areaZoneAt(p.x, p.y);
+        const eitherInArea = localZone !== null || remoteZone !== null;
+        const sameZone = localZone !== null && localZone === remoteZone;
+        const shouldConnect = eitherInArea ? sameZone : dist < PROXIMITY_CONNECT;
+        const shouldDisconnect = eitherInArea ? !sameZone : dist > PROXIMITY_DISCONNECT;
+
         const isConnected = connectedPeersRef.current.has(id);
-        if (dist < PROXIMITY_CONNECT && !isConnected) {
+        if (shouldConnect && !isConnected) {
           connectedPeersRef.current.add(id);
           connectToPeer(id);
-        } else if (dist > PROXIMITY_DISCONNECT && isConnected) {
+        } else if (shouldDisconnect && isConnected) {
           connectedPeersRef.current.delete(id);
           closePeer(id);
         }
@@ -889,6 +917,10 @@ export default function GameRoom() {
           if (p.id === data.selfId) continue;
           remotePlayersRef.current.set(p.id, p);
           scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name, statusColorFor(p.status));
+          // já chega sentado (entrou na sala depois de alguém já estar
+          // numa mesa privada, ver "seat" no protocolo) -- sem isso a
+          // pose/posse só apareceria depois do PRÓXIMO "seat" de verdade.
+          if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name);
         }
         setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
 
@@ -913,6 +945,14 @@ export default function GameRoom() {
         remotePlayersRef.current.set(p.id, p);
         setRemoteProfiles((prev) => ({ ...prev, [p.id]: pickRemoteProfile(p) }));
         scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name, statusColorFor(p.status));
+        if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name);
+      } else if (data.type === "seat") {
+        // ver protocolo "seat" em server/index.js -- outra pessoa sentou
+        // (tomou posse de uma mesa privada, se a cadeira ficar dentro de
+        // uma) ou levantou (furnitureId null).
+        const existing = remotePlayersRef.current.get(data.id);
+        if (existing) existing.seatFurnitureId = data.furnitureId;
+        scene?.setRemoteSeat(data.id, data.furnitureId, existing?.name ?? "?");
       } else if (data.type === "profile") {
         const existing = remotePlayersRef.current.get(data.id);
         if (existing) Object.assign(existing, data);
@@ -1174,8 +1214,16 @@ export default function GameRoom() {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
           checkProximity();
         };
+        // senta/levanta (tomar/soltar posse de mesa privada, ver
+        // protocolo "seat" em server/index.js) -- muda bem menos vezes
+        // que a posição, então manda direto, sem passar pelo mesmo
+        // throttle de reportPosition do onLocalMove.
+        scene.onLocalSeatChange = (furnitureId) => {
+          socketRef.current?.send(JSON.stringify({ type: "seat", furnitureId }));
+        };
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
+        scene.onDraftAreaChange = (items) => setDraftAreaItems(items);
         // piso já salvo (ver GET /room/floor em server/index.js) -- busca
         // assim que a cena fica pronta e manda pra dentro dela (ver
         // loadSavedFloor em MainScene.ts). Falha em silêncio (ex: servidor
@@ -1194,7 +1242,25 @@ export default function GameRoom() {
           .finally(() => {
             floorLoadedRef.current = true;
           });
+        // área já salva (ver GET /room/areas em server/index.js) -- mesmo
+        // timing/tratamento de falha do piso acima.
+        fetch(`${REALTIME_HTTP_BASE}/room/areas`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data?.items) sceneRef.current?.loadSavedAreas(data.items);
+          })
+          .catch(() => {})
+          .finally(() => {
+            areaLoadedRef.current = true;
+          });
         scene.onAvatarClick = (info) => {
+          setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
+          setEditingCharacter(false);
+        };
+        // clique no nome (hover) do dono de uma mesa privada -- mesmo
+        // destino do onAvatarClick acima, disparado pela MESA em vez do
+        // boneco (ver onAreaOwnerClick em MainScene.ts).
+        scene.onAreaOwnerClick = (info) => {
           setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
           setEditingCharacter(false);
         };
@@ -1703,6 +1769,7 @@ export default function GameRoom() {
     setEditMode(next);
     setSelectedCatalogIndex(null);
     setSelectedFloorToolId(null);
+    setSelectedAreaToolId(null);
     setActiveCategory("poltrona");
     sceneRef.current?.setEditMode(next);
   }
@@ -1761,6 +1828,25 @@ export default function GameRoom() {
     sceneRef.current?.clearDraftFloor();
   }
 
+  // mesmo padrão "clica de novo desarma" das duas funções de piso acima.
+  function selectAreaPaint(type: AreaType) {
+    const next = selectedAreaToolId === type ? null : type;
+    setSelectedAreaToolId(next);
+    setSelectedCatalogIndex(null);
+    sceneRef.current?.selectAreaTool(next === null ? null : { kind: "paint", type });
+  }
+
+  function selectAreaEraser() {
+    const next = selectedAreaToolId === "erase" ? null : "erase";
+    setSelectedAreaToolId(next);
+    setSelectedCatalogIndex(null);
+    sceneRef.current?.selectAreaTool(next === null ? null : { kind: "erase" });
+  }
+
+  function clearDraftAreaItems() {
+    sceneRef.current?.clearDraftArea();
+  }
+
   // autosave do piso: qualquer mudança em draftFloorItems (pintar, apagar,
   // "Limpar tudo", ou o carregamento inicial acima) manda o piso INTEIRO
   // pro servidor (POST /room/floor, ver server/index.js) depois de uma
@@ -1785,6 +1871,27 @@ export default function GameRoom() {
     }, 600);
     return () => clearTimeout(timer);
   }, [draftFloorItems]);
+
+  // autosave da área -- MESMA lógica/timing do autosave do piso acima,
+  // só troca o endpoint (ver POST /room/areas em server/index.js) e a
+  // flag de "já carregou" (areaLoadedRef).
+  useEffect(() => {
+    if (!areaLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setAreaSaveStatus("saving");
+      fetch(`${REALTIME_HTTP_BASE}/room/areas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: draftAreaItems }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setAreaSaveStatus("saved");
+        })
+        .catch(() => setAreaSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftAreaItems]);
 
   // reflete nome/status do MEU card ao vivo no boneco dentro do jogo
   // (nome + bolinha de status, ver setNameplate/setLocalProfile na
@@ -2296,6 +2403,12 @@ export default function GameRoom() {
           draftFloorItems={draftFloorItems}
           onClearAllFloor={clearDraftFloorItems}
           floorSaveStatus={floorSaveStatus}
+          selectedAreaToolId={selectedAreaToolId}
+          onSelectAreaPaint={selectAreaPaint}
+          onSelectAreaEraser={selectAreaEraser}
+          draftAreaItems={draftAreaItems}
+          onClearAllArea={clearDraftAreaItems}
+          areaSaveStatus={areaSaveStatus}
         />
       )}
     </div>
@@ -2312,7 +2425,7 @@ export default function GameRoom() {
 // categoria do Gather; só o item selecionado se destaca (brilho/anel,
 // ver .category-icon-btn.selected no CSS).
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso";
+  id: FurnitureCategoryId | "piso" | "area";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -2323,6 +2436,7 @@ const EDIT_CATEGORY_TABS: {
   { id: "computador", label: "Computador", icon: ComputerIcon },
   { id: "divisoria", label: "Divisória", icon: DividerIcon },
   { id: "piso", label: "Piso", icon: FloorIcon },
+  { id: "area", label: "Área", icon: AreaIcon },
 ];
 
 function EditPanel({
@@ -2343,9 +2457,15 @@ function EditPanel({
   draftFloorItems,
   onClearAllFloor,
   floorSaveStatus,
+  selectedAreaToolId,
+  onSelectAreaPaint,
+  onSelectAreaEraser,
+  draftAreaItems,
+  onClearAllArea,
+  areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso";
-  onChangeCategory: (category: FurnitureCategoryId | "piso") => void;
+  activeCategory: FurnitureCategoryId | "piso" | "area";
+  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   draftItems: FurnitureDef[];
@@ -2361,6 +2481,12 @@ function EditPanel({
   draftFloorItems: FloorTileDef[];
   onClearAllFloor: () => void;
   floorSaveStatus: "idle" | "saving" | "saved" | "error";
+  selectedAreaToolId: AreaType | "erase" | null;
+  onSelectAreaPaint: (type: AreaType) => void;
+  onSelectAreaEraser: () => void;
+  draftAreaItems: AreaTileDef[];
+  onClearAllArea: () => void;
+  areaSaveStatus: "idle" | "saving" | "saved" | "error";
 }) {
   const activeCategoryLabel = EDIT_CATEGORY_TABS.find((c) => c.id === activeCategory)?.label ?? "";
 
@@ -2370,7 +2496,7 @@ function EditPanel({
   // FURNITURE_ROTATE_ORDER que existir); depois disso o preview embaixo
   // deixa girar pra trocar de direção sem precisar voltar na grade.
   const typesInCategory: FurnitureType[] =
-    activeCategory === "piso"
+    activeCategory === "piso" || activeCategory === "area"
       ? []
       : Array.from(
           new Set(FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory).map((e) => e.type))
@@ -2452,6 +2578,52 @@ function EditPanel({
           {draftFloorItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
           {draftFloorItems.length > 0 && (
             <button className="clear-btn" onClick={onClearAllFloor}>
+              Limpar tudo
+            </button>
+          )}
+        </>
+      ) : activeCategory === "area" ? (
+        <>
+          <p className="edit-hint">
+            "Mesa privada": ponha uma cadeira dentro e quem sentar toma posse
+            do espaço (áudio/vídeo isolado, nome aparece ao passar o mouse).
+            "Sala": mesma isolação de áudio/vídeo, sem dono. Pinte/arraste
+            igual ao piso -- tiles vizinhos do mesmo tipo viram uma zona só.
+            Salva sozinho.
+          </p>
+
+          <div className="floor-palette">
+            <button
+              className={selectedAreaToolId === "erase" ? "floor-eraser-btn selected" : "floor-eraser-btn"}
+              onClick={onSelectAreaEraser}
+              title="Apagar área pintada"
+            >
+              ✕ Apagar
+            </button>
+            {AREA_TYPES.map((entry) => (
+              <button
+                key={entry.id}
+                className={selectedAreaToolId === entry.id ? "area-swatch selected" : "area-swatch"}
+                style={{ backgroundColor: `#${entry.color.toString(16).padStart(6, "0")}` }}
+                onClick={() => onSelectAreaPaint(entry.id)}
+                title={entry.label}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+
+          <h3>
+            Área pintada ({draftAreaItems.length})
+            <span className={`floor-save-status floor-save-status-${areaSaveStatus}`}>
+              {areaSaveStatus === "saving" && "Salvando…"}
+              {areaSaveStatus === "saved" && "Salvo ✓"}
+              {areaSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
+          {draftAreaItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
+          {draftAreaItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAllArea}>
               Limpar tudo
             </button>
           )}
@@ -2658,6 +2830,28 @@ function FloorIcon() {
       <rect x="13.3" y="2.5" width="8.2" height="8.2" rx="1.6" />
       <rect x="2.5" y="13.3" width="8.2" height="8.2" rx="1.6" />
       <rect x="13.3" y="13.3" width="8.2" height="8.2" rx="1.6" />
+    </svg>
+  );
+}
+
+// ícone da aba "Área" (ver EDIT_CATEGORY_TABS) -- um quadrado tracejado
+// (zona demarcada, não um objeto físico como os outros ícones) com um
+// "alvo"/ponto no meio, pra diferenciar visualmente de "Piso" (grade de
+// quadrados cheios).
+function AreaIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+      <rect
+        x="3"
+        y="3"
+        width="18"
+        height="18"
+        rx="3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeDasharray="4 3"
+      />
+      <circle cx="12" cy="12" r="3" fill="currentColor" />
     </svg>
   );
 }

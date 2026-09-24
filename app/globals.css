@@ -1570,6 +1570,33 @@ body {
   border-color: #7c5cff;
 }
 
+/* Paleta de área ("Mesa privada"/"Sala", ver game/areas.ts) -- mesmo
+   tamanho/formato do .floor-swatch, só que sem textura (área não tem
+   "modelo", só uma cor por tipo, ver AREA_TYPES) -- por isso mostra o
+   nome do tipo escrito dentro em vez de uma miniatura de imagem. */
+.area-swatch {
+  width: 76px;
+  height: 48px;
+  border-radius: 8px;
+  border: 2px solid #2f2245;
+  cursor: pointer;
+  padding: 4px;
+  color: #16101f;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.area-swatch:hover {
+  border-color: #3a2a55;
+}
+
+.area-swatch.selected {
+  border-color: #7c5cff;
+  box-shadow: 0 0 0 2px #7c5cff inset;
+}
+
 /* Ferramenta de apagar piso -- separada das miniaturas (não é uma
    textura), tom avermelhado pra ficar claro que é destrutiva, igual o
    .clear-btn. */

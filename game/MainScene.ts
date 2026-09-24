@@ -27,6 +27,16 @@ import {
   resolveOutfitSkinId,
 } from "./customization";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
+import {
+  AreaType,
+  AreaTileDef,
+  AreaZone,
+  areaTypeMeta,
+  areaWorldPos,
+  computeAreaZones,
+  zoneAtTile,
+  zoneBounds,
+} from "./areas";
 
 /**
  * Cena principal: renderiza a sala, o avatar local (controlado por
@@ -220,6 +230,20 @@ const DEPTH_FLAT_FURNITURE = -1_000_000;
 // é o próprio chão, tudo o mais (móvel flat incluso) fica em cima dele.
 const DEPTH_FLOOR = -2_000_000;
 
+// tinta de área (ver game/areas.ts) fica ENTRE o piso e a mobília "flat" --
+// é um "verniz" por cima do chão marcando a zona (mesa privada/sala),
+// então precisa aparecer ACIMA do piso pintado, mas ainda atrás de
+// qualquer móvel (mesmo um tapete flat) pra não competir visualmente com
+// a mobília de verdade que fica dentro da área.
+const DEPTH_AREA = -1_500_000;
+
+// hitbox de hover do nome do dono (ver updateAreaHoverLabels) fica logo
+// acima da tinta, e o próprio label (texto) mais acima ainda -- só
+// precisam ficar atrás do boneco/móvel (que usam profundidade dinâmica
+// bem maior, perto de 0+), nunca vão colidir de verdade.
+const DEPTH_AREA_HOVER = DEPTH_AREA + 1;
+const DEPTH_AREA_LABEL = DEPTH_AREA + 2;
+
 // a arte de fundo da sala (textura "room", ver create()) precisa ficar
 // AINDA MAIS atrás que o piso pintado -- sem isso ela ficava com
 // profundidade padrão (0), ou seja, na FRENTE do piso (DEPTH_FLOOR é
@@ -268,6 +292,13 @@ type Activity = "idle" | "sentado";
  * padrão da sala), null = nenhuma ferramenta armada (clique não faz
  * nada nos tiles). */
 type FloorTool = { kind: "paint"; entry: FloorCatalogEntry } | { kind: "erase" } | null;
+
+/** Ferramenta de área selecionada no editor (ver selectAreaTool) -- MESMA
+ * ideia da FloorTool acima (paint pinta o tipo escolhido, erase apaga,
+ * null = nada armado), só que "paint" leva um AreaType em vez de um
+ * FloorCatalogEntry (área não tem "modelo", só 2 tipos fixos, ver
+ * AREA_TYPES em game/areas.ts). */
+type AreaTool = { kind: "paint"; type: AreaType } | { kind: "erase" } | null;
 
 // depois de levantar (por movimento), ignora o auto-sentar por um
 // instante -- senão sentaria de novo assim que parasse ainda em cima
@@ -380,6 +411,53 @@ export default class MainScene extends Phaser.Scene {
 
   /** Definido de fora (GameRoom.tsx) -- chamado ao clicar em QUALQUER avatar (local ou remoto), pra abrir o card de perfil. */
   onAvatarClick?: (info: { playerId: string; isLocal: boolean; name: string; color: string }) => void;
+
+  // --- área do editor de espaço (aba "Área", ver selectAreaTool) --
+  // MESMO esquema do piso (draftFloor acima): draftArea/draftAreaSprites
+  // guardam TODA a área da sala (salva no servidor + pintada agora nesta
+  // sessão, tudo no mesmo Map, chave "col,row" -- um tipo de área por
+  // tile, pintar de novo em cima troca o tipo em vez de empilhar).
+  private selectedAreaTool: AreaTool = null;
+  private draftArea: Map<string, AreaTileDef> = new Map();
+  private draftAreaSprites: Map<string, Phaser.GameObjects.Rectangle> = new Map();
+  private isPaintingArea = false;
+  private lastPaintedAreaKey: string | null = null;
+
+  /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftFloorChange, mas pra área. */
+  onDraftAreaChange?: (items: AreaTileDef[]) => void;
+
+  // zonas calculadas a partir de draftArea (grupos de tiles vizinhos do
+  // MESMO tipo, ver computeAreaZones em game/areas.ts) -- recalculadas
+  // toda vez que a área, a mobília ou quem tá sentado onde muda (ver
+  // refreshAreaZones). Usadas pra: desenhar o contorno de cada zona,
+  // achar o dono de uma mesa privada (refreshAreaOwnership) e responder
+  // "esse tile tá dentro de qual área?" (areaZoneAt, chamado de fora
+  // pelo checkProximity em GameRoom.tsx pra isolar áudio/vídeo).
+  private areaZones: AreaZone[] = [];
+  private areaZoneBorderGfx: Phaser.GameObjects.Graphics[] = [];
+
+  // dono atual de cada zona "mesa-privada" (zoneId -> quem tá sentado
+  // numa cadeira dentro dela) -- só mesas privadas entram aqui, "sala"
+  // nunca tem dono. playerId "local" identifica o PRÓPRIO jogador (ver
+  // onAreaOwnerClick/isLocal).
+  private areaOwnerByZoneId: Map<string, { playerId: string; name: string }> = new Map();
+
+  // móvel (id) + nome de cada jogador REMOTO sentado agora, alimentado
+  // de fora pelas mensagens "seat" recebidas (ver setRemoteSeat, chamado
+  // pelo GameRoom.tsx) -- o LOCAL usa this.seatedAt direto, nunca passa
+  // por aqui.
+  private remoteSeat: Map<string, { furnitureId: string | null; name: string }> = new Map();
+
+  // hitbox de hover (mostra/esconde o nome) + o próprio texto do nome,
+  // um par por zona "mesa-privada" -- ver updateAreaHoverLabels.
+  private areaHoverZones: Map<string, Phaser.GameObjects.Zone> = new Map();
+  private areaNameLabels: Map<string, Phaser.GameObjects.Text> = new Map();
+
+  /** Definido de fora (GameRoom.tsx) -- chamado toda vez que o jogador LOCAL senta/levanta, pra mandar "seat" pro servidor (ver protocolo em server/index.js). */
+  onLocalSeatChange?: (furnitureId: string | null) => void;
+
+  /** Definido de fora (GameRoom.tsx) -- chamado ao clicar no nome (hover) do dono de uma mesa privada, pra abrir o card de perfil dele -- mesmo destino do onAvatarClick acima, só que disparado pela MESA, não pelo boneco. */
+  onAreaOwnerClick?: (info: { playerId: string; isLocal: boolean }) => void;
 
   constructor() {
     super("main");
@@ -572,10 +650,12 @@ export default class MainScene extends Phaser.Scene {
     this.input.on("pointerup", () => {
       this.stopCameraPan();
       this.stopFloorPaint();
+      this.stopAreaPaint();
     });
     this.input.on("pointerupoutside", () => {
       this.stopCameraPan();
       this.stopFloorPaint();
+      this.stopAreaPaint();
     });
   }
 
@@ -1041,6 +1121,11 @@ export default class MainScene extends Phaser.Scene {
     this.sitCooldownUntil = this.time.now + STAND_COOLDOWN_MS;
     this.localContainer.setDepth(avatarDepthForY(this.localContainer.y));
     this.stopWalk(this.localContainer);
+    // "solta" a posse de mesa privada, se a cadeira em que tava sentado
+    // ficava dentro de uma (ver refreshAreaOwnership) -- avisa o servidor
+    // (ver protocolo "seat" em server/index.js) e já recalcula local.
+    this.onLocalSeatChange?.(null);
+    this.refreshAreaZones();
   }
 
   /** Senta automaticamente no móvel passado (chamado ao PARAR no tile dele). */
@@ -1068,6 +1153,12 @@ export default class MainScene extends Phaser.Scene {
         ? furnitureDepthForRow(furniture.row) - 1
         : avatarDepthForY(this.localContainer.y)
     );
+    // sentar numa cadeira dentro de uma zona "mesa-privada" TOMA POSSE
+    // dela (ver refreshAreaOwnership) -- avisa o servidor (protocolo
+    // "seat") e já recalcula local, pra própria pessoa ver o nome/o
+    // dono mudar na hora, sem esperar o round-trip de rede.
+    this.onLocalSeatChange?.(furniture.id);
+    this.refreshAreaZones();
   }
 
   /**
@@ -1145,6 +1236,11 @@ export default class MainScene extends Phaser.Scene {
   private stopFloorPaint() {
     this.isPaintingFloor = false;
     this.lastPaintedFloorKey = null;
+  }
+
+  private stopAreaPaint() {
+    this.isPaintingArea = false;
+    this.lastPaintedAreaKey = null;
   }
 
   /** Aplica um novo zoom mantendo o mesmo PONTO CENTRAL da câmera --
@@ -1303,8 +1399,11 @@ export default class MainScene extends Phaser.Scene {
         ease: "Linear",
         // mesma profundidade dinâmica do boneco local (ver update()) --
         // jogador remoto também passa por trás/na frente dos móveis
-        // conforme a fileira. Remoto ainda não sincroniza "sentado" pela
-        // rede, então sempre usa a regra geral aqui.
+        // conforme a fileira. Isso é só pro MOVIMENTO -- sentado, ele já
+        // não manda mais "move" nenhum (fica parado), então esse tween
+        // nem roda mais; a pose/profundidade especial de "sentado" (ver
+        // comentário em sitAt) é ajustada à parte, por setRemoteSeat, ao
+        // receber "seat" pela rede.
         onUpdate: () => target.setDepth(avatarDepthForY(target.y)),
         onComplete: () => this.stopWalk(target),
       });
@@ -1317,6 +1416,10 @@ export default class MainScene extends Phaser.Scene {
       container.destroy();
       this.remoteContainers.delete(id);
     }
+    // se ele tava sentado (dono de alguma mesa privada), some o nome
+    // dele junto -- senão o dono continuaria aparecendo pra sempre numa
+    // mesa depois que a pessoa já saiu da sala.
+    if (this.remoteSeat.delete(id)) this.refreshAreaZones();
   }
 
   getLocalPosition() {
@@ -1333,14 +1436,22 @@ export default class MainScene extends Phaser.Scene {
     this.editMode = active;
     this.selectedCatalogEntry = null;
     this.selectedFloorTool = null;
+    this.selectedAreaTool = null;
     this.gridGraphics?.setVisible(active);
     if (!active) this.hoverGraphics?.setVisible(false);
+    // a tinta/contorno de área fica mais forte durante a edição (pra
+    // pintar com precisão) e mais discreta no uso normal (só um lembrete
+    // visual de onde a zona está) -- ver refreshAreaTileAlpha/
+    // redrawAreaZoneBorders.
+    this.refreshAreaTileAlpha();
+    this.redrawAreaZoneBorders();
   }
 
-  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma a ferramenta de piso (ver selectFloorTool) -- só uma ferramenta ativa por vez. */
+  /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma as ferramentas de piso/área (ver selectFloorTool/selectAreaTool) -- só uma ferramenta ativa por vez. */
   selectCatalogEntry(entry: FurnitureCatalogEntry | null) {
     this.selectedCatalogEntry = entry;
     this.selectedFloorTool = null;
+    this.selectedAreaTool = null;
   }
 
   getDraftFurnitureList(): FurnitureDef[] {
@@ -1361,10 +1472,11 @@ export default class MainScene extends Phaser.Scene {
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
-  /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma o item de móvel selecionado (ver selectCatalogEntry) -- só uma ferramenta ativa por vez. */
+  /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma o item de móvel/a ferramenta de área (ver selectCatalogEntry/selectAreaTool) -- só uma ferramenta ativa por vez. */
   selectFloorTool(tool: FloorTool) {
     this.selectedFloorTool = tool;
     this.selectedCatalogEntry = null;
+    this.selectedAreaTool = null;
   }
 
   getDraftFloorList(): FloorTileDef[] {
@@ -1376,6 +1488,94 @@ export default class MainScene extends Phaser.Scene {
     this.draftFloorSprites.clear();
     this.draftFloor.clear();
     this.onDraftFloorChange?.(this.getDraftFloorList());
+  }
+
+  /** Escolhe a ferramenta de área ativa -- mesma ideia da selectFloorTool acima, {kind:"paint", type} pinta "mesa-privada"/"sala", {kind:"erase"} apaga. Desarma móvel/piso (só uma ferramenta ativa por vez). */
+  selectAreaTool(tool: AreaTool) {
+    this.selectedAreaTool = tool;
+    this.selectedCatalogEntry = null;
+    this.selectedFloorTool = null;
+  }
+
+  getDraftAreaList(): AreaTileDef[] {
+    return Array.from(this.draftArea.values());
+  }
+
+  clearDraftArea() {
+    for (const sprite of this.draftAreaSprites.values()) sprite.destroy();
+    this.draftAreaSprites.clear();
+    this.draftArea.clear();
+    this.refreshAreaZones();
+    this.onDraftAreaChange?.(this.getDraftAreaList());
+  }
+
+  /**
+   * Carrega a área já salva no servidor (ver GET /room/areas em
+   * server/index.js) -- mesma ideia/timing do loadSavedFloor (chamado
+   * pelo React assim que a cena fica pronta E a busca responder).
+   */
+  loadSavedAreas(items: AreaTileDef[]) {
+    for (const a of items) {
+      const key = `${a.col},${a.row}`;
+      if (this.draftArea.has(key)) continue; // já carregado (ex: chamado 2x) -- não duplica sprite
+      const rect = this.addAreaTileRect(a);
+      this.draftArea.set(key, a);
+      this.draftAreaSprites.set(key, rect);
+    }
+    this.refreshAreaZones();
+    this.onDraftAreaChange?.(this.getDraftAreaList());
+  }
+
+  /**
+   * Consulta pura: em qual zona de área (se alguma) a posição em MUNDO
+   * (x, y) cai -- devolve o id da zona ou null. Usado de fora
+   * (checkProximity em GameRoom.tsx) tanto pra posição local quanto pra
+   * cada jogador remoto, pra decidir isolamento de áudio/vídeo: dois
+   * jogadores só se conectam por proximidade normal se NENHUM dos dois
+   * estiver numa área; se algum estiver, só conectam se for a MESMA
+   * zona.
+   */
+  areaZoneAt(x: number, y: number): string | null {
+    const { col, row } = worldToTile(x, y);
+    const zone = zoneAtTile(this.areaZones, col, row);
+    return zone?.id ?? null;
+  }
+
+  /**
+   * Atualiza o que o jogador REMOTO `id` tá sentado agora (ver "seat" no
+   * protocolo de server/index.js) -- chamado pelo GameRoom.tsx a cada
+   * mensagem "seat" recebida (própria ou já presente no "init"/"join").
+   * `name` vem de fora (remotePlayersRef em GameRoom.tsx) porque aqui
+   * dentro não existe um jeito direto de ler o nome de um container
+   * remoto sem duplicar esse estado.
+   *
+   * Além de guardar o estado (usado por refreshAreaOwnership), também
+   * ajusta a POSE do boneco remoto pra pose sentada do móvel (a posição
+   * em si já chega certa pelo "move" de sempre, ver comentário no
+   * protocolo -- só a pose/direção que não sincronizava antes, ver
+   * comentário em upsertRemotePlayer).
+   */
+  setRemoteSeat(id: string, furnitureId: string | null, name: string) {
+    this.remoteSeat.set(id, { furnitureId, name });
+    if (furnitureId) {
+      const furniture = this.furnitureById(furnitureId);
+      const container = this.remoteContainers.get(id);
+      if (furniture && container) {
+        container.setData("dir", furniture.facing);
+        this.setPoseFrame(container, SENTADO_FRAMES[furniture.facing]);
+        container.setDepth(
+          furniture.facing === "up"
+            ? furnitureDepthForRow(furniture.row) - 1
+            : avatarDepthForY(container.y)
+        );
+      }
+    }
+    this.refreshAreaZones();
+  }
+
+  /** Item de mobília (fixo OU rascunho) com esse id, se houver -- usado só pra achar em qual tile uma cadeira ocupada está (ver refreshAreaOwnership/setRemoteSeat). */
+  private furnitureById(id: string): FurnitureDef | undefined {
+    return ROOM_FURNITURE.find((f) => f.id === id) ?? this.draftFurniture.get(id);
   }
 
   /**
@@ -1446,6 +1646,235 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Cria o retângulo de tinta de UM tile de área -- sem textura própria
+   * (diferente do piso/mobília), é só uma cor chapada semi-transparente
+   * (ver AREA_TYPES em game/areas.ts). Alpha depende do modo de edição
+   * (mais forte editando, mais discreto no uso normal -- ver
+   * refreshAreaTileAlpha).
+   */
+  private addAreaTileRect(a: AreaTileDef): Phaser.GameObjects.Rectangle {
+    const pos = areaWorldPos(a);
+    const meta = areaTypeMeta(a.type);
+    return this.add
+      .rectangle(pos.x, pos.y, TILE, TILE, meta.color, this.editMode ? 0.35 : 0.16)
+      .setDepth(DEPTH_AREA);
+  }
+
+  /** Reaplica o alpha certo (editando vs. uso normal) em toda tinta de área já desenhada -- chamado ao ligar/desligar o modo de edição (ver setEditMode). */
+  private refreshAreaTileAlpha() {
+    const alpha = this.editMode ? 0.35 : 0.16;
+    for (const rect of this.draftAreaSprites.values()) rect.setAlpha(alpha);
+  }
+
+  /**
+   * Pinta (ou apaga) o tile col/row com a ferramenta de área selecionada --
+   * mesma mecânica exata do paintFloorAt (clique único ou repetido
+   * durante um arrasto, ver handleEditPointerMove/handleEditPointerDown).
+   * Sem ferramenta selecionada, não faz nada.
+   */
+  private paintAreaAt(col: number, row: number) {
+    const tool = this.selectedAreaTool;
+    if (!tool) return;
+    const key = `${col},${row}`;
+
+    if (tool.kind === "erase") {
+      const existing = this.draftArea.get(key);
+      if (!existing) return;
+      this.draftAreaSprites.get(key)?.destroy();
+      this.draftAreaSprites.delete(key);
+      this.draftArea.delete(key);
+      this.refreshAreaZones();
+      this.onDraftAreaChange?.(this.getDraftAreaList());
+      return;
+    }
+
+    const existing = this.draftArea.get(key);
+    if (existing && existing.type === tool.type) return; // já pintado com o mesmo tipo, nada a fazer
+
+    this.draftAreaSprites.get(key)?.destroy();
+    const def: AreaTileDef = { col, row, type: tool.type };
+    const rect = this.addAreaTileRect(def);
+    this.draftArea.set(key, def);
+    this.draftAreaSprites.set(key, rect);
+    this.refreshAreaZones();
+    this.onDraftAreaChange?.(this.getDraftAreaList());
+  }
+
+  /** Pinta (via paintAreaAt) cada tile ao longo da linha reta entre o último tile pintado e o atual -- mesmo Bresenham do paintFloorLine, pra não deixar buraco num arrasto rápido. */
+  private paintAreaLine(fromCol: number, fromRow: number, toCol: number, toRow: number) {
+    let x0 = fromCol;
+    let y0 = fromRow;
+    const dx = Math.abs(toCol - x0);
+    const dy = -Math.abs(toRow - y0);
+    const sx = x0 < toCol ? 1 : -1;
+    const sy = y0 < toRow ? 1 : -1;
+    let err = dx + dy;
+    for (let i = 0; i < 200; i++) {
+      this.paintAreaAt(x0, y0);
+      if (x0 === toCol && y0 === toRow) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+  }
+
+  /**
+   * Recalcula TUDO que depende da área pintada: as zonas em si
+   * (computeAreaZones), o contorno de cada zona, quem é dono de cada
+   * mesa privada, e o hover/nome de cada uma -- chamado toda vez que a
+   * área muda (pintar/apagar/carregar) E toda vez que "quem tá sentado
+   * onde" muda (sitAt/standUp locais, setRemoteSeat remoto), já que os
+   * dois afetam quem é "dono". Ponto único de recálculo em vez de cada
+   * chamador ter que lembrar de atualizar cada coisa na ordem certa.
+   */
+  private refreshAreaZones() {
+    this.areaZones = computeAreaZones(this.getDraftAreaList());
+    this.redrawAreaZoneBorders();
+    this.refreshAreaOwnership();
+    this.updateAreaHoverLabels();
+  }
+
+  /** Desenha (do zero) o contorno de cada zona -- um retângulo por zona, do canto superior-esquerdo ao inferior-direito dela (ver zoneBounds em game/areas.ts; numa zona não-retangular isso pode incluir algum tile de fora, simplificação aceitável pro uso esperado). Mais forte durante a edição, mais discreto no uso normal. */
+  private redrawAreaZoneBorders() {
+    for (const g of this.areaZoneBorderGfx) g.destroy();
+    this.areaZoneBorderGfx = [];
+    for (const zone of this.areaZones) {
+      const meta = areaTypeMeta(zone.type);
+      const { minCol, maxCol, minRow, maxRow } = zoneBounds(zone);
+      const topLeft = tileToWorld(minCol, minRow);
+      const bottomRight = tileToWorld(maxCol, maxRow);
+      const g = this.add.graphics().setDepth(DEPTH_AREA);
+      g.lineStyle(2, meta.color, this.editMode ? 0.85 : 0.35);
+      g.strokeRect(
+        topLeft.x - TILE / 2,
+        topLeft.y - TILE / 2,
+        bottomRight.x - topLeft.x + TILE,
+        bottomRight.y - topLeft.y + TILE
+      );
+      this.areaZoneBorderGfx.push(g);
+    }
+  }
+
+  /**
+   * Recalcula quem é "dono" de cada zona "mesa-privada" agora: o dono é
+   * quem estiver SENTADO numa cadeira (móvel) cujo tile caia dentro da
+   * zona -- não é só "estar em cima do tile", é estar mesmo sentado (ver
+   * comentário grande em game/areas.ts). O jogador LOCAL (this.seatedAt)
+   * tem prioridade sobre um remoto que porventura conste sentado na
+   * mesma zona (não deveria acontecer com 1 cadeira por mesa, é só uma
+   * ordem de desempate defensiva).
+   */
+  private refreshAreaOwnership() {
+    this.areaOwnerByZoneId.clear();
+
+    if (this.seatedAt) {
+      const zone = zoneAtTile(this.areaZones, this.seatedAt.col, this.seatedAt.row);
+      if (zone && zone.type === "mesa-privada") {
+        this.areaOwnerByZoneId.set(zone.id, { playerId: "local", name: this.localName });
+      }
+    }
+
+    for (const [playerId, seat] of this.remoteSeat.entries()) {
+      if (!seat.furnitureId) continue;
+      const furniture = this.furnitureById(seat.furnitureId);
+      if (!furniture) continue;
+      const zone = zoneAtTile(this.areaZones, furniture.col, furniture.row);
+      if (!zone || zone.type !== "mesa-privada") continue;
+      if (this.areaOwnerByZoneId.has(zone.id)) continue;
+      this.areaOwnerByZoneId.set(zone.id, { playerId, name: seat.name });
+    }
+  }
+
+  /**
+   * Cria/atualiza a hitbox de hover + o texto do nome de cada zona
+   * "mesa-privada" -- o texto só FICA VISÍVEL ao passar o mouse em cima
+   * (ver setAreaLabelVisible), e clicar nele (só quando tem dono e fora
+   * do modo de edição) abre o card de perfil do dono (ver
+   * onAreaOwnerClick). Zonas que sumiram (apagadas/mudaram de forma) têm
+   * sua hitbox/label destruídos.
+   */
+  private updateAreaHoverLabels() {
+    const activeZoneIds = new Set(this.areaZones.filter((z) => z.type === "mesa-privada").map((z) => z.id));
+
+    for (const [zoneId, hitZone] of this.areaHoverZones.entries()) {
+      if (activeZoneIds.has(zoneId)) continue;
+      hitZone.destroy();
+      this.areaHoverZones.delete(zoneId);
+      this.areaNameLabels.get(zoneId)?.destroy();
+      this.areaNameLabels.delete(zoneId);
+    }
+
+    for (const zone of this.areaZones) {
+      if (zone.type !== "mesa-privada") continue;
+      const { minCol, maxCol, minRow, maxRow } = zoneBounds(zone);
+      const topLeft = tileToWorld(minCol, minRow);
+      const bottomRight = tileToWorld(maxCol, maxRow);
+      const centerX = (topLeft.x + bottomRight.x) / 2;
+      const centerY = (topLeft.y + bottomRight.y) / 2;
+      const width = bottomRight.x - topLeft.x + TILE;
+      const height = bottomRight.y - topLeft.y + TILE;
+      const labelX = centerX;
+      const labelY = topLeft.y - TILE / 2 - 4;
+
+      let hitZone = this.areaHoverZones.get(zone.id);
+      if (!hitZone) {
+        hitZone = this.add
+          .zone(centerX, centerY, width, height)
+          .setDepth(DEPTH_AREA_HOVER)
+          .setInteractive({ cursor: "pointer" });
+        const zoneId = zone.id;
+        hitZone.on("pointerover", () => this.setAreaLabelVisible(zoneId, true));
+        hitZone.on("pointerout", () => this.setAreaLabelVisible(zoneId, false));
+        hitZone.on("pointerdown", () => {
+          // igual ao clique de avatar: nada durante a edição, nem com o
+          // card de perfil já aberto por cima (ver avatarClicksLocked).
+          if (this.editMode || this.avatarClicksLocked) return;
+          const owner = this.areaOwnerByZoneId.get(zoneId);
+          if (!owner) return;
+          this.onAreaOwnerClick?.({ playerId: owner.playerId, isLocal: owner.playerId === "local" });
+        });
+        this.areaHoverZones.set(zone.id, hitZone);
+      } else {
+        hitZone.setPosition(centerX, centerY);
+        hitZone.setSize(width, height);
+      }
+
+      const owner = this.areaOwnerByZoneId.get(zone.id);
+      let label = this.areaNameLabels.get(zone.id);
+      if (!label) {
+        label = this.add
+          .text(labelX, labelY, owner?.name ?? "", {
+            fontFamily: "sans-serif",
+            fontSize: "13px",
+            color: "#ffffff",
+            backgroundColor: "#00000099",
+            padding: { x: 6, y: 2 },
+          })
+          .setOrigin(0.5, 1)
+          .setDepth(DEPTH_AREA_LABEL)
+          .setVisible(false);
+        this.areaNameLabels.set(zone.id, label);
+      } else {
+        label.setPosition(labelX, labelY);
+        label.setText(owner?.name ?? "");
+      }
+    }
+  }
+
+  private setAreaLabelVisible(zoneId: string, visible: boolean) {
+    const owner = this.areaOwnerByZoneId.get(zoneId);
+    const label = this.areaNameLabels.get(zoneId);
+    if (!label) return;
+    label.setVisible(visible && !!owner);
+  }
+
   /** Desenha o contorno de TODO tile colocável (mesmos limites que clampTile usa pro boneco) -- só visível durante o modo de edição. */
   private drawEditGrid() {
     const g = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
@@ -1510,6 +1939,19 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
+    // mesmo esquema de arrasto acima, só que pra ferramenta de área (ver
+    // paintAreaLine).
+    if (this.isPaintingArea && pointer.isDown && this.selectedAreaTool) {
+      const key = `${col},${row}`;
+      if (key !== this.lastPaintedAreaKey) {
+        const [lastCol, lastRow] = this.lastPaintedAreaKey
+          ? this.lastPaintedAreaKey.split(",").map(Number)
+          : [col, row];
+        this.lastPaintedAreaKey = key;
+        this.paintAreaLine(lastCol, lastRow, col, row);
+      }
+    }
+
     const occupied = this.anyFurnitureAt(col, row);
     const { x, y } = tileToWorld(col, row);
     this.hoverGraphics
@@ -1554,6 +1996,18 @@ export default class MainScene extends Phaser.Scene {
     if (this.isPointerOnAnyAvatar(pointer)) return;
     const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
     if (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS) return;
+
+    // ferramenta de área armada: mesma ideia da ferramenta de piso logo
+    // abaixo (clique único já pinta e entra em modo de arrasto) -- checa
+    // ANTES do piso só por ordem de leitura, as duas são mutuamente
+    // exclusivas mesmo (ver selectAreaTool/selectFloorTool), nunca as
+    // duas armadas ao mesmo tempo.
+    if (this.selectedAreaTool) {
+      this.isPaintingArea = true;
+      this.lastPaintedAreaKey = `${col},${row}`;
+      this.paintAreaAt(col, row);
+      return;
+    }
 
     // ferramenta de piso armada: pinta/apaga esse tile (clique único --
     // "unitário") e já entra em modo de arrasto (ver

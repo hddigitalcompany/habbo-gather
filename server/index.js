@@ -9,6 +9,17 @@
 //   init    -> { type: "init", selfId, players: [...] }
 //   join    -> { type: "join", player }
 //   move    -> { type: "move", id, x, y }
+//   seat    -> cliente->servidor: { type: "seat", furnitureId }  (furnitureId
+//              = id do móvel sentado agora, ou null ao levantar -- ver
+//              sitAt/standUp em MainScene.ts)
+//              servidor->sala: { type: "seat", id, furnitureId }
+//              (o server guarda o último valor em player.seatFurnitureId,
+//              igual x/y -- por isso ele já sai certo dentro de "init"/
+//              "join" pra quem entra depois de alguém já sentado. Usado
+//              só pra "posse" de mesa privada, ver refreshAreaOwnership em
+//              MainScene.ts/game/areas.ts -- a POSIÇÃO de quem senta já
+//              chega normal pelo "move" de sempre, isso aqui é só a POSE/
+//              o "quem é dono de qual mesa")
 //   leave   -> { type: "leave", id }
 //   signal  -> { type: "signal", from, data }   (relay de WebRTC)
 //   chat    -> cliente->servidor: { type: "chat", text?, attachment?, kind? }
@@ -94,6 +105,16 @@
 //        `node server/index.js` localmente (npm run dev) fica disponível
 //        normal; no deploy de verdade (ex: Render) o host precisa estar
 //        com NODE_ENV=production setado.
+//
+// Áreas da sala ("Editar espaço" -> aba "Área", ver game/areas.ts pro
+// conceito de zona/tipo "mesa-privada"/"sala") -- MESMO esquema do piso
+// acima (mesmo arquivo data/room.json, mesma trava de produção):
+//   GET  /room/areas    -> 200 { items: AreaTileDef[] }  (área salva agora)
+//   POST /room/areas    (corpo JSON: { items: AreaTileDef[] }, sempre a
+//                        área INTEIRA, não um diff -- ver onDraftAreaChange
+//                        em MainScene.ts)
+//     -> 200 { ok: true, items }
+//     -> 403, mesma trava de produção do /room/floor acima.
 //
 // Agenda (marcar call: data/horário/participantes, necessidades de
 // câmera/áudio/tela, aprovação dos convidados) -- ver server/agendaStore.js:
@@ -457,6 +478,13 @@ function handleGetFloor(req, res) {
   res.end(JSON.stringify({ items: roomStore.getFloor() }));
 }
 
+/** GET /room/areas -- mesma ideia do handleGetFloor acima, ver
+ * loadSavedAreas em MainScene.ts. */
+function handleGetAreas(req, res) {
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ items: roomStore.getAreas() }));
+}
+
 const MAX_ROOM_BODY_BYTES = 500_000; // generoso pro tamanho da sala hoje (12x7), evita payload absurdo
 
 /** POST /room/floor -- ver comentário grande no topo do arquivo. Desativado
@@ -520,6 +548,67 @@ function handlePostFloor(req, res) {
   });
 }
 
+/** POST /room/areas -- mesma ideia/travas do handlePostFloor acima, só
+ * troca roomStore.setFloor por roomStore.setAreas (ver validação em
+ * server/roomStore.js -- rejeita item com `type` que não seja
+ * "mesa-privada"/"sala"). */
+function handlePostAreas(req, res) {
+  if (process.env.NODE_ENV === "production") {
+    res.writeHead(403, corsHeaders());
+    res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_ROOM_BODY_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Corpo grande demais");
+    return;
+  }
+
+  const chunks = [];
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
+      aborted = true;
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Corpo grande demais");
+      }
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, corsHeaders());
+      res.end("JSON inválido");
+      return;
+    }
+    const saved = roomStore.setAreas(data?.items);
+    if (saved === null) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "items" (array)');
+      return;
+    }
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, items: saved }));
+  });
+
+  req.on("error", () => {
+    aborted = true;
+  });
+}
+
 const httpServer = createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
@@ -549,6 +638,16 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/room/areas") {
+    handleGetAreas(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/room/areas") {
+    handlePostAreas(req, res);
+    return;
+  }
+
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
   res.end("Servidor multiplayer do habbo-gather está no ar.\n");
 });
@@ -575,6 +674,11 @@ wss.on("connection", (ws, req) => {
     y: 480 + Math.floor(Math.random() * 3) * 20,
     name: `Visitante-${id.slice(0, 4)}`,
     color,
+    // móvel (id) em que a pessoa tá sentada agora, ou null -- ver "seat"
+    // no comentário de protocolo lá em cima. Guardado no player (igual
+    // x/y) pra sair certo dentro de "init"/"join" pra quem entra DEPOIS
+    // de alguém já sentado numa mesa privada.
+    seatFurnitureId: null,
     status: "online",
     instagram: "",
     bio: "",
@@ -642,6 +746,13 @@ wss.on("connection", (ws, req) => {
         player.x = data.x;
         player.y = data.y;
         broadcast(room, { type: "move", id, x: player.x, y: player.y }, id);
+        break;
+      }
+      case "seat": {
+        const furnitureId =
+          typeof data.furnitureId === "string" && data.furnitureId ? data.furnitureId.slice(0, 200) : null;
+        player.seatFurnitureId = furnitureId;
+        broadcast(room, { type: "seat", id, furnitureId }, id);
         break;
       }
       case "signal": {
