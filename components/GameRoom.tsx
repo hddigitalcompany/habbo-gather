@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
 import PartySocket from "partysocket";
-import MainScene, { DEFAULT_ZOOM_LEVEL, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
+import MainScene, { DEFAULT_ZOOM_LEVEL, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL, skinTextureKey } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
@@ -50,6 +50,8 @@ import {
   CUSTOMIZATION_CATEGORIES,
   CustomizationCategoryId,
   AvatarGender,
+  SkinOption,
+  registerCustomSkins,
 } from "@/game/customization";
 
 // "focus/ausente/online" -- ver caixinha de status no ProfileCard.
@@ -314,18 +316,19 @@ type SavedAvatar = {
   outfitId?: string;
 };
 
-// arte de móvel vem de dois lugares bem diferentes: um arquivo "de
-// fábrica" em public/assets/ (ver FURNITURE_ART/GENERATED_FURNITURE_MODELS,
-// game/furniture.ts -- só o NOME do arquivo, precisa do prefixo
-// "/assets/" pra virar um caminho de verdade) ou uma URL PÚBLICA
-// COMPLETA do Supabase Storage (item CUSTOM, cadastrado pelo Editor de
-// Itens -- ver registerCustomFurnitureModels) -- essa já é a URL
-// inteira, prefixar "/assets/" na frente dela vira um caminho relativo
-// que não existe em lugar nenhum ("/assets/https://..."), quebrando a
-// miniatura/preview de QUALQUER item custom no catálogo. Esse helper
-// decide certo pros dois casos -- usado em todo lugar que pode
-// renderizar arte de item custom (palette-btn/item-preview-img/
-// color-swatch, ver EditPanel mais abaixo).
+// arte de item custom (móvel OU tom de pele -- ver `custom` em
+// FurnitureModelDef/SkinOption) vem de dois lugares bem diferentes: um
+// arquivo "de fábrica" em public/assets/ (gerado da pasta local -- só o
+// NOME do arquivo, precisa do prefixo "/assets/" pra virar um caminho de
+// verdade) ou uma URL PÚBLICA COMPLETA do Supabase Storage (cadastrado
+// pelo Editor de Itens -- ver registerCustomFurnitureModels/
+// registerCustomSkins) -- essa já é a URL inteira, prefixar "/assets/"
+// na frente dela vira um caminho relativo que não existe em lugar
+// nenhum ("/assets/https://..."), quebrando a miniatura/preview de
+// QUALQUER item custom. Esse helper decide certo pros dois casos --
+// usado em todo lugar que pode renderizar arte custom (palette-btn/
+// item-preview-img/color-swatch em EditPanel, preview de tom de pele em
+// ProfileCard).
 function furnitureAssetUrl(file: string): string {
   return file.startsWith("http") ? file : `/assets/${file}`;
 }
@@ -780,6 +783,10 @@ export default function GameRoom({
   // array importado mudou de conteúdo). ---
   const [itemEditorOpen, setItemEditorOpen] = useState(false);
   const [customItemsVersion, setCustomItemsVersion] = useState(0);
+  // mesma ideia de customItemsVersion acima, só que pra tom de pele
+  // CUSTOM (Editor de Itens, botão "Criar Avatar" -- ver
+  // fetchAndRegisterCustomSkins/registerCustomSkins).
+  const [customSkinsVersion, setCustomSkinsVersion] = useState(0);
 
   /**
    * Busca os itens custom no Supabase (leitura pública, ver policy em
@@ -857,6 +864,43 @@ export default function GameRoom({
       for (const modelId of updatedIds) sceneRef.current?.refreshFurnitureModel(modelId);
     } catch {
       // Supabase fora do ar/não configurado -- segue sem item custom, sala funciona igual
+    }
+  }
+
+  /**
+   * Mesmo esquema de fetchAndRegisterCustomFurniture acima, só que pra
+   * TOM DE PELE custom (Editor de Itens, botão "Criar Avatar" -- ver
+   * supabase/migrations/0005_avatar_skins.sql, RODA JUNTO com a pasta
+   * local, pedido do Douglas). Chamado nos mesmos lugares (scene-ready +
+   * onItemsChanged do ItemEditor). Sem "editar tom" ainda (só criar,
+   * diferente do móvel) -- um tom novo não tem sprite já desenhado com
+   * arte antiga pra atualizar, então não precisa de um
+   * refreshFurnitureModel-equivalente aqui.
+   */
+  async function fetchAndRegisterCustomSkins(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("avatar_skins").select("id, label, gender, sheet_url, hex");
+      if (error || !data || data.length === 0) return;
+      const skins: SkinOption[] = data.map(
+        (row: { id: string; label: string; gender: string; sheet_url: string; hex: string | null }) => ({
+          id: row.id,
+          label: row.label,
+          file: row.sheet_url,
+          gender: row.gender === "feminino" ? "feminino" : "masculino",
+          hex: row.hex ?? undefined,
+        })
+      );
+      registerCustomSkins(skins);
+      setCustomSkinsVersion((v) => v + 1);
+      const textureEntries = skins.map((skin) => ({ key: skinTextureKey(skin.id), url: skin.file }));
+      await new Promise<void>((resolve) => {
+        if (sceneRef.current) sceneRef.current.loadCustomSkinTextures(textureEntries, resolve);
+        else resolve();
+      });
+    } catch {
+      // Supabase fora do ar/não configurado -- segue sem tom custom, sala funciona igual
     }
   }
 
@@ -1686,6 +1730,10 @@ export default function GameRoom({
         // mandar qualquer POST. O ajuste de assento (seatOffsets) precisa
         // entrar na cena (setSeatOffsets) ANTES de loadSavedFurniture,
         // senão um item já sentável carregaria sem o ajuste salvo.
+        // Tom de pele custom (ver fetchAndRegisterCustomSkins) roda em
+        // PARALELO, sem bloquear a cadeia de carregar móvel -- os dois
+        // não dependem um do outro.
+        fetchAndRegisterCustomSkins();
         fetchAndRegisterCustomFurniture().finally(() => {
           fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
             .then((r) => (r.ok ? r.json() : null))
@@ -3143,6 +3191,7 @@ export default function GameRoom({
             onClose={() => setItemEditorOpen(false)}
             onItemsChanged={() => {
               fetchAndRegisterCustomFurniture();
+              fetchAndRegisterCustomSkins();
             }}
           />
         )}
@@ -4355,7 +4404,7 @@ function ProfileCard({
               <span
                 className="avatar-preview-layer"
                 style={{
-                  backgroundImage: `url(/assets/${selectedSkinOption.file})`,
+                  backgroundImage: `url(${furnitureAssetUrl(selectedSkinOption.file)})`,
                   backgroundPosition: "0 0",
                   backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                 }}

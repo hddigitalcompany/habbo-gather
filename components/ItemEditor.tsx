@@ -19,7 +19,16 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH } from "@/game/furniture";
 import { TILE } from "@/game/grid";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
-import { HAIR_CATALOG, DEFAULT_HAIR_ID, SKIN_CATALOG, DEFAULT_SKIN_ID, OUTFIT_CATALOG, DEFAULT_OUTFIT_ID, outfitFileForSkin } from "@/game/customization";
+import {
+  HAIR_CATALOG,
+  DEFAULT_HAIR_ID,
+  SKIN_CATALOG,
+  DEFAULT_SKIN_ID,
+  OUTFIT_CATALOG,
+  DEFAULT_OUTFIT_ID,
+  outfitFileForSkin,
+  AvatarGender,
+} from "@/game/customization";
 
 type CategoryId = "poltrona" | "divisoria" | "sofa" | "mesa" | "planta" | "computador";
 type DirectionKey = "down" | "left" | "right" | "up";
@@ -196,6 +205,261 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+type CustomSkinRow = {
+  id: string;
+  label: string;
+  gender: AvatarGender;
+  sheet_url: string;
+  hex: string | null;
+};
+
+// qual direção (ver DIRECTION_FIELDS acima) cada um dos 15 quadros da
+// folha usa -- MESMA ordem/esquema de FRAME_SLOTS/SLOTS_BY_DIRECTION em
+// scripts/syncSkinAssets.mjs (duplicado aqui de propósito: é o FORMATO
+// do arquivo que o jogo espera, não muda, e importar um script .mjs de
+// Node dentro de um componente React não rola). A cabeça de cada direção
+// é reaproveitada nos 3-4 quadros dela (parado/passoA/passoB/sentado) --
+// só "up" (costas) não tem quadro de sentado, mesma observação de sempre
+// (reusa o quadro 9 direto em MainScene.ts).
+const SKIN_SHEET_SLOT_DIRECTIONS: DirectionKey[] = [
+  "down", "down", "down",
+  "left", "left", "left",
+  "right", "right", "right",
+  "up", "up", "up",
+  "down", "left", "right",
+];
+const SKIN_SHEET_COLS = 8;
+const SKIN_SHEET_SPACING = 2;
+
+/**
+ * Monta a folha de sprites (8x2, 200x260 por quadro -- mesmo formato de
+ * public/assets/avatar_<tom>.png, ver scripts/syncSkinAssets.mjs) DIRETO
+ * NO NAVEGADOR a partir das até 4 fotos que a pessoa sobe (frente
+ * obrigatória, lado esq/lado dir/costas opcionais -- mesma convenção "só
+ * a cabeça" da pasta local). Sem foto pra uma direção, reaproveita a de
+ * "frente" nela (mesma prévia rápida que o pipeline local ganhou, ver
+ * relaxMissingHeads em scripts/syncSkinAssets.mjs -- fica com a mesma
+ * cabeça virada nos 4 lados até a pessoa subir o resto). Cada foto entra
+ * "encaixada" no quadro 200x260 sem cortar nem esticar (mesma ideia do
+ * `fit:"contain"` que o pipeline local usa via sharp), centralizada, com
+ * fundo transparente ao redor.
+ */
+async function composeSkinSheet(filesByDirection: Partial<Record<DirectionKey, File>>): Promise<Blob> {
+  const fallbackFile = filesByDirection.down;
+  if (!fallbackFile) throw new Error("a imagem de frente é obrigatória");
+
+  const bitmaps: Partial<Record<DirectionKey, ImageBitmap>> = {};
+  for (const dir of ["down", "left", "right", "up"] as DirectionKey[]) {
+    const file = filesByDirection[dir] ?? fallbackFile;
+    bitmaps[dir] = await createImageBitmap(file);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = SKIN_SHEET_COLS * (FRAME_W + SKIN_SHEET_SPACING) - SKIN_SHEET_SPACING;
+  canvas.height = 2 * (FRAME_H + SKIN_SHEET_SPACING) - SKIN_SHEET_SPACING;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("navegador sem suporte a canvas 2D");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  SKIN_SHEET_SLOT_DIRECTIONS.forEach((dir, i) => {
+    const bitmap = bitmaps[dir];
+    if (!bitmap) return;
+    const col = i % SKIN_SHEET_COLS;
+    const row = Math.floor(i / SKIN_SHEET_COLS);
+    const cellX = col * (FRAME_W + SKIN_SHEET_SPACING);
+    const cellY = row * (FRAME_H + SKIN_SHEET_SPACING);
+    const scale = Math.min(FRAME_W / bitmap.width, FRAME_H / bitmap.height);
+    const drawW = bitmap.width * scale;
+    const drawH = bitmap.height * scale;
+    ctx.drawImage(bitmap, cellX + (FRAME_W - drawW) / 2, cellY + (FRAME_H - drawH) / 2, drawW, drawH);
+  });
+  for (const bitmap of Object.values(bitmaps)) bitmap?.close?.();
+
+  const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("erro ao montar a folha de sprites");
+  return blob;
+}
+
+/**
+ * Botão "Criar Avatar" do Editor de Itens (pedido do Douglas: "quero
+ * subir os personagens DENTRO da plataforma") -- por enquanto só cadastra
+ * TOM DE PELE (ver AskUserQuestion respondido: escopo inicial menor,
+ * cabelo/barba/traje/acessório continuam só pela pasta local e entram
+ * depois). Mesmo esquema de upload direto pro Storage que o resto do
+ * Editor de Itens já usa (ver ItemEditor logo abaixo) -- só os metadados
+ * (nome/sexo/URL da folha já composta/hex) vão pro servidor (POST
+ * /api/avatar-skins). Sem editar/apagar ainda (a API não tem PATCH/DELETE
+ * pra isso -- só criar, ver comentário lá).
+ */
+function AvatarSkinPanel({ accessToken, onSkinsChanged }: { accessToken: string; onSkinsChanged: () => void }) {
+  const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
+  const [skinLabel, setSkinLabel] = useState("");
+  const [gender, setGender] = useState<AvatarGender>("masculino");
+  const [skinFiles, setSkinFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  const [hex, setHex] = useState("#d1a276");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  async function loadSkins() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data, error: fetchError } = await supabase
+      .from("avatar_skins")
+      .select("id, label, gender, sheet_url, hex");
+    if (fetchError) {
+      setError(fetchError.message);
+      return;
+    }
+    setSkins((data ?? []) as CustomSkinRow[]);
+  }
+
+  useEffect(() => {
+    loadSkins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSkinSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!skinLabel.trim()) {
+      setError("Dá um nome pro tom.");
+      return;
+    }
+    if (!skinFiles.down) {
+      setError("A imagem de frente é obrigatória.");
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    setSubmitting(true);
+    try {
+      const sheetBlob = await composeSkinSheet(skinFiles);
+      const slug = slugify(skinLabel);
+      const path = `avatar-skins/${gender}-${slug}-${Date.now()}.png`;
+      const { error: uploadError } = await supabase.storage.from("room-items").upload(path, sheetBlob, {
+        upsert: false,
+        contentType: "image/png",
+      });
+      if (uploadError) throw uploadError;
+      const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
+
+      const res = await fetch("/api/avatar-skins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ label: skinLabel.trim(), gender, sheetUrl: publicUrlData.publicUrl, hex }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao salvar tom de pele");
+
+      setSkinLabel("");
+      setSkinFiles({});
+      for (const key of Object.keys(fileInputRefs.current)) {
+        const input = fileInputRefs.current[key];
+        if (input) input.value = "";
+      }
+      await loadSkins();
+      onSkinsChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro ao salvar tom de pele");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <p className="settings-hint">
+        Por enquanto só dá pra subir TOM DE PELE por aqui -- cabelo, barba, traje e acessório continuam vindo só
+        da pasta local. Só a foto de "Frente" é obrigatória (só a cabeça, mesmo recorte de sempre) -- sem as
+        outras 3, o jogo reaproveita a de frente virada nas outras direções, é só uma prévia até você subir o
+        resto.
+      </p>
+      <form className="items-panel-form" onSubmit={handleSkinSubmit}>
+        <input
+          className="items-panel-input"
+          type="text"
+          placeholder="Nome do tom"
+          value={skinLabel}
+          maxLength={40}
+          onChange={(e) => setSkinLabel(e.target.value)}
+        />
+
+        <div className="gender-switch">
+          <button
+            type="button"
+            className={gender === "masculino" ? "gender-btn selected" : "gender-btn"}
+            onClick={() => setGender("masculino")}
+          >
+            Masculino
+          </button>
+          <button
+            type="button"
+            className={gender === "feminino" ? "gender-btn selected" : "gender-btn"}
+            onClick={() => setGender("feminino")}
+          >
+            Feminino
+          </button>
+        </div>
+
+        <label className="items-panel-upload-field">
+          <span>Cor do botão (opcional)</span>
+          <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} />
+        </label>
+
+        <div className="items-panel-uploads">
+          {DIRECTION_FIELDS.map((field) => (
+            <label key={field.key} className="items-panel-upload-field">
+              <span>
+                {field.label}
+                {field.key === "down" ? " *" : ""}
+              </span>
+              <input
+                ref={(el) => {
+                  fileInputRefs.current[field.key] = el;
+                }}
+                type="file"
+                accept="image/*"
+                onChange={(e) => setSkinFiles((prev) => ({ ...prev, [field.key]: e.target.files?.[0] }))}
+              />
+            </label>
+          ))}
+        </div>
+
+        {error && <p className="items-panel-error">{error}</p>}
+
+        <div className="items-panel-submit-row">
+          <button type="submit" className="items-panel-submit" disabled={submitting}>
+            {submitting ? "Enviando..." : "Cadastrar tom"}
+          </button>
+        </div>
+      </form>
+
+      <section className="items-panel-section">
+        <h3>Tons cadastrados ({skins?.length ?? 0})</h3>
+        {!skins ? (
+          <p className="items-panel-loading">Carregando...</p>
+        ) : skins.length === 0 ? (
+          <p className="items-panel-loading">Nenhum tom custom ainda.</p>
+        ) : (
+          <ul className="items-panel-list">
+            {skins.map((skin) => (
+              <li key={skin.id} className="items-panel-row">
+                <span className="skin-swatch" style={{ background: skin.hex ?? "#8a7ca8" }} />
+                <span className="items-panel-name">
+                  {skin.label} <span className="items-panel-category">({skin.gender})</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
 export default function ItemEditor({
   accessToken,
   onClose,
@@ -205,6 +469,13 @@ export default function ItemEditor({
   onClose: () => void;
   onItemsChanged: () => void;
 }) {
+  // "Criar Mobi" (de sempre) / "Criar Avatar" (pedido do Douglas: "la
+  // encima quero dois botoes criar mobi/criar avatar") -- dois modos
+  // dentro do MESMO painel, não duas telas separadas. "Criar Avatar" usa
+  // um componente à parte (AvatarSkinPanel, ver acima) com seu próprio
+  // formulário/estado, já que os campos são bem diferentes (sexo, folha
+  // composta no navegador) do de móvel.
+  const [mode, setMode] = useState<"mobi" | "avatar">("mobi");
   const [items, setItems] = useState<CustomItemRow[] | null>(null);
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<CategoryId>("poltrona");
@@ -535,12 +806,33 @@ export default function ItemEditor({
     <div className="items-panel-backdrop" onClick={onClose}>
       <div className="items-panel items-panel-editor" onClick={(e) => e.stopPropagation()}>
         <div className="items-panel-header">
-          <h2>{editingId ? "Editar item" : "Editor de itens"}</h2>
+          <h2>{mode === "avatar" ? "Editor de itens" : editingId ? "Editar item" : "Editor de itens"}</h2>
           <button type="button" className="items-panel-close" onClick={onClose} title="Fechar">
             ✕
           </button>
         </div>
 
+        <div className="edit-section-tabs">
+          <button
+            type="button"
+            className={mode === "mobi" ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => setMode("mobi")}
+          >
+            Criar Mobi
+          </button>
+          <button
+            type="button"
+            className={mode === "avatar" ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => setMode("avatar")}
+          >
+            Criar Avatar
+          </button>
+        </div>
+
+        {mode === "avatar" && <AvatarSkinPanel accessToken={accessToken} onSkinsChanged={onItemsChanged} />}
+
+        {mode === "mobi" && (
+        <>
         <form className="items-panel-form" onSubmit={handleSubmit}>
           <input
             className="items-panel-input"
@@ -744,6 +1036,8 @@ export default function ItemEditor({
             </ul>
           )}
         </section>
+        </>
+        )}
       </div>
     </div>
   );

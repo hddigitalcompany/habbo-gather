@@ -205,8 +205,12 @@ function hairTextureKey(hairId: string): string {
   return `avatar-cabelo-${hairId}`;
 }
 
-/** Chave da textura no Phaser pra UM TOM de pele do catálogo (ver SKIN_CATALOG). */
-function skinTextureKey(skinId: string): string {
+/** Chave da textura no Phaser pra UM TOM de pele do catálogo (ver
+ * SKIN_CATALOG). Exportada (diferente das outras *TextureKey da vizinhança)
+ * porque GameRoom.tsx precisa montar essa mesma chave pra carregar um tom
+ * CUSTOM em tempo de execução (ver loadCustomSkinTextures acima e
+ * fetchAndRegisterCustomSkins, GameRoom.tsx). */
+export function skinTextureKey(skinId: string): string {
   return `avatar-base-${skinId}`;
 }
 
@@ -879,6 +883,37 @@ export default class MainScene extends Phaser.Scene {
     }
     const start = () => {
       for (const e of missing) this.load.image(e.key, e.url);
+      this.load.once(Phaser.Loader.Events.COMPLETE, () => onDone?.());
+      this.load.start();
+    };
+    if (this.load.isLoading()) {
+      this.load.once(Phaser.Loader.Events.COMPLETE, start);
+    } else {
+      start();
+    }
+  }
+
+  /**
+   * Igual a loadCustomFurnitureTextures acima, mas pra TOM DE PELE
+   * customizado (Editor de Itens, botão "Criar Avatar" -- ver
+   * registerCustomSkins em game/customization.ts e app/api/avatar-skins)
+   * -- diferente de móvel (imagem estática), tom de pele é um
+   * SPRITESHEET (mesma folha 8x2/200x260 que os tons da pasta local
+   * usam, já composta pelo NAVEGADOR antes do upload, ver
+   * ItemEditor.tsx), por isso `this.load.spritesheet` com os mesmos
+   * FRAME_W/FRAME_H/spacing:2 do resto das camadas (ver preload() acima)
+   * em vez de `this.load.image`.
+   */
+  loadCustomSkinTextures(entries: { key: string; url: string }[], onDone?: () => void) {
+    const missing = entries.filter((e) => !this.textures.exists(e.key));
+    if (missing.length === 0) {
+      onDone?.();
+      return;
+    }
+    const start = () => {
+      for (const e of missing) {
+        this.load.spritesheet(e.key, e.url, { frameWidth: FRAME_W, frameHeight: FRAME_H, spacing: 2 });
+      }
       this.load.once(Phaser.Loader.Events.COMPLETE, () => onDone?.());
       this.load.start();
     };

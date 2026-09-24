@@ -104,6 +104,11 @@ export type AvatarGender = "masculino" | "feminino";
 export interface SkinOption {
   id: string;
   label: string;
+  /** Nome de arquivo em public/assets/ (tom "de fábrica", gerado da
+   * pasta local) OU URL pública completa do Supabase Storage (tom
+   * CUSTOM, ver `custom` abaixo) -- quem desenha precisa diferenciar os
+   * dois (ver assetUrl em GameRoom.tsx, mesmo helper que já existia pra
+   * arte de móvel custom). */
   file: string;
   hex?: string;
   /** Ver AvatarGender acima -- gerado automaticamente (ver
@@ -112,6 +117,10 @@ export interface SkinOption {
    * antes dessa mudança (ausente = trata como "masculino", ver
    * SKIN_CATALOG mais abaixo). */
   gender?: AvatarGender;
+  /** true só pros tons CUSTOM cadastrados pelo Editor de Itens (botão
+   * "Criar Avatar", ver registerCustomSkins logo abaixo) -- ausente/false
+   * pro catálogo "de fábrica" (GENERATED_SKIN_CATALOG). */
+  custom?: boolean;
 }
 
 // gerado automaticamente -- ver scripts/syncSkinAssets.mjs, NÃO editar
@@ -133,6 +142,39 @@ export const DEFAULT_SKIN_ID = SKIN_CATALOG[0]?.id ?? "branco";
  * aparecendo atrás de um tom de pele feminino). */
 function skinGenderOf(skinId: string): AvatarGender {
   return SKIN_CATALOG.find((s) => s.id === skinId)?.gender ?? "masculino";
+}
+
+/**
+ * Registra tom(ns) de pele CUSTOM(izado(s)), cadastrado(s) pelo dono da
+ * sala no Editor de Itens (botão "Criar Avatar", upload direto -- ver
+ * components/ItemEditor.tsx, app/api/avatar-skins e a tabela
+ * avatar_skins/Storage do Supabase) -- diferente de GENERATED_SKIN_CATALOG
+ * (gerado em BUILD-TIME pela pasta local, ver scripts/syncSkinAssets.mjs),
+ * esses chegam em TEMPO DE EXECUÇÃO, buscados assim que a sala carrega
+ * (ver fetchCustomAvatarSkins em GameRoom.tsx). RODA JUNTO com a pasta
+ * local -- pedido do Douglas ("duplicar sem perder o outro"), não troca
+ * nem remove nada que já existia.
+ *
+ * Empurra direto pra dentro de SKIN_CATALOG (mesmo truque de
+ * registerCustomFurnitureModels em game/furniture.ts -- array é tipo
+ * referência, então todo lugar que já importa SKIN_CATALOG direto
+ * enxerga os tons novos sozinho, só precisa forçar uma re-renderização
+ * depois de chamar isso). UPSERT por id -- chamar de novo com o mesmo id
+ * substitui em vez de duplicar (mesmo comportamento do móvel, pensando
+ * já num "editar tom" futuro, ainda sem UI pra isso).
+ */
+export function registerCustomSkins(skins: SkinOption[]): string[] {
+  const updatedIds: string[] = [];
+  for (const skin of skins) {
+    const existingIndex = SKIN_CATALOG.findIndex((s) => s.id === skin.id);
+    if (existingIndex !== -1) {
+      updatedIds.push(skin.id);
+      SKIN_CATALOG[existingIndex] = { ...skin, custom: true };
+    } else {
+      SKIN_CATALOG.push({ ...skin, custom: true });
+    }
+  }
+  return updatedIds;
 }
 
 /**
