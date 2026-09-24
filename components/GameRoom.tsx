@@ -1272,6 +1272,16 @@ export default function GameRoom() {
           myProfileRef.current.name || "Você",
           statusColorFor(myProfileRef.current.status)
         );
+        // aplica o traje sorteado (ver pickRandomOutfitId acima) já na
+        // hora que a cena fica pronta -- sem isso, createAvatar() sempre
+        // cria o boneco com DEFAULT_OUTFIT_ID ("nenhum", ver
+        // customization.ts) e o traje sorteado só ia aparecer quando/se a
+        // pessoa abrisse e salvasse o editor de personagem (que é o único
+        // outro lugar que chama setLocalOutfitId) -- até lá o boneco
+        // ficava só com a cabeça (a camada "base" não desenha mais o
+        // corpo, ver scripts/syncSkinAssets.mjs), sem nenhum erro no
+        // console pra dar pista.
+        scene.setLocalOutfitId(selectedOutfitId);
         scene.onLocalMove = (x, y) => {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
           checkProximity();
