@@ -2336,10 +2336,6 @@ export default function GameRoom({
     sceneRef.current?.selectCatalogEntry(entryWithColor(FURNITURE_CATALOG[selectedCatalogIndex], colorId));
   }
 
-  function clearDraftItems() {
-    sceneRef.current?.clearDraftFurniture();
-  }
-
   /** Botão "Sair do assento" do painel "Assento" -- levanta o boneco local sem precisar de tecla (que durante o ajuste não levanta mais, ver update() em MainScene.ts). */
   function standUpFromSeatTuning() {
     sceneRef.current?.standUpNow();
@@ -3016,10 +3012,11 @@ export default function GameRoom({
         )}
 
         {/* Grupo "Mover"/"Apagar" -- pedido do Douglas: os dois juntos num
-            botão flutuante próprio, LONGE dos controles de zoom (ver
-            .map-tool-group em globals.css, fica no topo direito, abaixo do
-            botão "Sair da conta" quando ele existe -- .map-controls, o
-            zoom/centralizar, continua embaixo à direita como sempre). */}
+            botão flutuante próprio, no MESMO rumo dos controles de zoom
+            (mesma borda direita) mas bem mais acima, fora da área do
+            painel de móveis (ver .map-tool-group em globals.css -- é
+            position:absolute dentro de .room-wrapper, não fixed no
+            viewport, senão ficava atrás do painel quando ele abre). */}
         {canEditRoom && editMode && (
           <div className="map-tool-group">
             <button
@@ -3172,9 +3169,6 @@ export default function GameRoom({
           onSelectCatalog={selectCatalog}
           selectedColorId={selectedColorId}
           onSelectColor={selectFurnitureColor}
-          draftItems={draftItems}
-          onClearAll={clearDraftItems}
-          furnitureSaveStatus={furnitureSaveStatus}
           seatTuningInfo={seatTuningInfo}
           onStandUpFromSeatTuning={standUpFromSeatTuning}
           onResetSeatTuning={resetSeatTuning}
@@ -3228,7 +3222,15 @@ const EDIT_CATEGORY_TABS: {
   { id: "mesa", label: "Mesa", icon: TableIcon },
   { id: "planta", label: "Planta", icon: PlantIcon },
   { id: "computador", label: "Computador", icon: ComputerIcon },
-  { id: "divisoria", label: "Divisória", icon: DividerIcon },
+  // era "Divisória" -- pedido do Douglas: essa categoria (tipo "vidro",
+  // ver FURNITURE_TYPE_CATEGORY em game/furniture.ts) agora é a aba
+  // "Parede" dentro da seção "Mapa" (ver EDIT_SECTIONS/CATEGORY_SECTION
+  // abaixo) -- MESMO sistema de sempre (objeto que bloqueia passagem,
+  // ver FURNITURE_BLOCKS_MOVEMENT.vidro), só rebatizado. Item custom
+  // com CARA de parede (opaco, em vez do vidro decorativo de hoje) sobe
+  // como um MODELO NOVO dessa mesma categoria pelo Editor de Itens,
+  // sem precisar de tipo/categoria nova no código.
+  { id: "divisoria", label: "Parede", icon: DividerIcon },
   { id: "piso", label: "Piso", icon: FloorIcon },
   { id: "area", label: "Área", icon: AreaIcon },
   // "Assento": ajuste fino (setas) de onde o boneco senta em cada
@@ -3243,6 +3245,44 @@ const EDIT_CATEGORY_TABS: {
   // usada por esse botão flutuante.
 ];
 
+/**
+ * 3 seções de topo do painel de edição (pedido do Douglas, ver print de
+ * referência: "Minha mesa"/"Construir"/"Mapa") -- agrupam as categorias
+ * de EDIT_CATEGORY_TABS acima por "o que você tá editando", em vez da
+ * barra de ícones plana de antes (9 abas soltas, sem hierarquia). Clicar
+ * numa seção troca pra categoria PADRÃO dela (defaultCategory) usando o
+ * MESMO onChangeCategory de sempre -- não existe estado novo pra seção
+ * ativa, ela é sempre DERIVADA da activeCategory atual (ver
+ * CATEGORY_SECTION/activeSection dentro de EditPanel), então não tem
+ * como os dois desincronizarem.
+ */
+const EDIT_SECTIONS: {
+  id: "moveis" | "construir" | "mapa";
+  label: string;
+  icon: () => JSX.Element;
+  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento";
+}[] = [
+  { id: "moveis", label: "Minha mesa", icon: DeskIcon, defaultCategory: "poltrona" },
+  { id: "construir", label: "Construir", icon: BuildIcon, defaultCategory: "piso" },
+  { id: "mapa", label: "Mapa", icon: MapIcon, defaultCategory: "divisoria" },
+];
+
+// categoria -> seção (inverso de EDIT_SECTIONS[].defaultCategory, mas
+// com TODAS as categorias de cada seção, não só a padrão). "assento"
+// entra em "moveis" -- é ajuste fino de móvel sentável, não faz sentido
+// em outra seção.
+const CATEGORY_SECTION: Record<FurnitureCategoryId | "piso" | "area" | "assento", "moveis" | "construir" | "mapa"> = {
+  poltrona: "moveis",
+  sofa: "moveis",
+  mesa: "moveis",
+  planta: "moveis",
+  computador: "moveis",
+  assento: "moveis",
+  piso: "construir",
+  area: "construir",
+  divisoria: "mapa",
+};
+
 function EditPanel({
   activeCategory,
   onChangeCategory,
@@ -3250,9 +3290,6 @@ function EditPanel({
   onSelectCatalog,
   selectedColorId,
   onSelectColor,
-  draftItems,
-  onClearAll,
-  furnitureSaveStatus,
   seatTuningInfo,
   onStandUpFromSeatTuning,
   onResetSeatTuning,
@@ -3278,9 +3315,6 @@ function EditPanel({
   onSelectCatalog: (index: number) => void;
   selectedColorId: string | null;
   onSelectColor: (colorId: string) => void;
-  draftItems: FurnitureDef[];
-  onClearAll: () => void;
-  furnitureSaveStatus: "idle" | "saving" | "saved" | "error";
   seatTuningInfo: SeatTuningInfo | null;
   onStandUpFromSeatTuning: () => void;
   onResetSeatTuning: () => void;
@@ -3302,6 +3336,27 @@ function EditPanel({
 }) {
   const activeCategoryLabel = EDIT_CATEGORY_TABS.find((c) => c.id === activeCategory)?.label ?? "";
 
+  // seção ativa é SEMPRE derivada da categoria ativa (ver comentário em
+  // CATEGORY_SECTION acima) -- nunca vira estado próprio, então não tem
+  // como desincronizar da aba de categoria de fato selecionada.
+  const activeSection = CATEGORY_SECTION[activeCategory];
+  const categoryTabsInSection = EDIT_CATEGORY_TABS.filter((cat) => CATEGORY_SECTION[cat.id] === activeSection);
+
+  // busca por texto (pedido do Douglas, ver print de referência
+  // "Pesquisar objetos") -- filtra a paleta de móveis E a de piso
+  // (não faz sentido em "área"/"assento", que não têm paleta pra
+  // procurar nada). Estado só LOCAL desse painel (não precisa subir pro
+  // GameRoom) -- limpa sozinho ao trocar de categoria, senão um termo
+  // digitado numa aba "vaza" pra outra e parece que sumiu tudo.
+  const [searchQuery, setSearchQuery] = useState("");
+  useEffect(() => {
+    setSearchQuery("");
+  }, [activeCategory]);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredFloorCatalog = normalizedQuery
+    ? FLOOR_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
+    : FLOOR_CATALOG;
+
   // um GRUPO por botão na grade (não mais um por direção, ver
   // catalogEntryGroupKey/catalogIndicesForGroup em game/furniture.ts):
   // escolher um GRUPO (modelo, ver catalogEntryGroupKey -- ou o tipo,
@@ -3319,7 +3374,16 @@ function EditPanel({
       : FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory);
   const hasModelsInCategory = categoryEntries.some((e) => e.modelId);
   const paletteEntries = hasModelsInCategory ? categoryEntries.filter((e) => e.modelId) : categoryEntries;
-  const groupsInCategory: string[] = Array.from(new Set(paletteEntries.map((e) => catalogEntryGroupKey(e))));
+  const allGroupsInCategory: string[] = Array.from(new Set(paletteEntries.map((e) => catalogEntryGroupKey(e))));
+  // filtra pelo texto buscado, comparando com o LABEL do modelo (o
+  // mesmo que aparece no title do botão/no preview grande) -- não
+  // filtra nada com a busca vazia.
+  const groupsInCategory = normalizedQuery
+    ? allGroupsInCategory.filter((groupKey) => {
+        const entry = FURNITURE_CATALOG[catalogIndicesForGroup(groupKey)[0]];
+        return entry?.label.toLowerCase().includes(normalizedQuery);
+      })
+    : allGroupsInCategory;
 
   const selectedEntry = selectedCatalogIndex !== null ? FURNITURE_CATALOG[selectedCatalogIndex] : null;
 
@@ -3353,39 +3417,77 @@ function EditPanel({
     <div className="edit-panel">
       <h2>Editar espaço</h2>
 
-      <div className="category-icon-bar">
-        {EDIT_CATEGORY_TABS.map((cat) => {
-          const Icon = cat.icon;
+      {/* 3 seções de topo (Minha mesa/Construir/Mapa) -- pedido do
+          Douglas. Trocar de seção vai pra categoria PADRÃO dela; a
+          barra de categoria logo abaixo (existente desde antes) some
+          quando a seção só tem 1 categoria (caso de "Mapa", só tem
+          "Parede" por enquanto). */}
+      <div className="edit-section-tabs">
+        {EDIT_SECTIONS.map((section) => {
+          const Icon = section.icon;
           return (
             <button
-              key={cat.id}
-              className={activeCategory === cat.id ? "category-icon-btn selected" : "category-icon-btn"}
-              onClick={() => onChangeCategory(cat.id)}
-              title={cat.label}
+              key={section.id}
+              className={activeSection === section.id ? "edit-section-tab selected" : "edit-section-tab"}
+              onClick={() => onChangeCategory(section.defaultCategory)}
             >
               <Icon />
+              <span>{section.label}</span>
             </button>
           );
         })}
       </div>
+
+      {categoryTabsInSection.length > 1 && (
+        <div className="category-icon-bar">
+          {categoryTabsInSection.map((cat) => {
+            const Icon = cat.icon;
+            return (
+              <button
+                key={cat.id}
+                className={activeCategory === cat.id ? "category-icon-btn selected" : "category-icon-btn"}
+                onClick={() => onChangeCategory(cat.id)}
+                title={cat.label}
+              >
+                <Icon />
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {activeCategory === "piso" ? (
         <>
           <p className="edit-hint">
             Escolha um modelo abaixo e clique num quadrado da sala pra pintar só
             ele ("unitário"), ou clique e arraste pra pintar vários de uma vez.
-            "Apagar" volta o quadrado pro fundo padrão da sala. Salva sozinho.
+            "Apagar piso" volta o quadrado pro fundo padrão da sala. Salva sozinho.
           </p>
 
+          {/* pedido do Douglas: apagar piso é "mais sensível" que apagar
+              móvel (desfaz área andável) -- por isso ganhou um botão
+              PRÓPRIO, com ícone, separado da grade de modelos (antes era
+              só mais um item de texto dentro de .floor-palette, fácil de
+              clicar sem querer no meio dos outros). */}
+          <button
+            className={selectedFloorToolId === "erase" ? "floor-erase-standalone-btn selected" : "floor-erase-standalone-btn"}
+            onClick={onSelectFloorEraser}
+            title="Apagar piso pintado (volta pro fundo padrão)"
+          >
+            <TrashIcon />
+            Apagar piso
+          </button>
+
+          <input
+            type="search"
+            className="catalog-search-input"
+            placeholder="Pesquisar pisos"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+
           <div className="floor-palette">
-            <button
-              className={selectedFloorToolId === "erase" ? "floor-eraser-btn selected" : "floor-eraser-btn"}
-              onClick={onSelectFloorEraser}
-              title="Apagar piso pintado (volta pro fundo padrão)"
-            >
-              ✕ Apagar
-            </button>
-            {FLOOR_CATALOG.map((entry) => (
+            {filteredFloorCatalog.map((entry) => (
               <button
                 key={entry.id}
                 className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
@@ -3395,8 +3497,12 @@ function EditPanel({
               />
             ))}
           </div>
-          {FLOOR_CATALOG.length === 0 && (
-            <p className="edit-hint">Nenhum modelo de piso ainda -- suba as imagens na pasta de origem.</p>
+          {filteredFloorCatalog.length === 0 && (
+            <p className="edit-hint">
+              {normalizedQuery
+                ? `Nada encontrado pra "${searchQuery.trim()}".`
+                : "Nenhum modelo de piso ainda -- suba as imagens na pasta de origem."}
+            </p>
           )}
 
           <h3>
@@ -3521,6 +3627,14 @@ function EditPanel({
         </>
       ) : (
         <>
+          <input
+            type="search"
+            className="catalog-search-input"
+            placeholder="Pesquisar objetos"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+
           <div className="palette">
             {groupsInCategory.map((groupKey) => {
               const indices = catalogIndicesForGroup(groupKey);
@@ -3541,7 +3655,9 @@ function EditPanel({
           </div>
           {groupsInCategory.length === 0 && (
             <p className="edit-hint">
-              Nenhum modelo de {activeCategoryLabel} ainda -- suba as artes na pasta de origem.
+              {normalizedQuery
+                ? `Nada encontrado pra "${searchQuery.trim()}".`
+                : `Nenhum modelo de ${activeCategoryLabel} ainda -- suba as artes na pasta de origem.`}
             </p>
           )}
 
@@ -3620,23 +3736,13 @@ function EditPanel({
             })()}
 
           {/* pedido do Douglas: apagar item agora é direto no espaço (ver
-              .map-delete-btn/toggleDeleteTool) -- a lista "Itens colocados"
-              (um <li> por item) saiu de vez, sobrou só a contagem + status
-              de salvamento (ainda útil, principalmente "Erro ao salvar")
-              e o botão de limpar tudo. */}
-          <h3>
-            Itens colocados ({draftItems.length})
-            <span className={`floor-save-status floor-save-status-${furnitureSaveStatus}`}>
-              {furnitureSaveStatus === "saving" && "Salvando…"}
-              {furnitureSaveStatus === "saved" && "Salvo ✓"}
-              {furnitureSaveStatus === "error" && "Erro ao salvar"}
-            </span>
-          </h3>
-          {draftItems.length > 0 && (
-            <button className="clear-btn" onClick={onClearAll}>
-              Limpar tudo
-            </button>
-          )}
+              .map-delete-btn/toggleDeleteTool) -- primeiro só a lista
+              "Itens colocados" (um <li> por item) tinha saído, sobrando a
+              contagem + status de salvamento + botão de limpar tudo;
+              agora esse resto saiu junto também ("remove essas opções
+              aqui", print do cabeçalho "Itens colocados (4) Erro ao
+              salvar" + "Limpar tudo") -- o painel de móveis não mostra
+              mais nada disso, só a paleta pra colocar item mesmo. */}
         </>
       )}
     </div>
@@ -3754,6 +3860,51 @@ function DividerIcon() {
     <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
       <rect x="4" y="3" width="7.2" height="18" rx="1.3" />
       <rect x="12.8" y="3" width="7.2" height="18" rx="1.3" opacity="0.6" />
+    </svg>
+  );
+}
+
+// ícone da seção "Minha mesa" (ver EDIT_SECTIONS) -- mesa com gaveta,
+// de propósito DIFERENTE do TableIcon (usado pela aba de categoria
+// "Mesa" dentro dessa mesma seção) pra não confundir as duas.
+function DeskIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="2.3" y="4" width="19.4" height="4.4" rx="1.2" />
+      <rect x="2.3" y="9.4" width="19.4" height="9" rx="1.4" opacity="0.55" />
+      <rect x="4.3" y="12" width="6" height="2.4" rx="1" fill="#16101f" />
+    </svg>
+  );
+}
+
+// ícone da seção "Construir" (ver EDIT_SECTIONS) -- martelo + chave,
+// dupla clássica de "ferramenta/construção".
+function BuildIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M14.7 6.3 17.7 3.3a3 3 0 0 1 4 4l-3 3M3 21l7-7M9 7l3 3-7 7-3-3 7-7ZM13 11l7.5 7.5a2 2 0 1 1-3 3L10 14"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// ícone da seção "Mapa" (ver EDIT_SECTIONS) -- mapa dobrado (3 painéis),
+// bem reconhecível mesmo pequeno.
+function MapIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M9 4v14M15 6v14" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

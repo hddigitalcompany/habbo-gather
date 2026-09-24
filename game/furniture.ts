@@ -570,75 +570,18 @@ export function catalogIndicesForGroup(groupKey: string): number[] {
   ).filter((i) => i !== -1);
 }
 
-export const ROOM_FURNITURE: FurnitureDef[] = [
-  {
-    id: "poltrona-1",
-    type: "poltrona",
-    col: 9,
-    row: 6,
-    facing: "down",
-    seatOffsetY: SEAT_Y_FRENTE_COSTAS,
-  },
-  {
-    id: "poltrona-2",
-    type: "poltrona",
-    col: 3,
-    row: 1,
-    facing: "left",
-    seatOffsetY: SEAT_Y_LADO,
-    seatOffsetX: -SEAT_X_LADO,
-  },
-  {
-    id: "poltrona-3",
-    type: "poltrona",
-    col: 9,
-    row: 1,
-    facing: "right",
-    seatOffsetY: SEAT_Y_LADO,
-    seatOffsetX: SEAT_X_LADO,
-  },
-  {
-    id: "poltrona-4",
-    type: "poltrona",
-    col: 5,
-    row: 2,
-    facing: "up",
-    seatOffsetY: SEAT_Y_FRENTE_COSTAS,
-  },
-  // painel de vidro de teste -- item alto (quase 3 tiles de altura,
-  // overflow pra cima é intencional) em área livre, pra validar a troca
-  // de profundidade (andar por cima dele desce por trás) e a
-  // transparência (ver através dele) juntas. Fixado como divisória: o
-  // próprio tile trava (FURNITURE_BLOCKS_MOVEMENT), o de cima (onde só a
-  // parte de cima vaza) continua livre.
-  //
-  // A transparência agora vem DA PRÓPRIA ARTE (vidro.png tem alpha
-  // diferente por região: perfil/moldura -- a barra escura no topo --
-  // 100% opaco, corpo do vidro com alpha reduzido já assado no PNG) --
-  // por isso NÃO usa mais `transparent: true` aqui, que aplicaria
-  // GLASS_ALPHA por cima da imagem inteira e deixaria a moldura
-  // transparente também, o que o usuário pediu pra não acontecer.
-  {
-    id: "vidro-teste-1",
-    type: "vidro",
-    col: 1,
-    row: 4,
-    facing: "down",
-    baseOffsetY: VIDRO_BASE_OFFSET_Y,
-  },
-  // segundo teste: vidro um tile ABAIXO da poltrona-1, na mesma coluna
-  // (reto/alinhado com ela) -- valida a profundidade quando o overflow
-  // do vidro (que vaza pra cima, entrando na própria fileira da
-  // poltrona) se sobrepõe ao boneco sentado ali.
-  {
-    id: "vidro-teste-2",
-    type: "vidro",
-    col: 9,
-    row: 7,
-    facing: "down",
-    baseOffsetY: VIDRO_BASE_OFFSET_Y,
-  },
-];
+// Era uma lista de móveis de TESTE escritos à mão (4 poltronas, 2
+// painéis de vidro) pra validar arte/profundidade/transparência antes
+// dos modelos e do editor de espaço existirem de verdade -- "posição
+// definitiva vem depois" já dizia o comentário antigo aqui. Ficaram
+// fixos demais tempo (não editáveis pela ferramenta "Apagar", que só
+// mexe em móvel colocado pelo editor -- ver comentário em
+// selectDeleteTool, MainScene.ts) e o Douglas pediu pra tirar ("os
+// mobis que colocamos no começo tão fixos ali no meio, não dá pra
+// apagar"). Removidos -- toda mobília da sala agora entra 100% pelo
+// editor de espaço (draftFurniture, salva no banco), que já tem
+// colocar/mover/apagar completos.
+export const ROOM_FURNITURE: FurnitureDef[] = [];
 
 /** Retorna o móvel que TRAVA a passagem no tile dado, se houver (ver startStep() em MainScene.ts). */
 export function blockingFurnitureAt(col: number, row: number): FurnitureDef | undefined {

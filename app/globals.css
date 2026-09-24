@@ -169,17 +169,21 @@ body {
 /* Grupo "Mover"/"Apagar" do editor de espaço (ver toggleMoveTool/
    toggleDeleteTool em GameRoom.tsx) -- só aparece durante "Editar espaço"
    (canEditRoom && editMode). Pedido do Douglas: os dois botões juntos,
-   LONGE dos controles de zoom -- por isso é um grupo flutuante PRÓPRIO,
-   separado de .map-controls (que fica embaixo à direita, zoom/
-   centralizar): esse aqui fica no topo direito, colado sob o botão "Sair
-   da conta" (.account-sign-out-btn, top:10px + ~26px de altura -> aqui
-   começa em 52px pra sobrar respiro) quando ele existe, ou no mesmo lugar
-   mesmo sem ele (sala sem conta ligada é caso raro pra quem edita). */
+   longe dos controles de zoom, mas no MESMO rumo deles (mesma borda
+   direita, position:absolute dentro de .room-wrapper -- não position:
+   fixed no viewport inteiro como a primeira versão, que ficava por
+   BAIXO do painel de móveis (.edit-panel, 280px sólido, irmão de
+   .room-wrapper em .room-and-editor) sempre que ele tava aberto, então
+   na prática sumia atrás dele -- pedido do Douglas: "fora da janela dos
+   mobi"). Empilhado bem ACIMA de .map-controls (que fica em bottom:84px
+   -- a pilha dela, recentralizar + zoom, tem uns 131px de altura, então
+   aqui começa em bottom:260px pra sobrar respiro de verdade entre os
+   dois grupos). */
 .map-tool-group {
-  position: fixed;
-  top: 52px;
-  right: 12px;
-  z-index: 40;
+  position: absolute;
+  bottom: 260px;
+  right: 16px;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1641,6 +1645,44 @@ body {
    sub-aba "Porcelanato"/"Laminado" dentro de Piso, que sumiu -- agora é
    uma categoria só). flex-wrap porque com 7 ícones pode não caber numa
    linha só dependendo da largura do painel. */
+/* 3 seções de topo (Minha mesa/Construir/Mapa, ver EDIT_SECTIONS em
+   GameRoom.tsx) -- pills lado a lado, sempre 3, cabem numa linha só
+   nos 280px do painel. Visualmente "acima" da barra de categoria
+   (.category-icon-bar logo abaixo), pra deixar claro que é outro
+   nível de hierarquia. */
+.edit-section-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.edit-section-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: #241933;
+  border: 1px solid #362552;
+  border-radius: 10px;
+  color: #cdbdf0;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.edit-section-tab:hover {
+  background: #3d2a5c;
+  color: #f5f0ff;
+}
+
+.edit-section-tab.selected {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: white;
+}
+
 .category-icon-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1870,6 +1912,69 @@ body {
   background: #d95959;
   border-color: #ff8080;
   color: white;
+}
+
+/* Ferramenta de apagar PISO, agora um botão PRÓPRIO e cheio (não mais
+   um quadradinho de texto dentro de .floor-palette, ver .floor-eraser-btn
+   -- esse aqui virou o botão da ÁREA só) -- pedido do Douglas: apagar
+   piso é "mais sensível" que apagar móvel (desfaz área andável de
+   verdade, não só remove um objeto decorativo), então merece destaque
+   PRÓPRIO em vez de ficar escondido/fácil de confundir no meio das
+   miniaturas de textura. Tom ÂMBAR (não vermelho) de propósito -- pra
+   não confundir visualmente com o botão flutuante "Apagar" de móvel
+   (.map-delete-btn, esse sim vermelho) nem com o "✕ Apagar" de área
+   (.floor-eraser-btn): cada ferramenta de apagar tem sua cor. */
+.floor-erase-standalone-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 10px;
+  border: 1px solid #5c4420;
+  background: #3a2a15;
+  color: #ffd28a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.floor-erase-standalone-btn:hover {
+  background: #4a3620;
+}
+
+.floor-erase-standalone-btn.selected {
+  background: #c98a2e;
+  border-color: #ffbf5c;
+  color: #1c1430;
+}
+
+/* Campo de busca do catálogo (móveis/piso, ver EditPanel em
+   GameRoom.tsx -- pedido do Douglas, print de referência "Pesquisar
+   objetos") -- mesma pegada visual do .area-create-input, mas com
+   ícone de lupa nativo do input type="search" (o "x" de limpar também
+   vem de graça do navegador). */
+.catalog-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #1c1430;
+  border: 1px solid #2f2245;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f2eefc;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.catalog-search-input::placeholder {
+  color: #6f5f96;
+}
+
+.catalog-search-input:focus {
+  outline: none;
+  border-color: #7c5cff;
 }
 
 /* status do autosave do piso ("Salvando…"/"Salvo ✓"/"Erro ao salvar"),
