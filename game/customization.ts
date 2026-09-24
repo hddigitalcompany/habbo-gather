@@ -47,6 +47,15 @@ export interface HairOption {
 import { GENERATED_HAIR_CATALOG, GENERATED_HAIR_COLORS_BY_STYLE } from "./customizationCatalog.generated";
 
 export const HAIR_CATALOG: HairOption[] = [
+  // pedido do Douglas: opção "Nenhum" (arquivo transparente, mesmo
+  // esquema de BEARD_CATALOG/ACCESSORY_CATALOG/OUTFIT_CATALOG) -- útil
+  // pra tons de pele cuja arte já vem com o cabelo desenhado junto (ver
+  // AvatarGender/"feminino" acima), pra não desenhar um penteado do
+  // catálogo por cima/atrás dele. NÃO é o padrão de quem cria um avatar
+  // novo (ver DEFAULT_HAIR_ID abaixo, fixado em "ondulado" -- diferente
+  // de BEARD/ACCESSORY, onde "nenhum(a)" sendo o item [0] também é o
+  // padrão certo), só mais uma opção escolhível no editor.
+  { id: "nenhum", label: "Nenhum", file: "cabelo_nenhum.png" },
   {
     id: "ondulado",
     label: "Cabelinho pra trás",
@@ -62,7 +71,10 @@ export const HAIR_CATALOG: HairOption[] = [
   ...GENERATED_HAIR_CATALOG,
 ];
 
-export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
+// fixo em "ondulado" (não HAIR_CATALOG[0].id) -- ver comentário acima:
+// "Nenhum" é [0] só por convenção visual (mesmo lugar dos outros
+// catálogos), não deve virar o cabelo de quem cria um avatar novo.
+export const DEFAULT_HAIR_ID = "ondulado";
 
 /**
  * Tom de pele/corpo base (camada "base" do avatar, ver LAYER_TEXTURE_FILE
@@ -112,6 +124,17 @@ export const SKIN_CATALOG: SkinOption[] = [...GENERATED_SKIN_CATALOG].sort((a, b
 
 export const DEFAULT_SKIN_ID = SKIN_CATALOG[0]?.id ?? "branco";
 
+/** Sexo de um tom de pele pelo id (ver AvatarGender/SKIN_CATALOG acima)
+ * -- "masculino" se não achar (tom desconhecido ou gerado antes do
+ * campo `gender` existir). Usado por resolveBeardSkinId/
+ * resolveOutfitSkinId logo abaixo pra nunca cair pro tom de OUTRO sexo
+ * (ver comentário nos dois -- bug relatado pelo Douglas: "tá bugado com
+ * o masculino atrás", a arte de traje/barba de um tom masculino
+ * aparecendo atrás de um tom de pele feminino). */
+function skinGenderOf(skinId: string): AvatarGender {
+  return SKIN_CATALOG.find((s) => s.id === skinId)?.gender ?? "masculino";
+}
+
 /**
  * Barba (camada "barba") -- só 3 poses de verdade (sem "costas" -- não
  * dá pra ver a barba de trás da cabeça, o frame de "up" fica
@@ -142,11 +165,16 @@ export const BEARD_CATALOG: BeardOption[] = [
 export const DEFAULT_BEARD_ID = BEARD_CATALOG[0].id;
 
 /** Devolve o ID de tom de pele cujo arquivo deve ser usado pra barba: o
- * exato se existir, senão o primeiro disponível no `bySkin` (mesma
- * lógica de resolveOutfitSkinId mais abaixo). */
+ * exato se existir, senão o primeiro disponível no `bySkin` DO MESMO
+ * SEXO (ver skinGenderOf acima) -- nunca cai pro tom de OUTRO sexo, já
+ * que a barba/traje daquele tom foi desenhada pra um corpo diferente
+ * (mesma lógica de resolveOutfitSkinId mais abaixo). undefined se não
+ * achar nenhum tom do mesmo sexo -- quem chama trata como "não desenha
+ * nada" (ver setLocalBeardId/setLocalSkinId em MainScene.ts). */
 export function resolveBeardSkinId(beard: BeardOption, skinId: string): string | undefined {
   if (beard.bySkin[skinId]) return skinId;
-  return Object.keys(beard.bySkin)[0];
+  const gender = skinGenderOf(skinId);
+  return Object.keys(beard.bySkin).find((id) => skinGenderOf(id) === gender);
 }
 
 /** Devolve o arquivo da barba pro tom de pele atual (ver resolveBeardSkinId). */
@@ -214,11 +242,19 @@ export const OUTFIT_CATALOG: OutfitOption[] = [
 export const DEFAULT_OUTFIT_ID = OUTFIT_CATALOG[0].id;
 
 /** Devolve o ID de tom de pele cujo arquivo deve ser usado pro traje: o
- * exato se existir, senão o primeiro disponível no `bySkin` (undefined
- * só se o traje não tiver NENHUM tom, o que não deveria acontecer). */
+ * exato se existir, senão o primeiro disponível no `bySkin` DO MESMO
+ * SEXO (ver skinGenderOf/resolveBeardSkinId acima) -- nunca cai pro tom
+ * de OUTRO sexo (a roupa foi desenhada pra um corpo diferente, ficava
+ * sobreposta errado -- bug relatado pelo Douglas). undefined se não
+ * achar nenhum tom do mesmo sexo (hoje só acontece nos tons femininos,
+ * que ainda não têm traje próprio -- ver bySkin dos trajes gerados por
+ * scripts/syncOutfitAssets.mjs, só cobre pastas de tom MASCULINO por
+ * enquanto); quem chama trata como "não desenha nada" (ver
+ * setLocalOutfitId/setLocalSkinId em MainScene.ts). */
 export function resolveOutfitSkinId(outfit: OutfitOption, skinId: string): string | undefined {
   if (outfit.bySkin[skinId]) return skinId;
-  return Object.keys(outfit.bySkin)[0];
+  const gender = skinGenderOf(skinId);
+  return Object.keys(outfit.bySkin).find((id) => skinGenderOf(id) === gender);
 }
 
 /** Devolve o arquivo do traje pro tom de pele atual (ver resolveOutfitSkinId). */

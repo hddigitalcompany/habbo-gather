@@ -1484,6 +1484,12 @@ export default class MainScene extends Phaser.Scene {
         if (resolvedSkinId) {
           const currentFrame = outfitSprite.frame.name;
           outfitSprite.setTexture(outfitTextureKey(outfit.id, resolvedSkinId), currentFrame);
+          outfitSprite.setVisible(true);
+        } else {
+          // sem traje pro SEXO do tom novo (ver resolveOutfitSkinId) --
+          // esconde em vez de deixar a textura antiga (de outro sexo)
+          // grudada (bug relatado pelo Douglas: "masculino atrás").
+          outfitSprite.setVisible(false);
         }
       }
     }
@@ -1497,6 +1503,9 @@ export default class MainScene extends Phaser.Scene {
         if (resolvedBeardSkinId) {
           const currentFrame = beardSprite.frame.name;
           beardSprite.setTexture(beardTextureKey(beard.id, resolvedBeardSkinId), currentFrame);
+          beardSprite.setVisible(true);
+        } else {
+          beardSprite.setVisible(false);
         }
       }
     }
@@ -1514,9 +1523,16 @@ export default class MainScene extends Phaser.Scene {
     if (!beard) return;
     const skinId = (this.localContainer.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
     const resolvedSkinId = resolveBeardSkinId(beard, skinId);
-    if (!resolvedSkinId) return;
+    if (!resolvedSkinId) {
+      // sem barba pro sexo do tom atual (ver resolveBeardSkinId) --
+      // esconde em vez de deixar a textura de OUTRO sexo grudada.
+      sprite.setVisible(false);
+      this.localContainer.setData("beardId", beardId);
+      return;
+    }
     const currentFrame = sprite.frame.name;
     sprite.setTexture(beardTextureKey(beard.id, resolvedSkinId), currentFrame);
+    sprite.setVisible(true);
     this.localContainer.setData("beardId", beardId);
   }
 
@@ -1548,9 +1564,16 @@ export default class MainScene extends Phaser.Scene {
     if (!outfit) return;
     const skinId = (this.localContainer.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
     const resolvedSkinId = resolveOutfitSkinId(outfit, skinId);
-    if (!resolvedSkinId) return;
+    if (!resolvedSkinId) {
+      // sem traje pro sexo do tom atual (ver resolveOutfitSkinId) --
+      // esconde em vez de deixar a textura de OUTRO sexo grudada.
+      sprite.setVisible(false);
+      this.localContainer.setData("outfitId", outfitId);
+      return;
+    }
     const currentFrame = sprite.frame.name;
     sprite.setTexture(outfitTextureKey(outfit.id, resolvedSkinId), currentFrame);
+    sprite.setVisible(true);
     this.localContainer.setData("outfitId", outfitId);
   }
 
