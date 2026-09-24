@@ -206,6 +206,37 @@ export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
   { type: "vidro", facing: "down", label: "Vidro (divisória)", baseOffsetY: VIDRO_BASE_OFFSET_Y },
 ];
 
+/**
+ * Nome "de tipo" (sem a direção) -- usado na grade do editor de espaço,
+ * que agora mostra UM botão por peça (não um por direção, ver
+ * FURNITURE_CATALOG acima) e deixa girar pra escolher a direção depois
+ * de selecionar (ver FURNITURE_ROTATE_ORDER/catalogIndicesForType e o
+ * preview com setas de girar em EditPanel, GameRoom.tsx).
+ */
+export const FURNITURE_TYPE_LABEL: Record<FurnitureType, string> = {
+  poltrona: "Poltrona",
+  vidro: "Divisória de vidro",
+};
+
+/**
+ * Ordem de rotação (sentido horário, começando de frente) usada pelo
+ * botão de girar no preview do item selecionado -- ver
+ * catalogIndicesForType abaixo.
+ */
+export const FURNITURE_ROTATE_ORDER: Direction[] = ["down", "right", "up", "left"];
+
+/**
+ * Índices (em FURNITURE_CATALOG) de todas as direções cadastradas pra
+ * um tipo de móvel, na ordem de FURNITURE_ROTATE_ORDER -- direções sem
+ * entrada no catálogo (ex: vidro só tem "down") ficam de fora. Se tiver
+ * só 1 direção, não tem o que girar (ver canRotate no preview).
+ */
+export function catalogIndicesForType(type: FurnitureType): number[] {
+  return FURNITURE_ROTATE_ORDER.map((facing) =>
+    FURNITURE_CATALOG.findIndex((e) => e.type === type && e.facing === facing)
+  ).filter((i) => i !== -1);
+}
+
 export const ROOM_FURNITURE: FurnitureDef[] = [
   {
     id: "poltrona-1",

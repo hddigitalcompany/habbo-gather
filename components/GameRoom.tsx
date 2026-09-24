@@ -8,11 +8,14 @@ import PartySocket from "partysocket";
 import MainScene, { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import {
+  catalogIndicesForType,
   FURNITURE_CATALOG,
-  FURNITURE_CATEGORIES,
   FURNITURE_TYPE_CATEGORY,
+  FURNITURE_TYPE_LABEL,
+  furnitureArtFile,
   FurnitureCategoryId,
   FurnitureDef,
+  FurnitureType,
 } from "@/game/furniture";
 import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef } from "@/game/floor";
@@ -2339,16 +2342,32 @@ function EditPanel({
 }) {
   const activeCategoryLabel = EDIT_CATEGORY_TABS.find((c) => c.id === activeCategory)?.label ?? "";
 
-  // índice ORIGINAL em FURNITURE_CATALOG (não o índice dentro da lista
-  // filtrada) -- onSelectCatalog/selectedCatalogIndex usam esse índice
-  // pra saber qual entrada é, então filtrar sem guardar o índice de
-  // origem ia embaralhar qual item cada botão realmente coloca.
-  const furnitureEntriesInCategory =
+  // um TIPO por botão na grade (não mais um por direção -- ver
+  // FURNITURE_TYPE_LABEL/catalogIndicesForType em game/furniture.ts):
+  // escolher o tipo já seleciona a direção "padrão" dele (a primeira em
+  // FURNITURE_ROTATE_ORDER que existir); depois disso o preview embaixo
+  // deixa girar pra trocar de direção sem precisar voltar na grade.
+  const typesInCategory: FurnitureType[] =
     activeCategory === "piso"
       ? []
-      : FURNITURE_CATALOG.map((entry, i) => ({ entry, i })).filter(
-          ({ entry }) => FURNITURE_TYPE_CATEGORY[entry.type] === activeCategory
+      : Array.from(
+          new Set(FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory).map((e) => e.type))
         );
+
+  const selectedEntry = selectedCatalogIndex !== null ? FURNITURE_CATALOG[selectedCatalogIndex] : null;
+
+  // gira o item selecionado dentro das direções cadastradas pro TIPO
+  // dele (ver catalogIndicesForType) -- reusa onSelectCatalog direto
+  // (mesma função que os botões da grade chamam), só troca pra outro
+  // índice do catálogo, então nem precisa de handler novo na cena.
+  function rotateSelected(direction: -1 | 1) {
+    if (!selectedEntry) return;
+    const indices = catalogIndicesForType(selectedEntry.type);
+    if (indices.length <= 1) return;
+    const pos = indices.indexOf(selectedCatalogIndex!);
+    const nextPos = (pos + direction + indices.length) % indices.length;
+    onSelectCatalog(indices[nextPos]);
+  }
 
   return (
     <div className="edit-panel">
@@ -2425,21 +2444,61 @@ function EditPanel({
           </p>
 
           <div className="palette">
-            {furnitureEntriesInCategory.map(({ entry, i }) => (
-              <button
-                key={i}
-                className={selectedCatalogIndex === i ? "palette-btn selected" : "palette-btn"}
-                onClick={() => onSelectCatalog(i)}
-              >
-                {entry.label}
-              </button>
-            ))}
+            {typesInCategory.map((type) => {
+              const defaultIndex = catalogIndicesForType(type)[0];
+              const isSelected = selectedEntry?.type === type;
+              return (
+                <button
+                  key={type}
+                  className={isSelected ? "palette-btn selected" : "palette-btn"}
+                  onClick={() => onSelectCatalog(defaultIndex)}
+                >
+                  {FURNITURE_TYPE_LABEL[type]}
+                </button>
+              );
+            })}
           </div>
-          {furnitureEntriesInCategory.length === 0 && (
+          {typesInCategory.length === 0 && (
             <p className="edit-hint">
               Nenhum modelo de {activeCategoryLabel} ainda -- suba as artes na pasta de origem.
             </p>
           )}
+
+          {selectedEntry &&
+            (() => {
+              const canRotate = catalogIndicesForType(selectedEntry.type).length > 1;
+              const artFile = furnitureArtFile(selectedEntry.type, selectedEntry.facing);
+              return (
+                <div className="item-preview">
+                  <div className="item-preview-row">
+                    <button
+                      className="item-preview-rotate"
+                      onClick={() => rotateSelected(-1)}
+                      disabled={!canRotate}
+                      title="Girar (anti-horário)"
+                    >
+                      <RotateLeftIcon />
+                    </button>
+                    {artFile && (
+                      <img
+                        className="item-preview-img"
+                        src={`/assets/${artFile}`}
+                        alt={FURNITURE_TYPE_LABEL[selectedEntry.type]}
+                      />
+                    )}
+                    <button
+                      className="item-preview-rotate"
+                      onClick={() => rotateSelected(1)}
+                      disabled={!canRotate}
+                      title="Girar (horário)"
+                    >
+                      <RotateRightIcon />
+                    </button>
+                  </div>
+                  <p className="item-preview-label">{FURNITURE_TYPE_LABEL[selectedEntry.type]}</p>
+                </div>
+              );
+            })()}
 
           <h3>Itens colocados ({draftItems.length})</h3>
           {draftItems.length === 0 ? (
@@ -2551,6 +2610,28 @@ function FloorIcon() {
       <rect x="13.3" y="2.5" width="8.2" height="8.2" rx="1.6" />
       <rect x="2.5" y="13.3" width="8.2" height="8.2" rx="1.6" />
       <rect x="13.3" y="13.3" width="8.2" height="8.2" rx="1.6" />
+    </svg>
+  );
+}
+
+// Setas de girar do preview do item selecionado (ver item-preview em
+// EditPanel) -- contorno fino, igual o resto dos ícones "de ação" desse
+// arquivo (BackIcon, PlusIcon etc.), diferente dos ícones chapados da
+// barra de categoria.
+function RotateLeftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M4.5 12a7.5 7.5 0 1 1 2.2 5.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M3 16.5V12h4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function RotateRightIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M19.5 12a7.5 7.5 0 1 0-2.2 5.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M21 16.5V12h-4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
