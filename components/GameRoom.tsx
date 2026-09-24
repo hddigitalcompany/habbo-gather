@@ -2282,24 +2282,22 @@ export default function GameRoom() {
 // com "divisória" (vidro, já existia antes desse pedido) e "piso" no
 // fim. Fica fora do componente por ser uma lista estática (não depende
 // de nenhuma prop) -- os ícones em si ficam definidos logo abaixo do
-// EditPanel. Cada categoria tem uma COR própria (pastilha colorida,
-// glifo branco por cima) em vez de um botão cinza único -- pra ficar
-// mais parecido com a barra de categoria do Gather (chips coloridos,
-// não texto/contorno neutro), que foi o pedido do Douglas depois de
-// ver a primeira versão (ícone de linha simples/monocromático).
+// EditPanel. Fundo uniforme (nada de cor por categoria -- já testamos e
+// o Douglas não gostou) + glifo branco chapado, igual o rail de
+// categoria do Gather; só o item selecionado se destaca (brilho/anel,
+// ver .category-icon-btn.selected no CSS).
 const EDIT_CATEGORY_TABS: {
   id: FurnitureCategoryId | "piso";
   label: string;
-  color: string;
   icon: () => JSX.Element;
 }[] = [
-  { id: "poltrona", label: "Poltrona", color: "#f2994a", icon: ArmchairIcon },
-  { id: "sofa", label: "Sofá", color: "#eb5757", icon: SofaIcon },
-  { id: "mesa", label: "Mesa", color: "#2d9cdb", icon: TableIcon },
-  { id: "planta", label: "Planta", color: "#27ae60", icon: PlantIcon },
-  { id: "computador", label: "Computador", color: "#9b51e0", icon: ComputerIcon },
-  { id: "divisoria", label: "Divisória", color: "#56ccf2", icon: DividerIcon },
-  { id: "piso", label: "Piso", color: "#bb8548", icon: FloorIcon },
+  { id: "poltrona", label: "Poltrona", icon: ArmchairIcon },
+  { id: "sofa", label: "Sofá", icon: SofaIcon },
+  { id: "mesa", label: "Mesa", icon: TableIcon },
+  { id: "planta", label: "Planta", icon: PlantIcon },
+  { id: "computador", label: "Computador", icon: ComputerIcon },
+  { id: "divisoria", label: "Divisória", icon: DividerIcon },
+  { id: "piso", label: "Piso", icon: FloorIcon },
 ];
 
 function EditPanel({
@@ -2363,7 +2361,6 @@ function EditPanel({
             <button
               key={cat.id}
               className={activeCategory === cat.id ? "category-icon-btn selected" : "category-icon-btn"}
-              style={{ background: cat.color }}
               onClick={() => onChangeCategory(cat.id)}
               title={cat.label}
             >
@@ -2479,104 +2476,81 @@ function EditPanel({
 }
 
 // Ícones da barra de categoria do editor de espaço -- glifo BRANCO
-// grosso em cima de uma pastilha colorida (ver EDIT_CATEGORY_TABS,
-// cor por categoria), não miniatura da arte de verdade do item, só um
-// símbolo genérico representando a categoria. Trocado de contorno fino
-// monocromático pra esse formato (mais grosso/chapado, tipo os ícones
-// de item do Gather) depois do Douglas achar a primeira versão
-// (ícone de linha fina, sem cor) feia/pouco clara.
+// CHAPADO (preenchido, sem contorno fino), não miniatura da arte de
+// verdade do item, só um símbolo genérico representando a categoria.
+// Estilo copiado do rail de categoria do próprio Gather (print que o
+// Douglas mandou): forma sólida/bloco simples, sem linha fina nem cor
+// por categoria -- só o fundo do botão que já muda no hover/selecionado
+// (ver .category-icon-btn no CSS).
 function ArmchairIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M6 11V7.5A2.5 2.5 0 0 1 8.5 5h7A2.5 2.5 0 0 1 18 7.5V11"
-        stroke="currentColor"
-        strokeWidth="2.1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect x="4.5" y="11" width="15" height="6.5" rx="1.8" stroke="currentColor" strokeWidth="2.1" />
-      <path
-        d="M4.5 14.5h-1a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1M19.5 14.5h1a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-1"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-      <path d="M6 17.5V20M18 17.5V20" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 4.8A2.8 2.8 0 0 1 8.8 2h6.4A2.8 2.8 0 0 1 18 4.8V10H6V4.8Z" />
+      <rect x="4" y="10" width="16" height="7" rx="2" />
+      <rect x="5.3" y="17.3" width="2.2" height="4" rx="1" />
+      <rect x="16.5" y="17.3" width="2.2" height="4" rx="1" />
     </svg>
   );
 }
 
 function SofaIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M5 12V8.5A1.5 1.5 0 0 1 6.5 7h11A1.5 1.5 0 0 1 19 8.5V12"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect x="2.5" y="12" width="19" height="5.5" rx="1.6" stroke="currentColor" strokeWidth="2" />
-      <path d="M12 12v5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity="0.8" />
-      <path d="M4.5 17.5V20M19.5 17.5V20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 6.3A1.7 1.7 0 0 1 7.7 4.6h8.6A1.7 1.7 0 0 1 18 6.3V11H6V6.3Z" />
+      <rect x="2.3" y="10" width="3.2" height="7.7" rx="1.3" />
+      <rect x="18.5" y="10" width="3.2" height="7.7" rx="1.3" />
+      <rect x="4.3" y="11" width="15.4" height="6.2" rx="1.8" />
+      <rect x="5.5" y="18" width="2.2" height="3.2" rx="1" />
+      <rect x="16.3" y="18" width="2.2" height="3.2" rx="1" />
     </svg>
   );
 }
 
 function TableIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="6" width="18" height="3.5" rx="1.2" stroke="currentColor" strokeWidth="2.1" />
-      <path d="M5.5 9.5V19M18.5 9.5V19" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="2.3" y="5.3" width="19.4" height="3.4" rx="1.3" />
+      <rect x="4.8" y="8.7" width="2.4" height="10.8" rx="1.1" />
+      <rect x="16.8" y="8.7" width="2.4" height="10.8" rx="1.1" />
     </svg>
   );
 }
 
 function PlantIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <path d="M12 20v-8.5" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
-      <path
-        d="M12 13c0-3-2.5-5-6-5 0 3.2 2.3 5.6 6 5Z"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 11.2c0-3.4 2.7-5.7 6.3-5.7 0 3.4-2.5 6-6.3 5.7Z"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinejoin="round"
-      />
-      <path d="M7.5 20h9l-1-6h-7l-1 6Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 10.2c2.9 0 5.2-2.2 5.2-5.5C13.5 4.7 12 6.6 12 9c0-2.4-1.5-4.3-5.2-4.3 0 3.3 2.3 5.5 5.2 5.5Z" />
+      <path d="M8.1 21h7.8l-1.1-8H9.2l-1.1 8Z" />
     </svg>
   );
 }
 
 function ComputerIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="3.5" y="4.5" width="17" height="11.5" rx="1.6" stroke="currentColor" strokeWidth="2.1" />
-      <path d="M9 19.5h6M12 16v3.5" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="2.5" y="3.5" width="19" height="13" rx="2" />
+      <rect x="9.7" y="17.3" width="4.6" height="2.1" rx="0.9" />
+      <rect x="6.8" y="19.8" width="10.4" height="1.9" rx="0.95" />
     </svg>
   );
 }
 
 function DividerIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="5" y="4" width="6.5" height="16" rx="1" stroke="currentColor" strokeWidth="2" />
-      <rect x="12.5" y="4" width="6.5" height="16" rx="1" stroke="currentColor" strokeWidth="2" opacity="0.75" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="4" y="3" width="7.2" height="18" rx="1.3" />
+      <rect x="12.8" y="3" width="7.2" height="18" rx="1.3" opacity="0.6" />
     </svg>
   );
 }
 
 function FloorIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="3.5" y="3.5" width="17" height="17" rx="1.5" stroke="currentColor" strokeWidth="2" />
-      <path d="M12 3.5v17M3.5 12h17" stroke="currentColor" strokeWidth="2" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="2.5" y="2.5" width="8.2" height="8.2" rx="1.6" />
+      <rect x="13.3" y="2.5" width="8.2" height="8.2" rx="1.6" />
+      <rect x="2.5" y="13.3" width="8.2" height="8.2" rx="1.6" />
+      <rect x="13.3" y="13.3" width="8.2" height="8.2" rx="1.6" />
     </svg>
   );
 }

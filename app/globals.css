@@ -1517,24 +1517,26 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* fundo colorido vem por categoria via style inline (ver
-     EDIT_CATEGORY_TABS/cat.color em GameRoom.tsx) -- pastilha colorida
-     + glifo branco por cima, não botão cinza uniforme. */
+  /* fundo uniforme pra todo mundo (nada de cor por categoria -- versão
+     testada e descartada) -- só o item selecionado se destaca, ver
+     .selected abaixo. */
+  background: #2a1d40;
   border: none;
   border-radius: 10px;
-  color: white;
+  color: #cdbdf0;
   cursor: pointer;
   padding: 0;
-  opacity: 0.78;
-  transition: opacity 0.12s, transform 0.12s, box-shadow 0.12s;
+  transition: background 0.12s, color 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 
 .category-icon-btn:hover {
-  opacity: 1;
+  background: #3d2a5c;
+  color: #f5f0ff;
 }
 
 .category-icon-btn.selected {
-  opacity: 1;
+  background: #7c5cff;
+  color: white;
   transform: translateY(-2px);
   box-shadow: 0 0 0 2px #16101f, 0 0 0 4px rgba(255, 255, 255, 0.85);
 }
