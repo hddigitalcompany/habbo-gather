@@ -2,8 +2,8 @@
 // pasta de "arte crua" (ver PISO_SRC_ROOT em scripts/avatarAssetsConfig.mjs)
 // -- bem mais simples que os pipelines de avatar (cabelo/pele/barba/
 // acessório): piso não tem poses (é uma textura PLANA, sem direção) nem
-// cores aninhadas, só DUAS subpastas fixas (a categoria) e, dentro de
-// cada uma, um arquivo de imagem por modelo/padrão:
+// cores aninhadas, só subpastas FIXAS (a categoria) e, dentro de cada
+// uma, um arquivo de imagem por modelo/padrão:
 //
 //   Piso/
 //     Porcelanato/
@@ -12,12 +12,20 @@
 //     Laminado/
 //       Carvalho.png
 //       ...
+//     Natural/
+//       Grama.png
+//       ...
 //
 // O nome do ARQUIVO (sem extensão) vira o rótulo do modelo -- não
 // precisa de subpasta nem de arquivo label.txt/nome.txt como nos outros
-// pipelines. Categorias com nome diferente de "Porcelanato"/"Laminado"
-// são ignoradas (avisa no console) -- são as duas únicas que o editor de
-// piso (ver FLOOR_CATEGORIES em game/floor.ts) sabe mostrar por enquanto.
+// pipelines. Categorias com nome diferente de "Porcelanato"/"Laminado"/
+// "Natural" são ignoradas (avisa no console) -- são as únicas que o
+// editor de piso (ver FLOOR_CATEGORIES em game/floor.ts) sabe mostrar
+// por enquanto. Uma subpasta "_raw" (ou qualquer uma começando com "_")
+// dentro de uma categoria é ignorada também -- útil pra guardar imagem
+// de referência/fonte crua que não deve virar opção no editor (ver
+// Piso/Natural/_raw/ -- não confundir com Piso/_to_delete/, que é o
+// mesmo esquema só que na raiz de Piso, não dentro de uma categoria).
 //
 // Gera public/assets/piso_<categoria>-<slug>.png (recortado/redimensionado
 // pra um quadrado, ver FLOOR_TEXTURE_SIZE) e game/floorCatalog.generated.ts
@@ -43,11 +51,12 @@ const CATALOG_OUT = path.join(ROOT, "game", "floorCatalog.generated.ts");
 // bordas transparentes/vazadas, prefere cortar o excesso a sobrar vazio.
 const FLOOR_TEXTURE_SIZE = 240;
 
-// só essas duas categorias por enquanto (ver FLOOR_CATEGORIES em
+// só essas categorias por enquanto (ver FLOOR_CATEGORIES em
 // game/floor.ts) -- pasta de primeiro nível com outro nome é ignorada.
 const CATEGORY_BY_FOLDER = {
   porcelanato: "porcelanato",
   laminado: "laminado",
+  natural: "natural",
 };
 
 async function buildOne(category, filePath, idLabel, takenIds) {
@@ -82,8 +91,9 @@ async function main() {
   const alreadyHadRoot = existsSync(SRC_ROOT);
   await mkdir(path.join(SRC_ROOT, "Porcelanato"), { recursive: true });
   await mkdir(path.join(SRC_ROOT, "Laminado"), { recursive: true });
+  await mkdir(path.join(SRC_ROOT, "Natural"), { recursive: true });
   if (!alreadyHadRoot) {
-    console.log(`Criei ${SRC_ROOT} com as pastas Porcelanato/ e Laminado/ -- solte um arquivo de imagem por modelo aí dentro.`);
+    console.log(`Criei ${SRC_ROOT} com as pastas Porcelanato/, Laminado/ e Natural/ -- solte um arquivo de imagem por modelo aí dentro.`);
   }
   await mkdir(OUT_DIR, { recursive: true });
 

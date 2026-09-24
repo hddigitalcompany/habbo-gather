@@ -9,11 +9,12 @@ import { tileToWorld } from "./grid";
  * create() em MainScene.ts) -- pintar um tile aqui cobre só aquele
  * quadrado com o modelo escolhido, o resto continua com o fundo padrão.
  */
-export type FloorCategory = "porcelanato" | "laminado";
+export type FloorCategory = "porcelanato" | "laminado" | "natural";
 
 export const FLOOR_CATEGORIES: { id: FloorCategory; label: string }[] = [
   { id: "porcelanato", label: "Porcelanato" },
   { id: "laminado", label: "Laminado" },
+  { id: "natural", label: "Natural" },
 ];
 
 export interface FloorCatalogEntry {
