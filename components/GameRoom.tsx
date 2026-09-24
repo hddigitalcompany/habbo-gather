@@ -10,6 +10,7 @@ import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
 import ItemEditor from "@/components/ItemEditor";
+import SettingsPanel from "@/components/SettingsPanel";
 import {
   catalogEntryGroupKey,
   catalogIndicesForGroup,
@@ -363,13 +364,17 @@ const PROXIMITY_DISCONNECT = 220;
 // o zoom "pulando" longe demais a cada tique.
 const WHEEL_ZOOM_STEP = 0.12;
 
-// ferramenta "Editar espaço" (móveis + piso) é só de uso interno do
-// Douglas -- gera código pra colar à mão em furniture.ts/floor.ts, não
-// salva nada de verdade, e o cliente final NUNCA pode ver ou acessar
-// isso. Next.js troca process.env.NODE_ENV pelo valor real ("production"
-// num `next build`/deploy, "development" num `next dev`) em tempo de
-// build, inclusive no bundle do cliente -- então isso já esconde o botão
-// e o painel sozinho em produção, sem precisar de nenhuma config extra.
+// era ferramenta só de DEV (gerava código pra colar à mão em
+// furniture.ts/floor.ts, não salvava nada de verdade) -- hoje móveis E
+// ajuste de assento SALVAM DE VERDADE (ver GET/POST /room/furniture
+// acima), então esconder isso em produção sem exceção deixava até o
+// DONO da sala sem conseguir editar o próprio espaço fora do `npm run
+// dev` (bug provável por trás de "cliquei em editar espaço e não abriu
+// a aba dos móveis" -- ver canEditRoom mais abaixo, que agora libera
+// pro dono também fora de dev). Continua ligado sozinho em dev (não
+// depende de ser dono, facilita testar) e continua escondido pra
+// membro/visitante em qualquer ambiente -- só o cliente final comum
+// nunca vê isso, não o Douglas.
 const IS_ROOM_EDITOR_ENABLED = process.env.NODE_ENV !== "production";
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
@@ -475,6 +480,22 @@ export default function GameRoom({
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [screenOn, setScreenOn] = useState(false);
+
+  // --- Configurações (ver SettingsPanel/botão de engrenagem na av-bar)
+  // -- deviceId ESCOLHIDO de cada aparelho ("" = padrão do navegador,
+  // não mexeu ainda), e o volume: "som do espaço" é um multiplicador
+  // GERAL (afeta todo mundo de uma vez, pedido do Douglas), remoteVolumes
+  // é o ajuste fino POR PESSOA (id de dentro de remoteStreams -> 0..1)
+  // -- os dois se multiplicam na hora de aplicar (ver RemoteVideoTile
+  // mais abaixo). Nenhum dos dois persiste entre sessões por enquanto
+  // (reseta ao recarregar a página).
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedMicId, setSelectedMicId] = useState("");
+  const [selectedCamId, setSelectedCamId] = useState("");
+  const [selectedSpeakerId, setSelectedSpeakerId] = useState("");
+  const [spaceVolume, setSpaceVolume] = useState(1);
+  const [remoteVolumes, setRemoteVolumes] = useState<Record<string, number>>({});
+
   const [status, setStatus] = useState("Conectando...");
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteMeta, setRemoteMeta] = useState<
@@ -678,6 +699,10 @@ export default function GameRoom({
   // configuração aparece (só "owner"); presenceCounts é só decorativo
   // (contador na tela), aparece pra todo mundo. ---
   const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
+  // libera "Editar espaço" (ver IS_ROOM_EDITOR_ENABLED acima) sempre em
+  // dev, e em qualquer ambiente pro DONO da sala -- membro/visitante
+  // nunca, em lugar nenhum.
+  const canEditRoom = IS_ROOM_EDITOR_ENABLED || roomRole === "owner";
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
 
@@ -1669,6 +1694,86 @@ export default function GameRoom({
     setCamOn((v) => !v);
   }
 
+  // --- troca de aparelho (mic/câmera), ver SettingsPanel > "Áudio e
+  // vídeo" -- pedido do Douglas: "de onde quer puxar o audio, video".
+  // Abre um getUserMedia NOVO só com o deviceId escolhido, troca a
+  // track dentro do MESMO MediaStream de sempre (localStreamRef -- pra
+  // não perder a referência que o resto do código já guarda) e manda a
+  // track nova pra TODOS os peers já conectados via replaceTrack (mesmo
+  // truque do toggleScreenShare acima, sem precisar renegociar nada) --
+  // nos DOIS meshes (peersRef da sala por proximidade E callPeersRef da
+  // chamada de chat, que reusam o mesmo localStreamRef).
+  async function switchMicDevice(deviceId: string) {
+    if (!deviceId || deviceId === selectedMicId) return;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+      const newTrack = fresh.getAudioTracks()[0];
+      if (!newTrack) return;
+      newTrack.enabled = micOn;
+      const stream = localStreamRef.current;
+      const oldTrack = stream?.getAudioTracks()[0];
+      if (stream && oldTrack) {
+        stream.removeTrack(oldTrack);
+        oldTrack.stop();
+        stream.addTrack(newTrack);
+      } else {
+        localStreamRef.current = fresh;
+      }
+      [...peersRef.current.values(), ...callPeersRef.current.values()].forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        sender?.replaceTrack(newTrack);
+      });
+      setSelectedMicId(deviceId);
+    } catch (e) {
+      console.warn("Não deu pra trocar de microfone", e);
+    }
+  }
+
+  async function switchCamDevice(deviceId: string) {
+    if (!deviceId || deviceId === selectedCamId) return;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+      const newTrack = fresh.getVideoTracks()[0];
+      if (!newTrack) return;
+      newTrack.enabled = camOn;
+      const stream = localStreamRef.current;
+      const oldTrack = stream?.getVideoTracks()[0];
+      if (stream && oldTrack) {
+        stream.removeTrack(oldTrack);
+        oldTrack.stop();
+        stream.addTrack(newTrack);
+      } else {
+        localStreamRef.current = fresh;
+      }
+      // com tela compartilhada agora, o sender de vídeo tá ocupado com a
+      // tela (ver toggleScreenShare) -- não mexe nele aqui, a câmera nova
+      // só assume quando a pessoa PARAR o compartilhamento
+      // (stopScreenShare já pega a track atual de localStreamRef sozinho).
+      if (!screenOn) {
+        [...peersRef.current.values(), ...callPeersRef.current.values()].forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          sender?.replaceTrack(newTrack);
+        });
+        if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      setSelectedCamId(deviceId);
+    } catch (e) {
+      console.warn("Não deu pra trocar de câmera", e);
+    }
+  }
+
+  // Saída de áudio (alto-falante/fone) -- diferente de mic/câmera, não
+  // precisa de getUserMedia nenhum: é só QUAL DISPOSITIVO toca o áudio
+  // que já tá chegando, aplicado por elemento <video> (ver setSinkId em
+  // RemoteVideoTile). Só guarda a escolha aqui.
+  function switchSpeakerDevice(deviceId: string) {
+    setSelectedSpeakerId(deviceId);
+  }
+
+  function changeRemoteVolume(id: string, volume: number) {
+    setRemoteVolumes((prev) => ({ ...prev, [id]: volume }));
+  }
+
   // Compartilhar tela: em vez de mandar uma track de vídeo A MAIS (o que
   // exigiria renegociar a chamada com cada peer, ver createPeerConnection
   // -- essa base não trata "negotiationneeded"), TROCA a track de vídeo
@@ -2110,10 +2215,10 @@ export default function GameRoom({
   }
 
   function toggleEditMode() {
-    // defensivo -- o botão que chama isso já fica escondido fora de dev
-    // (ver IS_ROOM_EDITOR_ENABLED), isso é só pra garantir que nada mais
-    // consiga ligar o modo de edição em produção.
-    if (!IS_ROOM_EDITOR_ENABLED) return;
+    // defensivo -- o botão que chama isso já fica escondido pra quem não
+    // pode (ver canEditRoom), isso é só pra garantir que nada mais
+    // consiga ligar o modo de edição pra membro/visitante.
+    if (!canEditRoom) return;
     const next = !editMode;
     setEditMode(next);
     setSelectedCatalogIndex(null);
@@ -2762,7 +2867,13 @@ export default function GameRoom({
 
         <div className="remote-videos">
           {Object.entries(remoteStreams).map(([id, stream]) => (
-            <RemoteVideoTile key={id} stream={stream} meta={remoteMeta[id]} />
+            <RemoteVideoTile
+              key={id}
+              stream={stream}
+              meta={remoteMeta[id]}
+              volume={spaceVolume * (remoteVolumes[id] ?? 1)}
+              sinkId={selectedSpeakerId || undefined}
+            />
           ))}
         </div>
 
@@ -2796,14 +2907,14 @@ export default function GameRoom({
               <BoxIcon />
             </button>
           )}
-          {IS_ROOM_EDITOR_ENABLED && (
+          {canEditRoom && (
             <button
               className={editMode ? "av-btn on" : "av-btn"}
               onClick={toggleEditMode}
               aria-label={editMode ? "Sair da edição" : "Editar espaço"}
               data-tooltip={editMode ? "Sair da edição" : "Editar espaço"}
             >
-              <WrenchIcon />
+              <FurnitureBrushIcon />
             </button>
           )}
         </div>
@@ -2899,10 +3010,36 @@ export default function GameRoom({
           >
             <AgendaIcon />
           </button>
+          <button
+            className={settingsOpen ? "av-btn on" : "av-btn"}
+            onClick={() => setSettingsOpen((v) => !v)}
+            aria-label={settingsOpen ? "Fechar configurações" : "Configurações"}
+            data-tooltip={settingsOpen ? "Fechar configurações" : "Configurações"}
+          >
+            <GearIcon />
+          </button>
         </div>
 
         {chatOpen && chatPinMode !== "side" && <ChatDrawer {...chatDrawerProps} />}
         {agendaOpen && <AgendaDrawer {...agendaDrawerProps} />}
+        {settingsOpen && (
+          <SettingsPanel
+            onClose={() => setSettingsOpen(false)}
+            micOn={micOn}
+            camOn={camOn}
+            selectedMicId={selectedMicId}
+            selectedCamId={selectedCamId}
+            selectedSpeakerId={selectedSpeakerId}
+            onSelectMic={switchMicDevice}
+            onSelectCam={switchCamDevice}
+            onSelectSpeaker={switchSpeakerDevice}
+            spaceVolume={spaceVolume}
+            onChangeSpaceVolume={setSpaceVolume}
+            remoteUsers={Object.keys(remoteStreams).map((id) => ({ id, name: remoteMeta[id]?.name || "Jogador" }))}
+            remoteVolumes={remoteVolumes}
+            onChangeRemoteVolume={changeRemoteVolume}
+          />
+        )}
         <input
           ref={chatFileInputRef}
           type="file"
@@ -2923,7 +3060,7 @@ export default function GameRoom({
         />
       </div>
 
-      {IS_ROOM_EDITOR_ENABLED && editMode && (
+      {canEditRoom && editMode && (
         <EditPanel
           activeCategory={activeCategory}
           onChangeCategory={changeCategory}
@@ -2994,8 +3131,8 @@ const EDIT_CATEGORY_TABS: {
   { id: "area", label: "Área", icon: AreaIcon },
   // "Assento": ajuste fino (setas) de onde o boneco senta em cada
   // MODELO de móvel sentável -- ver resolveSeatOffset em
-  // game/furniture.ts. Só existe aqui dentro do editor dev (mesma trava
-  // de sempre, IS_ROOM_EDITOR_ENABLED), não é uma categoria de móvel de
+  // game/furniture.ts. Só existe aqui dentro do "Editar espaço" (mesma
+  // trava de sempre, canEditRoom), não é uma categoria de móvel de
   // verdade (não tem paleta pra colocar item nenhum).
   { id: "assento", label: "Assento", icon: SeatTuneIcon },
 ];
@@ -4298,13 +4435,37 @@ function UsersIcon() {
   );
 }
 
-function WrenchIcon() {
+// pedido do Douglas: "editar espaco tem que ter icone de mobi+pincel"
+// -- a ferramenta "Editar espaço" mexe em DUAS coisas (arrastar móvel +
+// pintar piso/área), esse ícone junta uma poltrona pequena (canto
+// superior-esquerdo) com um pincel cruzando por cima (canto
+// inferior-direito) pra ficar claro que não é só "configurações"
+// (ícone de engrenagem, ver GearIcon) nem "cadastrar item novo" (ver
+// BoxIcon/"Itens" abaixo) -- os três apareciam parecidos demais só de
+// ícone genérico.
+function FurnitureBrushIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
       <path
-        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94Z"
+        d="M5 9V6.2A1.7 1.7 0 0 1 6.7 4.5h3.6A1.7 1.7 0 0 1 12 6.2V9"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x="3.5" y="9" width="10" height="4.2" rx="1.3" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4.3 13.2v2.3M12.7 13.2v2.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M20.5 6.8 13.8 13.5a1.6 1.6 0 0 0 2.3 2.3l6.7-6.7"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.8 13.5c-1 .6-1.8 1.6-1.9 3 1.4-.1 2.4-.9 3-1.9"
+        stroke="currentColor"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -4409,18 +4570,49 @@ function ScreenIcon({ active }: { active: boolean }) {
   );
 }
 
+// setSinkId (escolher a SAÍDA de áudio, ver "Configurações" >
+// "Áudio e vídeo") ainda não tá no lib.dom.d.ts padrão do TypeScript
+// (só Chromium implementa de verdade -- Safari/Firefox não têm) -- essa
+// interface só descreve o pedacinho que a gente usa, pra não precisar
+// de "as any" no meio do componente.
+type VideoElementWithSink = HTMLVideoElement & {
+  setSinkId?: (deviceId: string) => Promise<void>;
+};
+
 function RemoteVideoTile({
   stream,
   meta,
+  volume,
+  sinkId,
 }: {
   stream: MediaStream;
   meta?: { name: string; distance: number };
+  // volume FINAL já calculado (som do espaço × volume da pessoa, ver
+  // GameRoom -- esse componente só aplica, não faz a conta).
+  volume: number;
+  // deviceId do alto-falante/fone escolhido em "Configurações" -- "" ou
+  // undefined = padrão do sistema (não mexe em nada).
+  sinkId?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
+
+  useEffect(() => {
+    if (ref.current) ref.current.volume = Math.max(0, Math.min(1, volume));
+  }, [volume]);
+
+  useEffect(() => {
+    const el = ref.current as VideoElementWithSink | null;
+    if (el && sinkId && typeof el.setSinkId === "function") {
+      el.setSinkId(sinkId).catch(() => {
+        // navegador recusou (dispositivo sumiu, sem permissão etc) --
+        // sem tratamento especial, só segue tocando na saída padrão.
+      });
+    }
+  }, [sinkId]);
 
   const distance = meta?.distance ?? 0;
   const opacity = Math.max(0.35, 1 - distance / PROXIMITY_DISCONNECT);
@@ -5585,6 +5777,23 @@ function ChatIcon() {
         stroke="currentColor"
         strokeWidth="1.7"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Ícone do botão "Configurações" (ver SettingsPanel) -- engrenagem
+// simples (círculo + 8 "dentes"), mesmo estilo contorno dos outros
+// ícones da av-bar.
+function GearIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
       />
     </svg>
   );

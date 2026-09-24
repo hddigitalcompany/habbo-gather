@@ -15,8 +15,28 @@
 // gravar.
 import { useEffect, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { CUSTOM_ITEM_TARGET_WIDTH } from "@/game/furniture";
 
 type CategoryId = "poltrona" | "divisoria" | "sofa" | "mesa" | "planta" | "computador";
+
+// múltiplo de folga acima do tamanho que o item aparece no jogo (ver
+// CUSTOM_ITEM_TARGET_WIDTH em game/furniture.ts) -- pedido do Douglas:
+// gera no ChatGPT, monta no Canva, redimensiona pro tamanho final e só
+// depois sobe aqui. Isso custava um tanto de qualidade nesse
+// redimensionamento manual (e ida-e-volta pra eu ajudar a acertar o
+// tamanho), e além disso ele notou que de LONGE (zoom afastado) o móvel
+// borra mesmo de perto tendo qualidade -- isso é o efeito clássico de
+// encolher demais uma textura no WebGL sem ela ter uma versão
+// intermediária: quanto maior a diferença entre o tamanho do arquivo e o
+// tamanho exibido, mais a GPU "erra a média" dos pixels ao amostrar pra
+// baixo, e borra. Por isso a imagem AGORA é redimensionada aqui no
+// navegador (resizeImageForUpload, logo abaixo) pra um teto de ~3x o
+// tamanho final -- folga o suficiente pra ficar nítido em qualquer
+// zoom (a mesma técnica de "arte em alta, exibida menor" que sites/apps
+// bons usam pra tela Retina), sem sobrar tanta diferença que borre. A
+// pessoa não precisa mais encolher NADA à mão -- sobe do jeito que
+// gerou/montou, em qualquer resolução, e esse teto só corta o excesso.
+const UPLOAD_SUPERSAMPLE = 3;
 
 const CATEGORIES: { id: CategoryId; label: string }[] = [
   { id: "poltrona", label: "Poltrona" },
@@ -42,6 +62,48 @@ type CustomItemRow = {
   category: CategoryId;
   art: Partial<Record<"down" | "left" | "right" | "up", string>>;
 };
+
+/**
+ * Encolhe (só encolhe, nunca aumenta) a imagem pra no máximo maxWidth
+ * de largura ANTES de subir pro Storage -- ver UPLOAD_SUPERSAMPLE acima
+ * pro porquê. Usa createImageBitmap + canvas (2D, com suavização "high")
+ * em vez de mandar o arquivo cru: mais barato que mandar o arquivo
+ * gigante e o navegador aguenta tranquilo (é só um redimensionamento,
+ * roda na hora, sem travar a tela). Se alguma etapa falhar (formato
+ * exótico, navegador antigo) devolve o arquivo ORIGINAL sem esse corte
+ * -- upload continua funcionando, só sem o benefício do teto de tamanho.
+ */
+async function resizeImageForUpload(file: File, maxWidth: number): Promise<File> {
+  if (typeof createImageBitmap !== "function") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    if (bitmap.width <= maxWidth) {
+      bitmap.close?.();
+      return file;
+    }
+    const scale = maxWidth / bitmap.width;
+    const targetW = Math.max(1, Math.round(bitmap.width * scale));
+    const targetH = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    bitmap.close?.();
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" });
+  } catch (e) {
+    console.warn("Não deu pra redimensionar a imagem antes de subir, mandando original", e);
+    return file;
+  }
+}
 
 function slugify(text: string): string {
   return (
@@ -107,10 +169,16 @@ export default function ItemEditor({
     setSubmitting(true);
     try {
       const slug = slugify(label);
+      // teto de resolução com folga (ver UPLOAD_SUPERSAMPLE/
+      // resizeImageForUpload acima) -- calculado UMA vez por categoria
+      // escolhida, as 4 direções usam o mesmo teto (a peça tem
+      // proporções parecidas de qualquer ângulo).
+      const maxUploadWidth = CUSTOM_ITEM_TARGET_WIDTH[category] * UPLOAD_SUPERSAMPLE;
       const art: Record<string, string> = {};
       for (const field of DIRECTION_FIELDS) {
-        const file = files[field.key];
-        if (!file) continue;
+        const rawFile = files[field.key];
+        if (!rawFile) continue;
+        const file = await resizeImageForUpload(rawFile, maxUploadWidth);
         const ext = file.name.split(".").pop() || "png";
         const path = `${category}/${slug}-${Date.now()}-${field.key}.${ext}`;
         const { error: uploadError } = await supabase.storage.from("room-items").upload(path, file, {
@@ -187,6 +255,10 @@ export default function ItemEditor({
               </option>
             ))}
           </select>
+
+          <p className="settings-hint">
+            Pode subir a imagem na qualidade original (do ChatGPT/Canva, sem redimensionar à mão) -- o jogo encolhe sozinho pro tamanho certo.
+          </p>
 
           <div className="items-panel-uploads">
             {DIRECTION_FIELDS.map((field) => (

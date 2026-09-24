@@ -8,6 +8,8 @@ import {
   FurnitureCatalogEntry,
   FURNITURE_ART,
   FURNITURE_MODELS,
+  FURNITURE_TYPE_CATEGORY,
+  CUSTOM_ITEM_TARGET_WIDTH,
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
   furnitureWorldPos,
@@ -15,6 +17,7 @@ import {
   furnitureVariantTextureKey,
   furnitureTextureKeyFor,
   furnitureBlocksMovement,
+  furnitureModelById,
   isSittableFurnitureType,
   blockingFurnitureAt,
   resolveSeatOffset,
@@ -301,7 +304,7 @@ const GAME_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-se
 // bolinha de status (foco/ausente/online) ao lado do nome, dentro do
 // jogo -- a COR vem sempre de fora (GameRoom.tsx, ver STATUS_COLORS),
 // pra não duplicar a paleta aqui; a cena só sabe desenhar um círculo.
-const STATUS_DOT_RADIUS = 4;
+const STATUS_DOT_RADIUS = 3.5;
 const STATUS_DOT_GAP = 5;
 
 // plaquinha de nome (dot + texto) -- desenhada como uma "pill" de
@@ -310,10 +313,14 @@ const STATUS_DOT_GAP = 5;
 // parecer um card de verdade e não uma caixa de debug. Paleta igual ao
 // resto da UI (ver .seat-tuning-panel/.color-picker-label em
 // globals.css -- roxo bem escuro, borda um tom mais claro, texto
-// lavanda clarinho em vez de branco puro).
-const NAMEPLATE_PAD_X = 8;
-const NAMEPLATE_PAD_Y = 4;
-const NAMEPLATE_RADIUS = 9;
+// lavanda clarinho em vez de branco puro). Tamanho ajustado pra ficar
+// mais parecido com o do Gather de verdade (print que o Douglas
+// mandou) -- plaquinha bem discreta/fina, não um card grande chamando
+// atenção -- por isso fonte e preenchimento um pouco menores do que a
+// primeira versão.
+const NAMEPLATE_PAD_X = 7;
+const NAMEPLATE_PAD_Y = 3;
+const NAMEPLATE_RADIUS = 8;
 const NAMEPLATE_BG_COLOR = 0x120a1f;
 const NAMEPLATE_BG_ALPHA = 0.88;
 const NAMEPLATE_BORDER_COLOR = 0x3a2b57;
@@ -822,11 +829,36 @@ export default class MainScene extends Phaser.Scene {
     // origem embaixo-centro, igual ao avatar: a posição do móvel é o
     // pontinho onde ele "toca o chão", alinhado ao tile dele
     const pos = furnitureWorldPos(f);
-    return this.add
-      .image(pos.x, pos.y, furnitureTextureKeyFor(f))
+    const key = furnitureTextureKeyFor(f);
+    const image = this.add
+      .image(pos.x, pos.y, key)
       .setOrigin(0.5, 1)
       .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
       .setAlpha(f.transparent ? GLASS_ALPHA : 1);
+
+    // item CUSTOM (Editor de Itens, ver FurnitureModelDef.custom em
+    // game/furniture.ts) -- pedido do Douglas: subir a imagem na
+    // qualidade/resolução ORIGINAL (sem precisar redimensionar antes no
+    // Canva) e deixar o JOGO encolher só a EXIBIÇÃO. setDisplaySize muda
+    // só o tamanho na TELA -- a textura de verdade, em resolução cheia,
+    // continua carregada, então o encolhimento é feito pela GPU
+    // (WebGL/bilinear) na hora de desenhar, sem perder qualidade
+    // igual perderia redimensionando o ARQUIVO fora daqui. Item "de
+    // fábrica" (sem modelo custom) não entra aqui -- a arte dele já foi
+    // recortada certinha pelo script (scripts/syncFurnitureAssets.mjs),
+    // desenha no tamanho nativo de sempre.
+    const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+    if (model?.custom) {
+      const source = this.textures.get(key).getSourceImage() as { width?: number; height?: number };
+      const nativeW = source.width || image.width;
+      const nativeH = source.height || image.height;
+      const targetWidth = CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 150;
+      if (nativeW > 0 && nativeH > 0) {
+        image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
+      }
+    }
+
+    return image;
   }
 
   /**
@@ -1003,7 +1035,7 @@ export default class MainScene extends Phaser.Scene {
     // cada peça.
     const label = this.add
       .text(0, 0, name, {
-        fontSize: "11px",
+        fontSize: "10px",
         color: "#f1ecff",
         fontFamily: GAME_FONT_FAMILY,
         resolution: NAMEPLATE_TEXT_RESOLUTION,

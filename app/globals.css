@@ -3142,3 +3142,90 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Painel de "Configurações" (ver SettingsPanel.tsx) -- reaproveita todo
+   o resto do .items-panel-* (header/close/section/input, ver acima),
+   só mais LARGO (tem select de aparelho + slider por pessoa, não cabe
+   nos 400px padrão) e com as peças novas abaixo (campo de select com
+   rótulo, linha de slider, lista de atalhos). */
+.settings-panel {
+  width: 460px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #cfc4e6;
+  margin-bottom: 8px;
+}
+
+.settings-field:last-child {
+  margin-bottom: 0;
+}
+
+.settings-hint {
+  color: #9d90bb;
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.settings-slider-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(90px, 2fr) 40px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #cfc4e6;
+  margin-bottom: 8px;
+}
+
+.settings-slider-row:last-child {
+  margin-bottom: 0;
+}
+
+.settings-slider-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-slider-row input[type="range"] {
+  width: 100%;
+  accent-color: #7c5cff;
+}
+
+.settings-slider-value {
+  text-align: right;
+  color: #9d90bb;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-shortcut-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-shortcut-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #f5f0ff;
+}
+
+.settings-shortcut-keys {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #cfc4e6;
+  white-space: nowrap;
+}

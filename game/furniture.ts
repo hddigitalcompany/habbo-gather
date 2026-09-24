@@ -166,7 +166,39 @@ export interface FurnitureModelDef {
   type: FurnitureType;
   label: string;
   colors: FurnitureModelColorOption[];
+  /** true só pros modelos CUSTOM (ver registerCustomFurnitureModels
+   * abaixo) -- marca que a imagem foi enviada pelo Editor de Itens
+   * (upload direto do navegador, sem passar pela pasta local/
+   * scripts/syncFurnitureAssets.mjs) e por isso pode vir em QUALQUER
+   * resolução nativa (pedido do Douglas: subir a arte na qualidade
+   * original, sem precisar redimensionar antes -- ver
+   * CUSTOM_ITEM_TARGET_WIDTH e o uso em addFurnitureSprite,
+   * MainScene.ts, que encolhe só a EXIBIÇÃO pro tamanho certo, mantendo
+   * o arquivo original intacto no Storage). Modelo gerado da pasta local
+   * (GENERATED_FURNITURE_MODELS) nunca tem isso -- a arte dele já foi
+   * recortada/dimensionada certinha pelo script, não precisa de ajuste
+   * nenhum na exibição. */
+  custom?: boolean;
 }
+
+/**
+ * Largura ALVO (px, na tela do jogo) de um item CUSTOM por categoria --
+ * só usada quando o modelo é custom (ver FurnitureModelDef.custom
+ * acima). Calibrada pela mobília "de fábrica" já existente (poltrona
+ * tem uns 150-175px de largura nativa, ver comentário do TILE em
+ * game/grid.ts) -- sofá/mesa um pouco mais largos (peça maior na vida
+ * real), planta/computador um pouco menores. A ALTURA acompanha
+ * proporcionalmente (mantém a proporção da imagem original, ver
+ * addFurnitureSprite) -- só a largura é fixada aqui.
+ */
+export const CUSTOM_ITEM_TARGET_WIDTH: Record<FurnitureCategoryId, number> = {
+  poltrona: 160,
+  sofa: 260,
+  mesa: 180,
+  planta: 90,
+  computador: 100,
+  divisoria: 130,
+};
 
 // modelos gerados automaticamente a partir da pasta de origem (ver
 // scripts/avatarAssetsConfig.mjs/syncFurnitureAssets.mjs, roda sozinho
@@ -452,7 +484,13 @@ export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
 export function registerCustomFurnitureModels(models: FurnitureModelDef[]) {
   for (const model of models) {
     if (FURNITURE_MODELS.some((m) => m.id === model.id)) continue;
-    FURNITURE_MODELS.push(model);
+    // custom:true SEMPRE, não importa o que o chamador mandou -- essa
+    // função só existe pra registrar item vindo do Editor de Itens, então
+    // por definição é sempre custom (ver CUSTOM_ITEM_TARGET_WIDTH/
+    // addFurnitureSprite em MainScene.ts, que dependem dessa flag pra
+    // saber quando encolher a exibição de uma imagem enviada em
+    // qualidade/resolução alta).
+    FURNITURE_MODELS.push({ ...model, custom: true });
     const defaultColor = model.colors[0];
     if (!defaultColor) continue;
     for (const facing of FURNITURE_ROTATE_ORDER) {
