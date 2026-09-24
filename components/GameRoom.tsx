@@ -537,6 +537,11 @@ export default function GameRoom({
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const connectedPeersRef = useRef<Set<string>>(new Set());
+  // último valor REALMENTE aplicado em setRemoteMeta (ver checkProximity
+  // mais abaixo) -- usado só pra decidir se um novo "move" recebido
+  // precisa mesmo disparar um re-render, ou se é ruído (nome/distância
+  // arredondada iguais ao que já tava lá).
+  const lastRemoteMetaRef = useRef<Record<string, { name: string; distance: number }>>({});
   const selfIdRef = useRef<string>("");
   // mesh PARALELO da chamada de chat (ver comentário grande na função
   // sendCallSignal lá embaixo) -- connectionId -> RTCPeerConnection,
@@ -1420,10 +1425,18 @@ export default function GameRoom({
       const { x: lx, y: ly } = scene.getLocalPosition();
       const localZone = scene.areaZoneAt(lx, ly);
       const metaUpdate: Record<string, { name: string; distance: number }> = {};
+      // dist ARREDONDADA (não crua) -- é só o que a UI mostra/usa (ver
+      // RemoteVideoTile), então um passo de 1px de diferença não deveria
+      // contar como "mudou de verdade" (ver comparação com
+      // lastRemoteMetaRef logo abaixo).
+      let changed = Object.keys(lastRemoteMetaRef.current).length !== remotePlayersRef.current.size;
 
       remotePlayersRef.current.forEach((p, id) => {
         const dist = Math.hypot(p.x - lx, p.y - ly);
-        metaUpdate[id] = { name: p.name, distance: dist };
+        const roundedDist = Math.round(dist);
+        metaUpdate[id] = { name: p.name, distance: roundedDist };
+        const prev = lastRemoteMetaRef.current[id];
+        if (!prev || prev.name !== p.name || prev.distance !== roundedDist) changed = true;
 
         const remoteZone = scene.areaZoneAt(p.x, p.y);
         const eitherInArea = localZone !== null || remoteZone !== null;
@@ -1441,7 +1454,21 @@ export default function GameRoom({
         }
       });
 
-      setRemoteMeta(metaUpdate);
+      // pedido de performance (Douglas: "abri uma guia anônima e loguei
+      // em outro lá ficou BEM travado") -- checkProximity roda a cada
+      // "move" recebido de CADA jogador remoto (até 20x/s por pessoa, ver
+      // reportPosition em MainScene.ts), e setRemoteMeta(objeto novo)
+      // incondicional aqui forçava um re-render da árvore INTEIRA do
+      // GameRoom (componente gigante: chat, painéis de edição, criador
+      // de avatar...) a cada uma dessas mensagens, MESMO quando o valor
+      // exibido não mudava de verdade. Com 2+ jogadores por perto isso
+      // vira uma tempestade de re-renders somada aos custos de
+      // Phaser+WebRTC -- só chama setState quando algo realmente mudou
+      // (nome ou distância arredondada).
+      if (changed) {
+        lastRemoteMetaRef.current = metaUpdate;
+        setRemoteMeta(metaUpdate);
+      }
     }
 
     function handlePartyMessage(data: any) {
