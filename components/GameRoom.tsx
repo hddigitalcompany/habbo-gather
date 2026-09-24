@@ -21,6 +21,7 @@ import {
   FURNITURE_TYPE_CATEGORY,
   furnitureArtFile,
   furnitureColorArtFile,
+  furnitureModelById,
   furnitureVariantTextureKey,
   registerCustomFurnitureModels,
   FurnitureCategoryId,
@@ -310,6 +311,22 @@ type SavedAvatar = {
   accessoryColorId?: string | null;
   outfitId?: string;
 };
+
+// arte de móvel vem de dois lugares bem diferentes: um arquivo "de
+// fábrica" em public/assets/ (ver FURNITURE_ART/GENERATED_FURNITURE_MODELS,
+// game/furniture.ts -- só o NOME do arquivo, precisa do prefixo
+// "/assets/" pra virar um caminho de verdade) ou uma URL PÚBLICA
+// COMPLETA do Supabase Storage (item CUSTOM, cadastrado pelo Editor de
+// Itens -- ver registerCustomFurnitureModels) -- essa já é a URL
+// inteira, prefixar "/assets/" na frente dela vira um caminho relativo
+// que não existe em lugar nenhum ("/assets/https://..."), quebrando a
+// miniatura/preview de QUALQUER item custom no catálogo. Esse helper
+// decide certo pros dois casos -- usado em todo lugar que pode
+// renderizar arte de item custom (palette-btn/item-preview-img/
+// color-swatch, ver EditPanel mais abaixo).
+function furnitureAssetUrl(file: string): string {
+  return file.startsWith("http") ? file : `/assets/${file}`;
+}
 
 function loadSavedAvatar(): SavedAvatar {
   if (typeof window === "undefined") return {};
@@ -770,10 +787,13 @@ export default function GameRoom({
    * de cada um na cena (loadCustomFurnitureTextures, ver
    * MainScene.ts). Chamado uma vez quando a cena fica pronta (ver
    * init() no useEffect do Phaser.Game) e de novo toda vez que o
-   * Editor de Itens cadastra/apaga algo (ver onItemsChanged no
+   * Editor de Itens cadastra/EDITA/apaga algo (ver onItemsChanged no
    * ItemEditor renderizado mais abaixo) -- registerCustomFurnitureModels
-   * já é idempotente (ignora id repetido), então rodar de novo não
-   * duplica nada.
+   * agora faz UPSERT (ver comentário lá): item novo entra normal, item
+   * EDITADO substitui o registro antigo -- só que a textura em cache e
+   * os sprites já desenhados na tela não sabem disso sozinhos, por isso
+   * os passos extra abaixo (removeFurnitureTextures/refreshFurnitureModel)
+   * só pros ids que vieram como "atualizados".
    */
   async function fetchAndRegisterCustomFurniture(): Promise<void> {
     const supabase = getSupabaseBrowserClient();
@@ -781,7 +801,7 @@ export default function GameRoom({
     try {
       const { data, error } = await supabase
         .from("room_items")
-        .select("id, label, category, art, display_width");
+        .select("id, label, category, art, display_width, icon_url, offset_x, offset_y");
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
         (row: {
@@ -790,6 +810,9 @@ export default function GameRoom({
           category: string;
           art: Partial<Record<Direction, string>>;
           display_width: number | null;
+          icon_url: string | null;
+          offset_x: number | null;
+          offset_y: number | null;
         }) => ({
           id: row.id,
           type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
@@ -800,9 +823,12 @@ export default function GameRoom({
           // opção existir, cai no fallback por categoria (ver
           // addFurnitureSprite, MainScene.ts).
           displayWidth: typeof row.display_width === "number" ? row.display_width : undefined,
+          iconUrl: row.icon_url ?? undefined,
+          offsetX: row.offset_x ?? 0,
+          offsetY: row.offset_y ?? 0,
         })
       );
-      registerCustomFurnitureModels(models);
+      const updatedIds = registerCustomFurnitureModels(models);
       setCustomItemsVersion((v) => v + 1);
       const textureEntries: { key: string; url: string }[] = [];
       for (const model of models) {
@@ -810,13 +836,23 @@ export default function GameRoom({
         for (const facing of FURNITURE_ROTATE_ORDER) {
           const url = color.art[facing];
           if (!url) continue;
-          textureEntries.push({ key: furnitureVariantTextureKey(model.id, color.id, facing), url });
+          const key = furnitureVariantTextureKey(model.id, color.id, facing);
+          // item que já existia e mudou (ver "Editar" no Editor de
+          // Itens) -- limpa a textura ANTIGA da cena antes de recarregar
+          // com essa MESMA chave, senão loadCustomFurnitureTextures acha
+          // que já tá carregada e ignora a arte nova.
+          if (updatedIds.includes(model.id)) sceneRef.current?.removeFurnitureTextures([key]);
+          textureEntries.push({ key, url });
         }
       }
       await new Promise<void>((resolve) => {
         if (sceneRef.current) sceneRef.current.loadCustomFurnitureTextures(textureEntries, resolve);
         else resolve();
       });
+      // recria na hora o sprite de todo item JÁ COLOCADO que usa um
+      // modelo que acabou de ser editado -- sem isso, um item editado só
+      // atualizaria visualmente (tamanho/arte/posição) depois de um F5.
+      for (const modelId of updatedIds) sceneRef.current?.refreshFurnitureModel(modelId);
     } catch {
       // Supabase fora do ar/não configurado -- segue sem item custom, sala funciona igual
     }
@@ -3473,6 +3509,21 @@ function EditPanel({
     return furnitureArtFile(entry.type, entry.facing);
   }
 
+  // miniatura do BOTÃO da grade do catálogo (palette-btn) -- diferente
+  // de catalogEntryArtFile acima (usado no preview grande/swatches, que
+  // precisam da arte REAL da peça): aqui prefere o ícone PRÓPRIO
+  // cadastrado no Editor de Itens (model.iconUrl, pedido do Douglas:
+  // "escolher o favicon que aparece no catálogo"), quando o item tiver
+  // um -- cai pra arte normal (catalogEntryArtFile) quando não tiver
+  // (item de fábrica, ou custom cadastrado antes desse campo existir).
+  function catalogEntryIconFile(entry: FurnitureCatalogEntry): string | null {
+    if (entry.modelId) {
+      const model = furnitureModelById(entry.modelId);
+      if (model?.iconUrl) return model.iconUrl;
+    }
+    return catalogEntryArtFile(entry);
+  }
+
   // gira o item selecionado dentro das direções cadastradas pro GRUPO
   // dele (ver catalogIndicesForGroup) -- reusa onSelectCatalog direto
   // (mesma função que os botões da grade chamam), só troca pra outro
@@ -3714,12 +3765,12 @@ function EditPanel({
               const defaultIndex = indices[0];
               const groupEntry = FURNITURE_CATALOG[defaultIndex];
               const isSelected = selectedEntry ? catalogEntryGroupKey(selectedEntry) === groupKey : false;
-              const thumbFile = catalogEntryArtFile(groupEntry);
+              const thumbFile = catalogEntryIconFile(groupEntry);
               return (
                 <button
                   key={groupKey}
                   className={isSelected ? "palette-btn selected" : "palette-btn"}
-                  style={thumbFile ? { backgroundImage: `url(/assets/${thumbFile})` } : undefined}
+                  style={thumbFile ? { backgroundImage: `url(${furnitureAssetUrl(thumbFile)})` } : undefined}
                   onClick={() => onSelectCatalog(defaultIndex)}
                   title={groupEntry.label}
                 />
@@ -3759,7 +3810,7 @@ function EditPanel({
                         <RotateLeftIcon />
                       </button>
                       {artFile && (
-                        <img className="item-preview-img" src={`/assets/${artFile}`} alt={selectedEntry.label} />
+                        <img className="item-preview-img" src={furnitureAssetUrl(artFile)} alt={selectedEntry.label} />
                       )}
                       <button
                         className="item-preview-rotate"
@@ -3791,7 +3842,7 @@ function EditPanel({
                               style={{
                                 width: 22,
                                 height: 22,
-                                backgroundImage: swatchArt ? `url(/assets/${swatchArt})` : undefined,
+                                backgroundImage: swatchArt ? `url(${furnitureAssetUrl(swatchArt)})` : undefined,
                                 backgroundSize: "cover",
                               }}
                               onClick={() => onSelectColor(c.id)}

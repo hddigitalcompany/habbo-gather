@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { clampItemOffset } from "@/lib/supabase/itemFields";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,17 @@ export async function POST(req: NextRequest) {
     typeof rawDisplayWidth === "number" && Number.isFinite(rawDisplayWidth) && rawDisplayWidth >= 20 && rawDisplayWidth <= 600
       ? Math.round(rawDisplayWidth)
       : null;
+  // ícone próprio do catálogo (pedido do Douglas: "escolher o favicon
+  // que aparece no catálogo") + posição dentro do tile (arrastado no
+  // preview do Editor de Itens) -- ver icon_url/offset_x/offset_y em
+  // supabase/migrations/0004_room_items_icon_offset.sql. Os dois são
+  // opcionais: sem ícone cai no fallback de sempre (foto de frente, ver
+  // catalogEntryIconFile em GameRoom.tsx), offset ausente/inválido vira
+  // 0 (sem deslocamento, comportamento de sempre) -- mesma faixa -300..300
+  // da constraint no banco.
+  const iconUrl = typeof body?.icon_url === "string" && body.icon_url ? body.icon_url : null;
+  const offsetX = clampItemOffset(body?.offset_x);
+  const offsetY = clampItemOffset(body?.offset_y);
 
   if (!label) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!ALLOWED_CATEGORIES.includes(category)) {
@@ -59,7 +71,16 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await admin
     .from("room_items")
-    .insert({ label, category, art: cleanArt, display_width: displayWidth, created_by: callerId })
+    .insert({
+      label,
+      category,
+      art: cleanArt,
+      display_width: displayWidth,
+      icon_url: iconUrl,
+      offset_x: offsetX,
+      offset_y: offsetY,
+      created_by: callerId,
+    })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

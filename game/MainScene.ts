@@ -99,8 +99,15 @@ import {
  * novo (qualquer tecla de direção) e levanta sozinho.
  */
 
-const FRAME_W = 200;
-const FRAME_H = 260;
+// exportadas (junto com AVATAR_SCALE/AVATAR_FOOT_OFFSET_Y logo abaixo)
+// pro preview "boneco real" do Editor de Itens (ItemEditor.tsx, pedido
+// do Douglas) conseguir montar a MESMA proporção/âncora do jogo de
+// verdade fora do Phaser (CSS puro) -- uma fonte só, em vez de duplicar
+// esses números lá e correr o risco de desalinhar de novo numa próxima
+// mudança de escala (foi o que quase aconteceu com AVATAR_REF_HEIGHT,
+// ver comentário dele em ItemEditor.tsx).
+export const FRAME_W = 200;
+export const FRAME_H = 260;
 // caractere ocupa ~210px de altura dentro do frame de 260 -> essa escala
 // deixa ele com uns 135px de altura em tela (mesma PROPORÇÃO de antes:
 // ~90px numa tela de 600px de altura -> ~135px numa de 900px, ver
@@ -112,7 +119,7 @@ const FRAME_H = 260;
 // Chegou a ser testado em 2x (0.86), mas pesou demais na performance --
 // 1.5x é o meio-termo, ver comentário de GAME_WIDTH/GAME_HEIGHT em
 // grid.ts).
-const AVATAR_SCALE = 0.645;
+export const AVATAR_SCALE = 0.645;
 
 // o container do boneco fica ancorado no CENTRO do tile (tileToWorld) --
 // isso é o que worldToTile/clampTile/movimento usam pra saber em que
@@ -122,7 +129,7 @@ const AVATAR_SCALE = 0.645;
 // sprites (e o label do nome) são desenhadas com um offset PRA BAIXO
 // dentro do container: puramente visual, não mexe na posição lógica
 // usada pro grid/colisão/sentar.
-const AVATAR_FOOT_OFFSET_Y = 21;
+export const AVATAR_FOOT_OFFSET_Y = 21;
 
 // [parado, passoA, passoB] -- passoA/passoB alternam a cada passo dado
 // (ver playWalk), não por tempo -- assim funciona igual pra um pulo de
@@ -925,9 +932,52 @@ export default class MainScene extends Phaser.Scene {
       if (nativeW > 0 && nativeH > 0) {
         image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
       }
+      // posição ajustada à mão (arrastando o item em cima do
+      // boneco/quadrado de referência no preview do Editor de Itens, ver
+      // FurnitureModelDef.offsetX/offsetY em game/furniture.ts) -- só
+      // desloca a EXIBIÇÃO a partir da âncora padrão (pos.x/pos.y, borda
+      // de baixo do tile), não muda o tile lógico nem a profundidade.
+      if (model.offsetX || model.offsetY) {
+        image.setPosition(pos.x + (model.offsetX ?? 0), pos.y + (model.offsetY ?? 0));
+      }
     }
 
     return image;
+  }
+
+  /**
+   * Tira da memória a textura em cache pra cada chave dada -- chamado
+   * ANTES de registrar um item EDITADO no Editor de Itens
+   * (fetchAndRegisterCustomFurniture, GameRoom.tsx): sem isso,
+   * loadCustomFurnitureTextures vê a chave já carregada (mesma chave de
+   * sempre, ver furnitureVariantTextureKey -- não muda numa edição, só o
+   * conteúdo do arquivo) e pula o carregamento, deixando a arte ANTIGA
+   * na tela até um F5. Só limpa do TextureManager -- não mexe em nenhum
+   * sprite já desenhado (ver refreshFurnitureModel logo abaixo, que
+   * cuida disso).
+   */
+  removeFurnitureTextures(keys: string[]) {
+    for (const key of keys) {
+      if (this.textures.exists(key)) this.textures.remove(key);
+    }
+  }
+
+  /**
+   * Recria o sprite de todo item JÁ COLOCADO (draftFurniture) que usa o
+   * MODELO dado -- chamado depois de editar um item no Editor de Itens
+   * (ver removeFurnitureTextures acima + loadCustomFurnitureTextures,
+   * fetchAndRegisterCustomFurniture em GameRoom.tsx), pra arte/tamanho/
+   * posição novos aparecerem NA HORA nos itens que já estavam na sala,
+   * sem precisar de F5. Só troca o sprite (destroy + addFurnitureSprite
+   * de novo, que já lê o modelo atualizado do catálogo) -- o
+   * FurnitureDef em si (col/row/facing/colorId) não muda.
+   */
+  refreshFurnitureModel(modelId: string) {
+    for (const [id, f] of this.draftFurniture.entries()) {
+      if (f.modelId !== modelId) continue;
+      this.draftSprites.get(id)?.destroy();
+      this.draftSprites.set(id, this.addFurnitureSprite(f));
+    }
   }
 
   /**

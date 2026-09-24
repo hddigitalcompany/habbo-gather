@@ -190,6 +190,23 @@ export interface FurnitureModelDef {
    * resultado bem diferente de item pra item -- precisa ajustar cada
    * um. */
   displayWidth?: number;
+  /** Ícone PRÓPRIO pro botão do catálogo (URL do Storage) -- pedido do
+   * Douglas: "escolher o favicon que aparece no catálogo", separado das
+   * 4 fotos de direção (a arte da peça pode não ficar boa cortada em
+   * quadrado pequeno). undefined = sem ícone próprio, cai no fallback
+   * de sempre (foto de frente, ver catalogEntryIconFile em
+   * GameRoom.tsx). Só existe em item CUSTOM, igual displayWidth. */
+  iconUrl?: string;
+  /** Deslocamento (px) da posição-âncora do móvel a partir do padrão
+   * (borda de baixo do tile, ver furnitureWorldPos) -- ajustado À MÃO
+   * arrastando o item em cima do quadrado/boneco de referência no
+   * preview do Editor de Itens (pedido do Douglas: "delimitar ali no
+   * editor a posição do mobi no tile"). Só existe em item CUSTOM, por
+   * MODELO (não por instância colocada -- todo item desse modelo usa o
+   * mesmo ajuste, ver addFurnitureSprite em MainScene.ts). 0/undefined =
+   * sem deslocamento, comportamento de sempre. */
+  offsetX?: number;
+  offsetY?: number;
 }
 
 /**
@@ -500,21 +517,42 @@ export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
  * nada -- só precisa forçar uma re-renderização depois de chamar isso
  * (o array mutou por dentro, mas o React não percebe sozinho).
  *
- * Idempotente: chamar de novo com o mesmo id (ex: reconexão, refetch
- * depois de cadastrar um item novo) não duplica -- MAS também não
- * atualiza um item já registrado que mudou (não é o caso de uso hoje;
- * o Editor de Itens não tem "editar", só cadastrar/excluir).
+ * UPSERT: chamar de novo com o mesmo id (ex: reconexão, refetch depois
+ * de cadastrar/EDITAR um item, ver "Editar" no Editor de Itens) SUBSTITUI
+ * o modelo e reconstrói as entradas de catálogo dele a partir do zero --
+ * não duplica, e agora também não fica preso na versão antiga (antes
+ * disso existir, editar um item cadastrado não tinha efeito nenhum aqui:
+ * o registro simplesmente era ignorado por já existir o id). Devolve os
+ * ids que já EXISTIAM antes dessa chamada (ou seja, que acabaram de ser
+ * atualizados, não criados) -- quem chama usa isso pra saber quando
+ * precisa limpar a textura antiga da cena e recriar os sprites já
+ * colocados desse modelo (ver fetchAndRegisterCustomFurniture,
+ * GameRoom.tsx, e removeFurnitureTextures/refreshFurnitureModel em
+ * MainScene.ts), já que só re-registrar aqui não muda nada que já foi
+ * desenhado na tela.
  */
-export function registerCustomFurnitureModels(models: FurnitureModelDef[]) {
+export function registerCustomFurnitureModels(models: FurnitureModelDef[]): string[] {
+  const updatedIds: string[] = [];
   for (const model of models) {
-    if (FURNITURE_MODELS.some((m) => m.id === model.id)) continue;
+    const existingIndex = FURNITURE_MODELS.findIndex((m) => m.id === model.id);
     // custom:true SEMPRE, não importa o que o chamador mandou -- essa
     // função só existe pra registrar item vindo do Editor de Itens, então
     // por definição é sempre custom (ver CUSTOM_ITEM_TARGET_WIDTH/
     // addFurnitureSprite em MainScene.ts, que dependem dessa flag pra
     // saber quando encolher a exibição de uma imagem enviada em
     // qualidade/resolução alta).
-    FURNITURE_MODELS.push({ ...model, custom: true });
+    if (existingIndex !== -1) {
+      updatedIds.push(model.id);
+      FURNITURE_MODELS[existingIndex] = { ...model, custom: true };
+    } else {
+      FURNITURE_MODELS.push({ ...model, custom: true });
+    }
+    // reconstrói as entradas de catálogo desse modelo do zero (cobre os
+    // dois casos: item novo, sem entrada nenhuma ainda, e item editado,
+    // cuja arte/direções disponíveis podem ter mudado).
+    for (let i = FURNITURE_CATALOG.length - 1; i >= 0; i--) {
+      if (FURNITURE_CATALOG[i].modelId === model.id) FURNITURE_CATALOG.splice(i, 1);
+    }
     const defaultColor = model.colors[0];
     if (!defaultColor) continue;
     for (const facing of FURNITURE_ROTATE_ORDER) {
@@ -529,6 +567,7 @@ export function registerCustomFurnitureModels(models: FurnitureModelDef[]) {
       });
     }
   }
+  return updatedIds;
 }
 
 /**
