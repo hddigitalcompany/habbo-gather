@@ -9,17 +9,23 @@ import MainScene, { DEFAULT_ZOOM_LEVEL, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
+import ItemEditor from "@/components/ItemEditor";
 import {
   catalogEntryGroupKey,
   catalogIndicesForGroup,
+  CUSTOM_ITEM_CATEGORY_TYPE,
   FURNITURE_CATALOG,
   FURNITURE_COLORS,
+  FURNITURE_ROTATE_ORDER,
   FURNITURE_TYPE_CATEGORY,
   furnitureArtFile,
   furnitureColorArtFile,
+  furnitureVariantTextureKey,
+  registerCustomFurnitureModels,
   FurnitureCategoryId,
   FurnitureCatalogEntry,
   FurnitureDef,
+  FurnitureModelDef,
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
 } from "@/game/furniture";
@@ -667,6 +673,63 @@ export default function GameRoom({
   const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
+
+  // --- Editor de Itens (móvel custom cadastrado pelo dono, ver
+  // components/ItemEditor.tsx / supabase/migrations/0002_room_items.sql)
+  // -- itemEditorOpen só abre pro "owner" (mesmo gate do painel de
+  // membros). customItemsVersion não guarda nada -- só existe pra
+  // FORÇAR o EditPanel a re-renderizar depois de registerCustomFurnitureModels
+  // mutar FURNITURE_CATALOG por baixo (React não percebe sozinho que um
+  // array importado mudou de conteúdo). ---
+  const [itemEditorOpen, setItemEditorOpen] = useState(false);
+  const [customItemsVersion, setCustomItemsVersion] = useState(0);
+
+  /**
+   * Busca os itens custom no Supabase (leitura pública, ver policy em
+   * supabase/migrations/0002_room_items.sql -- funciona sem login),
+   * registra os modelos (registerCustomFurnitureModels, empurra pra
+   * dentro de FURNITURE_MODELS/FURNITURE_CATALOG) e carrega a textura
+   * de cada um na cena (loadCustomFurnitureTextures, ver
+   * MainScene.ts). Chamado uma vez quando a cena fica pronta (ver
+   * init() no useEffect do Phaser.Game) e de novo toda vez que o
+   * Editor de Itens cadastra/apaga algo (ver onItemsChanged no
+   * ItemEditor renderizado mais abaixo) -- registerCustomFurnitureModels
+   * já é idempotente (ignora id repetido), então rodar de novo não
+   * duplica nada.
+   */
+  async function fetchAndRegisterCustomFurniture(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("room_items").select("id, label, category, art");
+      if (error || !data || data.length === 0) return;
+      const models: FurnitureModelDef[] = data.map(
+        (row: { id: string; label: string; category: string; art: Partial<Record<Direction, string>> }) => ({
+          id: row.id,
+          type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
+          label: row.label,
+          colors: [{ id: "default", label: "Padrão", art: row.art }],
+        })
+      );
+      registerCustomFurnitureModels(models);
+      setCustomItemsVersion((v) => v + 1);
+      const textureEntries: { key: string; url: string }[] = [];
+      for (const model of models) {
+        const color = model.colors[0];
+        for (const facing of FURNITURE_ROTATE_ORDER) {
+          const url = color.art[facing];
+          if (!url) continue;
+          textureEntries.push({ key: furnitureVariantTextureKey(model.id, color.id, facing), url });
+        }
+      }
+      await new Promise<void>((resolve) => {
+        if (sceneRef.current) sceneRef.current.loadCustomFurnitureTextures(textureEntries, resolve);
+        else resolve();
+      });
+    } catch {
+      // Supabase fora do ar/não configurado -- segue sem item custom, sala funciona igual
+    }
+  }
 
   useEffect(() => {
     if (!accountAccessToken) return;
@@ -1426,6 +1489,14 @@ export default function GameRoom({
             return { ...prev, [groupKey]: nextByFacing };
           });
         };
+        // itens CUSTOM (Editor de Itens, ver fetchAndRegisterCustomFurniture
+        // acima) -- registra os modelos e carrega a textura de cada um
+        // ANTES de pedir a mobília já colocada (loadSavedFurniture logo
+        // abaixo): um item custom colocado precisa do modelo já
+        // registrado E a textura já carregada pra resolveFurnitureArt/
+        // furnitureTextureKeyFor acharem ele, senão renderiza em branco
+        // (ou nem acha o design único de fallback, já que sofa/mesa/
+        // planta/computador não têm um).
         // mobília adicional já salva (ver GET /room/furniture em
         // server/index.js) -- mesmo timing/tratamento de falha do piso
         // abaixo: furnitureLoadedRef só vira true DEPOIS da tentativa
@@ -1433,19 +1504,21 @@ export default function GameRoom({
         // mandar qualquer POST. O ajuste de assento (seatOffsets) precisa
         // entrar na cena (setSeatOffsets) ANTES de loadSavedFurniture,
         // senão um item já sentável carregaria sem o ajuste salvo.
-        fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data) => {
-            if (data?.seatOffsets) {
-              setSeatOffsetsState(data.seatOffsets);
-              sceneRef.current?.setSeatOffsets(data.seatOffsets);
-            }
-            if (data?.items) sceneRef.current?.loadSavedFurniture(data.items);
-          })
-          .catch(() => {})
-          .finally(() => {
-            furnitureLoadedRef.current = true;
-          });
+        fetchAndRegisterCustomFurniture().finally(() => {
+          fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              if (data?.seatOffsets) {
+                setSeatOffsetsState(data.seatOffsets);
+                sceneRef.current?.setSeatOffsets(data.seatOffsets);
+              }
+              if (data?.items) sceneRef.current?.loadSavedFurniture(data.items);
+            })
+            .catch(() => {})
+            .finally(() => {
+              furnitureLoadedRef.current = true;
+            });
+        });
         // piso já salvo (ver GET /room/floor em server/index.js) -- busca
         // assim que a cena fica pronta e manda pra dentro dela (ver
         // loadSavedFloor em MainScene.ts). Falha em silêncio (ex: servidor
@@ -2674,6 +2747,15 @@ export default function GameRoom({
               👥 Membros
             </button>
           )}
+          {roomRole === "owner" && (
+            <button
+              className="edit-toggle-btn"
+              onClick={() => setItemEditorOpen(true)}
+              title="Cadastrar item de móvel novo"
+            >
+              🧩 Itens
+            </button>
+          )}
           {IS_ROOM_EDITOR_ENABLED && (
             <button
               className={editMode ? "edit-toggle-btn active" : "edit-toggle-btn"}
@@ -2690,6 +2772,16 @@ export default function GameRoom({
             accessToken={accountAccessToken}
             httpBase={REALTIME_HTTP_BASE}
             onClose={() => setMembersPanelOpen(false)}
+          />
+        )}
+
+        {itemEditorOpen && accountAccessToken && (
+          <ItemEditor
+            accessToken={accountAccessToken}
+            onClose={() => setItemEditorOpen(false)}
+            onItemsChanged={() => {
+              fetchAndRegisterCustomFurniture();
+            }}
           />
         )}
 

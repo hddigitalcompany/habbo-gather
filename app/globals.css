@@ -2900,3 +2900,194 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Editor de Itens (components/ItemEditor.tsx) -- mesmo padrão visual do
+   painel de membros logo acima, só com um formulário de upload em vez
+   da lista de ações. */
+.items-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(5, 3, 10, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.items-panel {
+  width: 400px;
+  max-width: 100%;
+  max-height: 84vh;
+  overflow-y: auto;
+  background: rgba(28, 22, 42, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: 18px;
+}
+
+.items-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.items-panel-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #f5f0ff;
+}
+
+.items-panel-close {
+  background: transparent;
+  border: none;
+  color: #cfc4e6;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.items-panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.items-panel-input {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #f5f0ff;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.items-panel-uploads {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.items-panel-upload-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #cfc4e6;
+}
+
+.items-panel-upload-field input {
+  font-size: 11px;
+  color: #cfc4e6;
+}
+
+.items-panel-error {
+  color: #ff8a8a;
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.items-panel-submit {
+  margin-top: 6px;
+  background: #0a84ff;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.items-panel-submit:hover {
+  background: #2a95ff;
+}
+
+.items-panel-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.items-panel-section {
+  margin-top: 14px;
+}
+
+.items-panel-section h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9fb4ff;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.items-panel-loading {
+  color: #cfc4e6;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.items-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.items-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.items-panel-thumb {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.items-panel-name {
+  font-size: 13px;
+  color: #f5f0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.items-panel-category {
+  color: #9d90bb;
+  font-size: 11px;
+}
+
+.items-panel-row button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  font-size: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.items-panel-row button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.items-panel-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
