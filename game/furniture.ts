@@ -12,7 +12,16 @@ import { tileToWorld, Direction, TILE } from "./grid";
  * viradas pro lado certo em vez de usar sempre a mesma arte de frente.
  */
 
-export type FurnitureType = "poltrona" | "vidro";
+/**
+ * "sofa"/"mesa"/"planta"/"computador" começam sem NENHUM modelo
+ * cadastrado (mesma situação que "poltrona" tinha antes dos modelos
+ * existirem) -- servem só pra dar um "tipo" pra onde um item CUSTOM
+ * dessa categoria (ver CUSTOM_ITEM_CATEGORY_TYPE/registerCustomFurnitureModels
+ * abaixo, cadastrado pelo Editor de Itens) possa se pendurar. Sem isso,
+ * as categorias vazias em FURNITURE_CATEGORIES não têm em que tipo
+ * um item novo entraria.
+ */
+export type FurnitureType = "poltrona" | "vidro" | "sofa" | "mesa" | "planta" | "computador";
 
 export interface FurnitureDef {
   id: string;
@@ -87,6 +96,16 @@ export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, stri
   vidro: {
     down: "vidro.png",
   },
+  // sem design único -- itens dessas categorias só existem via MODELO
+  // (ver FURNITURE_MODELS/registerCustomFurnitureModels), seja gerado
+  // da pasta local (ainda nenhum) ou custom (Editor de Itens). Vazio
+  // aqui só satisfaz o Record<FurnitureType, ...> -- nunca é lido de
+  // verdade (resolveFurnitureArt só cai nisso quando falta modelId, e
+  // item dessas categorias sempre tem um).
+  sofa: {},
+  mesa: {},
+  planta: {},
+  computador: {},
 };
 
 /**
@@ -134,7 +153,12 @@ export function furnitureColorArtFile(color: FurnitureColorOption, facing: Direc
 export interface FurnitureModelColorOption {
   id: string;
   label: string;
-  art: Record<Direction, string>;
+  // Partial de propósito: modelo GERADO da pasta local (poltrona,
+  // scripts/syncFurnitureAssets.mjs) sempre garante as 4 direções, mas
+  // item CUSTOM (Editor de Itens, ver registerCustomFurnitureModels)
+  // só exige "down" (frente) -- as outras 3 caem no fallback pra
+  // "down" já usado em resolveFurnitureArt/furnitureModelCatalogEntries.
+  art: Partial<Record<Direction, string>>;
 }
 
 export interface FurnitureModelDef {
@@ -246,6 +270,27 @@ export const FURNITURE_CATEGORIES: { id: FurnitureCategoryId; label: string }[] 
 export const FURNITURE_TYPE_CATEGORY: Record<FurnitureType, FurnitureCategoryId> = {
   poltrona: "poltrona",
   vidro: "divisoria",
+  sofa: "sofa",
+  mesa: "mesa",
+  planta: "planta",
+  computador: "computador",
+};
+
+/**
+ * Categoria (escolhida no formulário do Editor de Itens) -> TIPO --
+ * inverso de FURNITURE_TYPE_CATEGORY, usado só na hora de REGISTRAR um
+ * item custom (ver registerCustomFurnitureModels abaixo e
+ * components/ItemEditor.tsx). "poltrona"/"divisoria" reaproveitam os
+ * tipos que já existem (item custom dessa categoria vira só mais um
+ * MODELO do mesmo tipo, lado a lado com os gerados da pasta local).
+ */
+export const CUSTOM_ITEM_CATEGORY_TYPE: Record<FurnitureCategoryId, FurnitureType> = {
+  poltrona: "poltrona",
+  divisoria: "vidro",
+  sofa: "sofa",
+  mesa: "mesa",
+  planta: "planta",
+  computador: "computador",
 };
 
 /**
@@ -259,10 +304,19 @@ export const FURNITURE_TYPE_CATEGORY: Record<FurnitureType, FurnitureCategoryId>
 export const FURNITURE_BLOCKS_MOVEMENT: Record<FurnitureType, boolean> = {
   poltrona: false,
   vidro: true,
+  sofa: false, // senta, igual poltrona
+  mesa: true,
+  planta: true,
+  computador: true,
 };
 
 export function furnitureBlocksMovement(type: FurnitureType): boolean {
   return FURNITURE_BLOCKS_MOVEMENT[type] ?? false;
+}
+
+/** Tipos em que o boneco senta sozinho ao parar em cima (ver findChairAtCurrentTile em MainScene.ts) -- vidro/mesa/planta/computador são decoração, não sentam. */
+export function isSittableFurnitureType(type: FurnitureType): boolean {
+  return type === "poltrona" || type === "sofa";
 }
 
 /** Chave da textura no Phaser pra um móvel numa direção (ex: "poltrona" + "left" -> "furniture-poltrona-left"). */
@@ -375,6 +429,47 @@ export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
 ];
 
 /**
+ * Registra modelo(s) de móvel CUSTOMIZADO(s), cadastrado(s) pelo dono da
+ * sala pelo Editor de Itens (upload direto, guardado na tabela
+ * room_items/Storage do Supabase -- ver components/ItemEditor.tsx e
+ * app/api/items) -- diferente de GENERATED_FURNITURE_MODELS (gerado em
+ * BUILD-TIME pela pasta local, ver scripts/syncFurnitureAssets.mjs),
+ * esses chegam em TEMPO DE EXECUÇÃO, buscados assim que a sala carrega
+ * (ver fetchCustomFurnitureModels em GameRoom.tsx).
+ *
+ * Empurra direto pra dentro de FURNITURE_MODELS/FURNITURE_CATALOG (em
+ * vez de expor um "getCatalog()" separado) de propósito: array é tipo
+ * referência, então todo código que já importa esses dois const direto
+ * (GameRoom.tsx/EditPanel) enxerga os itens novos sem precisar mudar
+ * nada -- só precisa forçar uma re-renderização depois de chamar isso
+ * (o array mutou por dentro, mas o React não percebe sozinho).
+ *
+ * Idempotente: chamar de novo com o mesmo id (ex: reconexão, refetch
+ * depois de cadastrar um item novo) não duplica -- MAS também não
+ * atualiza um item já registrado que mudou (não é o caso de uso hoje;
+ * o Editor de Itens não tem "editar", só cadastrar/excluir).
+ */
+export function registerCustomFurnitureModels(models: FurnitureModelDef[]) {
+  for (const model of models) {
+    if (FURNITURE_MODELS.some((m) => m.id === model.id)) continue;
+    FURNITURE_MODELS.push(model);
+    const defaultColor = model.colors[0];
+    if (!defaultColor) continue;
+    for (const facing of FURNITURE_ROTATE_ORDER) {
+      if (!defaultColor.art[facing]) continue;
+      FURNITURE_CATALOG.push({
+        type: model.type,
+        facing,
+        label: model.label,
+        modelId: model.id,
+        colorId: defaultColor.id,
+        colors: model.colors,
+      });
+    }
+  }
+}
+
+/**
  * Nome "de tipo" (sem a direção) -- usado só pro vidro/design único
  * agora (peça com modelo usa model.label direto, ver
  * FurnitureCatalogEntry.label já vir preenchido com o nome do modelo em
@@ -383,6 +478,10 @@ export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
 export const FURNITURE_TYPE_LABEL: Record<FurnitureType, string> = {
   poltrona: "Poltrona",
   vidro: "Divisória de vidro",
+  sofa: "Sofá",
+  mesa: "Mesa",
+  planta: "Planta",
+  computador: "Computador",
 };
 
 /**

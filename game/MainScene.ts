@@ -15,6 +15,7 @@ import {
   furnitureVariantTextureKey,
   furnitureTextureKeyFor,
   furnitureBlocksMovement,
+  isSittableFurnitureType,
   blockingFurnitureAt,
   resolveSeatOffset,
   seatOffsetGroupKey,
@@ -799,6 +800,36 @@ export default class MainScene extends Phaser.Scene {
    * colocados pelo editor de espaço (ver placeDraftFurniture), pra
    * garantir que os dois renderizam exatamente igual.
    */
+  /**
+   * Carrega a textura de item(ns) CUSTOM (Editor de Itens -- ver
+   * registerCustomFurnitureModels em game/furniture.ts) DEPOIS que a
+   * cena já criou. Diferente de todo o resto (preload(), roda antes de
+   * qualquer coisa aparecer): a URL desses itens só existe depois de
+   * buscar no Supabase (assíncrono, ver fetchCustomFurnitureModels em
+   * GameRoom.tsx), então não dá pra saber ainda no preload(). Usa o
+   * loader do Phaser FORA do ciclo normal -- suportado, só não pode
+   * chamar de novo enquanto um load anterior ainda está em andamento
+   * (por isso o `isLoading()`+fila em vez de chamar this.load.start()
+   * direto, que ignoraria/atropelaria um load já rolando).
+   */
+  loadCustomFurnitureTextures(entries: { key: string; url: string }[], onDone?: () => void) {
+    const missing = entries.filter((e) => !this.textures.exists(e.key));
+    if (missing.length === 0) {
+      onDone?.();
+      return;
+    }
+    const start = () => {
+      for (const e of missing) this.load.image(e.key, e.url);
+      this.load.once(Phaser.Loader.Events.COMPLETE, () => onDone?.());
+      this.load.start();
+    };
+    if (this.load.isLoading()) {
+      this.load.once(Phaser.Loader.Events.COMPLETE, start);
+    } else {
+      start();
+    }
+  }
+
   private addFurnitureSprite(f: FurnitureDef): Phaser.GameObjects.Image {
     // origem embaixo-centro, igual ao avatar: a posição do móvel é o
     // pontinho onde ele "toca o chão", alinhado ao tile dele
@@ -1406,18 +1437,19 @@ export default class MainScene extends Phaser.Scene {
   private findChairAtCurrentTile(): FurnitureDef | null {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
-    // só "poltrona" é sentável -- vidro (e outros móveis de decoração
-    // que forem chegando) não deve disparar o auto-sentar só por o
-    // boneco parar em cima do tile dele. Procura tanto na mobília FIXA
+    // só tipo sentável (ver isSittableFurnitureType, hoje poltrona/sofá)
+    // -- vidro/mesa/planta/computador (móveis de decoração) não devem
+    // disparar o auto-sentar só por o boneco parar em cima do tile
+    // dele. Procura tanto na mobília FIXA
     // (ROOM_FURNITURE) quanto na colocada pelo editor (draftFurniture --
     // desde que ganhou persistência de verdade, ver POST /room/furniture,
     // esses itens também precisam ser sentáveis na hora, sem precisar de
     // restart/deploy).
     for (const f of ROOM_FURNITURE) {
-      if (f.type === "poltrona" && f.col === col && f.row === row) return f;
+      if (isSittableFurnitureType(f.type) && f.col === col && f.row === row) return f;
     }
     for (const f of this.draftFurniture.values()) {
-      if (f.type === "poltrona" && f.col === col && f.row === row) return f;
+      if (isSittableFurnitureType(f.type) && f.col === col && f.row === row) return f;
     }
     return null;
   }
