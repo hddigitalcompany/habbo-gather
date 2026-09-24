@@ -2438,25 +2438,19 @@ function EditPanel({
         </>
       ) : (
         <>
-          <p className="edit-hint">
-            Escolha um item abaixo e clique num quadrado livre da sala pra colocar.
-            Clique num item já colocado (borda vermelha ao passar o mouse) pra
-            remover. Isso ainda não salva sozinho — copie o código no fim e cole
-            em <code>ROOM_FURNITURE</code>.
-          </p>
-
           <div className="palette">
             {typesInCategory.map((type) => {
               const defaultIndex = catalogIndicesForType(type)[0];
               const isSelected = selectedEntry?.type === type;
+              const thumbFile = furnitureArtFile(type, "down");
               return (
                 <button
                   key={type}
                   className={isSelected ? "palette-btn selected" : "palette-btn"}
+                  style={thumbFile ? { backgroundImage: `url(/assets/${thumbFile})` } : undefined}
                   onClick={() => onSelectCatalog(defaultIndex)}
-                >
-                  {FURNITURE_TYPE_LABEL[type]}
-                </button>
+                  title={FURNITURE_TYPE_LABEL[type]}
+                />
               );
             })}
           </div>

@@ -1620,23 +1620,29 @@ body {
   gap: 6px;
 }
 
+/* Grade de móveis -- 1 miniatura (arte "de frente", ver furnitureArtFile
+   em game/furniture.ts) por peça, sem nome escrito embaixo (nome vira
+   só o title/tooltip) -- mesma pegada do .floor-swatch da aba Piso. */
 .palette-btn {
-  background: #2a1d40;
-  border: 1px solid #3a2a55;
-  border-radius: 6px;
-  color: #f5f0ff;
-  padding: 6px 10px;
-  font-size: 12px;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 2px solid #2f2245;
+  background-color: #0d0715;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  image-rendering: pixelated;
   cursor: pointer;
+  padding: 0;
 }
 
 .palette-btn:hover {
-  background: #3d2a5c;
+  border-color: #3a2a55;
 }
 
 .palette-btn.selected {
-  background: #7c5cff;
-  border-color: #9376ff;
+  border-color: #7c5cff;
 }
 
 /* Preview do item selecionado na paleta de móveis (ver item-preview em
