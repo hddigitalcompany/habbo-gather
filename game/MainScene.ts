@@ -375,6 +375,14 @@ export default class MainScene extends Phaser.Scene {
   localColor = "#5c9bff";
   localName = "Você";
   localStatusColor = "#4fd97a";
+  // traje inicial do boneco local (ver pickRandomOutfitId em
+  // GameRoom.tsx) -- igual localName/localStatusColor acima: guardado
+  // aqui pra createAvatar() ler na hora de montar o boneco (ver ali
+  // embaixo), porque setLocalOutfitId costuma ser chamado (pelo
+  // "READY" da cena, GameRoom.tsx) ANTES de create() ter rodado --
+  // nesse momento ainda não existe localContainer/outfitSprite pra
+  // trocar a textura na hora, só dá pra deixar guardado aqui mesmo.
+  localOutfitId: string = DEFAULT_OUTFIT_ID;
 
   // --- câmera (zoom/arrastar pra olhar ao redor, ver MapControls em
   // GameRoom.tsx: botão de centralizar + zoom "+"/"-") -- arrastar fica
@@ -845,7 +853,13 @@ export default class MainScene extends Phaser.Scene {
         continue;
       }
       if (layer === "traje") {
-        const defaultOutfit = OUTFIT_CATALOG.find((o) => o.id === DEFAULT_OUTFIT_ID) ?? OUTFIT_CATALOG[0];
+        // avatar local: usa o traje já guardado em localOutfitId (ver
+        // comentário no campo -- normalmente o sorteado no spawn, já
+        // setado ANTES de create() rodar via setLocalOutfitId). Avatar
+        // remoto: sempre começa em DEFAULT_OUTFIT_ID mesmo (o traje de
+        // verdade dele ainda não é sincronizado pela rede).
+        const initialOutfitId = isLocal ? this.localOutfitId : DEFAULT_OUTFIT_ID;
+        const defaultOutfit = OUTFIT_CATALOG.find((o) => o.id === initialOutfitId) ?? OUTFIT_CATALOG[0];
         const resolvedSkinId = resolveOutfitSkinId(defaultOutfit, DEFAULT_SKIN_ID) ?? DEFAULT_SKIN_ID;
         const sprite = this.add.sprite(
           0,
@@ -953,7 +967,7 @@ export default class MainScene extends Phaser.Scene {
     container.setData("accessorySprite", accessorySprite);
     container.setData("accessoryId", DEFAULT_ACCESSORY_ID);
     container.setData("outfitSprite", outfitSprite);
-    container.setData("outfitId", DEFAULT_OUTFIT_ID);
+    container.setData("outfitId", isLocal ? this.localOutfitId : DEFAULT_OUTFIT_ID);
     container.setData("playerId", playerId);
     container.setData("isLocal", isLocal);
     this.layoutNameplate(label, statusDot);
@@ -1126,10 +1140,16 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /** Troca o traje do jogador LOCAL ao vivo (ver OUTFIT_CATALOG) --
-   * chamado pelo editor de personagem (GameRoom.tsx). Usa o tom de pele
-   * ATUAL do jogador pra escolher a arte certa (mão exposta, ver
-   * resolveOutfitSkinId) -- não precisa escolha manual de cor/tom. */
+   * chamado pelo editor de personagem (GameRoom.tsx), e também logo que
+   * a cena fica pronta pra aplicar o traje sorteado no spawn (ver
+   * pickRandomOutfitId em GameRoom.tsx). Guarda em localOutfitId SEMPRE
+   * (mesmo se o boneco ainda não existir -- ver comentário no campo),
+   * então funciona tanto ANTES quanto DEPOIS de create() ter rodado. Usa
+   * o tom de pele ATUAL do jogador pra escolher a arte certa (mão
+   * exposta, ver resolveOutfitSkinId) -- não precisa escolha manual de
+   * cor/tom. */
   setLocalOutfitId(outfitId: string) {
+    this.localOutfitId = outfitId;
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
