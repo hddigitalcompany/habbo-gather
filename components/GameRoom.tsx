@@ -7,6 +7,8 @@ import * as Phaser from "phaser";
 import PartySocket from "partysocket";
 import MainScene, { DEFAULT_ZOOM_LEVEL, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import RoomMembersPanel from "@/components/RoomMembersPanel";
 import {
   catalogEntryGroupKey,
   catalogIndicesForGroup,
@@ -53,6 +55,19 @@ type ProfileFields = {
   instagram: string;
   bio: string;
   photoUrl: string;
+};
+
+// props que vêm do AuthGate (ver components/AuthGate.tsx e app/page.tsx)
+// -- TODAS opcionais/com default null, pra continuar funcionando 100%
+// igual (visitante anônimo por localStorage) se algum dia GameRoom for
+// renderizado sem passar por ele. accountProfile é estruturalmente
+// igual a ProfileFields (mesmos campos) de propósito, pra dar pra
+// mesclar direto sem conversão.
+type GameRoomProps = {
+  accountUserId?: string | null;
+  accountProfile?: Partial<ProfileFields> | null;
+  accountAccessToken?: string | null;
+  onSignOut?: (() => void) | null;
 };
 
 type RemoteProfile = ProfileFields & { role: string };
@@ -415,7 +430,12 @@ async function uploadChatFile(file: Blob, filename: string): Promise<ChatAttachm
   return (await res.json()) as ChatAttachment;
 }
 
-export default function GameRoom() {
+export default function GameRoom({
+  accountUserId = null,
+  accountProfile = null,
+  accountAccessToken = null,
+  onSignOut = null,
+}: GameRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -456,7 +476,21 @@ export default function GameRoom() {
   // vez só (useMemo com deps vazias). activeConversationId===null
   // representa a pseudo-conversa "Sala" (o chatLog/chatInput de cima,
   // sem histórico/anexo -- ver comentário em ChatDrawer). ---
-  const myUserId = useMemo(() => getOrCreateUserId(), []);
+  // accountUserId (ver AuthGate.tsx) tem prioridade sobre o id gerado
+  // sozinho no localStorage -- quem loga com conta de verdade usa o id
+  // do Supabase (auth.users.id), confirmável pelo servidor (ver
+  // server/roomAuth.js); quem entra sem conta (Supabase não
+  // configurado, ou clicou "Continuar como visitante") segue no mesmo
+  // fluxo anônimo de sempre.
+  const myUserId = useMemo(() => accountUserId || getOrCreateUserId(), [accountUserId]);
+  // ref pro token de acesso ATUAL (renovado sozinho pelo Supabase de
+  // tempos em tempos, ver onAuthStateChange em AuthGate.tsx -- por
+  // isso é ref e não só a prop direto: o handler de "identify" abaixo
+  // roda dentro de um useEffect que conecta UMA VEZ só, precisa ler o
+  // valor mais novo sem depender de re-executar o efeito inteiro,
+  // mesmo motivo de myProfileRef.current logo abaixo).
+  const accountAccessTokenRef = useRef(accountAccessToken);
+  accountAccessTokenRef.current = accountAccessToken;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatView, setChatView] = useState<"list" | "thread" | "new">("list");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -582,6 +616,10 @@ export default function GameRoom() {
     bio: "",
     photoUrl: "",
     ...loadSavedProfile(),
+    // perfil da CONTA (ver AuthGate.tsx) tem a palavra final -- se
+    // logou, é o que tá salvo no Supabase que manda, não o que
+    // sobrou de um perfil anônimo antigo nesse navegador.
+    ...(accountProfile ?? {}),
   }));
   const [remoteProfiles, setRemoteProfiles] = useState<Record<string, RemoteProfile>>({});
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -619,6 +657,58 @@ export default function GameRoom() {
   // Antes só gerava um código pra colar à mão em furniture.ts -- isso
   // não existe mais.
   const [editMode, setEditMode] = useState(false);
+
+  // --- membro/visitante/dono da sala (ver supabase/migrations/0001_accounts.sql
+  // e app/api/room/members) -- só quem tem conta (accountUserId, ver
+  // AuthGate.tsx) tem um "role" de verdade; sem conta fica sempre
+  // "visitor". roomRole decide se o botão de abrir o painel de
+  // configuração aparece (só "owner"); presenceCounts é só decorativo
+  // (contador na tela), aparece pra todo mundo. ---
+  const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
+  const [membersPanelOpen, setMembersPanelOpen] = useState(false);
+  const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
+
+  useEffect(() => {
+    if (!accountAccessToken) return;
+    let cancelled = false;
+    fetch("/api/room/members", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && (data.role === "owner" || data.role === "member" || data.role === "visitor")) {
+          setRoomRole(data.role);
+        }
+      })
+      .catch(() => {
+        // sem Supabase configurado, ou rota fora do ar -- fica "visitor" mesmo, não é crítico
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken]);
+
+  // contador de membro/visitante ONLINE -- reaproveita GET
+  // /room/presence do servidor WebSocket (ver handleGetPresence em
+  // server/index.js), que já sabe quem tá conectado AGORA; polling
+  // simples (10s) em vez de mais um tipo de mensagem no protocolo do
+  // WS só pra isso.
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const res = await fetch(`${REALTIME_HTTP_BASE}/room/presence`);
+        const data = await res.json();
+        if (!cancelled && res.ok) setPresenceCounts({ memberCount: data.memberCount, visitorCount: data.visitorCount });
+      } catch {
+        // servidor fora do ar/offline -- deixa o contador como tava, sem quebrar a UI
+      }
+    }
+    poll();
+    const interval = setInterval(poll, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
   const [selectedCatalogIndex, setSelectedCatalogIndex] = useState<number | null>(null);
   // cor escolhida NA HORA pro item selecionado (ver selectFurnitureColor)
   // -- separado da cor default de FURNITURE_CATALOG[selectedCatalogIndex]
@@ -1414,7 +1504,14 @@ export default function GameRoom() {
         setStatus("Conectado");
         // identidade persistente pro chat direto/grupo (ver comentário
         // em getOrCreateUserId) + já pede a lista de conversas salvas.
-        socket.send(JSON.stringify({ type: "identify", userId: myUserId }));
+        // accessToken (só quem tem conta, ver AuthGate.tsx) deixa o
+        // servidor CONFIRMAR que esse userId é mesmo dessa conta (ver
+        // server/roomAuth.js) -- sem token, servidor trata como
+        // visitante anônimo de sempre, sem confiar cegamente no
+        // userId que o cliente mandou.
+        socket.send(
+          JSON.stringify({ type: "identify", userId: myUserId, accessToken: accountAccessTokenRef.current })
+        );
         socket.send(JSON.stringify({ type: "chat:list" }));
         socket.send(JSON.stringify({ type: "agenda:list" }));
       });
@@ -2346,9 +2443,37 @@ export default function GameRoom() {
         // localStorage indisponível (modo privado, etc.) -- segue só em memória
       }
       if (profileSendTimer.current) clearTimeout(profileSendTimer.current);
-      profileSendTimer.current = setTimeout(() => sendProfileUpdate(next), 400);
+      profileSendTimer.current = setTimeout(() => {
+        sendProfileUpdate(next);
+        syncProfileToAccount(next);
+      }, 400);
       return next;
     });
+  }
+
+  // quem tem conta (ver AuthGate.tsx) também salva o perfil no Supabase
+  // -- assim ele acompanha a CONTA (não só esse navegador/localStorage),
+  // aparece igual em qualquer aparelho que a pessoa logar. Sem conta
+  // (accountUserId null), não faz nada -- segue só localStorage, igual
+  // sempre foi.
+  function syncProfileToAccount(fields: ProfileFields) {
+    if (!accountUserId) return;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    supabase
+      .from("profiles")
+      .update({
+        name: fields.name,
+        status: fields.status,
+        instagram: fields.instagram,
+        bio: fields.bio,
+        photo_url: fields.photoUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", accountUserId)
+      .then(({ error }) => {
+        if (error) console.warn("Não deu pra salvar o perfil da conta no Supabase:", error.message);
+      });
   }
 
   async function handlePhotoChange(file: File) {
@@ -2469,6 +2594,11 @@ export default function GameRoom() {
 
   return (
     <div className="room-and-editor">
+      {onSignOut && (
+        <button type="button" className="account-sign-out-btn" onClick={onSignOut} title="Sair da conta">
+          Sair da conta
+        </button>
+      )}
       {chatOpen && chatPinMode === "side" && <ChatDrawer {...chatDrawerProps} />}
       <div className="room-wrapper">
         <div ref={containerRef} className="phaser-container" />
@@ -2527,7 +2657,23 @@ export default function GameRoom() {
 
         <div className="status-badge">{status}</div>
 
+        {presenceCounts && (
+          <div className="presence-badge" title="Quem tá na sala agora">
+            {presenceCounts.memberCount} membro{presenceCounts.memberCount === 1 ? "" : "s"} · {presenceCounts.visitorCount}{" "}
+            visitante{presenceCounts.visitorCount === 1 ? "" : "s"}
+          </div>
+        )}
+
         <div className="controls">
+          {roomRole === "owner" && (
+            <button
+              className="edit-toggle-btn"
+              onClick={() => setMembersPanelOpen(true)}
+              title="Configurar membros da sala"
+            >
+              👥 Membros
+            </button>
+          )}
           {IS_ROOM_EDITOR_ENABLED && (
             <button
               className={editMode ? "edit-toggle-btn active" : "edit-toggle-btn"}
@@ -2538,6 +2684,14 @@ export default function GameRoom() {
             </button>
           )}
         </div>
+
+        {membersPanelOpen && accountAccessToken && (
+          <RoomMembersPanel
+            accessToken={accountAccessToken}
+            httpBase={REALTIME_HTTP_BASE}
+            onClose={() => setMembersPanelOpen(false)}
+          />
+        )}
 
         <div className="map-controls">
           <button className="map-recenter-btn" onClick={handleRecenterCamera} title="Centralizar no meu personagem">

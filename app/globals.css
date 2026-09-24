@@ -2575,3 +2575,328 @@ body {
   height: 600px;
   color: #aaa;
 }
+
+/* --- portão de login/cadastro (ver components/AuthGate.tsx) --------
+   mesma paleta roxo-escura do resto da UI (ver .seat-tuning-panel/
+   .profile-card acima: fundo bem escuro, borda clarinha translúcida,
+   texto lavanda, azul #0a84ff de destaque pro botão principal). */
+.auth-gate-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #14101f;
+  padding: 16px;
+}
+
+.auth-gate-card {
+  width: 320px;
+  max-width: 100%;
+  background: rgba(28, 22, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  padding: 24px 22px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.auth-gate-title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 700;
+  color: #f5f0ff;
+  text-align: center;
+}
+
+.auth-gate-subtitle {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #cfc4e6;
+  text-align: center;
+}
+
+.auth-gate-loading {
+  margin: 0;
+  font-size: 14px;
+  color: #cfc4e6;
+  text-align: center;
+}
+
+.auth-gate-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 999px;
+  padding: 4px;
+  margin-bottom: 16px;
+}
+
+.auth-gate-tabs button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #cfc4e6;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.auth-gate-tabs button.active {
+  background: #7c5cff;
+  color: #fff;
+}
+
+.auth-gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-gate-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f5f0ff;
+  padding: 11px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.auth-gate-input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.auth-gate-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff8a8a;
+}
+
+.auth-gate-submit {
+  background: #0a84ff;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.auth-gate-submit:hover {
+  background: #2a95ff;
+}
+
+.auth-gate-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-gate-link-btn {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #9fb4ff;
+  font-size: 13px;
+  text-align: center;
+  padding: 14px 0 0;
+  cursor: pointer;
+}
+
+.auth-gate-link-btn:hover {
+  text-decoration: underline;
+}
+
+/* botão de sair, só aparece pra quem entrou com conta (ver onSignOut
+   em GameRoom.tsx) -- cantinho discreto, não disputa espaço com a
+   av-bar/HUD do jogo. */
+.account-sign-out-btn {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 60;
+  background: rgba(13, 7, 21, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #cfc4e6;
+  font-size: 11px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.account-sign-out-btn:hover {
+  background: rgba(13, 7, 21, 0.92);
+  color: #f5f0ff;
+}
+
+/* contador de membro/visitante online (ver presenceCounts em
+   GameRoom.tsx) -- mesmo estilo discreto do .status-badge ao lado. */
+.presence-badge {
+  position: absolute;
+  top: 12px;
+  left: 130px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+  color: #cfc4e6;
+  font-size: 12px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  z-index: 5;
+}
+
+/* --- painel "Membros da sala" (ver components/RoomMembersPanel.tsx)
+   -- mesma paleta roxo-escura do resto (ver .seat-tuning-panel/
+   .auth-gate-card acima). */
+.members-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(5, 3, 10, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.members-panel {
+  width: 360px;
+  max-width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: rgba(28, 22, 42, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: 18px;
+}
+
+.members-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.members-panel-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #f5f0ff;
+}
+
+.members-panel-close {
+  background: transparent;
+  border: none;
+  color: #cfc4e6;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.members-invite-row {
+  margin-bottom: 12px;
+}
+
+.members-invite-btn {
+  background: #0a84ff;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.members-invite-btn:hover {
+  background: #2a95ff;
+}
+
+.members-invite-code {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #cfc4e6;
+}
+
+.members-panel-error {
+  color: #ff8a8a;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.members-panel-loading {
+  color: #cfc4e6;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.members-panel-section {
+  margin-top: 14px;
+}
+
+.members-panel-section h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9fb4ff;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.members-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.members-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.members-panel-name {
+  font-size: 13px;
+  color: #f5f0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.members-panel-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.members-panel-row button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  font-size: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.members-panel-row button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.members-panel-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
