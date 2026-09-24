@@ -166,6 +166,46 @@ body {
   gap: 10px;
 }
 
+/* Botão "Apagar" do editor de espaço (ver toggleDeleteTool/TrashIcon em
+   GameRoom.tsx) -- só aparece durante "Editar espaço" (canEditRoom &&
+   editMode), no TOPO da mesma coluna flutuante dos controles de mapa
+   (pedido do Douglas: "do lado igual os botões de zoom, mas lá em cima").
+   Mesma pegada visual do .map-recenter-btn logo abaixo; .active (ligado --
+   próximo clique num item já colocado apaga ele) fica com um tom
+   avermelhado, pra ficar claro que tá armado. */
+.map-delete-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(40, 34, 56, 0.55);
+  color: #f5f0ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+}
+
+.map-delete-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.map-delete-btn:active {
+  transform: scale(0.94);
+}
+
+.map-delete-btn.active {
+  background: rgba(224, 62, 78, 0.35);
+  border-color: rgba(255, 120, 130, 0.55);
+  color: #ffd7db;
+}
+
 .map-recenter-btn {
   width: 44px;
   height: 44px;

@@ -691,6 +691,14 @@ export default function GameRoom({
   // Antes só gerava um código pra colar à mão em furniture.ts -- isso
   // não existe mais.
   const [editMode, setEditMode] = useState(false);
+  // ferramenta "Apagar" do editor de espaço -- botão flutuante PRÓPRIO (ver
+  // .map-delete-btn/.map-controls em globals.css), do lado dos controles de
+  // zoom, disponível em QUALQUER aba de "Editar espaço" (diferente de
+  // "Mover", que é uma aba de categoria dentro do painel -- ver
+  // EDIT_CATEGORY_TABS). Ligada, clicar num item já colocado apaga ele na
+  // hora (ver selectDeleteTool em MainScene.ts) -- pedido do Douglas: apagar
+  // direto no espaço, não na lista de linha do painel.
+  const [deleteToolActive, setDeleteToolActive] = useState(false);
 
   // --- membro/visitante/dono da sala (ver supabase/migrations/0001_accounts.sql
   // e app/api/room/members) -- só quem tem conta (accountUserId, ver
@@ -2239,8 +2247,23 @@ export default function GameRoom({
     setSelectedFloorToolId(null);
     setSelectedAreaToolId(null);
     setActiveCategory("poltrona");
+    setDeleteToolActive(false);
     sceneRef.current?.setEditMode(next);
     sceneRef.current?.setSeatTuningMode(false); // defensivo -- sair do editor sempre desliga o ajuste de assento também
+  }
+
+  /** Botão flutuante "Apagar" (ver .map-delete-btn) -- liga/desliga a
+   * ferramenta na cena e desarma qualquer outra (categoria de móvel, piso,
+   * área, mover), mesma exclusão mútua que já existe entre elas. */
+  function toggleDeleteTool() {
+    const next = !deleteToolActive;
+    setDeleteToolActive(next);
+    if (next) {
+      setSelectedCatalogIndex(null);
+      setSelectedFloorToolId(null);
+      setSelectedAreaToolId(null);
+    }
+    sceneRef.current?.selectDeleteTool(next);
   }
 
   // troca de categoria na barra de ícones -- separado de setActiveCategory
@@ -2251,8 +2274,10 @@ export default function GameRoom({
   // selectMoveTool em MainScene.ts).
   function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento" | "mover") {
     setActiveCategory(category);
+    setDeleteToolActive(false);
     sceneRef.current?.setSeatTuningMode(category === "assento");
     sceneRef.current?.selectMoveTool(category === "mover");
+    sceneRef.current?.selectDeleteTool(false);
   }
 
   /** Aplica a COR escolhida (ver selectFurnitureColor) numa entrada de catálogo, se ela tiver cores (ver FurnitureCatalogEntry.colors) -- devolve a entrada como veio quando não tiver (ex: vidro) ou quando o id não bater com nenhuma cor dela. */
@@ -2275,6 +2300,7 @@ export default function GameRoom({
     if (!sameGroup) setSelectedColorId(null);
     setSelectedCatalogIndex(next);
     setSelectedFloorToolId(null); // móvel e piso são ferramentas exclusivas, ver selectCatalogEntry na cena
+    setDeleteToolActive(false);
     sceneRef.current?.selectCatalogEntry(nextEntry ? entryWithColor(nextEntry, colorId) : null);
   }
 
@@ -2283,10 +2309,6 @@ export default function GameRoom({
     setSelectedColorId(colorId);
     if (selectedCatalogIndex === null) return;
     sceneRef.current?.selectCatalogEntry(entryWithColor(FURNITURE_CATALOG[selectedCatalogIndex], colorId));
-  }
-
-  function removeDraftItem(id: string) {
-    sceneRef.current?.removeDraftFurniture(id);
   }
 
   function clearDraftItems() {
@@ -2317,6 +2339,7 @@ export default function GameRoom({
     const next = selectedFloorToolId === entry.id ? null : entry.id;
     setSelectedFloorToolId(next);
     setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
     sceneRef.current?.selectFloorTool(next === null ? null : { kind: "paint", entry });
   }
 
@@ -2324,6 +2347,7 @@ export default function GameRoom({
     const next = selectedFloorToolId === "erase" ? null : "erase";
     setSelectedFloorToolId(next);
     setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
     sceneRef.current?.selectFloorTool(next === null ? null : { kind: "erase" });
   }
 
@@ -2338,6 +2362,7 @@ export default function GameRoom({
     const next = selectedAreaToolId === id ? null : id;
     setSelectedAreaToolId(next);
     setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
     sceneRef.current?.selectAreaTool(next === null ? null : { kind: "paint", areaId: id });
   }
 
@@ -2345,6 +2370,7 @@ export default function GameRoom({
     const next = selectedAreaToolId === "erase" ? null : "erase";
     setSelectedAreaToolId(next);
     setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
     sceneRef.current?.selectAreaTool(next === null ? null : { kind: "erase" });
   }
 
@@ -2969,6 +2995,16 @@ export default function GameRoom({
         )}
 
         <div className="map-controls">
+          {canEditRoom && editMode && (
+            <button
+              className={deleteToolActive ? "map-delete-btn active" : "map-delete-btn"}
+              onClick={toggleDeleteTool}
+              aria-label="Apagar item"
+              data-tooltip={deleteToolActive ? "Clique num item pra apagar" : "Apagar item"}
+            >
+              <TrashIcon />
+            </button>
+          )}
           <button
             className="map-recenter-btn"
             onClick={handleRecenterCamera}
@@ -3101,7 +3137,6 @@ export default function GameRoom({
           onSelectColor={selectFurnitureColor}
           draftItems={draftItems}
           catalogLabelFor={catalogLabelFor}
-          onRemoveItem={removeDraftItem}
           onClearAll={clearDraftItems}
           furnitureSaveStatus={furnitureSaveStatus}
           seatTuningInfo={seatTuningInfo}
@@ -3182,7 +3217,6 @@ function EditPanel({
   onSelectColor,
   draftItems,
   catalogLabelFor,
-  onRemoveItem,
   onClearAll,
   furnitureSaveStatus,
   seatTuningInfo,
@@ -3212,7 +3246,6 @@ function EditPanel({
   onSelectColor: (colorId: string) => void;
   draftItems: FurnitureDef[];
   catalogLabelFor: (item: FurnitureDef) => string;
-  onRemoveItem: (id: string) => void;
   onClearAll: () => void;
   furnitureSaveStatus: "idle" | "saving" | "saved" | "error";
   seatTuningInfo: SeatTuningInfo | null;
@@ -3573,15 +3606,15 @@ function EditPanel({
           {draftItems.length === 0 ? (
             <p className="edit-hint">Nenhum item colocado ainda.</p>
           ) : (
+            // pedido do Douglas: apagar item agora é direto no espaço (ver
+            // .map-delete-btn/toggleDeleteTool), não mais um ✕ por linha
+            // aqui -- a lista virou só um resumo do que já tá colocado.
             <ul className="draft-list">
               {draftItems.map((item) => (
                 <li key={item.id}>
                   <span>
                     {catalogLabelFor(item)} — col {item.col}, row {item.row}
                   </span>
-                  <button onClick={() => onRemoveItem(item.id)} title="Remover">
-                    ✕
-                  </button>
                 </li>
               ))}
             </ul>

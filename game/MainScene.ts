@@ -274,6 +274,13 @@ function furnitureDepthForRow(row: number): number {
 // pela mesma profundidade acima) continua parcialmente visível através.
 const GLASS_ALPHA = 0.55;
 
+// "fantasma" que acompanha o cursor com o item selecionado na paleta (ver
+// refreshCatalogGhost) -- opacidade BAIXA o suficiente pra ficar claro que
+// ainda não foi colocado de verdade (é só um preview), mas alta o
+// suficiente pra dar pra ver cor/modelo direitinho antes de clicar
+// (pedido do Douglas).
+const CATALOG_GHOST_ALPHA = 0.5;
+
 /** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForRow(). */
 function avatarDepthForY(y: number): number {
   return y;
@@ -304,8 +311,8 @@ const GAME_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-se
 // bolinha de status (foco/ausente/online) ao lado do nome, dentro do
 // jogo -- a COR vem sempre de fora (GameRoom.tsx, ver STATUS_COLORS),
 // pra não duplicar a paleta aqui; a cena só sabe desenhar um círculo.
-const STATUS_DOT_RADIUS = 3.5;
-const STATUS_DOT_GAP = 5;
+const STATUS_DOT_RADIUS = 2.5;
+const STATUS_DOT_GAP = 4;
 
 // plaquinha de nome (dot + texto) -- desenhada como uma "pill" de
 // cantos arredondados (Graphics, ver drawNameplateBg) em vez do
@@ -318,9 +325,9 @@ const STATUS_DOT_GAP = 5;
 // mandou) -- plaquinha bem discreta/fina, não um card grande chamando
 // atenção -- por isso fonte e preenchimento um pouco menores do que a
 // primeira versão.
-const NAMEPLATE_PAD_X = 7;
-const NAMEPLATE_PAD_Y = 3;
-const NAMEPLATE_RADIUS = 8;
+const NAMEPLATE_PAD_X = 5;
+const NAMEPLATE_PAD_Y = 2;
+const NAMEPLATE_RADIUS = 6;
 const NAMEPLATE_BG_COLOR = 0x120a1f;
 const NAMEPLATE_BG_ALPHA = 0.88;
 const NAMEPLATE_BORDER_COLOR = 0x3a2b57;
@@ -463,6 +470,9 @@ export default class MainScene extends Phaser.Scene {
   private draftSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private gridGraphics?: Phaser.GameObjects.Graphics;
   private hoverGraphics?: Phaser.GameObjects.Graphics;
+  // "fantasma" (ver refreshCatalogGhost) do item selecionado na paleta,
+  // seguindo o cursor -- null quando nenhum item de móvel está selecionado.
+  private catalogGhostSprite: Phaser.GameObjects.Image | null = null;
 
   // --- ferramenta "Mover" do editor de espaço (ver selectMoveTool) --
   // pedido do Douglas: até aqui, clicar num item já colocado só APAGAVA
@@ -475,6 +485,12 @@ export default class MainScene extends Phaser.Scene {
   // (catálogo/piso/área), mesmo padrão de selectFloorTool/selectAreaTool.
   private moveToolActive = false;
   private movingFurnitureId: string | null = null;
+  // ferramenta "Apagar" (ver selectDeleteTool) -- pedido do Douglas: um
+  // botão explícito pra apagar item direto no espaço (fora da lista de
+  // linha do painel), em vez do clique-em-cima-do-item apagar sozinho
+  // sem aviso em qualquer aba de móvel (comportamento antigo, fácil de
+  // apagar sem querer).
+  private deleteToolActive = false;
 
   /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido/carregado no editor, pra React manter a lista/autosave em dia. */
   onDraftChange?: (items: FurnitureDef[]) => void;
@@ -842,6 +858,14 @@ export default class MainScene extends Phaser.Scene {
     // pontinho onde ele "toca o chão", alinhado ao tile dele
     const pos = furnitureWorldPos(f);
     const key = furnitureTextureKeyFor(f);
+    // só um alerta (não muda nada no desenho) -- mesma ideia do guard em
+    // addFloorSprite: se a textura ainda não tiver carregado por algum
+    // motivo, o Phaser desenha o quadriculado preto/verde de "textura
+    // faltando" sozinho, e esse warn pelo menos deixa rastro de qual
+    // item/chave foi.
+    if (!this.textures.exists(key)) {
+      console.warn(`[móvel] textura "${key}" (item "${f.id}", tipo "${f.type}") não estava carregada ainda.`);
+    }
     const image = this.add
       .image(pos.x, pos.y, key)
       .setOrigin(0.5, 1)
@@ -883,14 +907,28 @@ export default class MainScene extends Phaser.Scene {
    * (ver loadSavedFloor) quanto pros tiles pintados na hora no editor de
    * espaço (ver paintFloorAt), mesma ideia do addFurnitureSprite. Devolve
    * null se o styleId não bate com nenhum item do catálogo (defensivo --
-   * não deveria acontecer normalmente).
+   * não deveria acontecer normalmente) OU se a textura desse estilo, por
+   * algum motivo, não terminou de carregar ainda (ver comentário abaixo --
+   * bug reportado pelo Douglas: piso salvo virando o quadriculado preto/
+   * verde do Phaser -- "textura faltando" -- depois de um F5). Nos dois
+   * casos, MELHOR não desenhar nada (o tile fica só sem o piso pintado,
+   * mostrando o fundo padrão por baixo) do que mostrar esse quadriculado
+   * feio -- e o console.warn dá uma pista de verdade (styleId + chave) da
+   * próxima vez que acontecer, em vez de só "sumiu".
    */
   private addFloorSprite(f: FloorTileDef): Phaser.GameObjects.Image | null {
     const entry = floorEntryById(f.styleId);
     if (!entry) return null;
+    const key = floorTextureKey(f.styleId);
+    if (!this.textures.exists(key)) {
+      console.warn(
+        `[piso] textura "${key}" (estilo "${f.styleId}") não estava carregada ainda -- tile ${f.col},${f.row} não desenhado (em vez do quadriculado de textura faltando do Phaser). Se isso aparecer toda vez que recarregar a página, é sinal de uma corrida entre o preload() da cena e o carregamento do piso salvo.`
+      );
+      return null;
+    }
     const pos = floorWorldPos(f);
     return this.add
-      .image(pos.x, pos.y, floorTextureKey(f.styleId))
+      .image(pos.x, pos.y, key)
       .setOrigin(0.5, 0.5)
       .setDisplaySize(TILE, TILE)
       .setDepth(DEPTH_FLOOR);
@@ -912,15 +950,50 @@ export default class MainScene extends Phaser.Scene {
    * manda pro servidor o piso INTEIRO certo, não só o que mudou agora.
    */
   loadSavedFloor(items: FloorTileDef[]) {
+    // tenta de novo, uma vez, os tiles que não conseguiram desenhar a
+    // sprite na primeira passada (ver addFloorSprite) -- bug reportado
+    // pelo Douglas: piso salvo virando o quadriculado de "textura
+    // faltando" e SUMINDO depois de um F5. Suspeita: corrida entre o
+    // preload() da cena e essa função (que pode ser chamada assim que o
+    // GET /room/floor responder, ver comentário acima) -- 400ms de
+    // folga cobre isso se for o caso.
+    const pendingRetry: FloorTileDef[] = [];
     for (const f of items) {
       const key = `${f.col},${f.row}`;
       if (this.draftFloor.has(key)) continue; // já carregado (ex: chamado 2x) -- não duplica sprite
-      const sprite = this.addFloorSprite(f);
-      if (!sprite) continue;
+      // guarda o DADO já aqui, mesmo que a sprite não tenha desenhado --
+      // CRÍTICO: getDraftFloorList() (usada pelo autosave, ver
+      // onDraftFloorChange) manda o piso INTEIRO pro servidor a cada
+      // mudança; se um tile que falhou por causa de uma corrida de
+      // carregamento sumisse daqui, o autosave ia APAGAR ele de verdade
+      // no servidor no ciclo seguinte -- um simples refresh não pode
+      // apagar piso já salvo.
       this.draftFloor.set(key, f);
-      this.draftFloorSprites.set(key, sprite);
+      const sprite = this.addFloorSprite(f);
+      if (sprite) {
+        this.draftFloorSprites.set(key, sprite);
+      } else if (floorEntryById(f.styleId)) {
+        // só vale tentar de novo se o ESTILO ainda existe no catálogo --
+        // um styleId de um item removido do catálogo nunca vai carregar,
+        // por mais que espere.
+        pendingRetry.push(f);
+      }
+    }
+    if (pendingRetry.length > 0) {
+      this.time.delayedCall(400, () => this.retryFloorSprites(pendingRetry));
     }
     this.onDraftFloorChange?.(this.getDraftFloorList());
+  }
+
+  /** Segunda tentativa (ver loadSavedFloor) de desenhar tiles de piso cuja textura ainda não estava carregada da primeira vez. Não mexe em draftFloor (o dado já está lá desde loadSavedFloor) -- só tenta criar a sprite que faltou. */
+  private retryFloorSprites(items: FloorTileDef[]) {
+    for (const f of items) {
+      const key = `${f.col},${f.row}`;
+      if (this.draftFloorSprites.has(key)) continue; // já resolveu por outro caminho nesse meio-tempo (ex: apagado/repintado)
+      if (!this.draftFloor.has(key)) continue; // apagado nesse meio-tempo, não recria
+      const sprite = this.addFloorSprite(f);
+      if (sprite) this.draftFloorSprites.set(key, sprite);
+    }
   }
 
   private createAvatar(
@@ -1051,7 +1124,7 @@ export default class MainScene extends Phaser.Scene {
     // cada peça.
     const label = this.add
       .text(0, 0, name, {
-        fontSize: "10px",
+        fontSize: "8px",
         color: "#f1ecff",
         fontFamily: GAME_FONT_FAMILY,
         resolution: NAMEPLATE_TEXT_RESOLUTION,
@@ -1886,7 +1959,9 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedAreaTool = null;
     this.moveToolActive = false;
+    this.deleteToolActive = false;
     this.cancelMovingFurniture();
+    this.refreshCatalogGhost();
     this.gridGraphics?.setVisible(active);
     if (!active) this.hoverGraphics?.setVisible(false);
     // a tinta/contorno de área fica mais forte durante a edição (pra
@@ -1902,7 +1977,46 @@ export default class MainScene extends Phaser.Scene {
     this.selectedCatalogEntry = entry;
     this.selectedFloorTool = null;
     this.selectedAreaTool = null;
+    this.deleteToolActive = false;
     this.selectMoveTool(false);
+    this.refreshCatalogGhost();
+  }
+
+  /**
+   * Cria (ou recria, ou remove) o "fantasma" que acompanha o cursor com o
+   * item atualmente selecionado na paleta (ver catalogGhostSprite acima) --
+   * chamado toda vez que selectedCatalogEntry muda, de qualquer um dos
+   * métodos que mexem nele (setEditMode/selectCatalogEntry/selectFloorTool/
+   * selectAreaTool/selectMoveTool/selectDeleteTool). Usa o MESMO
+   * addFurnitureSprite de sempre (mesma textura/tamanho/cor de um item de
+   * verdade), só com opacidade reduzida (CATALOG_GHOST_ALPHA) -- pedido do
+   * Douglas: ver o resultado exato antes de clicar pra colocar. A posição
+   * de verdade (seguindo o mouse) é responsabilidade de
+   * handleEditPointerMove, chamado a cada frame -- aqui só troca a
+   * TEXTURA/aparência quando a seleção muda.
+   */
+  private refreshCatalogGhost() {
+    this.catalogGhostSprite?.destroy();
+    this.catalogGhostSprite = null;
+    const entry = this.selectedCatalogEntry;
+    if (!entry) return;
+    const ghostDef: FurnitureDef = {
+      id: "__catalog_ghost__",
+      type: entry.type,
+      col: 0,
+      row: 0,
+      facing: entry.facing,
+      modelId: entry.modelId,
+      colorId: entry.colorId,
+      seatOffsetY: entry.seatOffsetY,
+      seatOffsetX: entry.seatOffsetX,
+      baseOffsetY: entry.baseOffsetY,
+    };
+    const sprite = this.addFurnitureSprite(ghostDef);
+    sprite.setAlpha(sprite.alpha * CATALOG_GHOST_ALPHA);
+    sprite.disableInteractive();
+    sprite.setVisible(false); // só aparece quando o mouse entra na grade num tile livre, ver handleEditPointerMove
+    this.catalogGhostSprite = sprite;
   }
 
   /** Liga/desliga a ferramenta "Mover" do editor de espaço -- ver
@@ -1916,8 +2030,32 @@ export default class MainScene extends Phaser.Scene {
       this.selectedCatalogEntry = null;
       this.selectedFloorTool = null;
       this.selectedAreaTool = null;
+      this.deleteToolActive = false;
+      this.refreshCatalogGhost();
     } else {
       this.cancelMovingFurniture();
+    }
+  }
+
+  /** Liga/desliga a ferramenta "Apagar" do editor de espaço: com ela armada,
+   * clicar num item já colocado apaga ele na hora (mesma restrição de
+   * sempre: só rascunho, móvel FIXO de ROOM_FURNITURE não é editável por
+   * aqui) -- clicar em tile vazio não faz nada. Substitui o comportamento
+   * antigo de apagar ao clicar em cima de qualquer item já colocado, em
+   * QUALQUER aba de móvel, sem precisar armar nada (fácil de apagar sem
+   * querer tentando clicar do lado pra colocar outro item -- pedido do
+   * Douglas: um botão explícito, fora da lista de linha do painel). Desarma
+   * as outras ferramentas ao ligar (mesmo padrão de selectFloorTool/
+   * selectAreaTool/selectCatalogEntry/selectMoveTool) -- só uma ferramenta
+   * ativa por vez. */
+  selectDeleteTool(active: boolean) {
+    this.deleteToolActive = active;
+    if (active) {
+      this.selectedCatalogEntry = null;
+      this.selectedFloorTool = null;
+      this.selectedAreaTool = null;
+      this.selectMoveTool(false);
+      this.refreshCatalogGhost();
     }
   }
 
@@ -1971,7 +2109,9 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = tool;
     this.selectedCatalogEntry = null;
     this.selectedAreaTool = null;
+    this.deleteToolActive = false;
     this.selectMoveTool(false);
+    this.refreshCatalogGhost();
   }
 
   getDraftFloorList(): FloorTileDef[] {
@@ -1990,7 +2130,9 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = tool;
     this.selectedCatalogEntry = null;
     this.selectedFloorTool = null;
+    this.deleteToolActive = false;
     this.selectMoveTool(false);
+    this.refreshCatalogGhost();
   }
 
   getDraftAreaList(): AreaTileDef[] {
@@ -2460,6 +2602,7 @@ export default class MainScene extends Phaser.Scene {
     const inBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
     if (!inBounds) {
       this.hoverGraphics.setVisible(false);
+      this.catalogGhostSprite?.setVisible(false);
       return;
     }
 
@@ -2502,15 +2645,30 @@ export default class MainScene extends Phaser.Scene {
       .fillStyle(occupied ? EDIT_HOVER_COLOR_OCCUPIED : EDIT_HOVER_COLOR_FREE, 0.35)
       .fillRect(x - TILE / 2, y - TILE / 2, TILE, TILE)
       .setVisible(true);
+
+    // "fantasma" do item selecionado na paleta acompanha o cursor (ver
+    // refreshCatalogGhost/selectCatalogEntry) -- só aparece em tile LIVRE
+    // (onde o clique realmente colocaria o item; em tile ocupado o clique
+    // não faz nada, ver handleEditPointerDown), já na profundidade certa
+    // pra desenhar na ordem certa em relação a bonecos/outros móveis dessa
+    // fileira (pedido do Douglas: ver o resultado exato antes de clicar).
+    if (this.catalogGhostSprite) {
+      this.catalogGhostSprite.setPosition(x, y);
+      this.catalogGhostSprite.setDepth(furnitureDepthForRow(row));
+      this.catalogGhostSprite.setVisible(!occupied);
+    }
   }
 
   /**
-   * Clique num tile durante o modo de edição: se o tile já tem um item
-   * RASCUNHO (colocado nesta sessão), remove ele -- senão, se tiver um
-   * item da paleta selecionado e o tile estiver livre (sem móvel fixo
-   * nem rascunho), coloca uma cópia nova ali. Clicar num tile ocupado
-   * por móvel FIXO (ROOM_FURNITURE) não faz nada -- esses não são
-   * editáveis por aqui.
+   * Clique num tile durante o modo de edição: o que acontece depende da
+   * ferramenta armada no momento (Mover/Apagar/Área/Piso, mutuamente
+   * exclusivas -- ver selectMoveTool/selectDeleteTool/selectAreaTool/
+   * selectFloorTool). Sem nenhuma dessas armada e com um item de móvel
+   * selecionado na paleta, clicar num tile LIVRE (sem móvel fixo nem
+   * rascunho) coloca uma cópia nova ali -- clicar num tile já ocupado não
+   * faz nada (pra apagar um item já colocado, arma a ferramenta "Apagar").
+   * Clicar num tile ocupado por móvel FIXO (ROOM_FURNITURE) nunca faz
+   * nada -- esses não são editáveis por aqui.
    */
   /** Verdadeiro se o clique caiu em cima de QUALQUER avatar (local ou remoto) -- usado pra não colocar/remover móvel do editor por baixo de um clique que era pra abrir o card de perfil (ver onAvatarClick). */
   private isPointerOnAnyAvatar(pointer: Phaser.Input.Pointer): boolean {
@@ -2592,6 +2750,14 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
 
+    // ferramenta "Apagar" armada (ver selectDeleteTool) -- clique num item
+    // já colocado apaga ele na hora; clique em tile vazio não faz nada.
+    if (this.deleteToolActive) {
+      const draftId = this.draftIdAt(col, row);
+      if (draftId) this.removeDraftFurniture(draftId);
+      return;
+    }
+
     // ferramenta de área armada: mesma ideia da ferramenta de piso logo
     // abaixo (clique único já pinta e entra em modo de arrasto) -- checa
     // ANTES do piso só por ordem de leitura, as duas são mutuamente
@@ -2612,12 +2778,6 @@ export default class MainScene extends Phaser.Scene {
       this.isPaintingFloor = true;
       this.lastPaintedFloorKey = `${col},${row}`;
       this.paintFloorAt(col, row);
-      return;
-    }
-
-    const draftId = this.draftIdAt(col, row);
-    if (draftId) {
-      this.removeDraftFurniture(draftId);
       return;
     }
 
