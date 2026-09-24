@@ -213,6 +213,15 @@ type CustomSkinRow = {
   hex: string | null;
 };
 
+type CustomAvatarItemRow = {
+  id: string;
+  category: "cabelo" | "acessorio" | "barba" | "traje";
+  gender: AvatarGender;
+  label: string;
+  skin_ids: string[] | null;
+  sheet_url: string;
+};
+
 // qual direção (ver DIRECTION_FIELDS acima) cada um dos 15 quadros da
 // folha usa -- MESMA ordem/esquema de FRAME_SLOTS/SLOTS_BY_DIRECTION em
 // scripts/syncSkinAssets.mjs (duplicado aqui de propósito: é o FORMATO
@@ -231,27 +240,112 @@ const SKIN_SHEET_SLOT_DIRECTIONS: DirectionKey[] = [
 const SKIN_SHEET_COLS = 8;
 const SKIN_SHEET_SPACING = 2;
 
+// "avatar" (tom de pele -- pedido do Douglas: "esse 'tom' é a cabeça")
+// vira a primeira categoria do fluxo, irmã de cabelo/acessório/barba/
+// traje -- MESMO formulário, botões acima ("sexo/avatar-cabelo-etc/cor")
+// -- ver pedido do Douglas: "ordem de seleção, tudo em botões: Masculino/
+// feminino, avatar/cabelo/acessório/barba/traje". Continua indo pra
+// tabela avatar_skins (não avatar_items -- ver comentário na migration
+// 0006_avatar_items.sql) por ser a definição de um TOM, não algo que
+// "aplica pra" um tom.
+type AvatarCreatorCategory = "avatar" | "cabelo" | "acessorio" | "barba" | "traje";
+
+const AVATAR_CREATOR_CATEGORIES: { id: AvatarCreatorCategory; label: string }[] = [
+  { id: "avatar", label: "Avatar" },
+  { id: "cabelo", label: "Cabelo" },
+  { id: "acessorio", label: "Acessório" },
+  { id: "barba", label: "Barba" },
+  { id: "traje", label: "Traje" },
+];
+
+// barba/acessório só têm 3 poses de verdade (sem "costas" -- não dá pra
+// ver de trás da cabeça mesmo, ver scripts/syncBeardAssets.mjs/
+// syncAccessoryAssets.mjs) -- essas duas categorias escondem o upload
+// de "Costas" e deixam o quadro de "up" transparente na folha final.
+const THREE_POSE_CATEGORIES = new Set<AvatarCreatorCategory>(["barba", "acessorio"]);
+
+// categorias cuja arte precisa combinar com o TOM DE PELE escolhido (a
+// mão/pescoço ficam expostos -- ver bySkin em game/customization.ts).
+// Cabelo/acessório não têm bySkin (mesma arte serve em qualquer tom),
+// então não mostram o seletor "aplica pra qual tom" abaixo.
+const BY_SKIN_CATEGORIES = new Set<AvatarCreatorCategory>(["barba", "traje"]);
+
+type SheetSlot = DirectionKey | "blank";
+
+const FOUR_DIR_SHEET_SLOTS: SheetSlot[] = SKIN_SHEET_SLOT_DIRECTIONS;
+// mesmo layout de FRAME_SLOTS em scripts/syncBeardAssets.mjs/
+// syncAccessoryAssets.mjs -- "up" (índices 9-11) fica em branco.
+const THREE_DIR_SHEET_SLOTS: SheetSlot[] = [
+  "down", "down", "down",
+  "left", "left", "left",
+  "right", "right", "right",
+  "blank", "blank", "blank",
+  "down", "left", "right",
+];
+
+// primeiro quadro (índice 0-based na folha 8x2) de cada direção -- usado
+// só pra mostrar o boneco de referência na POSE certa no editor de
+// posição (ver frameOffsetXPx/frameOffsetYPx mais abaixo), mesmos
+// índices de SKIN_SHEET_SLOT_DIRECTIONS acima.
+const DIRECTION_FIRST_FRAME_INDEX: Record<DirectionKey, number> = { down: 0, left: 3, right: 6, up: 9 };
+
+// posição/tamanho de UMA foto de direção dentro do quadro 200x260 --
+// pedido do Douglas: "preciso posicionar e redimensionar" -- ajustado
+// arrastando/com slider no editor (ver handleArtPointerDown mais
+// abaixo). offsetX/offsetY em px de JOGO (mesma unidade do offset do
+// mobi), scale MULTIPLICA o "contido" automático (1 = exatamente
+// fit:"contain" centralizado, igual ao comportamento de antes).
+type DirectionPlacement = { offsetX: number; offsetY: number; scale: number };
+const DEFAULT_PLACEMENT: DirectionPlacement = { offsetX: 0, offsetY: 0, scale: 1 };
+const PLACEMENT_OFFSET_LIMIT = 150;
+
+// nomes canônicos de tom (pedido do Douglas: "branco pardo negro") --
+// só pra categoria "Avatar" (criar um TOM novo): diferente das outras 4
+// categorias (que escolhem quais tons JÁ EXISTENTES a peça cobre, ver
+// BY_SKIN_CATEGORIES acima e genderSkins mais abaixo), aqui a pessoa tá
+// DEFININDO o tom, não aplicando numa lista -- por isso fixo em 3
+// botões (não vem do catálogo), com a cor de botão já sugerida (mesmo
+// hex que SKIN_HEX_BY_NAME em scripts/syncSkinAssets.mjs usa).
+const AVATAR_TONE_NAMES: { label: string; hex: string }[] = [
+  { label: "Branco", hex: "#fde6b5" },
+  { label: "Pardo", hex: "#d1a276" },
+  { label: "Negro", hex: "#765e48" },
+];
+
+/**
+ * Resolve a URL de uma arte de camada de avatar -- local (public/assets/)
+ * ou CUSTOM (URL completa do Supabase Storage, ver SkinOption.file em
+ * game/customization.ts). Mesmo helper que GameRoom.tsx já tem
+ * (furnitureAssetUrl), duplicado aqui de propósito -- GameRoom já
+ * importa ItemEditor, importar de volta criaria ciclo.
+ */
+function avatarAssetUrl(file: string): string {
+  return file.startsWith("http") ? file : `/assets/${file}`;
+}
+
 /**
  * Monta a folha de sprites (8x2, 200x260 por quadro -- mesmo formato de
  * public/assets/avatar_<tom>.png, ver scripts/syncSkinAssets.mjs) DIRETO
- * NO NAVEGADOR a partir das até 4 fotos que a pessoa sobe (frente
- * obrigatória, lado esq/lado dir/costas opcionais -- mesma convenção "só
- * a cabeça" da pasta local). Sem foto pra uma direção, reaproveita a de
- * "frente" nela (mesma prévia rápida que o pipeline local ganhou, ver
- * relaxMissingHeads em scripts/syncSkinAssets.mjs -- fica com a mesma
- * cabeça virada nos 4 lados até a pessoa subir o resto). Cada foto entra
- * "encaixada" no quadro 200x260 sem cortar nem esticar (mesma ideia do
- * `fit:"contain"` que o pipeline local usa via sharp), centralizada, com
- * fundo transparente ao redor.
+ * NO NAVEGADOR pra QUALQUER camada de avatar (tom de pele, cabelo,
+ * acessório, barba, traje) a partir das fotos por direção, cada uma com
+ * seu PRÓPRIO posicionamento (ver DirectionPlacement acima -- pedido do
+ * Douglas: "preciso posicionar e redimensionar"). Sem posicionamento
+ * ajustado pra uma direção, cai no "contido" centralizado de sempre
+ * (mesma ideia do `fit:"contain"` que o pipeline local usa via sharp).
+ * `slots` decide o layout das 15 posições (ver FOUR_DIR_SHEET_SLOTS/
+ * THREE_DIR_SHEET_SLOTS acima) -- "blank" fica transparente (barba/
+ * acessório não têm arte de costas).
  */
-async function composeSkinSheet(filesByDirection: Partial<Record<DirectionKey, File>>): Promise<Blob> {
-  const fallbackFile = filesByDirection.down;
-  if (!fallbackFile) throw new Error("a imagem de frente é obrigatória");
-
+async function composeAvatarArtSheet(
+  filesByDirection: Partial<Record<DirectionKey, File>>,
+  placements: Partial<Record<DirectionKey, DirectionPlacement>>,
+  slots: SheetSlot[]
+): Promise<Blob> {
+  const neededDirs = Array.from(new Set(slots.filter((s): s is DirectionKey => s !== "blank")));
   const bitmaps: Partial<Record<DirectionKey, ImageBitmap>> = {};
-  for (const dir of ["down", "left", "right", "up"] as DirectionKey[]) {
-    const file = filesByDirection[dir] ?? fallbackFile;
-    bitmaps[dir] = await createImageBitmap(file);
+  for (const dir of neededDirs) {
+    const file = filesByDirection[dir];
+    if (file) bitmaps[dir] = await createImageBitmap(file);
   }
 
   const canvas = document.createElement("canvas");
@@ -262,17 +356,22 @@ async function composeSkinSheet(filesByDirection: Partial<Record<DirectionKey, F
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
-  SKIN_SHEET_SLOT_DIRECTIONS.forEach((dir, i) => {
-    const bitmap = bitmaps[dir];
+  slots.forEach((slot, i) => {
+    if (slot === "blank") return;
+    const bitmap = bitmaps[slot];
     if (!bitmap) return;
+    const placement = placements[slot] ?? DEFAULT_PLACEMENT;
     const col = i % SKIN_SHEET_COLS;
     const row = Math.floor(i / SKIN_SHEET_COLS);
     const cellX = col * (FRAME_W + SKIN_SHEET_SPACING);
     const cellY = row * (FRAME_H + SKIN_SHEET_SPACING);
-    const scale = Math.min(FRAME_W / bitmap.width, FRAME_H / bitmap.height);
+    const baseScale = Math.min(FRAME_W / bitmap.width, FRAME_H / bitmap.height);
+    const scale = baseScale * placement.scale;
     const drawW = bitmap.width * scale;
     const drawH = bitmap.height * scale;
-    ctx.drawImage(bitmap, cellX + (FRAME_W - drawW) / 2, cellY + (FRAME_H - drawH) / 2, drawW, drawH);
+    const centerX = cellX + FRAME_W / 2 + placement.offsetX;
+    const centerY = cellY + FRAME_H / 2 + placement.offsetY;
+    ctx.drawImage(bitmap, centerX - drawW / 2, centerY - drawH / 2, drawW, drawH);
   });
   for (const bitmap of Object.values(bitmaps)) bitmap?.close?.();
 
@@ -283,25 +382,51 @@ async function composeSkinSheet(filesByDirection: Partial<Record<DirectionKey, F
 
 /**
  * Botão "Criar Avatar" do Editor de Itens (pedido do Douglas: "quero
- * subir os personagens DENTRO da plataforma") -- por enquanto só cadastra
- * TOM DE PELE (ver AskUserQuestion respondido: escopo inicial menor,
- * cabelo/barba/traje/acessório continuam só pela pasta local e entram
- * depois). Mesmo esquema de upload direto pro Storage que o resto do
- * Editor de Itens já usa (ver ItemEditor logo abaixo) -- só os metadados
- * (nome/sexo/URL da folha já composta/hex) vão pro servidor (POST
- * /api/avatar-skins). Sem editar/apagar ainda (a API não tem PATCH/DELETE
- * pra isso -- só criar, ver comentário lá).
+ * subir os personagens DENTRO da plataforma"). Fluxo em 4 passos, tudo
+ * em botões (pedido do Douglas: "ordem de seleção, tudo em botões"):
+ * 1) sexo (masculino/feminino), 2) categoria (avatar/cabelo/acessório/
+ * barba/traje), 3) pra categoria com bySkin (barba/traje), pra qual(is)
+ * tom(ns) de pele já cadastrado(s) isso vale (pedido: "selecionar pra
+ * qual cor vai... podendo selecionar todos") -- pra "avatar" em vez
+ * disso escolhe QUAL tom novo tá criando (Branco/Pardo/Negro); cabelo/
+ * acessório pulam esse passo (não dependem de tom, ver
+ * BY_SKIN_CATEGORIES acima); 4) fotos por direção + editor de posição/
+ * tamanho (arrastar + slider, pedido do Douglas: "preciso posicionar e
+ * redimensionar"), reaproveitando o boneco de referência JÁ na pose da
+ * direção escolhida.
+ *
+ * "Avatar" continua indo pra tabela avatar_skins (POST /api/avatar-skins,
+ * já existia); as outras 4 categorias vão pra tabela nova avatar_items
+ * (POST /api/avatar-items, ver supabase/migrations/0006_avatar_items.sql
+ * -- PRECISA rodar essa migration antes de usar). Mesmo esquema de
+ * upload direto pro Storage que o resto do Editor de Itens já usa. Sem
+ * editar/apagar ainda (nenhuma das duas APIs tem PATCH/DELETE -- só
+ * criar, fica pra depois se o Douglas pedir).
  */
-function AvatarSkinPanel({ accessToken, onSkinsChanged }: { accessToken: string; onSkinsChanged: () => void }) {
-  const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
-  const [skinLabel, setSkinLabel] = useState("");
+function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; onChanged: () => void }) {
+  const [category, setCategory] = useState<AvatarCreatorCategory>("avatar");
   const [gender, setGender] = useState<AvatarGender>("masculino");
-  const [skinFiles, setSkinFiles] = useState<Partial<Record<DirectionKey, File>>>({});
-  const [hex, setHex] = useState("#d1a276");
+  const [label, setLabel] = useState("");
+  const [hex, setHex] = useState(AVATAR_TONE_NAMES[0].hex);
+  const [selectedSkinIds, setSelectedSkinIds] = useState<string[]>([]);
+  const [files, setFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  const [placements, setPlacements] = useState<Partial<Record<DirectionKey, DirectionPlacement>>>({});
+  const [activeDirection, setActiveDirection] = useState<DirectionKey>("down");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
+  const [avatarItems, setAvatarItems] = useState<CustomAvatarItemRow[] | null>(null);
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  const isThreePose = THREE_POSE_CATEGORIES.has(category);
+  const activeDirectionFields = isThreePose ? DIRECTION_FIELDS.filter((f) => f.key !== "up") : DIRECTION_FIELDS;
+  const activeSlots = isThreePose ? THREE_DIR_SHEET_SLOTS : FOUR_DIR_SHEET_SLOTS;
+  const usesBySkin = BY_SKIN_CATEGORIES.has(category);
+  // tons já cadastrados (pasta local + "Avatar" acima) do SEXO
+  // escolhido -- é a partir daqui que barba/traje escolhem "pra qual
+  // tom vale" (ver comentário no tipo AvatarCreatorCategory acima).
+  const genderSkins = SKIN_CATALOG.filter((s) => (s.gender ?? "masculino") === gender);
 
   async function loadSkins() {
     const supabase = getSupabaseBrowserClient();
@@ -316,29 +441,135 @@ function AvatarSkinPanel({ accessToken, onSkinsChanged }: { accessToken: string;
     setSkins((data ?? []) as CustomSkinRow[]);
   }
 
+  async function loadAvatarItems() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    // sem `error` aqui de propósito: a tabela só existe depois que o
+    // Douglas rodar 0006_avatar_items.sql -- até lá, essa consulta falha
+    // (tabela não existe) e a lista fica vazia em silêncio, sem travar o
+    // resto do painel (ver mesmo cuidado em fetchAndRegisterCustomAvatarItems,
+    // GameRoom.tsx).
+    const { data } = await supabase
+      .from("avatar_items")
+      .select("id, category, gender, label, skin_ids, sheet_url");
+    setAvatarItems((data ?? []) as CustomAvatarItemRow[]);
+  }
+
   useEffect(() => {
     loadSkins();
+    loadAvatarItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleSkinSubmit(e: React.FormEvent) {
+  // preview da foto ATIVA (aba de direção escolhida) -- se essa direção
+  // ainda não tem foto própria, cai na de "frente" só pra mostrar (mesma
+  // prévia rápida de sempre), mas SEM deixar arrastar (ver hasOwnFile no
+  // JSX) -- não faz sentido ajustar posição de uma direção que nem tem
+  // arte própria ainda.
+  const hasOwnFile = Boolean(files[activeDirection]);
+  const activeFile = files[activeDirection] ?? files.down;
+  const activePlacement = hasOwnFile ? placements[activeDirection] ?? DEFAULT_PLACEMENT : DEFAULT_PLACEMENT;
+
+  const [activeArtUrl, setActiveArtUrl] = useState<string | null>(null);
+  const activeArtUrlRef = useRef<string | null>(null);
+  activeArtUrlRef.current = activeArtUrl;
+
+  useEffect(() => {
+    setActiveArtUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return activeFile ? URL.createObjectURL(activeFile) : null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile]);
+
+  useEffect(() => {
+    return () => {
+      if (activeArtUrlRef.current) URL.revokeObjectURL(activeArtUrlRef.current);
+    };
+  }, []);
+
+  function resetCreatorForm() {
+    setLabel("");
+    setHex(AVATAR_TONE_NAMES[0].hex);
+    setSelectedSkinIds([]);
+    setFiles({});
+    setPlacements({});
+    setActiveDirection("down");
+    for (const key of Object.keys(fileInputRefs.current)) {
+      const input = fileInputRefs.current[key];
+      if (input) input.value = "";
+    }
+  }
+
+  function handleCategoryChange(next: AvatarCreatorCategory) {
+    setCategory(next);
+    resetCreatorForm();
+  }
+
+  function handleGenderChange(next: AvatarGender) {
+    setGender(next);
+    setSelectedSkinIds([]);
+  }
+
+  // arrastar a foto ativa em cima do boneco de referência (mesmo esquema
+  // de handleItemPointerDown do mobi, mais abaixo) -- offsetX/offsetY em
+  // px de JOGO, convertidos do delta de tela pelo PREVIEW_SCALE.
+  function handleArtPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const dir = activeDirection;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const start = placements[dir] ?? DEFAULT_PLACEMENT;
+    const startOffsetX = start.offsetX;
+    const startOffsetY = start.offsetY;
+
+    function onMove(ev: PointerEvent) {
+      const dx = (ev.clientX - startClientX) / PREVIEW_SCALE;
+      const dy = (ev.clientY - startClientY) / PREVIEW_SCALE;
+      setPlacements((prev) => ({
+        ...prev,
+        [dir]: {
+          ...(prev[dir] ?? DEFAULT_PLACEMENT),
+          offsetX: clamp(Math.round(startOffsetX + dx), -PLACEMENT_OFFSET_LIMIT, PLACEMENT_OFFSET_LIMIT),
+          offsetY: clamp(Math.round(startOffsetY + dy), -PLACEMENT_OFFSET_LIMIT, PLACEMENT_OFFSET_LIMIT),
+        },
+      }));
+    }
+    function onUp(ev: PointerEvent) {
+      target.releasePointerCapture(ev.pointerId);
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+    }
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+  }
+
+  async function handleAvatarCreatorSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!skinLabel.trim()) {
-      setError("Dá um nome pro tom.");
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) {
+      setError(category === "avatar" ? "Escolha um tom (Branco/Pardo/Negro)." : "Dá um nome pro item.");
       return;
     }
-    if (!skinFiles.down) {
+    if (!files.down) {
       setError("A imagem de frente é obrigatória.");
+      return;
+    }
+    if (usesBySkin && selectedSkinIds.length === 0) {
+      setError("Selecione pra qual tom de pele isso vale.");
       return;
     }
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     setSubmitting(true);
     try {
-      const sheetBlob = await composeSkinSheet(skinFiles);
-      const slug = slugify(skinLabel);
-      const path = `avatar-skins/${gender}-${slug}-${Date.now()}.png`;
+      const sheetBlob = await composeAvatarArtSheet(files, placements, activeSlots);
+      const slug = slugify(trimmedLabel);
+      const pathPrefix = category === "avatar" ? "avatar-skins" : "avatar-items";
+      const path = `${pathPrefix}/${category}-${gender}-${slug}-${Date.now()}.png`;
       const { error: uploadError } = await supabase.storage.from("room-items").upload(path, sheetBlob, {
         upsert: false,
         contentType: "image/png",
@@ -346,71 +577,174 @@ function AvatarSkinPanel({ accessToken, onSkinsChanged }: { accessToken: string;
       if (uploadError) throw uploadError;
       const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
 
-      const res = await fetch("/api/avatar-skins", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ label: skinLabel.trim(), gender, sheetUrl: publicUrlData.publicUrl, hex }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "erro ao salvar tom de pele");
-
-      setSkinLabel("");
-      setSkinFiles({});
-      for (const key of Object.keys(fileInputRefs.current)) {
-        const input = fileInputRefs.current[key];
-        if (input) input.value = "";
+      if (category === "avatar") {
+        const res = await fetch("/api/avatar-skins", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ label: trimmedLabel, gender, sheetUrl: publicUrlData.publicUrl, hex }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "erro ao salvar tom de pele");
+        await loadSkins();
+      } else {
+        const res = await fetch("/api/avatar-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({
+            category,
+            gender,
+            label: trimmedLabel,
+            skinIds: selectedSkinIds,
+            sheetUrl: publicUrlData.publicUrl,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "erro ao salvar item");
+        await loadAvatarItems();
       }
-      await loadSkins();
-      onSkinsChanged();
+
+      resetCreatorForm();
+      onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "erro ao salvar tom de pele");
+      setError(err instanceof Error ? err.message : "erro ao salvar");
     } finally {
       setSubmitting(false);
     }
   }
 
+  // boneco de referência do editor de posição -- sexo-ciente (pega o
+  // primeiro tom cadastrado do sexo escolhido, não sempre o masculino
+  // padrão como o resto do editor faz pro móvel) e NA POSE da direção
+  // ativa (ver DIRECTION_FIRST_FRAME_INDEX acima) -- pedido do Douglas:
+  // "editor de posicionamento dos itens... em relação ao avatar".
+  const referenceSkin = genderSkins[0];
+  const referenceOutfitFile = REFERENCE_OUTFIT && referenceSkin ? outfitFileForSkin(REFERENCE_OUTFIT, referenceSkin.id) : undefined;
+  const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
+  const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
+  const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
+  const frameOffsetXPx = frameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
+  const frameOffsetYPx = frameRow * (FRAME_H + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
+
+  const activeDirectionLabel = activeDirectionFields.find((f) => f.key === activeDirection)?.label ?? activeDirection;
+
   return (
     <>
+      <div className="gender-switch">
+        <button
+          type="button"
+          className={gender === "masculino" ? "gender-btn selected" : "gender-btn"}
+          onClick={() => handleGenderChange("masculino")}
+        >
+          Masculino
+        </button>
+        <button
+          type="button"
+          className={gender === "feminino" ? "gender-btn selected" : "gender-btn"}
+          onClick={() => handleGenderChange("feminino")}
+        >
+          Feminino
+        </button>
+      </div>
+
+      <div className="edit-section-tabs">
+        {AVATAR_CREATOR_CATEGORIES.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className={category === c.id ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => handleCategoryChange(c.id)}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
       <p className="settings-hint">
-        Por enquanto só dá pra subir TOM DE PELE por aqui -- cabelo, barba, traje e acessório continuam vindo só
-        da pasta local. Só a foto de "Frente" é obrigatória (só a cabeça, mesmo recorte de sempre) -- sem as
-        outras 3, o jogo reaproveita a de frente virada nas outras direções, é só uma prévia até você subir o
-        resto.
+        Só a foto de "Frente" é obrigatória -- sem as outras, o jogo reaproveita a de frente virada nas outras
+        direções (prévia rápida até você subir o resto). Arraste a foto em cima do boneco pra posicionar, e use o
+        slider pra ajustar o tamanho -- cada direção guarda o próprio ajuste.
       </p>
-      <form className="items-panel-form" onSubmit={handleSkinSubmit}>
-        <input
-          className="items-panel-input"
-          type="text"
-          placeholder="Nome do tom"
-          value={skinLabel}
-          maxLength={40}
-          onChange={(e) => setSkinLabel(e.target.value)}
-        />
 
-        <div className="gender-switch">
-          <button
-            type="button"
-            className={gender === "masculino" ? "gender-btn selected" : "gender-btn"}
-            onClick={() => setGender("masculino")}
-          >
-            Masculino
-          </button>
-          <button
-            type="button"
-            className={gender === "feminino" ? "gender-btn selected" : "gender-btn"}
-            onClick={() => setGender("feminino")}
-          >
-            Feminino
-          </button>
-        </div>
+      <form className="items-panel-form" onSubmit={handleAvatarCreatorSubmit}>
+        {category === "avatar" ? (
+          <div className="tone-select">
+            {AVATAR_TONE_NAMES.map((tone) => (
+              <button
+                key={tone.label}
+                type="button"
+                className={label === tone.label ? "tone-chip selected" : "tone-chip"}
+                onClick={() => {
+                  setLabel(tone.label);
+                  setHex(tone.hex);
+                }}
+              >
+                <span className="tone-chip-swatch" style={{ background: tone.hex }} />
+                {tone.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <input
+            className="items-panel-input"
+            type="text"
+            placeholder="Nome do item"
+            value={label}
+            maxLength={40}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+        )}
 
-        <label className="items-panel-upload-field">
-          <span>Cor do botão (opcional)</span>
-          <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} />
-        </label>
+        {category === "avatar" && (
+          <label className="items-panel-upload-field">
+            <span>Cor do botão (opcional)</span>
+            <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} />
+          </label>
+        )}
+
+        {usesBySkin && (
+          <div className="items-panel-upload-field">
+            <span>Aplica pra qual tom de pele</span>
+            {genderSkins.length === 0 ? (
+              <p className="settings-hint">
+                Nenhum tom de pele "{gender}" cadastrado ainda -- cadastre um em "Avatar" primeiro.
+              </p>
+            ) : (
+              <>
+                <div className="tone-select">
+                  {genderSkins.map((skin) => (
+                    <button
+                      key={skin.id}
+                      type="button"
+                      className={selectedSkinIds.includes(skin.id) ? "tone-chip selected" : "tone-chip"}
+                      onClick={() =>
+                        setSelectedSkinIds((prev) =>
+                          prev.includes(skin.id) ? prev.filter((id) => id !== skin.id) : [...prev, skin.id]
+                        )
+                      }
+                    >
+                      <span className="tone-chip-swatch" style={{ background: skin.hex ?? "#8a7ca8" }} />
+                      {skin.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="clear-btn"
+                  onClick={() =>
+                    setSelectedSkinIds(
+                      selectedSkinIds.length === genderSkins.length ? [] : genderSkins.map((s) => s.id)
+                    )
+                  }
+                >
+                  {selectedSkinIds.length === genderSkins.length ? "Limpar seleção" : "Selecionar todos"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="items-panel-uploads">
-          {DIRECTION_FIELDS.map((field) => (
+          {activeDirectionFields.map((field) => (
             <label key={field.key} className="items-panel-upload-field">
               <span>
                 {field.label}
@@ -422,38 +756,174 @@ function AvatarSkinPanel({ accessToken, onSkinsChanged }: { accessToken: string;
                 }}
                 type="file"
                 accept="image/*"
-                onChange={(e) => setSkinFiles((prev) => ({ ...prev, [field.key]: e.target.files?.[0] }))}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  setFiles((prev) => ({ ...prev, [field.key]: file }));
+                  if (file) setActiveDirection(field.key);
+                }}
               />
             </label>
           ))}
+        </div>
+
+        {/* editor de posição/tamanho -- pedido do Douglas: "preciso
+            posicionar e redimensionar" -- abas de direção (só as que a
+            categoria usa, ver activeDirectionFields) trocam qual foto
+            tá sendo ajustada; o boneco de referência muda de POSE
+            junto (ver frameOffsetXPx/frameOffsetYPx acima). */}
+        <div className="edit-section-tabs">
+          {activeDirectionFields.map((field) => (
+            <button
+              key={field.key}
+              type="button"
+              className={activeDirection === field.key ? "edit-section-tab selected" : "edit-section-tab"}
+              onClick={() => setActiveDirection(field.key)}
+            >
+              {field.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="item-size-card">
+          <div className="item-stage" style={{ height: STAGE_HEIGHT }}>
+            <div
+              className="item-stage-avatar"
+              style={{
+                bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                width: FRAME_W,
+                height: FRAME_H,
+              }}
+              title="Boneco de referência -- pose da direção escolhida acima"
+            >
+              <div
+                className="item-stage-avatar-crop"
+                style={{
+                  transform: `translate(-${frameOffsetXPx}px, -${frameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
+                }}
+              >
+                {referenceOutfitFile && (
+                  <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceOutfitFile)} alt="" />
+                )}
+                {referenceSkin && (
+                  <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceSkin.file)} alt="" />
+                )}
+                {REFERENCE_HAIR && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_HAIR.file}`} alt="" />}
+              </div>
+            </div>
+
+            {activeArtUrl ? (
+              <div
+                className={hasOwnFile ? "avatar-art-drag-box" : "avatar-art-drag-box avatar-art-drag-box-ghost"}
+                style={{
+                  width: FRAME_W * PREVIEW_SCALE,
+                  height: FRAME_H * PREVIEW_SCALE,
+                  bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                  transform: `translate(calc(-50% + ${activePlacement.offsetX * PREVIEW_SCALE}px), ${activePlacement.offsetY * PREVIEW_SCALE}px) scale(${activePlacement.scale})`,
+                }}
+                onPointerDown={hasOwnFile ? handleArtPointerDown : undefined}
+                title={hasOwnFile ? "Arraste pra posicionar" : "Foto de frente reaproveitada -- suba a foto própria pra ajustar"}
+              >
+                <img className="avatar-art-drag-img" src={activeArtUrl} alt="Preview" />
+              </div>
+            ) : (
+              <p className="edit-hint item-size-empty">Escolha a foto de "{activeDirectionLabel}" pra ver o preview aqui.</p>
+            )}
+          </div>
+
+          <div className="settings-slider-row">
+            <span className="settings-slider-name">Tamanho ({activeDirectionLabel})</span>
+            <input
+              type="range"
+              min={0.3}
+              max={2.5}
+              step={0.05}
+              disabled={!hasOwnFile}
+              value={activePlacement.scale}
+              onChange={(e) =>
+                setPlacements((prev) => ({
+                  ...prev,
+                  [activeDirection]: { ...(prev[activeDirection] ?? DEFAULT_PLACEMENT), scale: Number(e.target.value) },
+                }))
+              }
+            />
+            <span className="settings-slider-value">{Math.round(activePlacement.scale * 100)}%</span>
+          </div>
+
+          <div className="item-stage-offset-row">
+            <span>
+              posição ({activeDirectionLabel}) -- x: {activePlacement.offsetX}px · y: {activePlacement.offsetY}px
+            </span>
+            {hasOwnFile && (activePlacement.offsetX !== 0 || activePlacement.offsetY !== 0 || activePlacement.scale !== 1) && (
+              <button
+                type="button"
+                className="clear-btn"
+                onClick={() => setPlacements((prev) => ({ ...prev, [activeDirection]: DEFAULT_PLACEMENT }))}
+              >
+                Resetar posição/tamanho
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <p className="items-panel-error">{error}</p>}
 
         <div className="items-panel-submit-row">
           <button type="submit" className="items-panel-submit" disabled={submitting}>
-            {submitting ? "Enviando..." : "Cadastrar tom"}
+            {submitting ? "Enviando..." : "Cadastrar"}
           </button>
         </div>
       </form>
 
       <section className="items-panel-section">
-        <h3>Tons cadastrados ({skins?.length ?? 0})</h3>
-        {!skins ? (
-          <p className="items-panel-loading">Carregando...</p>
-        ) : skins.length === 0 ? (
-          <p className="items-panel-loading">Nenhum tom custom ainda.</p>
+        {category === "avatar" ? (
+          <>
+            <h3>Tons cadastrados ({skins?.length ?? 0})</h3>
+            {!skins ? (
+              <p className="items-panel-loading">Carregando...</p>
+            ) : skins.length === 0 ? (
+              <p className="items-panel-loading">Nenhum tom custom ainda.</p>
+            ) : (
+              <ul className="items-panel-list">
+                {skins.map((skin) => (
+                  <li key={skin.id} className="items-panel-row">
+                    <span className="skin-swatch" style={{ background: skin.hex ?? "#8a7ca8" }} />
+                    <span className="items-panel-name">
+                      {skin.label} <span className="items-panel-category">({skin.gender})</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
-          <ul className="items-panel-list">
-            {skins.map((skin) => (
-              <li key={skin.id} className="items-panel-row">
-                <span className="skin-swatch" style={{ background: skin.hex ?? "#8a7ca8" }} />
-                <span className="items-panel-name">
-                  {skin.label} <span className="items-panel-category">({skin.gender})</span>
-                </span>
-              </li>
-            ))}
-          </ul>
+          (() => {
+            const rows = (avatarItems ?? []).filter((it) => it.category === category);
+            return (
+              <>
+                <h3>
+                  {AVATAR_CREATOR_CATEGORIES.find((c) => c.id === category)?.label} cadastrados ({rows.length})
+                </h3>
+                {!avatarItems ? (
+                  <p className="items-panel-loading">Carregando...</p>
+                ) : rows.length === 0 ? (
+                  <p className="items-panel-loading">
+                    Nenhum ainda -- se a tabela não existir ainda, peça pro Douglas rodar
+                    supabase/migrations/0006_avatar_items.sql.
+                  </p>
+                ) : (
+                  <ul className="items-panel-list">
+                    {rows.map((item) => (
+                      <li key={item.id} className="items-panel-row">
+                        <span className="items-panel-name">
+                          {item.label} <span className="items-panel-category">({item.gender})</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            );
+          })()
         )}
       </section>
     </>
@@ -472,9 +942,9 @@ export default function ItemEditor({
   // "Criar Mobi" (de sempre) / "Criar Avatar" (pedido do Douglas: "la
   // encima quero dois botoes criar mobi/criar avatar") -- dois modos
   // dentro do MESMO painel, não duas telas separadas. "Criar Avatar" usa
-  // um componente à parte (AvatarSkinPanel, ver acima) com seu próprio
-  // formulário/estado, já que os campos são bem diferentes (sexo, folha
-  // composta no navegador) do de móvel.
+  // um componente à parte (AvatarCreatorPanel, ver acima) com seu próprio
+  // formulário/estado, já que os campos são bem diferentes (sexo,
+  // categoria, folha composta no navegador) do de móvel.
   const [mode, setMode] = useState<"mobi" | "avatar">("mobi");
   const [items, setItems] = useState<CustomItemRow[] | null>(null);
   const [label, setLabel] = useState("");
@@ -829,7 +1299,7 @@ export default function ItemEditor({
           </button>
         </div>
 
-        {mode === "avatar" && <AvatarSkinPanel accessToken={accessToken} onSkinsChanged={onItemsChanged} />}
+        {mode === "avatar" && <AvatarCreatorPanel accessToken={accessToken} onChanged={onItemsChanged} />}
 
         {mode === "mobi" && (
         <>

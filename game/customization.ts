@@ -329,3 +329,56 @@ export const CUSTOMIZATION_CATEGORIES: CustomizationCategory[] = [
   { id: "barba", label: "Barba" },
   { id: "traje", label: "Traje" },
 ];
+
+/**
+ * Empurra item(ns) CUSTOM(izado(s)) direto pra dentro de um catálogo
+ * (mesmo truque de registerCustomSkins acima e
+ * registerCustomFurnitureModels em game/furniture.ts -- array é tipo
+ * referência, então todo lugar que já importa o catálogo direto enxerga
+ * os itens novos sozinho). UPSERT por id: chamar de novo com o mesmo id
+ * substitui em vez de duplicar. Usado por registerCustomHair/
+ * Accessories/Beards/Outfits logo abaixo (ver fetchAndRegisterCustomAvatarItems
+ * em GameRoom.tsx, que monta o BeardOption/OutfitOption já com `bySkin`
+ * pronto -- um id por tom de pele selecionado no Editor de Itens, todos
+ * apontando pra MESMA folha, ver comentário lá).
+ */
+function upsertCatalogById<T extends { id: string }>(catalog: T[], items: T[]): void {
+  for (const item of items) {
+    const existingIndex = catalog.findIndex((c) => c.id === item.id);
+    if (existingIndex !== -1) catalog[existingIndex] = item;
+    else catalog.push(item);
+  }
+}
+
+/**
+ * Cabelo CUSTOM, cadastrado pelo dono da sala no Editor de Itens (botão
+ * "Criar Avatar" > categoria "Cabelo" -- ver components/ItemEditor.tsx,
+ * app/api/avatar-items e a tabela avatar_items do Supabase). RODA JUNTO
+ * com a pasta local (mesmo esquema de registerCustomSkins acima), não
+ * troca nada que já existia.
+ */
+export function registerCustomHair(items: HairOption[]): void {
+  upsertCatalogById(HAIR_CATALOG, items);
+}
+
+/** Acessório CUSTOM -- ver registerCustomHair acima. */
+export function registerCustomAccessories(items: AccessoryOption[]): void {
+  upsertCatalogById(ACCESSORY_CATALOG, items);
+}
+
+/**
+ * Barba CUSTOM -- ver registerCustomHair acima. Diferente de
+ * cabelo/acessório, cada barba já chega com `bySkin` PRONTO (montado em
+ * GameRoom.tsx a partir dos tons de pele escolhidos no Editor de Itens,
+ * ver skin_ids na tabela avatar_items) -- pode cobrir mais de um tom
+ * apontando pra MESMA folha (pedido do Douglas: "podendo selecionar
+ * todos").
+ */
+export function registerCustomBeards(items: BeardOption[]): void {
+  upsertCatalogById(BEARD_CATALOG, items);
+}
+
+/** Traje CUSTOM -- mesma ideia de registerCustomBeards acima. */
+export function registerCustomOutfits(items: OutfitOption[]): void {
+  upsertCatalogById(OUTFIT_CATALOG, items);
+}

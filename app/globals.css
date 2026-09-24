@@ -2788,6 +2788,52 @@ body {
   border-color: #7c5cff;
 }
 
+/* Seletor de tom no Editor de Itens > "Criar Avatar" (ver AvatarCreatorPanel
+   em components/ItemEditor.tsx) -- Branco/Pardo/Negro pra categoria
+   "Avatar" (single-select, define o tom novo) e checkbox de "aplica pra
+   qual tom" pra barba/traje (multi-select, pedido do Douglas: "podendo
+   selecionar todos") -- mesmo componente visual pros dois usos, só muda
+   o onClick de quem chama. */
+.tone-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tone-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #241933;
+  border: 1px solid #362552;
+  border-radius: 999px;
+  color: #cdbdf0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tone-chip:hover {
+  background: #3d2a5c;
+  color: #f5f0ff;
+}
+
+.tone-chip.selected {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: white;
+}
+
+.tone-chip-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
 .toast-stack {
   position: absolute;
   top: 16px;
@@ -3468,6 +3514,42 @@ body {
 
 .item-stage-item-img:active {
   cursor: grabbing;
+}
+
+/* Editor de posição/tamanho do "Criar Avatar" (ver AvatarCreatorPanel em
+   ItemEditor.tsx, handleArtPointerDown) -- mesma ideia de
+   .item-stage-item-img acima (arrastar em cima do boneco de
+   referência), só que aqui a caixa tem o tamanho FIXO do quadro
+   200x260 (escalado) e usa object-fit:contain na imagem lá dentro
+   (mesmo efeito do fit:"contain" que composeAvatarArtSheet desenha no
+   canvas -- WYSIWYG entre o preview e o resultado final), com
+   offset/escala aplicados via transform (ver estilo inline). */
+.avatar-art-drag-box {
+  position: absolute;
+  left: 50%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.avatar-art-drag-box:active {
+  cursor: grabbing;
+}
+
+/* foto de "frente" reaproveitada numa direção que ainda não tem arte
+   própria (ver hasOwnFile em ItemEditor.tsx) -- não dá pra arrastar,
+   só mostra em transparência reduzida pra deixar claro que é só uma
+   prévia. */
+.avatar-art-drag-box-ghost {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.avatar-art-drag-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  display: block;
 }
 
 .item-stage-offset-row {

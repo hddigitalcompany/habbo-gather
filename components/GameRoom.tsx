@@ -5,7 +5,16 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
 import PartySocket from "partysocket";
-import MainScene, { DEFAULT_ZOOM_LEVEL, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL, skinTextureKey } from "@/game/MainScene";
+import MainScene, {
+  DEFAULT_ZOOM_LEVEL,
+  MIN_ZOOM_LEVEL,
+  MAX_ZOOM_LEVEL,
+  skinTextureKey,
+  hairTextureKey,
+  accessoryTextureKey,
+  beardTextureKey,
+  outfitTextureKey,
+} from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
@@ -52,6 +61,14 @@ import {
   AvatarGender,
   SkinOption,
   registerCustomSkins,
+  HairOption,
+  AccessoryOption,
+  BeardOption,
+  OutfitOption,
+  registerCustomHair,
+  registerCustomAccessories,
+  registerCustomBeards,
+  registerCustomOutfits,
 } from "@/game/customization";
 
 // "focus/ausente/online" -- ver caixinha de status no ProfileCard.
@@ -896,11 +913,99 @@ export default function GameRoom({
       setCustomSkinsVersion((v) => v + 1);
       const textureEntries = skins.map((skin) => ({ key: skinTextureKey(skin.id), url: skin.file }));
       await new Promise<void>((resolve) => {
-        if (sceneRef.current) sceneRef.current.loadCustomSkinTextures(textureEntries, resolve);
+        if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
         else resolve();
       });
     } catch {
       // Supabase fora do ar/não configurado -- segue sem tom custom, sala funciona igual
+    }
+  }
+
+  /**
+   * Mesmo esquema de fetchAndRegisterCustomSkins acima, só que pras
+   * OUTRAS camadas do avatar -- cabelo, acessório, barba e traje (Editor
+   * de Itens, botão "Criar Avatar" > categoria correspondente, ver
+   * AvatarCreatorPanel em components/ItemEditor.tsx e
+   * supabase/migrations/0006_avatar_items.sql). Uma linha da tabela
+   * "avatar_items" vira um item novo no catálogo certo (cabelo/
+   * acessório: `file` único, sem tom -- barba/traje: `bySkin` com UM
+   * tom por id em `skin_ids`, todos apontando pra MESMA folha, pedido do
+   * Douglas: "podendo selecionar todos"). RODA JUNTO com a pasta local,
+   * chamado nos mesmos lugares (scene-ready + onItemsChanged do
+   * ItemEditor).
+   */
+  async function fetchAndRegisterCustomAvatarItems(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("avatar_items")
+        .select("id, category, gender, label, skin_ids, sheet_url");
+      if (error || !data || data.length === 0) return;
+
+      type AvatarItemRow = {
+        id: string;
+        category: string;
+        gender: string;
+        label: string;
+        skin_ids: string[] | null;
+        sheet_url: string;
+      };
+      const rows = data as AvatarItemRow[];
+      const textureEntries: { key: string; url: string }[] = [];
+
+      const hairRows = rows.filter((r) => r.category === "cabelo");
+      if (hairRows.length > 0) {
+        const items: HairOption[] = hairRows.map((r) => ({ id: r.id, label: r.label, file: r.sheet_url }));
+        registerCustomHair(items);
+        for (const item of items) textureEntries.push({ key: hairTextureKey(item.id), url: item.file });
+      }
+
+      const accessoryRows = rows.filter((r) => r.category === "acessorio");
+      if (accessoryRows.length > 0) {
+        const items: AccessoryOption[] = accessoryRows.map((r) => ({ id: r.id, label: r.label, file: r.sheet_url }));
+        registerCustomAccessories(items);
+        for (const item of items) textureEntries.push({ key: accessoryTextureKey(item.id), url: item.file });
+      }
+
+      const beardRows = rows.filter((r) => r.category === "barba");
+      if (beardRows.length > 0) {
+        const items: BeardOption[] = beardRows.map((r) => ({
+          id: r.id,
+          label: r.label,
+          bySkin: Object.fromEntries((r.skin_ids ?? []).map((skinId) => [skinId, r.sheet_url])),
+        }));
+        registerCustomBeards(items);
+        for (const item of items) {
+          for (const skinId of Object.keys(item.bySkin)) {
+            textureEntries.push({ key: beardTextureKey(item.id, skinId), url: item.bySkin[skinId]! });
+          }
+        }
+      }
+
+      const outfitRows = rows.filter((r) => r.category === "traje");
+      if (outfitRows.length > 0) {
+        const items: OutfitOption[] = outfitRows.map((r) => ({
+          id: r.id,
+          label: r.label,
+          bySkin: Object.fromEntries((r.skin_ids ?? []).map((skinId) => [skinId, r.sheet_url])),
+        }));
+        registerCustomOutfits(items);
+        for (const item of items) {
+          for (const skinId of Object.keys(item.bySkin)) {
+            textureEntries.push({ key: outfitTextureKey(item.id, skinId), url: item.bySkin[skinId]! });
+          }
+        }
+      }
+
+      setCustomSkinsVersion((v) => v + 1);
+      await new Promise<void>((resolve) => {
+        if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
+        else resolve();
+      });
+    } catch {
+      // Supabase fora do ar/não configurado (ou migration 0006 ainda não
+      // rodada) -- segue sem esses itens custom, sala funciona igual
     }
   }
 
@@ -1730,10 +1835,12 @@ export default function GameRoom({
         // mandar qualquer POST. O ajuste de assento (seatOffsets) precisa
         // entrar na cena (setSeatOffsets) ANTES de loadSavedFurniture,
         // senão um item já sentável carregaria sem o ajuste salvo.
-        // Tom de pele custom (ver fetchAndRegisterCustomSkins) roda em
-        // PARALELO, sem bloquear a cadeia de carregar móvel -- os dois
-        // não dependem um do outro.
+        // Tom de pele/cabelo/acessório/barba/traje custom (ver
+        // fetchAndRegisterCustomSkins/fetchAndRegisterCustomAvatarItems)
+        // rodam em PARALELO, sem bloquear a cadeia de carregar móvel --
+        // nenhum desses três depende dos outros.
         fetchAndRegisterCustomSkins();
+        fetchAndRegisterCustomAvatarItems();
         fetchAndRegisterCustomFurniture().finally(() => {
           fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
             .then((r) => (r.ok ? r.json() : null))
@@ -3192,6 +3299,7 @@ export default function GameRoom({
             onItemsChanged={() => {
               fetchAndRegisterCustomFurniture();
               fetchAndRegisterCustomSkins();
+              fetchAndRegisterCustomAvatarItems();
             }}
           />
         )}

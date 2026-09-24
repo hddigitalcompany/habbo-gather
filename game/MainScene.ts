@@ -200,36 +200,45 @@ function layerTextureKey(layer: LayerKey): string {
   return `avatar-${layer}`;
 }
 
-/** Chave da textura no Phaser pra UMA OPÇÃO de cabelo do catálogo (ver HAIR_CATALOG). */
-function hairTextureKey(hairId: string): string {
+/** Chave da textura no Phaser pra UMA OPÇÃO de cabelo do catálogo (ver
+ * HAIR_CATALOG). Exportada (ver comentário de skinTextureKey abaixo)
+ * pra GameRoom.tsx montar a mesma chave pra um cabelo CUSTOM. */
+export function hairTextureKey(hairId: string): string {
   return `avatar-cabelo-${hairId}`;
 }
 
 /** Chave da textura no Phaser pra UM TOM de pele do catálogo (ver
- * SKIN_CATALOG). Exportada (diferente das outras *TextureKey da vizinhança)
- * porque GameRoom.tsx precisa montar essa mesma chave pra carregar um tom
- * CUSTOM em tempo de execução (ver loadCustomSkinTextures acima e
- * fetchAndRegisterCustomSkins, GameRoom.tsx). */
+ * SKIN_CATALOG). Exportada (diferente das outras *TextureKey da vizinhança
+ * antes dessa mudança) porque GameRoom.tsx precisa montar essa mesma chave
+ * pra carregar um tom CUSTOM em tempo de execução (ver
+ * loadCustomAvatarLayerTextures acima e fetchAndRegisterCustomSkins,
+ * GameRoom.tsx). */
 export function skinTextureKey(skinId: string): string {
   return `avatar-base-${skinId}`;
 }
 
 /** Chave da textura no Phaser pra UMA OPÇÃO de barba NUM TOM de pele
  * específico (ver BEARD_CATALOG/resolveBeardSkinId) -- igual ao traje,
- * a arte varia pelos dois, então a chave carrega os dois ids. */
-function beardTextureKey(beardId: string, resolvedSkinId: string): string {
+ * a arte varia pelos dois, então a chave carrega os dois ids. Exportada
+ * pelo mesmo motivo de skinTextureKey acima -- ver
+ * fetchAndRegisterCustomAvatarItems em GameRoom.tsx, uma barba CUSTOM
+ * pode cobrir vários tons (skin_ids), cada um vira uma chave própria
+ * aqui apontando pra MESMA folha. */
+export function beardTextureKey(beardId: string, resolvedSkinId: string): string {
   return `avatar-barba-${beardId}-${resolvedSkinId}`;
 }
 
-/** Chave da textura no Phaser pra UMA OPÇÃO de acessório do catálogo (ver ACCESSORY_CATALOG). */
-function accessoryTextureKey(accessoryId: string): string {
+/** Chave da textura no Phaser pra UMA OPÇÃO de acessório do catálogo (ver
+ * ACCESSORY_CATALOG). Exportada pelo mesmo motivo de skinTextureKey acima. */
+export function accessoryTextureKey(accessoryId: string): string {
   return `avatar-oculos-${accessoryId}`;
 }
 
 /** Chave da textura no Phaser pra UM TRAJE NUM TOM de pele específico (ver
  * OUTFIT_CATALOG/resolveOutfitSkinId) -- a arte varia pelos dois, então a
- * chave carrega os dois ids. */
-function outfitTextureKey(outfitId: string, resolvedSkinId: string): string {
+ * chave carrega os dois ids. Exportada pelo mesmo motivo de
+ * skinTextureKey/beardTextureKey acima. */
+export function outfitTextureKey(outfitId: string, resolvedSkinId: string): string {
   return `avatar-traje-${outfitId}-${resolvedSkinId}`;
 }
 
@@ -894,17 +903,21 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Igual a loadCustomFurnitureTextures acima, mas pra TOM DE PELE
-   * customizado (Editor de Itens, botão "Criar Avatar" -- ver
-   * registerCustomSkins em game/customization.ts e app/api/avatar-skins)
-   * -- diferente de móvel (imagem estática), tom de pele é um
-   * SPRITESHEET (mesma folha 8x2/200x260 que os tons da pasta local
-   * usam, já composta pelo NAVEGADOR antes do upload, ver
-   * ItemEditor.tsx), por isso `this.load.spritesheet` com os mesmos
+   * Igual a loadCustomFurnitureTextures acima, mas pra CAMADA DE AVATAR
+   * customizada (Editor de Itens, botão "Criar Avatar" -- tom de pele,
+   * cabelo, acessório, barba ou traje, ver registerCustomSkins/
+   * registerCustomHair/registerCustomAccessories/registerCustomBeards/
+   * registerCustomOutfits em game/customization.ts e app/api/avatar-skins
+   * + app/api/avatar-items) -- diferente de móvel (imagem estática),
+   * qualquer camada de avatar é um SPRITESHEET (mesma folha 8x2/200x260
+   * que a pasta local usa, já composta pelo NAVEGADOR antes do upload,
+   * ver ItemEditor.tsx), por isso `this.load.spritesheet` com os mesmos
    * FRAME_W/FRAME_H/spacing:2 do resto das camadas (ver preload() acima)
-   * em vez de `this.load.image`.
+   * em vez de `this.load.image`. (Nome antigo: loadCustomSkinTextures --
+   * generalizado quando o upload por navegador passou a cobrir as outras
+   * camadas, não só tom de pele.)
    */
-  loadCustomSkinTextures(entries: { key: string; url: string }[], onDone?: () => void) {
+  loadCustomAvatarLayerTextures(entries: { key: string; url: string }[], onDone?: () => void) {
     const missing = entries.filter((e) => !this.textures.exists(e.key));
     if (missing.length === 0) {
       onDone?.();
