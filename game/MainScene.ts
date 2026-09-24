@@ -24,7 +24,7 @@ import {
   seatOffsetGroupKey,
   seatOffsetGroupLabel,
 } from "./furniture";
-import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS } from "./grid";
+import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS, GAME_WIDTH, GAME_HEIGHT } from "./grid";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -102,8 +102,17 @@ import {
 const FRAME_W = 200;
 const FRAME_H = 260;
 // caractere ocupa ~210px de altura dentro do frame de 260 -> essa escala
-// deixa ele com uns 90px de altura em tela (tamanho aprovado)
-const AVATAR_SCALE = 0.43;
+// deixa ele com uns 135px de altura em tela (mesma PROPORÇÃO de antes:
+// ~90px numa tela de 600px de altura -> ~135px numa de 900px, ver
+// GAME_HEIGHT em grid.ts -- escalado 1.5x junto pra resolver o blur do
+// avatar em zoom distante: a arte original tem 260px de altura por
+// frame, então essa escala aproveita mais dela em vez de encolher quase
+// pela metade e depois esticar de novo pra tela real -- pedido do
+// Douglas, ver conversa sobre zoom borrando "principalmente o avatar".
+// Chegou a ser testado em 2x (0.86), mas pesou demais na performance --
+// 1.5x é o meio-termo, ver comentário de GAME_WIDTH/GAME_HEIGHT em
+// grid.ts).
+const AVATAR_SCALE = 0.645;
 
 // o container do boneco fica ancorado no CENTRO do tile (tileToWorld) --
 // isso é o que worldToTile/clampTile/movimento usam pra saber em que
@@ -113,7 +122,7 @@ const AVATAR_SCALE = 0.43;
 // sprites (e o label do nome) são desenhadas com um offset PRA BAIXO
 // dentro do container: puramente visual, não mexe na posição lógica
 // usada pro grid/colisão/sentar.
-const AVATAR_FOOT_OFFSET_Y = 14;
+const AVATAR_FOOT_OFFSET_Y = 21;
 
 // [parado, passoA, passoB] -- passoA/passoB alternam a cada passo dado
 // (ver playWalk), não por tempo -- assim funciona igual pra um pulo de
@@ -311,8 +320,12 @@ const GAME_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-se
 // bolinha de status (foco/ausente/online) ao lado do nome, dentro do
 // jogo -- a COR vem sempre de fora (GameRoom.tsx, ver STATUS_COLORS),
 // pra não duplicar a paleta aqui; a cena só sabe desenhar um círculo.
-const STATUS_DOT_RADIUS = 2.5;
-const STATUS_DOT_GAP = 4;
+// (escalado 1.5x junto com GAME_WIDTH/GAME_HEIGHT/AVATAR_SCALE em
+// grid.ts/acima, depois reduzido mais 10% -- pedido do Douglas: "o nome
+// pode diminuir, 10%" -- proporção base idêntica à aprovada antes, só
+// um pouco mais discreta agora.)
+const STATUS_DOT_RADIUS = 3.375;
+const STATUS_DOT_GAP = 5.4;
 
 // plaquinha de nome (dot + texto) -- desenhada como uma "pill" de
 // cantos arredondados (Graphics, ver drawNameplateBg) em vez do
@@ -325,9 +338,11 @@ const STATUS_DOT_GAP = 4;
 // mandou) -- plaquinha bem discreta/fina, não um card grande chamando
 // atenção -- por isso fonte e preenchimento um pouco menores do que a
 // primeira versão.
-const NAMEPLATE_PAD_X = 5;
-const NAMEPLATE_PAD_Y = 2;
-const NAMEPLATE_RADIUS = 6;
+// (escalados 1.5x junto com a resolução interna, depois reduzidos mais
+// 10%, mesmo motivo do STATUS_DOT_RADIUS/GAP acima.)
+const NAMEPLATE_PAD_X = 6.75;
+const NAMEPLATE_PAD_Y = 2.7;
+const NAMEPLATE_RADIUS = 8;
 const NAMEPLATE_BG_COLOR = 0x120a1f;
 const NAMEPLATE_BG_ALPHA = 0.88;
 const NAMEPLATE_BORDER_COLOR = 0x3a2b57;
@@ -344,8 +359,10 @@ const NAMEPLATE_TEXT_RESOLUTION = 4;
 // largura MÁXIMA (px, medida na mesma unidade da fonte -- ver
 // fitNameplateText) do texto do nome -- nome maior que isso é cortado
 // com "…" no final em vez de deixar o card crescer sem limite (pedido
-// do Douglas: "passou do limite, quero '...' no final").
-const NAMEPLATE_MAX_TEXT_WIDTH = 120;
+// do Douglas: "passou do limite, quero '...' no final"). Escalado 1.5x
+// junto com a resolução interna, depois reduzido mais 10% junto com o
+// resto da plaquinha.
+const NAMEPLATE_MAX_TEXT_WIDTH = 162;
 
 type Activity = "idle" | "sentado";
 
@@ -740,7 +757,19 @@ export default class MainScene extends Phaser.Scene {
   }
 
   create() {
-    this.add.image(400, 300, "room").setOrigin(0.5).setDepth(DEPTH_ROOM_BACKGROUND);
+    // posição/tamanho vêm de GAME_WIDTH/GAME_HEIGHT (grid.ts) em vez de
+    // 400/300 fixo (era exatamente o centro do canvas de 800x600 antigo)
+    // -- agora acompanha a resolução interna sozinho, sem precisar
+    // lembrar de atualizar aqui se ela mudar nunca mais. setDisplaySize
+    // também: a arte "room.png" é nativa 800x600 (a resolução VELHA) --
+    // esticada aqui pra cobrir o canvas novo (1200x900) até o Douglas
+    // subir uma versão em qualidade maior dela (mesma situação da
+    // mobília -- ver conversa sobre a resolução interna dobrar).
+    this.add
+      .image(GAME_WIDTH / 2, GAME_HEIGHT / 2, "room")
+      .setOrigin(0.5)
+      .setDisplaySize(GAME_WIDTH, GAME_HEIGHT)
+      .setDepth(DEPTH_ROOM_BACKGROUND);
 
     // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
     // escolhidos -- por isso desenha antes até dos móveis fixos (ver
@@ -892,7 +921,7 @@ export default class MainScene extends Phaser.Scene {
       // (model.displayWidth, ver FurnitureModelDef em furniture.ts) --
       // só cai no alvo genérico por categoria pra item cadastrado ANTES
       // dessa opção existir (display_width null no banco).
-      const targetWidth = model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 150;
+      const targetWidth = model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 225;
       if (nativeW > 0 && nativeH > 0) {
         image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
       }
@@ -1124,7 +1153,7 @@ export default class MainScene extends Phaser.Scene {
     // cada peça.
     const label = this.add
       .text(0, 0, name, {
-        fontSize: "8px",
+        fontSize: "11px", // escalado 1.5x junto com a resolução interna, depois -10% (ver NAMEPLATE_PAD_X/STATUS_DOT_RADIUS acima)
         color: "#f1ecff",
         fontFamily: GAME_FONT_FAMILY,
         resolution: NAMEPLATE_TEXT_RESOLUTION,
@@ -2491,7 +2520,7 @@ export default class MainScene extends Phaser.Scene {
       const width = bottomRight.x - topLeft.x + TILE;
       const height = bottomRight.y - topLeft.y + TILE;
       const labelX = centerX;
-      const labelY = topLeft.y - TILE / 2 - 4;
+      const labelY = topLeft.y - TILE / 2 - 6; // -6 = -4 de antes, escalado 1.5x junto com a resolução interna
 
       let hitZone = this.areaHoverZones.get(areaId);
       if (!hitZone) {
@@ -2524,10 +2553,10 @@ export default class MainScene extends Phaser.Scene {
         label = this.add
           .text(labelX, labelY, text, {
             fontFamily: GAME_FONT_FAMILY,
-            fontSize: "13px",
+            fontSize: "20px", // escalado 1.5x junto com a resolução interna
             color: "#ffffff",
             backgroundColor: owner ? "#000000cc" : "#7c5cffdd",
-            padding: { x: 6, y: 2 },
+            padding: { x: 9, y: 3 },
           })
           .setOrigin(0.5, 1)
           .setDepth(DEPTH_AREA_LABEL);

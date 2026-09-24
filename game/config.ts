@@ -6,35 +6,37 @@
 // resolve, já que Phaser.Scene, Phaser.AUTO etc. são todos named exports.
 import * as Phaser from "phaser";
 import MainScene from "./MainScene";
+import { GAME_WIDTH, GAME_HEIGHT } from "./grid";
 
 export function createGameConfig(
   parent: HTMLElement
 ): Phaser.Types.Core.GameConfig {
   return {
     type: Phaser.AUTO,
-    // resolução INTERNA do jogo continua 800x600 -- é nela que a sala
+    // resolução INTERNA do jogo (GAME_WIDTH/GAME_HEIGHT, ver grid.ts --
+    // 1600x1200, dobrada de 800x600 original) -- é nela que a sala
     // (GRID_COLS/GRID_ROWS em grid.ts) e todo o resto da lógica de
-    // tile/posição são calculados, então não muda. Quem preenche o
-    // navegador é o CANVAS por cima disso (ver `scale` abaixo).
-    width: 800,
-    height: 600,
+    // tile/posição são calculados. Quem preenche o navegador é o CANVAS
+    // por cima disso (ver `scale` abaixo).
+    width: GAME_WIDTH,
+    height: GAME_HEIGHT,
     parent,
     // ENVELOP (não FIT): escala o canvas pra COBRIR o elemento pai
     // inteiro (que é 100vw/100vh, ver .room-wrapper/.phaser-container em
-    // globals.css) mantendo a proporção 800:600, cortando só o excesso
-    // que sobrar de um lado -- igual "background-size: cover" do CSS.
-    // FIT (antes) fazia o oposto: encaixava o 800:600 INTEIRO dentro da
-    // tela sem cortar nada, o que sobra faixa vazia (cor de fundo) dos
-    // dois lados sempre que a janela não é exatamente 4:3 -- foi isso
-    // que o Douglas reportou como "limite de corte na lateral" (pediu
+    // globals.css) mantendo a proporção 4:3, cortando só o excesso que
+    // sobrar de um lado -- igual "background-size: cover" do CSS. FIT
+    // (antes) fazia o oposto: encaixava o canvas INTEIRO dentro da tela
+    // sem cortar nada, o que sobra faixa vazia (cor de fundo) dos dois
+    // lados sempre que a janela não é exatamente 4:3 -- foi isso que o
+    // Douglas reportou como "limite de corte na lateral" (pediu
     // responsivo, sem faixa, preenchendo a tela toda até a borda do
     // navegador). Reajusta sozinho quando a janela muda de tamanho, sem
     // precisar de nenhum listener de resize manual.
     scale: {
       mode: Phaser.Scale.ENVELOP,
       autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: 800,
-      height: 600,
+      width: GAME_WIDTH,
+      height: GAME_HEIGHT,
     },
     // a arte nova (gerada, com anti-aliasing suave) fica serrilhada com
     // filtro nearest-neighbor em escala fracionária -- diferente do

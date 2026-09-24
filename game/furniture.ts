@@ -202,13 +202,16 @@ export interface FurnitureModelDef {
  * proporcionalmente (mantém a proporção da imagem original, ver
  * addFurnitureSprite) -- só a largura é fixada aqui.
  */
+// (escalados 1.5x junto com a resolução interna do jogo -- ver
+// GAME_WIDTH/GAME_HEIGHT/TILE em game/grid.ts -- mantém a mesma
+// proporção aprovada de antes, só que calculada na resolução nova.)
 export const CUSTOM_ITEM_TARGET_WIDTH: Record<FurnitureCategoryId, number> = {
-  poltrona: 160,
-  sofa: 260,
-  mesa: 180,
-  planta: 90,
-  computador: 100,
-  divisoria: 130,
+  poltrona: 240,
+  sofa: 390,
+  mesa: 270,
+  planta: 135,
+  computador: 150,
+  divisoria: 195,
 };
 
 // modelos gerados automaticamente a partir da pasta de origem (ver
@@ -383,14 +386,24 @@ export function furnitureArtFile(type: FurnitureType, facing: Direction): string
 // zero; de lado ele tava baixo demais, então sobe mais que antes, e
 // ganha um empurrão horizontal (seatOffsetX) na direção que a poltrona
 // olha, pra não ficar sentado bem no meio do "pé" do móvel.
-// -14 aqui compensa o AVATAR_FOOT_OFFSET_Y (ver MainScene.ts) -- as
-// sprites do boneco agora são desenhadas 14px mais pra baixo dentro do
+// -21 aqui compensa o AVATAR_FOOT_OFFSET_Y (ver MainScene.ts) -- as
+// sprites do boneco agora são desenhadas 21px mais pra baixo dentro do
 // próprio container (só isso resolve o "pé não fica centralizado" ao
 // caminhar), mas isso empurraria o boneco sentado junto -- subtrai os
-// mesmos 14px aqui pra ele continuar encaixado na poltrona do jeito que
-// já tinha sido aprovado.
-export const SEAT_Y_FRENTE_COSTAS = -4 - 14;
-export const SEAT_Y_LADO = -18 - 14;
+// mesmos 21px aqui pra ele continuar encaixado na poltrona do jeito que
+// já tinha sido aprovado. (Era 14, escalou 1.5x junto com
+// AVATAR_FOOT_OFFSET_Y quando a resolução interna do jogo aumentou --
+// ver GAME_WIDTH/GAME_HEIGHT em game/grid.ts.)
+//
+// O resto do ajuste (-4/-18 de base, +12 horizontal) NÃO dobrou -- é
+// calibrado pra encaixar na arte ATUAL da poltrona (pequena, resolução
+// original, ainda sem o reupload em qualidade maior que o Douglas vai
+// fazer -- ver conversa sobre a resolução interna). Quando a arte nova
+// entrar, ajusta ao vivo pela ferramenta "Assento" do editor de espaço
+// (ver setSeatTuningMode/resetSeatOffset em MainScene.ts) em vez de
+// mexer aqui de novo.
+export const SEAT_Y_FRENTE_COSTAS = -4 - 21;
+export const SEAT_Y_LADO = -18 - 21;
 export const SEAT_X_LADO = 12;
 
 // divisória de vidro: sobe meio tile em relação à base padrão (que fica

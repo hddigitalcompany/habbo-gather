@@ -46,18 +46,21 @@ const UPLOAD_SUPERSAMPLE = 3;
 // ajuste, mostrado ao vivo no preview grande (ver item-size-card) antes
 // de cadastrar -- persistido por ITEM (não por categoria, ver
 // display_width em supabase/migrations/0003_room_items_display_width.sql
-// e o uso em addFurnitureSprite, MainScene.ts).
-const DISPLAY_WIDTH_MIN = 40;
-const DISPLAY_WIDTH_MAX = 400;
-const DISPLAY_WIDTH_STEP = 5;
+// e o uso em addFurnitureSprite, MainScene.ts). Min/max/step escalados
+// 1.5x junto com a resolução interna do jogo (mesma proporção de antes).
+const DISPLAY_WIDTH_MIN = 60;
+const DISPLAY_WIDTH_MAX = 600;
+const DISPLAY_WIDTH_STEP = 8;
 
 // altura (px, na tela do jogo) que o boneco realmente ocupa -- ver
 // comentário "caractere ocupa ~210px de altura dentro do frame de 260 ->
-// essa escala deixa ele com uns 90px de altura em tela" em
-// game/MainScene.ts (AVATAR_SCALE). Usado só pra desenhar a silhueta de
-// referência no preview (não é o boneco de verdade -- roupa/cabelo/tom
-// variam por pessoa -- mas o TAMANHO bate com o jogo de verdade).
-const AVATAR_REF_HEIGHT = 90;
+// essa escala deixa ele com uns 135px de altura em tela" em
+// game/MainScene.ts (AVATAR_SCALE -- escalado de 90 pra 135 (1.5x)
+// junto com a resolução interna do jogo, ver GAME_WIDTH/GAME_HEIGHT em
+// game/grid.ts). Usado só pra desenhar a silhueta de referência no
+// preview (não é o boneco de verdade -- roupa/cabelo/tom variam por
+// pessoa -- mas o TAMANHO bate com o jogo de verdade).
+const AVATAR_REF_HEIGHT = 135;
 
 // fator só pra deixar o card GRANDE o suficiente pra enxergar bem
 // (pedido do Douglas: "preciso disso num card maior, com a imagem
