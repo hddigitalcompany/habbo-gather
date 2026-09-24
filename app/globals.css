@@ -34,6 +34,19 @@ body {
 .room-wrapper {
   position: relative;
   flex: 1;
+  /* SEM isso, o canvas do jogo (que o Phaser deixa com um width/height
+     em PIXEL fixo no style, ver game/config.ts/ENVELOP) conta como
+     "conteúdo mínimo" desse item flexível -- por padrão um flex item
+     nunca encolhe abaixo do tamanho mínimo do próprio conteúdo (regra
+     do min-width:auto). Resultado: .room-wrapper recusava encolher pra
+     abrir espaço pro .edit-panel (irmã dele em .room-and-editor), e o
+     painel de 280px (mesmo com flex-shrink:0, ver .edit-panel) era
+     empurrado todo pra FORA da tela à direita -- não sumia "achatado",
+     sumia por estar fora da área visível. min-width:0 destrava o
+     encolhimento (truque clássico de flexbox); o corte do canvas em si
+     continua garantido pelo overflow:hidden do .phaser-container.
+     Era isso que fazia "Editar espaço" parecer não abrir nada. */
+  min-width: 0;
   height: 100%;
 }
 
