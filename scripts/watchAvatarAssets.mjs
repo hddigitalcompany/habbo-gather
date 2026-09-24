@@ -20,6 +20,7 @@ import {
   AVATAR_SKIN_SRC_ROOT,
   BARBA_SRC_ROOT,
   ACESSORIO_SRC_ROOT,
+  TRAJE_SRC_ROOT,
   PISO_SRC_ROOT,
 } from "./avatarAssetsConfig.mjs";
 
@@ -29,6 +30,7 @@ const TARGETS = [
   { label: "tom de pele", srcRoot: AVATAR_SKIN_SRC_ROOT, script: path.join(__dirname, "syncSkinAssets.mjs") },
   { label: "barba", srcRoot: BARBA_SRC_ROOT, script: path.join(__dirname, "syncBeardAssets.mjs") },
   { label: "acessório", srcRoot: ACESSORIO_SRC_ROOT, script: path.join(__dirname, "syncAccessoryAssets.mjs") },
+  { label: "traje", srcRoot: TRAJE_SRC_ROOT, script: path.join(__dirname, "syncOutfitAssets.mjs") },
   { label: "piso", srcRoot: PISO_SRC_ROOT, script: path.join(__dirname, "syncFloorAssets.mjs") },
 ];
 

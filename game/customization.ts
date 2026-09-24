@@ -148,21 +148,60 @@ export const ACCESSORY_CATALOG: AccessoryOption[] = [
 export const DEFAULT_ACCESSORY_ID = ACCESSORY_CATALOG[0].id;
 
 /**
+ * Traje (camada "traje") -- a roupa inteira do pescoço pra baixo, como
+ * UMA peça só por look (não separada em camisa/calça/tênis -- ver
+ * scripts/syncOutfitAssets.mjs). Diferente das outras camadas, cada
+ * traje não é UM arquivo, é um MAPA de arquivos por tom de pele
+ * (`bySkin`, chave = id do SkinOption) -- porque a mão fica exposta e
+ * precisa bater com o tom escolhido no avatar. `outfitFileForSkin`
+ * resolve qual arquivo usar: o exato do tom atual se existir, senão o
+ * primeiro tom disponível (pra nunca ficar sem desenhar nada) --
+ * `resolveOutfitSkinId` devolve só o ID resolvido, usado pra montar a
+ * texture key (ver outfitTextureKey em MainScene.ts).
+ */
+export interface OutfitOption {
+  id: string;
+  label: string;
+  bySkin: Partial<Record<string, string>>;
+}
+
+// gerado automaticamente -- ver scripts/syncOutfitAssets.mjs, NÃO editar
+// esse import nem o arquivo dele à mão.
+import { GENERATED_OUTFIT_CATALOG } from "./outfitCatalog.generated";
+
+export const OUTFIT_CATALOG: OutfitOption[] = [
+  { id: "nenhum", label: "Nenhum", bySkin: { [DEFAULT_SKIN_ID]: "traje_nenhum.png" } },
+  ...GENERATED_OUTFIT_CATALOG,
+];
+
+export const DEFAULT_OUTFIT_ID = OUTFIT_CATALOG[0].id;
+
+/** Devolve o ID de tom de pele cujo arquivo deve ser usado pro traje: o
+ * exato se existir, senão o primeiro disponível no `bySkin` (undefined
+ * só se o traje não tiver NENHUM tom, o que não deveria acontecer). */
+export function resolveOutfitSkinId(outfit: OutfitOption, skinId: string): string | undefined {
+  if (outfit.bySkin[skinId]) return skinId;
+  return Object.keys(outfit.bySkin)[0];
+}
+
+/** Devolve o arquivo do traje pro tom de pele atual (ver resolveOutfitSkinId). */
+export function outfitFileForSkin(outfit: OutfitOption, skinId: string): string | undefined {
+  const resolved = resolveOutfitSkinId(outfit, skinId);
+  return resolved ? outfit.bySkin[resolved] : undefined;
+}
+
+/**
  * Categorias do editor de personagem ("Editar meu personagem", ver
- * ProfileCard em GameRoom.tsx). Cabelo, tom de pele, barba e acessório
- * já têm itens de verdade -- as outras ficam com a aba visível e um
- * "em breve" no lugar da grade, prontas pra quando a arte de cada uma
- * chegar, sem precisar mexer no card em si (tamanho fixo, rolagem
- * interna).
+ * ProfileCard em GameRoom.tsx). Cabelo, tom de pele, barba, acessório e
+ * traje já têm itens de verdade (ou estrutura pronta pra receber, no
+ * caso do traje) -- prontas sem precisar mexer no card em si (tamanho
+ * fixo, rolagem interna).
  */
 export type CustomizationCategoryId =
   | "cabelo"
   | "acessorio"
   | "barba"
-  | "camisa"
-  | "jaqueta"
-  | "calca"
-  | "tenis";
+  | "traje";
 
 export interface CustomizationCategory {
   id: CustomizationCategoryId;
@@ -173,8 +212,5 @@ export const CUSTOMIZATION_CATEGORIES: CustomizationCategory[] = [
   { id: "cabelo", label: "Cabelo" },
   { id: "acessorio", label: "Acessório" },
   { id: "barba", label: "Barba" },
-  { id: "camisa", label: "Camisa" },
-  { id: "jaqueta", label: "Jaqueta" },
-  { id: "calca", label: "Calça" },
-  { id: "tenis", label: "Tênis" },
+  { id: "traje", label: "Traje" },
 ];

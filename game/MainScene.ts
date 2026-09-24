@@ -21,6 +21,9 @@ import {
   DEFAULT_BEARD_ID,
   ACCESSORY_CATALOG,
   DEFAULT_ACCESSORY_ID,
+  OUTFIT_CATALOG,
+  DEFAULT_OUTFIT_ID,
+  resolveOutfitSkinId,
 } from "./customization";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
 
@@ -38,11 +41,14 @@ import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorW
  *
  * Arte do avatar: sistema de CAMADAS (layers) -- o "base" (corpo/pele)
  * é um spritesheet, e cada item de customização (cabelo, óculos, barba,
- * camiseta, casaco, calça, tênis) é OUTRO spritesheet separado, desenhado
- * empilhado por cima, na mesma posição e MESMO frame que o base (ver
- * LAYER_DRAW_ORDER mais abaixo). Isso troca o sistema anterior de "um
- * visual = uma imagem só" pelo esquema modular pedido: cada peça pode
- * ser adicionada/trocada independente, e o boneco base fica padronizado.
+ * traje) é OUTRO spritesheet separado, desenhado empilhado por cima, na
+ * mesma posição e MESMO frame que o base (ver LAYER_DRAW_ORDER mais
+ * abaixo). Isso troca o sistema anterior de "um visual = uma imagem só"
+ * pelo esquema modular pedido: cada peça pode ser adicionada/trocada
+ * independente, e o boneco base fica padronizado. "Traje" é a roupa
+ * inteira do pescoço pra baixo como UMA peça só (não separada em
+ * camisa/calça/tênis) -- ver OutfitOption/OUTFIT_CATALOG em
+ * customization.ts.
  *
  * Cada spritesheet de camada (base ou item) usa o MESMO layout de
  * frames -- 13 frames:
@@ -54,11 +60,10 @@ import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorW
  * (passoA/passoB alternam a cada passo dado, pra dar sensação real de
  * andar -- ver playWalk.)
  *
- * Hoje só a camada "base" tem arte de verdade; as outras (cabelo, barba,
- * óculos, camiseta, casaco, calça, tênis) entram em LAYER_TEXTURE_FILE
- * conforme a arte for chegando -- cada uma precisa ser processada pelo
- * mesmo pipeline (chroma-key, normalização, alinhamento) do base, pra
- * bater exatamente o mesmo frame/pose/escala.
+ * "base", "cabelo", "barba", "oculos" e "traje" já têm (ou têm estrutura
+ * pronta pra receber) arte de verdade -- cada camada nova precisa ser
+ * processada pelo mesmo pipeline (chroma-key, normalização, alinhamento)
+ * do base, pra bater exatamente o mesmo frame/pose/escala.
  *
  * Movimento é por GRADE (tile a tile, estilo Gather/Habbo) — ver
  * game/grid.ts. Segurando uma direção, o boneco anda de quadrado em
@@ -121,10 +126,7 @@ const SENTADO_FRAMES: Record<Direction, number> = {
  */
 const LAYER_DRAW_ORDER = [
   "base",
-  "calca",
-  "tenis",
-  "camiseta",
-  "casaco",
+  "traje",
   "barba",
   "cabelo",
   "oculos",
@@ -138,21 +140,18 @@ type LayerKey = (typeof LAYER_DRAW_ORDER)[number];
  * processado pelo pipeline de chroma-key/normalização) em
  * `public/assets/`.
  *
- * "cabelo", "base", "barba" e "oculos" são DIFERENTES das outras -- não
- * são mais um arquivo único, e sim um CATÁLOGO de opções (ver
- * game/customization.ts / HAIR_CATALOG, SKIN_CATALOG, BEARD_CATALOG,
- * ACCESSORY_CATALOG), porque dá pra trocar ao vivo (editor de
- * personagem, ver setLocalHairId/setLocalSkinId/setLocalBeardId/
- * setLocalAccessoryId). O valor `null` aqui continua só pra manter o
- * record completo/tipado -- a arte de verdade é carregada à parte, ver
- * preload() e createAvatar().
+ * "cabelo", "base", "barba", "oculos" e "traje" são DIFERENTES das
+ * outras -- não são mais um arquivo único, e sim um CATÁLOGO de opções
+ * (ver game/customization.ts / HAIR_CATALOG, SKIN_CATALOG,
+ * BEARD_CATALOG, ACCESSORY_CATALOG, OUTFIT_CATALOG), porque dá pra
+ * trocar ao vivo (editor de personagem, ver setLocalHairId/
+ * setLocalSkinId/setLocalBeardId/setLocalAccessoryId/setLocalOutfitId).
+ * O valor `null` aqui continua só pra manter o record completo/tipado --
+ * a arte de verdade é carregada à parte, ver preload() e createAvatar().
  */
 const LAYER_TEXTURE_FILE: Record<LayerKey, string | null> = {
   base: null,
-  calca: null,
-  tenis: null,
-  camiseta: null,
-  casaco: null,
+  traje: null,
   barba: null,
   cabelo: null,
   oculos: null,
@@ -181,6 +180,13 @@ function beardTextureKey(beardId: string): string {
 /** Chave da textura no Phaser pra UMA OPÇÃO de acessório do catálogo (ver ACCESSORY_CATALOG). */
 function accessoryTextureKey(accessoryId: string): string {
   return `avatar-oculos-${accessoryId}`;
+}
+
+/** Chave da textura no Phaser pra UM TRAJE NUM TOM de pele específico (ver
+ * OUTFIT_CATALOG/resolveOutfitSkinId) -- a arte varia pelos dois, então a
+ * chave carrega os dois ids. */
+function outfitTextureKey(outfitId: string, resolvedSkinId: string): string {
+  return `avatar-traje-${outfitId}-${resolvedSkinId}`;
 }
 
 // profundidade (z-order): a "fronteira" de um móvel é a borda de CIMA da
@@ -386,6 +392,7 @@ export default class MainScene extends Phaser.Scene {
       if (layer === "base") continue; // carregado abaixo, ver SKIN_CATALOG
       if (layer === "barba") continue; // carregado abaixo, ver BEARD_CATALOG
       if (layer === "oculos") continue; // carregado abaixo, ver ACCESSORY_CATALOG
+      if (layer === "traje") continue; // carregado abaixo, ver OUTFIT_CATALOG
       const file = LAYER_TEXTURE_FILE[layer];
       if (!file) continue;
       this.load.spritesheet(layerTextureKey(layer), `/assets/${file}`, {
@@ -463,6 +470,22 @@ export default class MainScene extends Phaser.Scene {
       });
       for (const color of accessory.colors ?? []) {
         this.load.spritesheet(accessoryTextureKey(color.id), `/assets/${color.file}`, {
+          frameWidth: FRAME_W,
+          frameHeight: FRAME_H,
+          spacing: 2,
+        });
+      }
+    }
+
+    // traje: diferente das outras camadas, cada OPÇÃO tem VÁRIOS arquivos
+    // (um por tom de pele, ver OutfitOption.bySkin) -- carrega cada
+    // combinação traje+tom que realmente existe (não todo tom pra todo
+    // traje, só os que a pasta de origem trouxe de verdade) como seu
+    // próprio spritesheet, indexado pelos dois ids (ver outfitTextureKey).
+    for (const outfit of OUTFIT_CATALOG) {
+      for (const [skinId, file] of Object.entries(outfit.bySkin)) {
+        if (!file) continue;
+        this.load.spritesheet(outfitTextureKey(outfit.id, skinId), `/assets/${file}`, {
           frameWidth: FRAME_W,
           frameHeight: FRAME_H,
           spacing: 2,
@@ -643,6 +666,7 @@ export default class MainScene extends Phaser.Scene {
     let skinSprite: Phaser.GameObjects.Sprite | null = null;
     let beardSprite: Phaser.GameObjects.Sprite | null = null;
     let accessorySprite: Phaser.GameObjects.Sprite | null = null;
+    let outfitSprite: Phaser.GameObjects.Sprite | null = null;
     for (const layer of LAYER_DRAW_ORDER) {
       if (layer === "cabelo") {
         const sprite = this.add.sprite(
@@ -668,6 +692,21 @@ export default class MainScene extends Phaser.Scene {
         sprite.setScale(AVATAR_SCALE);
         layerSprites.push(sprite);
         skinSprite = sprite;
+        continue;
+      }
+      if (layer === "traje") {
+        const defaultOutfit = OUTFIT_CATALOG.find((o) => o.id === DEFAULT_OUTFIT_ID) ?? OUTFIT_CATALOG[0];
+        const resolvedSkinId = resolveOutfitSkinId(defaultOutfit, DEFAULT_SKIN_ID) ?? DEFAULT_SKIN_ID;
+        const sprite = this.add.sprite(
+          0,
+          AVATAR_FOOT_OFFSET_Y,
+          outfitTextureKey(defaultOutfit.id, resolvedSkinId),
+          WALK_FRAMES.down[0]
+        );
+        sprite.setOrigin(0.5, 1);
+        sprite.setScale(AVATAR_SCALE);
+        layerSprites.push(sprite);
+        outfitSprite = sprite;
         continue;
       }
       if (layer === "barba") {
@@ -744,6 +783,8 @@ export default class MainScene extends Phaser.Scene {
     container.setData("beardId", DEFAULT_BEARD_ID);
     container.setData("accessorySprite", accessorySprite);
     container.setData("accessoryId", DEFAULT_ACCESSORY_ID);
+    container.setData("outfitSprite", outfitSprite);
+    container.setData("outfitId", DEFAULT_OUTFIT_ID);
     container.setData("playerId", playerId);
     container.setData("isLocal", isLocal);
     this.layoutNameplate(label, statusDot);
@@ -812,14 +853,33 @@ export default class MainScene extends Phaser.Scene {
     this.localContainer.setData("hairId", hairId);
   }
 
-  /** Troca o tom de pele do jogador LOCAL ao vivo (ver SKIN_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
+  /** Troca o tom de pele do jogador LOCAL ao vivo (ver SKIN_CATALOG) --
+   * chamado pelo editor de personagem (GameRoom.tsx). Também reaplica a
+   * textura do TRAJE equipado (se algum), porque a arte dele varia por
+   * tom de pele (a mão fica exposta) -- ver resolveOutfitSkinId. Isso
+   * garante que trocar o tom mantém a mão combinando com a roupa,
+   * independente da ordem em que skin/traje forem trocados. */
   setLocalSkinId(skinId: string) {
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("skinSprite") as Phaser.GameObjects.Sprite | null;
-    if (!sprite) return;
-    const currentFrame = sprite.frame.name;
-    sprite.setTexture(skinTextureKey(skinId), currentFrame);
+    if (sprite) {
+      const currentFrame = sprite.frame.name;
+      sprite.setTexture(skinTextureKey(skinId), currentFrame);
+    }
     this.localContainer.setData("skinId", skinId);
+
+    const outfitSprite = this.localContainer.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
+    const outfitId = this.localContainer.getData("outfitId") as string | undefined;
+    if (outfitSprite && outfitId) {
+      const outfit = OUTFIT_CATALOG.find((o) => o.id === outfitId);
+      if (outfit) {
+        const resolvedSkinId = resolveOutfitSkinId(outfit, skinId);
+        if (resolvedSkinId) {
+          const currentFrame = outfitSprite.frame.name;
+          outfitSprite.setTexture(outfitTextureKey(outfit.id, resolvedSkinId), currentFrame);
+        }
+      }
+    }
   }
 
   /** Troca a barba do jogador LOCAL ao vivo (ver BEARD_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
@@ -840,6 +900,24 @@ export default class MainScene extends Phaser.Scene {
     const currentFrame = sprite.frame.name;
     sprite.setTexture(accessoryTextureKey(accessoryId), currentFrame);
     this.localContainer.setData("accessoryId", accessoryId);
+  }
+
+  /** Troca o traje do jogador LOCAL ao vivo (ver OUTFIT_CATALOG) --
+   * chamado pelo editor de personagem (GameRoom.tsx). Usa o tom de pele
+   * ATUAL do jogador pra escolher a arte certa (mão exposta, ver
+   * resolveOutfitSkinId) -- não precisa escolha manual de cor/tom. */
+  setLocalOutfitId(outfitId: string) {
+    if (!this.localContainer) return;
+    const sprite = this.localContainer.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
+    if (!sprite) return;
+    const outfit = OUTFIT_CATALOG.find((o) => o.id === outfitId);
+    if (!outfit) return;
+    const skinId = (this.localContainer.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
+    const resolvedSkinId = resolveOutfitSkinId(outfit, skinId);
+    if (!resolvedSkinId) return;
+    const currentFrame = sprite.frame.name;
+    sprite.setTexture(outfitTextureKey(outfit.id, resolvedSkinId), currentFrame);
+    this.localContainer.setData("outfitId", outfitId);
   }
 
   /**

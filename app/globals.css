@@ -2176,7 +2176,7 @@ body {
   flex-shrink: 0;
   border-bottom: 1px solid #2f2245;
   /* esconde a barra de rolagem horizontal mas mantém o scroll (a lista
-     de categorias vai crescer -- óculos, barba, camisa... -- e nem
+     de categorias vai crescer -- óculos, barba, traje... -- e nem
      sempre cabe tudo numa linha só na largura do card) */
   scrollbar-width: none;
 }

@@ -30,6 +30,9 @@ import {
   DEFAULT_BEARD_ID,
   ACCESSORY_CATALOG,
   DEFAULT_ACCESSORY_ID,
+  OUTFIT_CATALOG,
+  DEFAULT_OUTFIT_ID,
+  outfitFileForSkin,
   CUSTOMIZATION_CATEGORIES,
   CustomizationCategoryId,
 } from "@/game/customization";
@@ -663,6 +666,10 @@ export default function GameRoom() {
   const [selectedBeardColorId, setSelectedBeardColorId] = useState<string | null>(null);
   const [selectedAccessoryId, setSelectedAccessoryId] = useState(DEFAULT_ACCESSORY_ID);
   const [selectedAccessoryColorId, setSelectedAccessoryColorId] = useState<string | null>(null);
+  // traje (roupa do pescoço pra baixo, ver OUTFIT_CATALOG) -- sem cor
+  // manual (nenhum *ColorId), a arte já muda sozinha com o tom de pele
+  // escolhido acima (ver outfitFileForSkin).
+  const [selectedOutfitId, setSelectedOutfitId] = useState(DEFAULT_OUTFIT_ID);
   // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
@@ -1911,15 +1918,21 @@ export default function GameRoom() {
     setSelectedAccessoryColorId(colorId);
   }
 
+  // traje: sem variação de cor manual (a mão já combina sozinha com o
+  // tom de pele escolhido acima, ver outfitFileForSkin/resolveOutfitSkinId).
+  function selectOutfit(outfitId: string) {
+    setSelectedOutfitId(outfitId);
+  }
+
   // "Editar meu personagem" agora toma o card INTEIRO (nada de ficar
   // espremido embaixo dos campos de nome/bio junto -- ver ProfileCard)
   // e sai com Cancelar/Salvar de verdade: Cancelar descarta o rascunho
-  // e volta cabelo+cor+tom de pele+barba+acessório pro que tava ANTES
-  // de abrir o editor (guardado aqui) -- como nada foi aplicado no
+  // e volta cabelo+cor+tom de pele+barba+acessório+traje pro que tava
+  // ANTES de abrir o editor (guardado aqui) -- como nada foi aplicado no
   // boneco de verdade ainda (ver comentário acima), só precisa resetar
   // o estado local, sem mexer na cena. Salvar é o único que aplica de
   // verdade (setLocalHairId/setLocalSkinId/setLocalBeardId/
-  // setLocalAccessoryId) e fecha.
+  // setLocalAccessoryId/setLocalOutfitId) e fecha.
   const hairBeforeEditRef = useRef(selectedHairId);
   const hairColorBeforeEditRef = useRef(selectedHairColorId);
   const skinBeforeEditRef = useRef(selectedSkinId);
@@ -1927,6 +1940,7 @@ export default function GameRoom() {
   const beardColorBeforeEditRef = useRef(selectedBeardColorId);
   const accessoryBeforeEditRef = useRef(selectedAccessoryId);
   const accessoryColorBeforeEditRef = useRef(selectedAccessoryColorId);
+  const outfitBeforeEditRef = useRef(selectedOutfitId);
   function startEditingCharacter() {
     hairBeforeEditRef.current = selectedHairId;
     hairColorBeforeEditRef.current = selectedHairColorId;
@@ -1935,6 +1949,7 @@ export default function GameRoom() {
     beardColorBeforeEditRef.current = selectedBeardColorId;
     accessoryBeforeEditRef.current = selectedAccessoryId;
     accessoryColorBeforeEditRef.current = selectedAccessoryColorId;
+    outfitBeforeEditRef.current = selectedOutfitId;
     setEditorCategory("cabelo");
     setEditingCharacter(true);
   }
@@ -1948,16 +1963,22 @@ export default function GameRoom() {
     setSelectedBeardColorId(beardColorBeforeEditRef.current);
     setSelectedAccessoryId(accessoryBeforeEditRef.current);
     setSelectedAccessoryColorId(accessoryColorBeforeEditRef.current);
+    setSelectedOutfitId(outfitBeforeEditRef.current);
     setEditingCharacter(false);
   }
   function saveEditingCharacter() {
     // aplica o rascunho no boneco de verdade dentro do jogo -- só agora
     // (ver comentário grande acima). Cor escolhida (se houver) manda
     // mais que o item/estilo base, exatamente como no preview do topo.
+    // Tom de pele primeiro: setLocalOutfitId depois já resolve a arte do
+    // traje pro tom recém-aplicado (ver comentário em setLocalSkinId na
+    // MainScene, que também reaplica o traje sozinho, mas chamar na
+    // ordem certa evita depender só disso).
     sceneRef.current?.setLocalHairId(selectedHairColorId ?? selectedHairId);
     sceneRef.current?.setLocalSkinId(selectedSkinId);
     sceneRef.current?.setLocalBeardId(selectedBeardColorId ?? selectedBeardId);
     sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
+    sceneRef.current?.setLocalOutfitId(selectedOutfitId);
     setEditingCharacter(false);
   }
 
@@ -2132,6 +2153,8 @@ export default function GameRoom() {
             onSelectAccessory={selectAccessory}
             selectedAccessoryColorId={selectedAccessoryColorId}
             onSelectAccessoryColor={selectAccessoryColor}
+            selectedOutfitId={selectedOutfitId}
+            onSelectOutfit={selectOutfit}
             editorCategory={editorCategory}
             onSelectCategory={setEditorCategory}
             measuredHeight={profileCardHeight}
@@ -2738,6 +2761,8 @@ function ProfileCard({
   onSelectAccessory,
   selectedAccessoryColorId,
   onSelectAccessoryColor,
+  selectedOutfitId,
+  onSelectOutfit,
   editorCategory,
   onSelectCategory,
   measuredHeight,
@@ -2770,6 +2795,8 @@ function ProfileCard({
   onSelectAccessory: (id: string) => void;
   selectedAccessoryColorId: string | null;
   onSelectAccessoryColor: (id: string) => void;
+  selectedOutfitId: string;
+  onSelectOutfit: (id: string) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
   measuredHeight: number | null;
@@ -2838,6 +2865,14 @@ function ProfileCard({
       ? selectedAccessoryOption?.colors?.find((c) => c.id === selectedAccessoryColorId)
       : undefined;
     const effectiveAccessoryFile = selectedAccessoryColorOption?.file ?? selectedAccessoryOption?.file;
+    // traje: sem cor manual -- o arquivo efetivo já é resolvido pelo tom
+    // de pele ATUAL (ver outfitFileForSkin/resolveOutfitSkinId), então a
+    // prévia troca sozinha ao trocar o tom, sem precisar reselecionar o
+    // traje.
+    const selectedOutfitOption = OUTFIT_CATALOG.find((opt) => opt.id === selectedOutfitId);
+    const effectiveOutfitFile = selectedOutfitOption
+      ? outfitFileForSkin(selectedOutfitOption, selectedSkinId)
+      : undefined;
     const colorSwatchScale = COLOR_SWATCH_W / 200;
     return (
       <div className="profile-backdrop" onClick={onClose}>
@@ -2849,11 +2884,9 @@ function ProfileCard({
           <h3 className="profile-edit-title">Editar meu personagem</h3>
 
           {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
-              cabelo selecionado empilhados, mesmo recorte de frame 0
-              dos thumbnails). Só cabelo tem arte de verdade por
-              enquanto; as próximas camadas (camisa, calça...) entram
-              aqui sozinhas assim que LAYER_TEXTURE_FILE deixar de ser
-              null pra elas, ver MainScene.ts. */}
+              traje + cabelo/barba/acessório selecionados empilhados,
+              mesmo recorte de frame 0 dos thumbnails), ver
+              LAYER_DRAW_ORDER em MainScene.ts. */}
           <div className="avatar-preview-wrap">
             <div className="avatar-preview" style={{ width: AVATAR_PREVIEW_W, height: AVATAR_PREVIEW_H }}>
               <span
@@ -2865,9 +2898,20 @@ function ProfileCard({
                 }}
               />
               {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
-                  barba fica ATRÁS do cabelo, óculos fica NA FRENTE de
-                  tudo -- "nenhuma(o)" é um arquivo transparente, então
-                  sempre renderiza (sem condicional), só não aparece nada. */}
+                  traje fica sobre a base, barba fica ATRÁS do cabelo,
+                  óculos fica NA FRENTE de tudo -- "nenhuma(o)"/"Nenhum"
+                  é um arquivo transparente, então sempre renderiza (sem
+                  condicional), só não aparece nada. */}
+              {effectiveOutfitFile && (
+                <span
+                  className="avatar-preview-layer"
+                  style={{
+                    backgroundImage: `url(/assets/${effectiveOutfitFile})`,
+                    backgroundPosition: "0 0",
+                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                  }}
+                />
+              )}
               {effectiveBeardFile && (
                 <span
                   className="avatar-preview-layer"
@@ -3098,6 +3142,36 @@ function ProfileCard({
                   </div>
                 )}
               </>
+            ) : editorCategory === "traje" ? (
+              // traje: sem seletor de cor (a mão já combina sozinha com o
+              // tom de pele escolhido lá em cima, ver outfitFileForSkin) --
+              // a miniatura de cada traje também já mostra a arte casada
+              // com o tom atual.
+              <div className="hair-picker">
+                {OUTFIT_CATALOG.map((opt) => {
+                  const thumbFile = outfitFileForSkin(opt, selectedSkinId);
+                  return (
+                    <button
+                      key={opt.id}
+                      className={selectedOutfitId === opt.id ? "hair-option selected" : "hair-option"}
+                      onClick={() => onSelectOutfit(opt.id)}
+                      title={opt.label}
+                    >
+                      <span
+                        className="hair-thumb"
+                        style={{
+                          width: HAIR_THUMB_W,
+                          height: HAIR_THUMB_H,
+                          backgroundImage: thumbFile ? `url(/assets/${thumbFile})` : undefined,
+                          backgroundPosition: "0 0",
+                          backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
+                        }}
+                      />
+                      <span className="hair-label">{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             ) : (
               <div className="edit-category-empty">Em breve</div>
             )}
