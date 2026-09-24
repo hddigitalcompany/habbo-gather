@@ -288,6 +288,39 @@ function loadSavedProfile(): Partial<ProfileFields> {
   }
 }
 
+// APARÊNCIA do boneco (cabelo/cor do cabelo/tom de pele/barba/acessório/
+// cor do acessório/traje) -- bug reportado pelo Douglas: "o avatar não
+// tá salvando as edições que eu faço quando atualizo a página". Causa:
+// esses campos SÓ viviam em estado do React (selectedHairId etc.),
+// nunca eram persistidos em lugar nenhum -- diferente do resto do card
+// de perfil (nome/status/bio/insta/foto), que já salva sozinho no
+// localStorage (ver PROFILE_STORAGE_KEY/loadSavedProfile acima) desde
+// sempre. Mesmo esquema aqui: chave própria, lida uma vez pro estado
+// inicial (useState) e regravada em saveEditingCharacter() (ver mais
+// embaixo) toda vez que a pessoa clica "Salvar" no editor de
+// personagem.
+const AVATAR_STORAGE_KEY = "habbo-gather-avatar";
+
+type SavedAvatar = {
+  hairId?: string;
+  hairColorId?: string | null;
+  skinId?: string;
+  beardId?: string;
+  accessoryId?: string;
+  accessoryColorId?: string | null;
+  outfitId?: string;
+};
+
+function loadSavedAvatar(): SavedAvatar {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(AVATAR_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 // identidade PERSISTENTE do chat -- NÃO é login de verdade, só um id
 // salvo no localStorage do navegador (igual o profile acima), gerado
 // uma vez e reusado pra sempre NESSE navegador. É o que faz o
@@ -942,38 +975,47 @@ export default function GameRoom({
     isLocal: boolean;
   } | null>(null);
   const [editingCharacter, setEditingCharacter] = useState(false);
-  const [selectedHairId, setSelectedHairId] = useState(DEFAULT_HAIR_ID);
+  // valores iniciais: o que ficou salvo da última vez (ver
+  // AVATAR_STORAGE_KEY/loadSavedAvatar acima), com fallback pro padrão
+  // de sempre quando não tem nada salvo ainda (primeira visita). Lazy
+  // initializer (função, não valor direto) pra ler o localStorage só
+  // uma vez na hora de montar -- mesmo motivo do pickRandomOutfitId
+  // logo abaixo.
+  const [selectedHairId, setSelectedHairId] = useState(() => loadSavedAvatar().hairId ?? DEFAULT_HAIR_ID);
   // cor escolhida DENTRO do penteado atual (ex: "Castanho"/"Loiro" de
   // "Cabelinho pra trás") -- não é um penteado novo, é uma variação de
   // arte do mesmo item (ver ColorOption em game/customization.ts). null
   // = nenhuma cor escolhida ainda, mostra a arte "padrão" do penteado
   // (opt.file). Reseta pra null toda vez que troca de PENTEADO (ver
   // selectHair) -- a cor é sempre relativa ao penteado selecionado.
-  const [selectedHairColorId, setSelectedHairColorId] = useState<string | null>(null);
+  const [selectedHairColorId, setSelectedHairColorId] = useState<string | null>(
+    () => loadSavedAvatar().hairColorId ?? null
+  );
   // tom de pele/corpo base (ver SKIN_CATALOG) -- selecionável no espaço
   // ao lado do boneco no topo do editor (ver AvatarPreviewWrap), não
   // dentro da grade de categorias.
-  const [selectedSkinId, setSelectedSkinId] = useState(DEFAULT_SKIN_ID);
+  const [selectedSkinId, setSelectedSkinId] = useState(() => loadSavedAvatar().skinId ?? DEFAULT_SKIN_ID);
   // barba: sem cor manual (a arte já muda sozinha com o tom de pele
   // escolhido acima, mesmo esquema do traje -- ver beardFileForSkin).
-  const [selectedBeardId, setSelectedBeardId] = useState(DEFAULT_BEARD_ID);
+  const [selectedBeardId, setSelectedBeardId] = useState(() => loadSavedAvatar().beardId ?? DEFAULT_BEARD_ID);
   // acessório: MESMO esquema do cabelo (id do item + cor opcional dentro
   // dele, ver comentário em selectedHairColorId acima).
-  const [selectedAccessoryId, setSelectedAccessoryId] = useState(DEFAULT_ACCESSORY_ID);
-  const [selectedAccessoryColorId, setSelectedAccessoryColorId] = useState<string | null>(null);
+  const [selectedAccessoryId, setSelectedAccessoryId] = useState(
+    () => loadSavedAvatar().accessoryId ?? DEFAULT_ACCESSORY_ID
+  );
+  const [selectedAccessoryColorId, setSelectedAccessoryColorId] = useState<string | null>(
+    () => loadSavedAvatar().accessoryColorId ?? null
+  );
   // traje (roupa do pescoço pra baixo, ver OUTFIT_CATALOG) -- sem cor
   // manual (nenhum *ColorId), a arte já muda sozinha com o tom de pele
-  // escolhido acima (ver outfitFileForSkin). Começa num traje ALEATÓRIO
-  // (ver pickRandomOutfitId) em vez de "nenhum" -- desde que a camada
-  // base virou só cabeça (ver scripts/syncSkinAssets.mjs), um boneco
-  // sem traje ficaria sem corpo nenhum na sala; "Nenhum" continua
-  // escolhível à mão no editor, só não é mais o padrão do spawn. Função
-  // lazy (não `useState(DEFAULT_OUTFIT_ID)`) pra sortear só uma vez na
-  // hora de montar, não a cada render -- seguro mesmo sem estar dentro
-  // de um useEffect porque este componente é sempre client-only (ver
-  // `dynamic(..., { ssr: false })` em app/page.tsx), sem risco de
-  // hydration mismatch entre servidor/cliente.
-  const [selectedOutfitId, setSelectedOutfitId] = useState(pickRandomOutfitId);
+  // escolhido acima (ver outfitFileForSkin). Sem nada salvo ainda
+  // (primeira visita), começa num traje ALEATÓRIO (ver
+  // pickRandomOutfitId) em vez de "nenhum" -- desde que a camada base
+  // virou só cabeça (ver scripts/syncSkinAssets.mjs), um boneco sem
+  // traje ficaria sem corpo nenhum na sala; "Nenhum" continua
+  // escolhível à mão no editor, só não é mais o padrão do primeiro
+  // spawn. Lazy initializer pelo mesmo motivo dos campos acima.
+  const [selectedOutfitId, setSelectedOutfitId] = useState(() => loadSavedAvatar().outfitId ?? pickRandomOutfitId());
   // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
@@ -1514,15 +1556,20 @@ export default function GameRoom({
           myProfileRef.current.name || "Você",
           statusColorFor(myProfileRef.current.status)
         );
-        // aplica o traje sorteado (ver pickRandomOutfitId acima) já na
-        // hora que a cena fica pronta -- sem isso, createAvatar() sempre
-        // cria o boneco com DEFAULT_OUTFIT_ID ("nenhum", ver
-        // customization.ts) e o traje sorteado só ia aparecer quando/se a
-        // pessoa abrisse e salvasse o editor de personagem (que é o único
-        // outro lugar que chama setLocalOutfitId) -- até lá o boneco
-        // ficava só com a cabeça (a camada "base" não desenha mais o
-        // corpo, ver scripts/syncSkinAssets.mjs), sem nenhum erro no
-        // console pra dar pista.
+        // aplica a aparência salva/sorteada (cabelo, tom de pele, barba,
+        // acessório, traje) já na hora que a cena fica pronta -- sem
+        // isso, createAvatar() sempre cria o boneco com DEFAULT_HAIR_ID/
+        // DEFAULT_SKIN_ID/DEFAULT_BEARD_ID/DEFAULT_ACCESSORY_ID (ver
+        // customization.ts), ignorando o que a pessoa escolheu/salvou da
+        // última vez -- ANTES só o traje tinha esse tratamento aqui (por
+        // isso o boneco voltava pro padrão em TODO F5, mesmo sem trocar
+        // de traje: o bug reportado pelo Douglas). Mesma ordem de
+        // saveEditingCharacter() logo abaixo, pelo mesmo motivo (tom de
+        // pele primeiro, pra barba/traje já casarem com ele).
+        scene.setLocalHairId(selectedHairColorId ?? selectedHairId);
+        scene.setLocalSkinId(selectedSkinId);
+        scene.setLocalBeardId(selectedBeardId);
+        scene.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
         scene.setLocalOutfitId(selectedOutfitId);
         scene.onLocalMove = (x, y) => {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
@@ -2712,6 +2759,29 @@ export default function GameRoom({
     sceneRef.current?.setLocalBeardId(selectedBeardId);
     sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
     sceneRef.current?.setLocalOutfitId(selectedOutfitId);
+
+    // persiste no localStorage (ver AVATAR_STORAGE_KEY acima) -- é isso
+    // que faltava pra sobreviver a um F5 (bug reportado pelo Douglas).
+    // Mesmo esquema do resto do card de perfil (updateMyProfile logo
+    // abaixo), só que salva na hora (sem debounce): aqui só roda quando
+    // clica "Salvar" de verdade, não a cada tecla digitada.
+    try {
+      window.localStorage.setItem(
+        AVATAR_STORAGE_KEY,
+        JSON.stringify({
+          hairId: selectedHairId,
+          hairColorId: selectedHairColorId,
+          skinId: selectedSkinId,
+          beardId: selectedBeardId,
+          accessoryId: selectedAccessoryId,
+          accessoryColorId: selectedAccessoryColorId,
+          outfitId: selectedOutfitId,
+        } satisfies SavedAvatar)
+      );
+    } catch {
+      // localStorage indisponível (modo privado, etc.) -- segue só em memória
+    }
+
     setEditingCharacter(false);
   }
 
