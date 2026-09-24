@@ -81,11 +81,25 @@ export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
  * opção pro jogador). "Branco" é sempre o primeiro/padrão (ver sort
  * abaixo) -- não depende da ordem em que a pasta de origem foi lida.
  */
+/** "Sexo" do avatar (pedido do Douglas: botão Masculino/Feminino acima
+ * do seletor de tom de pele, ver ProfileCard em GameRoom.tsx) -- hoje só
+ * separa qual PASTA de origem cada tom de pele veio (ver
+ * AVATAR_SKIN_SRC_ROOT/AVATAR_SKIN_SRC_ROOT_FEMININO em
+ * scripts/avatarAssetsConfig.mjs), não afeta cabelo/barba/acessório/
+ * traje -- esses continuam com o catálogo único de sempre. */
+export type AvatarGender = "masculino" | "feminino";
+
 export interface SkinOption {
   id: string;
   label: string;
   file: string;
   hex?: string;
+  /** Ver AvatarGender acima -- gerado automaticamente (ver
+   * scripts/syncSkinAssets.mjs), sempre presente num catálogo recém-
+   * sincronizado; opcional aqui só pra não quebrar um catálogo gerado
+   * antes dessa mudança (ausente = trata como "masculino", ver
+   * SKIN_CATALOG mais abaixo). */
+  gender?: AvatarGender;
 }
 
 // gerado automaticamente -- ver scripts/syncSkinAssets.mjs, NÃO editar

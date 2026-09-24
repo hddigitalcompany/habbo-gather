@@ -49,6 +49,7 @@ import {
   outfitFileForSkin,
   CUSTOMIZATION_CATEGORIES,
   CustomizationCategoryId,
+  AvatarGender,
 } from "@/game/customization";
 
 // "focus/ausente/online" -- ver caixinha de status no ProfileCard.
@@ -306,6 +307,7 @@ type SavedAvatar = {
   hairId?: string;
   hairColorId?: string | null;
   skinId?: string;
+  gender?: AvatarGender;
   beardId?: string;
   accessoryId?: string;
   accessoryColorId?: string | null;
@@ -1027,6 +1029,14 @@ export default function GameRoom({
   const [selectedHairColorId, setSelectedHairColorId] = useState<string | null>(
     () => loadSavedAvatar().hairColorId ?? null
   );
+  // "sexo" do avatar (ver AvatarGender em game/customization.ts) --
+  // botão Masculino/Feminino em cima do seletor de tom de pele (pedido
+  // do Douglas), só filtra QUAIS tons aparecem ali embaixo (ver
+  // SKIN_CATALOG.filter em ProfileCard) -- não mexe em cabelo/barba/
+  // acessório/traje, que continuam com um catálogo só. Sem nada salvo
+  // ainda, cai em "masculino" (mesmo comportamento de sempre, já que só
+  // existia esse "sexo" implícito até agora).
+  const [selectedGender, setSelectedGender] = useState<AvatarGender>(() => loadSavedAvatar().gender ?? "masculino");
   // tom de pele/corpo base (ver SKIN_CATALOG) -- selecionável no espaço
   // ao lado do boneco no topo do editor (ver AvatarPreviewWrap), não
   // dentro da grade de categorias.
@@ -2719,6 +2729,20 @@ export default function GameRoom({
     setSelectedSkinId(skinId);
   }
 
+  // troca o sexo (ver AvatarGender) e, se o tom de pele atual não existir
+  // NESSE sexo (ex: veio do masculino, trocou pra feminino), já pula
+  // sozinho pro primeiro tom disponível do sexo novo -- senão a grade de
+  // baixo mostraria os tons certos mas nenhum marcado como selecionado
+  // (ou pior, o boneco continuaria com um tom que nem aparece mais ali).
+  function selectGender(gender: AvatarGender) {
+    setSelectedGender(gender);
+    const stillValid = SKIN_CATALOG.some((skin) => (skin.gender ?? "masculino") === gender && skin.id === selectedSkinId);
+    if (!stillValid) {
+      const firstOfGender = SKIN_CATALOG.find((skin) => (skin.gender ?? "masculino") === gender);
+      if (firstOfGender) setSelectedSkinId(firstOfGender.id);
+    }
+  }
+
   // barba: sem variação de cor manual (a arte já combina sozinha com o
   // tom de pele escolhido acima, mesmo esquema do traje -- ver
   // beardFileForSkin/resolveBeardSkinId).
@@ -2752,6 +2776,7 @@ export default function GameRoom({
   // setLocalAccessoryId/setLocalOutfitId) e fecha.
   const hairBeforeEditRef = useRef(selectedHairId);
   const hairColorBeforeEditRef = useRef(selectedHairColorId);
+  const genderBeforeEditRef = useRef(selectedGender);
   const skinBeforeEditRef = useRef(selectedSkinId);
   const beardBeforeEditRef = useRef(selectedBeardId);
   const accessoryBeforeEditRef = useRef(selectedAccessoryId);
@@ -2760,6 +2785,7 @@ export default function GameRoom({
   function startEditingCharacter() {
     hairBeforeEditRef.current = selectedHairId;
     hairColorBeforeEditRef.current = selectedHairColorId;
+    genderBeforeEditRef.current = selectedGender;
     skinBeforeEditRef.current = selectedSkinId;
     beardBeforeEditRef.current = selectedBeardId;
     accessoryBeforeEditRef.current = selectedAccessoryId;
@@ -2773,6 +2799,7 @@ export default function GameRoom({
     // enquanto editava, ver comentário acima -- nada a desfazer nele)
     setSelectedHairId(hairBeforeEditRef.current);
     setSelectedHairColorId(hairColorBeforeEditRef.current);
+    setSelectedGender(genderBeforeEditRef.current);
     setSelectedSkinId(skinBeforeEditRef.current);
     setSelectedBeardId(beardBeforeEditRef.current);
     setSelectedAccessoryId(accessoryBeforeEditRef.current);
@@ -2807,6 +2834,7 @@ export default function GameRoom({
         JSON.stringify({
           hairId: selectedHairId,
           hairColorId: selectedHairColorId,
+          gender: selectedGender,
           skinId: selectedSkinId,
           beardId: selectedBeardId,
           accessoryId: selectedAccessoryId,
@@ -3015,6 +3043,8 @@ export default function GameRoom({
             onSelectHair={selectHair}
             selectedHairColorId={selectedHairColorId}
             onSelectHairColor={selectHairColor}
+            selectedGender={selectedGender}
+            onSelectGender={selectGender}
             selectedSkinId={selectedSkinId}
             onSelectSkin={selectSkin}
             selectedBeardId={selectedBeardId}
@@ -4184,6 +4214,8 @@ function ProfileCard({
   onSelectHair,
   selectedHairColorId,
   onSelectHairColor,
+  selectedGender,
+  onSelectGender,
   selectedSkinId,
   onSelectSkin,
   selectedBeardId,
@@ -4216,6 +4248,8 @@ function ProfileCard({
   onSelectHair: (id: string) => void;
   selectedHairColorId: string | null;
   onSelectHairColor: (id: string) => void;
+  selectedGender: AvatarGender;
+  onSelectGender: (gender: AvatarGender) => void;
   selectedSkinId: string;
   onSelectSkin: (id: string) => void;
   selectedBeardId: string;
@@ -4376,11 +4410,31 @@ function ProfileCard({
             {/* tons de pele (ver SKIN_CATALOG) -- selecionáveis aqui do
                 lado do boneco, não dentro da grade de categorias (pedido
                 do Douglas). Troca ao vivo (ver selectSkin), sem precisar
-                estar na aba "cabelo". */}
+                estar na aba "cabelo". Sexo (ver AvatarGender) fica ACIMA
+                do tom de pele (pedido do Douglas) e só filtra a grade de
+                baixo -- tom sem `gender` no catálogo (gerado antes dessa
+                mudança) conta como "masculino". */}
             <div className="skin-picker">
+              <span className="skin-picker-label">Sexo</span>
+              <div className="gender-switch">
+                <button
+                  type="button"
+                  className={selectedGender === "masculino" ? "gender-btn selected" : "gender-btn"}
+                  onClick={() => onSelectGender("masculino")}
+                >
+                  Masculino
+                </button>
+                <button
+                  type="button"
+                  className={selectedGender === "feminino" ? "gender-btn selected" : "gender-btn"}
+                  onClick={() => onSelectGender("feminino")}
+                >
+                  Feminino
+                </button>
+              </div>
               <span className="skin-picker-label">Tom de pele</span>
               <div className="skin-swatches">
-                {SKIN_CATALOG.map((skin) => (
+                {SKIN_CATALOG.filter((skin) => (skin.gender ?? "masculino") === selectedGender).map((skin) => (
                   <button
                     key={skin.id}
                     className={selectedSkinId === skin.id ? "skin-swatch selected" : "skin-swatch"}

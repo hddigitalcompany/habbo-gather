@@ -2728,6 +2728,39 @@ body {
   margin-bottom: 8px;
 }
 
+/* botão Masculino/Feminino (ver AvatarGender) -- fica ACIMA do "Tom de
+   pele" dentro do mesmo .skin-picker (pedido do Douglas), mesma
+   linguagem visual do toggle de duas opções já usado em
+   .edit-section-tab (preenchido = selecionado). */
+.gender-switch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.gender-btn {
+  flex: 1;
+  padding: 6px 8px;
+  background: #241933;
+  border: 1px solid #362552;
+  border-radius: 8px;
+  color: #cdbdf0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gender-btn:hover {
+  background: #3d2a5c;
+  color: #f5f0ff;
+}
+
+.gender-btn.selected {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: white;
+}
+
 .skin-swatches {
   display: flex;
   flex-wrap: wrap;
@@ -3196,6 +3229,35 @@ body {
   color: #cfc4e6;
 }
 
+/* Miniatura da imagem JÁ SALVA (editando um item, ver startEditItem em
+   ItemEditor.tsx) -- mostrada acima do campo de upload de cada
+   direção/do ícone, pra dar pra ver o que já tá cadastrado antes de
+   decidir se troca ou não. */
+.items-panel-upload-existing {
+  width: 100%;
+  max-height: 64px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.items-panel-submit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+/* .clear-btn (ver regra geral acima) nasceu pra ficar sozinho, largura
+   100% -- aqui entra ao LADO de outro botão/texto numa linha, então
+   perde esse comportamento padrão. */
+.items-panel-submit-row .clear-btn,
+.item-stage-offset-row .clear-btn {
+  width: auto;
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
 .items-panel-error {
   color: #ff8a8a;
   font-size: 12px;
@@ -3311,13 +3373,14 @@ body {
   width: 640px;
 }
 
-/* Preview grande de tamanho do Editor de Itens -- pedido do Douglas:
-   "preciso disso num card maior, com a imagem maior e com o boneco...
-   pra eu ver o resultado exato". Mostra a imagem escolhida ao lado de
-   uma silhueta na altura REAL do boneco em jogo (ver AVATAR_REF_HEIGHT/
-   PREVIEW_SCALE em ItemEditor.tsx) -- os dois ficam lado a lado na
-   mesma "linha de chão" (align-items: flex-end), pra dar pra comparar
-   proporção de verdade, não só tamanho absoluto. */
+/* Preview grande do Editor de Itens -- pedido do Douglas: "preciso
+   disso num card maior, com a imagem maior", "quero boneco real ali
+   dentro em perspectiva certa, e o quadrado também", "delimitar ali no
+   editor a posição do mobi no tile". Item/boneco/quadrado ficam
+   EMPILHADOS (position:absolute) no mesmo "chão" (ver
+   AVATAR_FOOT_FROM_TILE_BOTTOM/STAGE_BASELINE_PAD em ItemEditor.tsx),
+   não mais lado a lado -- é isso que deixa comparar tamanho E posição
+   de verdade, na mesma perspectiva do jogo. */
 .item-size-card {
   margin-top: 4px;
   padding: 12px;
@@ -3326,56 +3389,95 @@ body {
   border-radius: 10px;
 }
 
-.item-size-stage {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 18px;
-  min-height: 120px;
-  max-height: 340px;
+.item-stage {
+  position: relative;
+  width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 10px 6px 12px;
   border-bottom: 1px dashed rgba(255, 255, 255, 0.18);
+  padding-bottom: 10px;
 }
 
 .item-size-empty {
   margin: 0;
-  align-self: center;
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
-/* Silhueta de referência -- não é o boneco de verdade (roupa/cabelo/tom
-   variam por pessoa), só uma forma genérica na ALTURA certa (ver
-   title= no elemento, ItemEditor.tsx) pra servir de régua visual. */
-.item-size-avatar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  width: 46px;
-  flex-shrink: 0;
+/* Quadrado do tamanho REAL do tile (ver TILE_SIZE_PX em ItemEditor.tsx)
+   -- só uma referência visual (borda + leve preenchimento), não precisa
+   de textura de piso de verdade. */
+.item-stage-tile {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 2px dashed rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.08);
+  border-radius: 4px;
+  pointer-events: none;
 }
 
-.item-size-avatar-head {
-  width: 60%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.4);
-  margin-bottom: 3px;
+/* Boneco de REFERÊNCIA (arte de verdade do jogo -- penteado/traje
+   padrão, ver REFERENCE_HAIR/REFERENCE_SKIN/REFERENCE_OUTFIT_FILE em
+   ItemEditor.tsx -- não é o boneco de ninguém em especial, só uma régua
+   visual na escala certa). O box externo tem o tamanho NATIVO do frame
+   (FRAME_W×FRAME_H) ancorado embaixo-centro (mesma âncora do jogo,
+   setOrigin(0.5,1)); o box interno escala (transform:scale, ver estilo
+   inline) com transformOrigin embaixo-centro, então o "pé" do boneco
+   fica fixo no lugar certo ao crescer. */
+.item-stage-avatar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
-.item-size-avatar-body {
+.item-stage-avatar-crop {
+  position: relative;
   width: 100%;
-  height: 58%;
-  border-radius: 10px 10px 4px 4px;
-  background: rgba(255, 255, 255, 0.28);
+  height: 100%;
+  overflow: hidden;
+  transform-origin: bottom center;
+  image-rendering: pixelated;
 }
 
-.item-size-item-img {
+/* Cada camada (traje/base/cabelo) é a mesma spritesheet inteira,
+   posicionada em (0,0) -- o overflow:hidden do pai corta só o PRIMEIRO
+   frame (down, parado), que fica sempre no canto superior esquerdo de
+   qualquer spritesheet desse jogo (ver comentário da ordem de poses em
+   game/MainScene.ts). */
+.item-stage-avatar-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+}
+
+.item-stage-item-img {
+  position: absolute;
+  left: 50%;
   height: auto;
   max-width: none;
   object-fit: contain;
-  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.item-stage-item-img:active {
+  cursor: grabbing;
+}
+
+.item-stage-offset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #cfc4e6;
 }
 
 /* Painel de "Configurações" (ver SettingsPanel.tsx) -- reaproveita todo

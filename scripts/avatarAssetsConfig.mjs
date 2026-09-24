@@ -12,6 +12,7 @@
 //   {
 //     "cabeloSourceRoot": "/caminho/completo/pra/pasta/Cabelos",
 //     "avatarSkinSourceRoot": "/caminho/completo/pra/pasta/Avatar",
+//     "avatarSkinSourceRootFeminino": "/caminho/completo/pra/pasta/Avatar feminino",
 //     "barbaSourceRoot": "/caminho/completo/pra/pasta/Barba",
 //     "acessorioSourceRoot": "/caminho/completo/pra/pasta/Acessório",
 //     "trajeSourceRoot": "/caminho/completo/pra/pasta/Trajes",
@@ -65,6 +66,20 @@ export const CABELO_SRC_ROOT = cfg.cabeloSourceRoot
 export const AVATAR_SKIN_SRC_ROOT = cfg.avatarSkinSourceRoot
   ? cfg.avatarSkinSourceRoot
   : path.join(ROOT, "assets-source", "avatar");
+
+// pasta IRMÃ da de cima (mesmo esquema, uma subpasta por tom de pele
+// dentro) pro sexo "feminino" (ver AvatarGender em game/customization.ts
+// e o botão Masculino/Feminino em ProfileCard, GameRoom.tsx) -- os tons
+// gerados a partir daqui ganham id prefixado "feminino-" (ver
+// scripts/syncSkinAssets.mjs) pra nunca colidir com um tom de mesmo nome
+// vindo da pasta de cima (ex: "Pardo" nos dois -- "pardo" e
+// "feminino-pardo"). Opcional: sem essa chave no avatar-assets.local.json,
+// cai numa pasta padrão vazia dentro do projeto (fica sem nenhum tom
+// feminino até você criar uma pasta lá dentro, mesmo comportamento de
+// primeira-visita da pasta de cima).
+export const AVATAR_SKIN_SRC_ROOT_FEMININO = cfg.avatarSkinSourceRootFeminino
+  ? cfg.avatarSkinSourceRootFeminino
+  : path.join(ROOT, "assets-source", "avatar-feminino");
 
 export const BARBA_SRC_ROOT = cfg.barbaSourceRoot
   ? cfg.barbaSourceRoot

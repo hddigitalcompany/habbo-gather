@@ -9,18 +9,21 @@ export const GENERATED_SKIN_CATALOG: SkinOption[] = [
     "id": "branco",
     "label": "Branco",
     "file": "avatar_branco.png",
-    "hex": "#fde6b5"
+    "hex": "#fde6b5",
+    "gender": "masculino"
   },
   {
     "id": "negro",
     "label": "Negro",
     "file": "avatar_negro.png",
-    "hex": "#765e48"
+    "hex": "#765e48",
+    "gender": "masculino"
   },
   {
     "id": "pardo",
     "label": "Pardo",
     "file": "avatar_pardo.png",
-    "hex": "#d1a276"
+    "hex": "#d1a276",
+    "gender": "masculino"
   }
 ];

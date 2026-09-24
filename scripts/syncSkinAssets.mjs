@@ -3,6 +3,14 @@
 // scripts/avatarAssetsConfig.mjs) -- cada pasta de primeiro nível
 // (Branco/Pardo/Negro...) é UM tom.
 //
+// Roda DUAS vezes, uma pra cada "sexo" (ver AvatarGender em
+// customization.ts e o botão Masculino/Feminino em ProfileCard,
+// GameRoom.tsx): a pasta de cima (AVATAR_SKIN_SRC_ROOT) pro masculino, e
+// uma pasta IRMÃ (AVATAR_SKIN_SRC_ROOT_FEMININO, mesmo esquema -- uma
+// subpasta por tom dentro) pro feminino. Os tons femininos ganham id
+// prefixado "feminino-" (ex: pasta "Pardo" -> id "feminino-pardo") pra
+// nunca colidir com um tom masculino de mesmo nome.
+//
 // Convenção NOVA (desde que todo avatar sempre usa um traje, ver
 // OUTFIT_CATALOG/DEFAULT_OUTFIT_ID em customization.ts -- o traje já
 // desenha o corpo inteiro do pescoço pra baixo, com a mão exposta na cor
@@ -33,7 +41,11 @@
 import { readdir, mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { ROOT, AVATAR_SKIN_SRC_ROOT as SRC_ROOT } from "./avatarAssetsConfig.mjs";
+import {
+  ROOT,
+  AVATAR_SKIN_SRC_ROOT as SRC_ROOT,
+  AVATAR_SKIN_SRC_ROOT_FEMININO as SRC_ROOT_FEMININO,
+} from "./avatarAssetsConfig.mjs";
 import {
   imageFiles,
   loadFrame,
@@ -117,24 +129,35 @@ async function ensureReferenceTemplates() {
   );
 }
 
-async function main() {
-  if (!existsSync(SRC_ROOT)) {
-    await mkdir(SRC_ROOT, { recursive: true });
-    console.log(`Criei ${SRC_ROOT} (estava vazia) -- crie uma pasta por tom de pele aí dentro.`);
+/**
+ * Sincroniza UMA pasta-raiz de tom de pele (uma subpasta por tom dentro
+ * dela) pro catálogo -- chamada uma vez pra cada "sexo" (ver AvatarGender
+ * em game/customization.ts): a de cima (SRC_ROOT, sempre existiu) pro
+ * masculino, a nova (SRC_ROOT_FEMININO) pro feminino. `idPrefix` evita
+ * colisão de id entre as duas pastas quando o nome do tom é igual nas
+ * duas (ex: "Pardo" nas duas -- vira "pardo" e "feminino-pardo"); o HEX
+ * de cor do swatch (SKIN_HEX_BY_NAME) continua batendo pelo NOME da
+ * pasta (sem prefixo), então funciona igual nos dois sexos. `takenIds`
+ * é compartilhado entre as duas chamadas (ids finais, já com prefixo)
+ * só pra pegar um erro de configuração bizarro (as duas pastas apontando
+ * pro mesmo lugar), não deveria colidir em uso normal.
+ */
+async function syncGenderRoot(srcRoot, gender, idPrefix, takenIds) {
+  if (!existsSync(srcRoot)) {
+    await mkdir(srcRoot, { recursive: true });
+    console.log(`Criei ${srcRoot} (estava vazia) -- crie uma pasta por tom de pele aí dentro.`);
   }
-  await mkdir(OUT_DIR, { recursive: true });
-  await ensureReferenceTemplates();
 
-  const topEntries = await readdir(SRC_ROOT, { withFileTypes: true });
+  const topEntries = await readdir(srcRoot, { withFileTypes: true });
   const topDirs = topEntries.filter((e) => e.isDirectory() && !e.name.startsWith("_") && !e.name.startsWith("."));
-  console.log(`Sincronizando tom de pele (${topDirs.length} pasta(s) encontrada(s) em ${SRC_ROOT})...`);
+  console.log(`Sincronizando tom de pele (${gender}, ${topDirs.length} pasta(s) encontrada(s) em ${srcRoot})...`);
 
   const results = [];
-  const takenIds = new Set();
   for (const entry of topDirs) {
-    const dir = path.join(SRC_ROOT, entry.name);
-    const id = slugify(entry.name);
-    if (!id) {
+    const dir = path.join(srcRoot, entry.name);
+    const rawId = slugify(entry.name);
+    const id = rawId ? `${idPrefix}${rawId}` : "";
+    if (!rawId) {
       console.warn(`- "${entry.name}": nome inválido pra virar id, pulei.`);
       continue;
     }
@@ -146,11 +169,11 @@ async function main() {
     const entries = await readdir(dir, { withFileTypes: true });
     const { found, missing } = findDirectionFiles(imageFiles(entries));
     if (missing.length > 0) {
-      console.warn(`- "${entry.name}": faltam as cabeças [${missing.join(", ")}], pulei (item incompleto).`);
+      console.warn(`- "${entry.name}" (${gender}): faltam as cabeças [${missing.join(", ")}], pulei (item incompleto).`);
       continue;
     }
 
-    console.log(`- "${entry.name}" -> id "${id}"`);
+    console.log(`- "${entry.name}" (${gender}) -> id "${id}"`);
     try {
       // carrega cada cabeça UMA vez só, depois reusa o mesmo buffer nos
       // 3-4 slots da direção dela (ver SLOTS_BY_DIRECTION) -- não
@@ -173,11 +196,23 @@ async function main() {
       const label = (await readOptionalLabel(dir, entries)) || humanize(entry.name);
       const hex = SKIN_HEX_BY_NAME[normalizeBase(entry.name)];
       takenIds.add(id);
-      results.push({ id, label, file: fileName, ...(hex ? { hex } : {}) });
+      results.push({ id, label, file: fileName, ...(hex ? { hex } : {}), gender });
     } catch (e) {
-      console.error(`- "${entry.name}": erro processando -- ${e.message}`);
+      console.error(`- "${entry.name}" (${gender}): erro processando -- ${e.message}`);
     }
   }
+
+  return results;
+}
+
+async function main() {
+  await mkdir(OUT_DIR, { recursive: true });
+  await ensureReferenceTemplates();
+
+  const takenIds = new Set();
+  const masculino = await syncGenderRoot(SRC_ROOT, "masculino", "", takenIds);
+  const feminino = await syncGenderRoot(SRC_ROOT_FEMININO, "feminino", "feminino-", takenIds);
+  const results = [...masculino, ...feminino];
 
   const header =
     "// GERADO AUTOMATICAMENTE por scripts/syncSkinAssets.mjs -- NÃO EDITE À MÃO.\n" +
@@ -187,7 +222,9 @@ async function main() {
   const body = `export const GENERATED_SKIN_CATALOG: SkinOption[] = ${JSON.stringify(results, null, 2)};\n`;
   await writeFile(CATALOG_OUT, header + body, "utf8");
 
-  console.log(`Pronto: ${results.length} tom(ns) de pele gerado(s), catálogo escrito em ${path.relative(ROOT, CATALOG_OUT)}.`);
+  console.log(
+    `Pronto: ${masculino.length} tom(ns) masculino(s) + ${feminino.length} tom(ns) feminino(s) gerado(s), catálogo escrito em ${path.relative(ROOT, CATALOG_OUT)}.`
+  );
 }
 
 main().catch((e) => {
