@@ -691,14 +691,19 @@ export default function GameRoom({
   // Antes só gerava um código pra colar à mão em furniture.ts -- isso
   // não existe mais.
   const [editMode, setEditMode] = useState(false);
-  // ferramenta "Apagar" do editor de espaço -- botão flutuante PRÓPRIO (ver
-  // .map-delete-btn/.map-controls em globals.css), do lado dos controles de
-  // zoom, disponível em QUALQUER aba de "Editar espaço" (diferente de
-  // "Mover", que é uma aba de categoria dentro do painel -- ver
-  // EDIT_CATEGORY_TABS). Ligada, clicar num item já colocado apaga ele na
-  // hora (ver selectDeleteTool em MainScene.ts) -- pedido do Douglas: apagar
-  // direto no espaço, não na lista de linha do painel.
+  // ferramentas "Apagar" e "Mover" do editor de espaço -- botões flutuantes
+  // PRÓPRIOS, agrupados (ver .map-tool-group/.map-delete-btn/.map-move-btn
+  // em globals.css), longe dos controles de zoom (pedido do Douglas),
+  // disponíveis em QUALQUER aba de "Editar espaço" (nenhuma das duas é mais
+  // uma aba de categoria dentro do painel -- "Mover" saiu de
+  // EDIT_CATEGORY_TABS quando virou botão flutuante). "Apagar" ligada,
+  // clicar num item já colocado apaga ele na hora (ver selectDeleteTool em
+  // MainScene.ts) -- pedido do Douglas: apagar direto no espaço, não na
+  // lista de linha do painel. "Mover" ligada, clicar num item já colocado
+  // pega ele e um clique num tile livre solta ali (ver selectMoveTool em
+  // MainScene.ts).
   const [deleteToolActive, setDeleteToolActive] = useState(false);
+  const [moveToolActive, setMoveToolActive] = useState(false);
 
   // --- membro/visitante/dono da sala (ver supabase/migrations/0001_accounts.sql
   // e app/api/room/members) -- só quem tem conta (accountUserId, ver
@@ -859,7 +864,7 @@ export default function GameRoom({
   // nenhum FurnitureType/arte cadastrado -- aparecem na barra mas com a
   // grade vazia, até subir os arquivos de origem (combinado com o
   // Douglas: estrutura agora, arte depois).
-  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento" | "mover">("poltrona");
+  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento">("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -2248,6 +2253,7 @@ export default function GameRoom({
     setSelectedAreaToolId(null);
     setActiveCategory("poltrona");
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.setEditMode(next);
     sceneRef.current?.setSeatTuningMode(false); // defensivo -- sair do editor sempre desliga o ajuste de assento também
   }
@@ -2262,21 +2268,39 @@ export default function GameRoom({
       setSelectedCatalogIndex(null);
       setSelectedFloorToolId(null);
       setSelectedAreaToolId(null);
+      setMoveToolActive(false);
     }
     sceneRef.current?.selectDeleteTool(next);
+  }
+
+  /** Botão flutuante "Mover" (ver .map-move-btn), agrupado com "Apagar" --
+   * mesmo padrão de toggleDeleteTool: liga/desliga a ferramenta na cena e
+   * desarma qualquer outra. Pedido do Douglas: reposicionar um item já
+   * colocado sem precisar apagar e colocar de novo (perdia cor/modelo
+   * escolhido); deixou de ser aba de categoria (EDIT_CATEGORY_TABS) pra
+   * virar botão flutuante junto do Apagar, longe do zoom. */
+  function toggleMoveTool() {
+    const next = !moveToolActive;
+    setMoveToolActive(next);
+    if (next) {
+      setSelectedCatalogIndex(null);
+      setSelectedFloorToolId(null);
+      setSelectedAreaToolId(null);
+      setDeleteToolActive(false);
+    }
+    sceneRef.current?.selectMoveTool(next);
   }
 
   // troca de categoria na barra de ícones -- separado de setActiveCategory
   // direto (era só isso antes) porque "assento" precisa ligar/desligar o
   // modo de ajuste na cena (ver setSeatTuningMode em MainScene.ts, muda o
-  // que as setas de direção fazem enquanto sentado) e "mover" precisa
-  // ligar/desligar a ferramenta de reposicionar item já colocado (ver
-  // selectMoveTool em MainScene.ts).
-  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento" | "mover") {
+  // que as setas de direção fazem enquanto sentado).
+  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento") {
     setActiveCategory(category);
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.setSeatTuningMode(category === "assento");
-    sceneRef.current?.selectMoveTool(category === "mover");
+    sceneRef.current?.selectMoveTool(false);
     sceneRef.current?.selectDeleteTool(false);
   }
 
@@ -2301,6 +2325,7 @@ export default function GameRoom({
     setSelectedCatalogIndex(next);
     setSelectedFloorToolId(null); // móvel e piso são ferramentas exclusivas, ver selectCatalogEntry na cena
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.selectCatalogEntry(nextEntry ? entryWithColor(nextEntry, colorId) : null);
   }
 
@@ -2313,14 +2338,6 @@ export default function GameRoom({
 
   function clearDraftItems() {
     sceneRef.current?.clearDraftFurniture();
-  }
-
-  /** Rótulo pra mostrar na lista "Itens colocados" -- procura por MODELO+direção quando o item tiver (ver FurnitureDef.modelId), senão por tipo+direção (design único, caso do vidro e dos itens antigos). Não pode só filtrar por type+facing sempre: com 2+ modelos do mesmo tipo (ver Gamer x Poltrona Lecce) isso acharia sempre o PRIMEIRO da lista, errado pros outros. */
-  function catalogLabelFor(item: FurnitureDef): string {
-    const entry = item.modelId
-      ? FURNITURE_CATALOG.find((c) => c.modelId === item.modelId && c.facing === item.facing)
-      : FURNITURE_CATALOG.find((c) => !c.modelId && c.type === item.type && c.facing === item.facing);
-    return entry?.label ?? `${item.type} (${item.facing})`;
   }
 
   /** Botão "Sair do assento" do painel "Assento" -- levanta o boneco local sem precisar de tecla (que durante o ajuste não levanta mais, ver update() em MainScene.ts). */
@@ -2340,6 +2357,7 @@ export default function GameRoom({
     setSelectedFloorToolId(next);
     setSelectedCatalogIndex(null);
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.selectFloorTool(next === null ? null : { kind: "paint", entry });
   }
 
@@ -2348,6 +2366,7 @@ export default function GameRoom({
     setSelectedFloorToolId(next);
     setSelectedCatalogIndex(null);
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.selectFloorTool(next === null ? null : { kind: "erase" });
   }
 
@@ -2363,6 +2382,7 @@ export default function GameRoom({
     setSelectedAreaToolId(next);
     setSelectedCatalogIndex(null);
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.selectAreaTool(next === null ? null : { kind: "paint", areaId: id });
   }
 
@@ -2371,6 +2391,7 @@ export default function GameRoom({
     setSelectedAreaToolId(next);
     setSelectedCatalogIndex(null);
     setDeleteToolActive(false);
+    setMoveToolActive(false);
     sceneRef.current?.selectAreaTool(next === null ? null : { kind: "erase" });
   }
 
@@ -2994,8 +3015,21 @@ export default function GameRoom({
           />
         )}
 
-        <div className="map-controls">
-          {canEditRoom && editMode && (
+        {/* Grupo "Mover"/"Apagar" -- pedido do Douglas: os dois juntos num
+            botão flutuante próprio, LONGE dos controles de zoom (ver
+            .map-tool-group em globals.css, fica no topo direito, abaixo do
+            botão "Sair da conta" quando ele existe -- .map-controls, o
+            zoom/centralizar, continua embaixo à direita como sempre). */}
+        {canEditRoom && editMode && (
+          <div className="map-tool-group">
+            <button
+              className={moveToolActive ? "map-move-btn active" : "map-move-btn"}
+              onClick={toggleMoveTool}
+              aria-label="Mover item"
+              data-tooltip={moveToolActive ? "Clique num item, depois no lugar novo" : "Mover item"}
+            >
+              <MoveIcon />
+            </button>
             <button
               className={deleteToolActive ? "map-delete-btn active" : "map-delete-btn"}
               onClick={toggleDeleteTool}
@@ -3004,7 +3038,10 @@ export default function GameRoom({
             >
               <TrashIcon />
             </button>
-          )}
+          </div>
+        )}
+
+        <div className="map-controls">
           <button
             className="map-recenter-btn"
             onClick={handleRecenterCamera}
@@ -3136,7 +3173,6 @@ export default function GameRoom({
           selectedColorId={selectedColorId}
           onSelectColor={selectFurnitureColor}
           draftItems={draftItems}
-          catalogLabelFor={catalogLabelFor}
           onClearAll={clearDraftItems}
           furnitureSaveStatus={furnitureSaveStatus}
           seatTuningInfo={seatTuningInfo}
@@ -3183,7 +3219,7 @@ const FACING_LABEL: Record<Direction, string> = {
 };
 
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso" | "area" | "assento" | "mover";
+  id: FurnitureCategoryId | "piso" | "area" | "assento";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -3201,11 +3237,10 @@ const EDIT_CATEGORY_TABS: {
   // trava de sempre, canEditRoom), não é uma categoria de móvel de
   // verdade (não tem paleta pra colocar item nenhum).
   { id: "assento", label: "Assento", icon: SeatTuneIcon },
-  // "Mover": pedido do Douglas -- reposicionar um item JÁ colocado sem
-  // precisar apagar e colocar de novo (perdia cor/modelo escolhido).
-  // Também não é categoria de móvel, é uma ferramenta (ver
-  // selectMoveTool em MainScene.ts).
-  { id: "mover", label: "Mover", icon: MoveIcon },
+  // "Mover" SAIU daqui -- pedido do Douglas: virou botão flutuante
+  // agrupado com "Apagar" (ver .map-tool-group/toggleMoveTool), não é
+  // mais aba de categoria. MoveIcon continua definida embaixo, agora só
+  // usada por esse botão flutuante.
 ];
 
 function EditPanel({
@@ -3216,7 +3251,6 @@ function EditPanel({
   selectedColorId,
   onSelectColor,
   draftItems,
-  catalogLabelFor,
   onClearAll,
   furnitureSaveStatus,
   seatTuningInfo,
@@ -3238,14 +3272,13 @@ function EditPanel({
   onClearAllArea,
   areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "mover";
-  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento" | "mover") => void;
+  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento";
+  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   selectedColorId: string | null;
   onSelectColor: (colorId: string) => void;
   draftItems: FurnitureDef[];
-  catalogLabelFor: (item: FurnitureDef) => string;
   onClearAll: () => void;
   furnitureSaveStatus: "idle" | "saving" | "saved" | "error";
   seatTuningInfo: SeatTuningInfo | null;
@@ -3281,7 +3314,7 @@ function EditPanel({
   // FURNITURE_CATALOG_STATIC, game/furniture.ts), continua existindo só
   // nos itens fixos antigos de ROOM_FURNITURE.
   const categoryEntries =
-    activeCategory === "piso" || activeCategory === "area" || activeCategory === "assento" || activeCategory === "mover"
+    activeCategory === "piso" || activeCategory === "area" || activeCategory === "assento"
       ? []
       : FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory);
   const hasModelsInCategory = categoryEntries.some((e) => e.modelId);
@@ -3486,15 +3519,6 @@ function EditPanel({
             <p className="edit-hint">Sente numa peça pra ver o ajuste aqui.</p>
           )}
         </>
-      ) : activeCategory === "mover" ? (
-        <>
-          <p className="edit-hint">
-            Clique num item já colocado pra pegar ele (fica destacado), e
-            clique num quadrado livre pra soltar ali. Clicar de novo no
-            quadrado de origem cancela sem mover. Se alguém estiver sentado
-            nele, o boneco acompanha pro lugar novo na hora. Salva sozinho.
-          </p>
-        </>
       ) : (
         <>
           <div className="palette">
@@ -3595,6 +3619,11 @@ function EditPanel({
               );
             })()}
 
+          {/* pedido do Douglas: apagar item agora é direto no espaço (ver
+              .map-delete-btn/toggleDeleteTool) -- a lista "Itens colocados"
+              (um <li> por item) saiu de vez, sobrou só a contagem + status
+              de salvamento (ainda útil, principalmente "Erro ao salvar")
+              e o botão de limpar tudo. */}
           <h3>
             Itens colocados ({draftItems.length})
             <span className={`floor-save-status floor-save-status-${furnitureSaveStatus}`}>
@@ -3603,22 +3632,6 @@ function EditPanel({
               {furnitureSaveStatus === "error" && "Erro ao salvar"}
             </span>
           </h3>
-          {draftItems.length === 0 ? (
-            <p className="edit-hint">Nenhum item colocado ainda.</p>
-          ) : (
-            // pedido do Douglas: apagar item agora é direto no espaço (ver
-            // .map-delete-btn/toggleDeleteTool), não mais um ✕ por linha
-            // aqui -- a lista virou só um resumo do que já tá colocado.
-            <ul className="draft-list">
-              {draftItems.map((item) => (
-                <li key={item.id}>
-                  <span>
-                    {catalogLabelFor(item)} — col {item.col}, row {item.row}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
           {draftItems.length > 0 && (
             <button className="clear-btn" onClick={onClearAll}>
               Limpar tudo
@@ -3793,10 +3806,10 @@ function SeatTuneIcon() {
   );
 }
 
-// Aba "Mover" (ver EDIT_CATEGORY_TABS/selectMoveTool) -- cruz de 4
-// setas, ícone universal de "arrastar/reposicionar" (diferente da
-// bússola de 4 pontas do SeatTuneIcon acima, pra não confundir as duas
-// abas na barra).
+// Botão flutuante "Mover" (ver .map-move-btn/toggleMoveTool/selectMoveTool)
+// -- cruz de 4 setas, ícone universal de "arrastar/reposicionar"
+// (diferente da bússola de 4 pontas do SeatTuneIcon acima, pra não
+// confundir os dois).
 function MoveIcon() {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none">

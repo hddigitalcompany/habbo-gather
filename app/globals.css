@@ -166,13 +166,31 @@ body {
   gap: 10px;
 }
 
-/* Botão "Apagar" do editor de espaço (ver toggleDeleteTool/TrashIcon em
-   GameRoom.tsx) -- só aparece durante "Editar espaço" (canEditRoom &&
-   editMode), no TOPO da mesma coluna flutuante dos controles de mapa
-   (pedido do Douglas: "do lado igual os botões de zoom, mas lá em cima").
-   Mesma pegada visual do .map-recenter-btn logo abaixo; .active (ligado --
-   próximo clique num item já colocado apaga ele) fica com um tom
-   avermelhado, pra ficar claro que tá armado. */
+/* Grupo "Mover"/"Apagar" do editor de espaço (ver toggleMoveTool/
+   toggleDeleteTool em GameRoom.tsx) -- só aparece durante "Editar espaço"
+   (canEditRoom && editMode). Pedido do Douglas: os dois botões juntos,
+   LONGE dos controles de zoom -- por isso é um grupo flutuante PRÓPRIO,
+   separado de .map-controls (que fica embaixo à direita, zoom/
+   centralizar): esse aqui fica no topo direito, colado sob o botão "Sair
+   da conta" (.account-sign-out-btn, top:10px + ~26px de altura -> aqui
+   começa em 52px pra sobrar respiro) quando ele existe, ou no mesmo lugar
+   mesmo sem ele (sala sem conta ligada é caso raro pra quem edita). */
+.map-tool-group {
+  position: fixed;
+  top: 52px;
+  right: 12px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Mesma pegada visual do .map-recenter-btn (ver mais abaixo); cada botão
+   tem sua própria cor de ".active" (ligado) pra ficar claro qual
+   ferramenta tá armada -- vermelho pra Apagar (ação destrutiva), roxo
+   (cor de destaque do resto da UI, ver .skin-swatch.selected) pra Mover. */
+.map-move-btn,
 .map-delete-btn {
   width: 44px;
   height: 44px;
@@ -192,10 +210,12 @@ body {
   transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
 }
 
+.map-move-btn:hover,
 .map-delete-btn:hover {
   background: rgba(255, 255, 255, 0.16);
 }
 
+.map-move-btn:active,
 .map-delete-btn:active {
   transform: scale(0.94);
 }
@@ -204,6 +224,12 @@ body {
   background: rgba(224, 62, 78, 0.35);
   border-color: rgba(255, 120, 130, 0.55);
   color: #ffd7db;
+}
+
+.map-move-btn.active {
+  background: rgba(124, 92, 255, 0.35);
+  border-color: rgba(160, 140, 255, 0.55);
+  color: #e4defc;
 }
 
 .map-recenter-btn {
@@ -2014,37 +2040,6 @@ body {
   margin: 0;
   font-size: 13px;
   font-weight: 700;
-}
-
-.draft-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.draft-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  background: #0d0715;
-  border: 1px solid #2f2245;
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 11px;
-}
-
-.draft-list button {
-  background: none;
-  border: none;
-  color: #d95959;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 2px 4px;
 }
 
 .clear-btn {
