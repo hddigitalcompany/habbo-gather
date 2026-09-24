@@ -7,7 +7,7 @@
     "dev:server": "node server/index.js",
     "dev:assets": "node scripts/watchAvatarAssets.mjs",
     "dev": "concurrently -n next,server,assets -c blue,magenta,green \"npm:dev:next\" \"npm:dev:server\" \"npm:dev:assets\"",
-    "sync-assets": "node scripts/syncAvatarAssets.mjs && node scripts/syncSkinAssets.mjs && node scripts/syncBeardAssets.mjs && node scripts/syncAccessoryAssets.mjs && node scripts/syncOutfitAssets.mjs && node scripts/syncFloorAssets.mjs",
+    "sync-assets": "node scripts/syncAvatarAssets.mjs && node scripts/syncSkinAssets.mjs && node scripts/syncBeardAssets.mjs && node scripts/syncAccessoryAssets.mjs && node scripts/syncOutfitAssets.mjs && node scripts/syncFloorAssets.mjs && node scripts/syncFurnitureAssets.mjs",
     "build": "next build",
     "start": "next start",
     "start:server": "node server/index.js",

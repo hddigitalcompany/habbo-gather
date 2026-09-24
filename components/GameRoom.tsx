@@ -8,19 +8,21 @@ import PartySocket from "partysocket";
 import MainScene, { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import {
-  catalogIndicesForType,
+  catalogEntryGroupKey,
+  catalogIndicesForGroup,
   FURNITURE_CATALOG,
   FURNITURE_COLORS,
   FURNITURE_TYPE_CATEGORY,
-  FURNITURE_TYPE_LABEL,
   furnitureArtFile,
   furnitureColorArtFile,
   FurnitureCategoryId,
+  FurnitureCatalogEntry,
   FurnitureDef,
-  FurnitureType,
+  FurnitureSeatOffsetsMap,
+  SeatTuningInfo,
 } from "@/game/furniture";
-import { generateFurnitureCode } from "@/game/furnitureCodegen";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef } from "@/game/floor";
+import type { Direction } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
   HAIR_CATALOG,
@@ -611,26 +613,47 @@ export default function GameRoom() {
     return true;
   }
 
-  // --- editor de espaço ("Editar espaço") -- modo dev: só posiciona
-  // visualmente e gera o código pra colar em furniture.ts, não salva
-  // nada sozinho (ver game/furnitureCodegen.ts) ---
+  // --- editor de espaço ("Editar espaço") -- modo dev: coloca/ajusta a
+  // mobília ADICIONAL da sala e salva sozinho (ver GET/POST /room/furniture
+  // em server/index.js), mesmo esquema autosave do piso/área logo abaixo.
+  // Antes só gerava um código pra colar à mão em furniture.ts -- isso
+  // não existe mais.
   const [editMode, setEditMode] = useState(false);
   const [selectedCatalogIndex, setSelectedCatalogIndex] = useState<number | null>(null);
+  // cor escolhida NA HORA pro item selecionado (ver selectFurnitureColor)
+  // -- separado da cor default de FURNITURE_CATALOG[selectedCatalogIndex]
+  // pra sobreviver a um giro de direção (rotateSelected troca de índice
+  // do catálogo, mas continua o MESMO modelo -- a cor escolhida não devia
+  // resetar só por girar). Reseta pra null (cai na cor default do
+  // modelo) toda vez que troca de MODELO de verdade, ver selectCatalog.
+  const [selectedColorId, setSelectedColorId] = useState<string | null>(null);
   const [draftItems, setDraftItems] = useState<FurnitureDef[]>([]);
-  const [copied, setCopied] = useState(false);
+  const [furnitureSaveStatus, setFurnitureSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const furnitureLoadedRef = useRef(false);
+
+  // --- ajuste de assento por MODELO ("Assento" na barra de categoria,
+  // ver resolveSeatOffset em game/furniture.ts) -- seatOffsets é o mapa
+  // completo (carregado JUNTO com a mobília, ver GET /room/furniture, e
+  // salvo junto no mesmo autosave abaixo); seatTuningInfo é só o que
+  // aparece no painel AGORA (null = não sentado/modo desligado, ver
+  // onSeatTuningChange na cena).
+  const [seatOffsets, setSeatOffsetsState] = useState<FurnitureSeatOffsetsMap>({});
+  const [seatTuningInfo, setSeatTuningInfo] = useState<SeatTuningInfo | null>(null);
 
   // --- barra de categoria do editor de espaço -- um ícone por
   // categoria lá em cima (poltrona/sofá/mesa/planta/computador/
-  // divisória/piso, ver FURNITURE_CATEGORIES em game/furniture.ts),
-  // igual ao padrão de referência que o Douglas mandou. activeCategory
-  // escolhe qual grade aparece embaixo: "piso" mostra TODOS os modelos
-  // de piso juntos (não separa mais por porcelanato/laminado), as
-  // outras filtram FURNITURE_CATALOG pelo tipo de móvel daquela
-  // categoria (ver FURNITURE_TYPE_CATEGORY). Sofá/mesa/planta/
-  // computador ainda não têm nenhum FurnitureType/arte cadastrado --
-  // aparecem na barra mas com a grade vazia, até subir os arquivos de
-  // origem (combinado com o Douglas: estrutura agora, arte depois).
-  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area">("poltrona");
+  // divisória/piso/área/assento, ver FURNITURE_CATEGORIES em
+  // game/furniture.ts), igual ao padrão de referência que o Douglas
+  // mandou. activeCategory escolhe qual grade aparece embaixo: "piso"
+  // mostra TODOS os modelos de piso juntos (não separa mais por
+  // porcelanato/laminado), "assento" é o ajuste de onde o boneco senta
+  // (ver EDIT_CATEGORY_TABS/changeCategory), as outras filtram
+  // FURNITURE_CATALOG pelo tipo/modelo de móvel daquela categoria (ver
+  // FURNITURE_TYPE_CATEGORY). Sofá/mesa/planta/computador ainda não têm
+  // nenhum FurnitureType/arte cadastrado -- aparecem na barra mas com a
+  // grade vazia, até subir os arquivos de origem (combinado com o
+  // Douglas: estrutura agora, arte depois).
+  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento">("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1275,6 +1298,54 @@ export default function GameRoom() {
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
         scene.onDraftAreaChange = (items) => setDraftAreaItems(items);
+        // painel "Assento" (ver EditPanel) -- estado ao vivo de
+        // sentou/levantou/nudge (ver onSeatTuningChange em
+        // MainScene.ts). onSeatOffsetReset é só pro botão "Redefinir":
+        // APAGA a entrada do grupo+direção em vez de só atualizar x/y
+        // (ver comentário em MainScene.ts).
+        // puramente de EXIBIÇÃO (painel "Assento") -- sentar/levantar/
+        // ligar o modo passam por aqui só pra MOSTRAR o valor atual
+        // (resolvido, ver resolveSeatOffset), sem gravar nada sozinho.
+        scene.onSeatTuningChange = (info) => setSeatTuningInfo(info);
+        // esse sim GRAVA -- só dispara com um nudge de verdade (ver
+        // comentário em onSeatOffsetChange, MainScene.ts), nunca só por
+        // sentar. É o que entra no mapa que autosalva (ver useEffect
+        // combinado de mobília+assento mais abaixo).
+        scene.onSeatOffsetChange = (groupKey, facing, x, y) => {
+          setSeatOffsetsState((prev) => ({
+            ...prev,
+            [groupKey]: { ...(prev[groupKey] ?? {}), [facing]: { x, y } },
+          }));
+        };
+        scene.onSeatOffsetReset = (groupKey, facing) => {
+          setSeatOffsetsState((prev) => {
+            const byFacing = prev[groupKey];
+            if (!byFacing || !(facing in byFacing)) return prev;
+            const nextByFacing = { ...byFacing };
+            delete nextByFacing[facing];
+            return { ...prev, [groupKey]: nextByFacing };
+          });
+        };
+        // mobília adicional já salva (ver GET /room/furniture em
+        // server/index.js) -- mesmo timing/tratamento de falha do piso
+        // abaixo: furnitureLoadedRef só vira true DEPOIS da tentativa
+        // (sucesso ou falha), o autosave confere essa flag antes de
+        // mandar qualquer POST. O ajuste de assento (seatOffsets) precisa
+        // entrar na cena (setSeatOffsets) ANTES de loadSavedFurniture,
+        // senão um item já sentável carregaria sem o ajuste salvo.
+        fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data?.seatOffsets) {
+              setSeatOffsetsState(data.seatOffsets);
+              sceneRef.current?.setSeatOffsets(data.seatOffsets);
+            }
+            if (data?.items) sceneRef.current?.loadSavedFurniture(data.items);
+          })
+          .catch(() => {})
+          .finally(() => {
+            furnitureLoadedRef.current = true;
+          });
         // piso já salvo (ver GET /room/floor em server/index.js) -- busca
         // assim que a cena fica pronta e manda pra dentro dela (ver
         // loadSavedFloor em MainScene.ts). Falha em silêncio (ex: servidor
@@ -1828,19 +1899,51 @@ export default function GameRoom() {
     const next = !editMode;
     setEditMode(next);
     setSelectedCatalogIndex(null);
+    setSelectedColorId(null);
     setSelectedFloorToolId(null);
     setSelectedAreaToolId(null);
     setActiveCategory("poltrona");
     sceneRef.current?.setEditMode(next);
+    sceneRef.current?.setSeatTuningMode(false); // defensivo -- sair do editor sempre desliga o ajuste de assento também
+  }
+
+  // troca de categoria na barra de ícones -- separado de setActiveCategory
+  // direto (era só isso antes) porque "assento" precisa ligar/desligar o
+  // modo de ajuste na cena (ver setSeatTuningMode em MainScene.ts, muda o
+  // que as setas de direção fazem enquanto sentado).
+  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento") {
+    setActiveCategory(category);
+    sceneRef.current?.setSeatTuningMode(category === "assento");
+  }
+
+  /** Aplica a COR escolhida (ver selectFurnitureColor) numa entrada de catálogo, se ela tiver cores (ver FurnitureCatalogEntry.colors) -- devolve a entrada como veio quando não tiver (ex: vidro) ou quando o id não bater com nenhuma cor dela. */
+  function entryWithColor(entry: FurnitureCatalogEntry, colorId: string | null): FurnitureCatalogEntry {
+    if (!colorId || !entry.colors?.some((c) => c.id === colorId)) return entry;
+    return { ...entry, colorId };
   }
 
   function selectCatalog(index: number) {
     // clicar de novo no mesmo item da paleta DESSELECIONA (sai do "modo
     // colocar"), igual clicar um toggle
     const next = selectedCatalogIndex === index ? null : index;
+    const prevEntry = selectedCatalogIndex !== null ? FURNITURE_CATALOG[selectedCatalogIndex] : null;
+    const nextEntry = next !== null ? FURNITURE_CATALOG[next] : null;
+    // só mantém a cor escolhida se continuar no MESMO modelo (ex: girou
+    // de direção) -- trocando de modelo de verdade, volta pra cor default
+    // dele (ver comentário em selectedColorId).
+    const sameGroup = !!(prevEntry && nextEntry && catalogEntryGroupKey(prevEntry) === catalogEntryGroupKey(nextEntry));
+    const colorId = sameGroup ? selectedColorId : null;
+    if (!sameGroup) setSelectedColorId(null);
     setSelectedCatalogIndex(next);
     setSelectedFloorToolId(null); // móvel e piso são ferramentas exclusivas, ver selectCatalogEntry na cena
-    sceneRef.current?.selectCatalogEntry(next === null ? null : FURNITURE_CATALOG[next]);
+    sceneRef.current?.selectCatalogEntry(nextEntry ? entryWithColor(nextEntry, colorId) : null);
+  }
+
+  /** Troca a cor do item selecionado na paleta AGORA (ver "Cores" no preview, EditPanel) -- próximo clique de colocar já sai com essa cor. */
+  function selectFurnitureColor(colorId: string) {
+    setSelectedColorId(colorId);
+    if (selectedCatalogIndex === null) return;
+    sceneRef.current?.selectCatalogEntry(entryWithColor(FURNITURE_CATALOG[selectedCatalogIndex], colorId));
   }
 
   function removeDraftItem(id: string) {
@@ -1851,22 +1954,23 @@ export default function GameRoom() {
     sceneRef.current?.clearDraftFurniture();
   }
 
-  async function copyGeneratedCode() {
-    try {
-      await navigator.clipboard.writeText(generatedCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (e) {
-      console.warn("Não deu pra copiar pro clipboard", e);
-    }
-  }
-
+  /** Rótulo pra mostrar na lista "Itens colocados" -- procura por MODELO+direção quando o item tiver (ver FurnitureDef.modelId), senão por tipo+direção (design único, caso do vidro e dos itens antigos). Não pode só filtrar por type+facing sempre: com 2+ modelos do mesmo tipo (ver Gamer x Poltrona Lecce) isso acharia sempre o PRIMEIRO da lista, errado pros outros. */
   function catalogLabelFor(item: FurnitureDef): string {
-    const entry = FURNITURE_CATALOG.find((c) => c.type === item.type && c.facing === item.facing);
+    const entry = item.modelId
+      ? FURNITURE_CATALOG.find((c) => c.modelId === item.modelId && c.facing === item.facing)
+      : FURNITURE_CATALOG.find((c) => !c.modelId && c.type === item.type && c.facing === item.facing);
     return entry?.label ?? `${item.type} (${item.facing})`;
   }
 
-  const generatedCode = useMemo(() => generateFurnitureCode(draftItems), [draftItems]);
+  /** Botão "Sair do assento" do painel "Assento" -- levanta o boneco local sem precisar de tecla (que durante o ajuste não levanta mais, ver update() em MainScene.ts). */
+  function standUpFromSeatTuning() {
+    sceneRef.current?.standUpNow();
+  }
+
+  /** Botão "Redefinir" do painel "Assento" -- apaga o ajuste manual do grupo+direção atual (ver resetSeatOffset em MainScene.ts, que já cuida de reposicionar e avisar onSeatOffsetReset). */
+  function resetSeatTuning() {
+    sceneRef.current?.resetSeatOffset();
+  }
 
   // clicar de novo na MESMA ferramenta de piso já selecionada desarma
   // (mesmo "clique de novo desseleciona" da paleta de móveis acima).
@@ -1919,7 +2023,7 @@ export default function GameRoom() {
     const slug = trimmed
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "") // remove acento (ver comentário parecido em generateFurnitureCode)
+      .replace(/[̀-ͯ]/g, "") // remove acento
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
     const id = `${slug || "area"}-${Date.now()}-${Math.round(Math.random() * 999)}`;
@@ -1994,6 +2098,30 @@ export default function GameRoom() {
     }, 600);
     return () => clearTimeout(timer);
   }, [draftAreaDefs, draftAreaItems]);
+
+  // autosave da mobília -- MESMA lógica/timing do autosave do piso/área
+  // acima, só que manda os itens colocados JUNTO com o mapa de ajuste de
+  // assento (ver POST /room/furniture em server/index.js), já que um
+  // nudge no "Assento" (ver onSeatOffsetChange/onSeatOffsetReset) também
+  // precisa persistir -- os dois moram no MESMO arquivo/endpoint (ver
+  // roomStore.js), então um autosave só cobre os dois juntos.
+  useEffect(() => {
+    if (!furnitureLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setFurnitureSaveStatus("saving");
+      fetch(`${REALTIME_HTTP_BASE}/room/furniture`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: draftItems, seatOffsets }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setFurnitureSaveStatus("saved");
+        })
+        .catch(() => setFurnitureSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftItems, seatOffsets]);
 
   // reflete nome/status do MEU card ao vivo no boneco dentro do jogo
   // (nome + bolinha de status, ver setNameplate/setLocalProfile na
@@ -2489,16 +2617,19 @@ export default function GameRoom() {
       {IS_ROOM_EDITOR_ENABLED && editMode && (
         <EditPanel
           activeCategory={activeCategory}
-          onChangeCategory={setActiveCategory}
+          onChangeCategory={changeCategory}
           selectedCatalogIndex={selectedCatalogIndex}
           onSelectCatalog={selectCatalog}
+          selectedColorId={selectedColorId}
+          onSelectColor={selectFurnitureColor}
           draftItems={draftItems}
           catalogLabelFor={catalogLabelFor}
           onRemoveItem={removeDraftItem}
           onClearAll={clearDraftItems}
-          generatedCode={generatedCode}
-          onCopyCode={copyGeneratedCode}
-          copied={copied}
+          furnitureSaveStatus={furnitureSaveStatus}
+          seatTuningInfo={seatTuningInfo}
+          onStandUpFromSeatTuning={standUpFromSeatTuning}
+          onResetSeatTuning={resetSeatTuning}
           selectedFloorToolId={selectedFloorToolId}
           onSelectFloorPaint={selectFloorPaint}
           onSelectFloorEraser={selectFloorEraser}
@@ -2529,8 +2660,18 @@ export default function GameRoom() {
 // o Douglas não gostou) + glifo branco chapado, igual o rail de
 // categoria do Gather; só o item selecionado se destaca (brilho/anel,
 // ver .category-icon-btn.selected no CSS).
+// rótulo em português de cada direção -- usado no painel "Assento" (ver
+// seatTuningInfo.facing) pra mostrar qual lado da peça tá sendo
+// ajustado agora.
+const FACING_LABEL: Record<Direction, string> = {
+  down: "frente",
+  left: "lado esq.",
+  right: "lado dir.",
+  up: "costas",
+};
+
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso" | "area";
+  id: FurnitureCategoryId | "piso" | "area" | "assento";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -2542,6 +2683,12 @@ const EDIT_CATEGORY_TABS: {
   { id: "divisoria", label: "Divisória", icon: DividerIcon },
   { id: "piso", label: "Piso", icon: FloorIcon },
   { id: "area", label: "Área", icon: AreaIcon },
+  // "Assento": ajuste fino (setas) de onde o boneco senta em cada
+  // MODELO de móvel sentável -- ver resolveSeatOffset em
+  // game/furniture.ts. Só existe aqui dentro do editor dev (mesma trava
+  // de sempre, IS_ROOM_EDITOR_ENABLED), não é uma categoria de móvel de
+  // verdade (não tem paleta pra colocar item nenhum).
+  { id: "assento", label: "Assento", icon: SeatTuneIcon },
 ];
 
 function EditPanel({
@@ -2549,13 +2696,16 @@ function EditPanel({
   onChangeCategory,
   selectedCatalogIndex,
   onSelectCatalog,
+  selectedColorId,
+  onSelectColor,
   draftItems,
   catalogLabelFor,
   onRemoveItem,
   onClearAll,
-  generatedCode,
-  onCopyCode,
-  copied,
+  furnitureSaveStatus,
+  seatTuningInfo,
+  onStandUpFromSeatTuning,
+  onResetSeatTuning,
   selectedFloorToolId,
   onSelectFloorPaint,
   onSelectFloorEraser,
@@ -2572,17 +2722,20 @@ function EditPanel({
   onClearAllArea,
   areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso" | "area";
-  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area") => void;
+  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento";
+  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
+  selectedColorId: string | null;
+  onSelectColor: (colorId: string) => void;
   draftItems: FurnitureDef[];
   catalogLabelFor: (item: FurnitureDef) => string;
   onRemoveItem: (id: string) => void;
   onClearAll: () => void;
-  generatedCode: string;
-  onCopyCode: () => void;
-  copied: boolean;
+  furnitureSaveStatus: "idle" | "saving" | "saved" | "error";
+  seatTuningInfo: SeatTuningInfo | null;
+  onStandUpFromSeatTuning: () => void;
+  onResetSeatTuning: () => void;
   selectedFloorToolId: string | "erase" | null;
   onSelectFloorPaint: (entry: FloorCatalogEntry) => void;
   onSelectFloorEraser: () => void;
@@ -2601,27 +2754,47 @@ function EditPanel({
 }) {
   const activeCategoryLabel = EDIT_CATEGORY_TABS.find((c) => c.id === activeCategory)?.label ?? "";
 
-  // um TIPO por botão na grade (não mais um por direção -- ver
-  // FURNITURE_TYPE_LABEL/catalogIndicesForType em game/furniture.ts):
-  // escolher o tipo já seleciona a direção "padrão" dele (a primeira em
-  // FURNITURE_ROTATE_ORDER que existir); depois disso o preview embaixo
-  // deixa girar pra trocar de direção sem precisar voltar na grade.
-  const typesInCategory: FurnitureType[] =
-    activeCategory === "piso" || activeCategory === "area"
+  // um GRUPO por botão na grade (não mais um por direção, ver
+  // catalogEntryGroupKey/catalogIndicesForGroup em game/furniture.ts):
+  // escolher um GRUPO (modelo, ver catalogEntryGroupKey -- ou o tipo,
+  // pra design único como o vidro) já seleciona a direção "padrão" dele
+  // (a primeira em FURNITURE_ROTATE_ORDER que existir); depois disso o
+  // preview embaixo deixa girar pra trocar de direção sem precisar
+  // voltar na grade. Categoria com modelo cadastrado (ex: poltrona, ver
+  // Gamer/Poltrona Lecce) só mostra os grupos DE MODELO -- o design
+  // único antigo (sem modelId) fica de fora da paleta (ver comentário em
+  // FURNITURE_CATALOG_STATIC, game/furniture.ts), continua existindo só
+  // nos itens fixos antigos de ROOM_FURNITURE.
+  const categoryEntries =
+    activeCategory === "piso" || activeCategory === "area" || activeCategory === "assento"
       ? []
-      : Array.from(
-          new Set(FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory).map((e) => e.type))
-        );
+      : FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory);
+  const hasModelsInCategory = categoryEntries.some((e) => e.modelId);
+  const paletteEntries = hasModelsInCategory ? categoryEntries.filter((e) => e.modelId) : categoryEntries;
+  const groupsInCategory: string[] = Array.from(new Set(paletteEntries.map((e) => catalogEntryGroupKey(e))));
 
   const selectedEntry = selectedCatalogIndex !== null ? FURNITURE_CATALOG[selectedCatalogIndex] : null;
 
-  // gira o item selecionado dentro das direções cadastradas pro TIPO
-  // dele (ver catalogIndicesForType) -- reusa onSelectCatalog direto
+  // arte pra mostrar (thumbnail da grade OU preview grande) de uma
+  // entrada de catálogo -- pega pela cor ESCOLHIDA quando tiver
+  // (selectedColorId, só faz sentido pro item selecionado de verdade,
+  // ver uso abaixo) ou pela cor default da entrada, senão cai no design
+  // único do tipo (furnitureArtFile, caso do vidro).
+  function catalogEntryArtFile(entry: FurnitureCatalogEntry, colorIdOverride?: string | null): string | null {
+    if (entry.colors) {
+      const color = entry.colors.find((c) => c.id === colorIdOverride) ?? entry.colors.find((c) => c.id === entry.colorId);
+      if (color) return color.art[entry.facing] ?? color.art.down ?? null;
+    }
+    return furnitureArtFile(entry.type, entry.facing);
+  }
+
+  // gira o item selecionado dentro das direções cadastradas pro GRUPO
+  // dele (ver catalogIndicesForGroup) -- reusa onSelectCatalog direto
   // (mesma função que os botões da grade chamam), só troca pra outro
   // índice do catálogo, então nem precisa de handler novo na cena.
   function rotateSelected(direction: -1 | 1) {
     if (!selectedEntry) return;
-    const indices = catalogIndicesForType(selectedEntry.type);
+    const indices = catalogIndicesForGroup(catalogEntryGroupKey(selectedEntry));
     if (indices.length <= 1) return;
     const pos = indices.indexOf(selectedCatalogIndex!);
     const nextPos = (pos + direction + indices.length) % indices.length;
@@ -2767,25 +2940,58 @@ function EditPanel({
             </button>
           )}
         </>
+      ) : activeCategory === "assento" ? (
+        <>
+          <p className="edit-hint">
+            Coloque uma peça sentável (aba de móvel, ex: "Poltrona") e sente
+            nela pra ajustar -- com essa aba ligada, as setas do teclado não
+            levantam mais, elas movem o boneco fino (1px; segure Shift pra
+            5px de uma vez). O ajuste vale pro MODELO inteiro (todas as
+            peças iguais já colocadas, viradas pra essa mesma direção), não
+            só a que você sentou. Salva sozinho.
+          </p>
+          {seatTuningInfo ? (
+            <div className="seat-tuning-panel">
+              <p className="seat-tuning-target">
+                {seatTuningInfo.label} — {FACING_LABEL[seatTuningInfo.facing]}
+              </p>
+              <p className="seat-tuning-coords">
+                x: {seatTuningInfo.x}px · y: {seatTuningInfo.y}px
+              </p>
+              <div className="seat-tuning-actions">
+                <button className="clear-btn" onClick={onResetSeatTuning}>
+                  Redefinir
+                </button>
+                <button className="clear-btn" onClick={onStandUpFromSeatTuning}>
+                  Sair do assento
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="edit-hint">Sente numa peça pra ver o ajuste aqui.</p>
+          )}
+        </>
       ) : (
         <>
           <div className="palette">
-            {typesInCategory.map((type) => {
-              const defaultIndex = catalogIndicesForType(type)[0];
-              const isSelected = selectedEntry?.type === type;
-              const thumbFile = furnitureArtFile(type, "down");
+            {groupsInCategory.map((groupKey) => {
+              const indices = catalogIndicesForGroup(groupKey);
+              const defaultIndex = indices[0];
+              const groupEntry = FURNITURE_CATALOG[defaultIndex];
+              const isSelected = selectedEntry ? catalogEntryGroupKey(selectedEntry) === groupKey : false;
+              const thumbFile = catalogEntryArtFile(groupEntry);
               return (
                 <button
-                  key={type}
+                  key={groupKey}
                   className={isSelected ? "palette-btn selected" : "palette-btn"}
                   style={thumbFile ? { backgroundImage: `url(/assets/${thumbFile})` } : undefined}
                   onClick={() => onSelectCatalog(defaultIndex)}
-                  title={FURNITURE_TYPE_LABEL[type]}
+                  title={groupEntry.label}
                 />
               );
             })}
           </div>
-          {typesInCategory.length === 0 && (
+          {groupsInCategory.length === 0 && (
             <p className="edit-hint">
               Nenhum modelo de {activeCategoryLabel} ainda -- suba as artes na pasta de origem.
             </p>
@@ -2793,15 +2999,16 @@ function EditPanel({
 
           {selectedEntry &&
             (() => {
-              const canRotate = catalogIndicesForType(selectedEntry.type).length > 1;
-              const artFile = furnitureArtFile(selectedEntry.type, selectedEntry.facing);
-              // cores dessa peça (ver FurnitureColorOption em
-              // game/furniture.ts) -- nenhum tipo tem cor cadastrada
-              // ainda, por isso sempre cai no "Em breve" por enquanto
-              // (mesmo padrão já usado pra cor de cabelo/acessório sem
-              // gerar ainda, ver color-picker-empty mais abaixo nesse
-              // arquivo).
-              const colorOptions = FURNITURE_COLORS[selectedEntry.type] ?? [];
+              const canRotate = catalogIndicesForGroup(catalogEntryGroupKey(selectedEntry)).length > 1;
+              const artFile = catalogEntryArtFile(selectedEntry, selectedColorId);
+              // cores dessa peça: as do MODELO quando tiver (ver
+              // FurnitureCatalogEntry.colors, gerado a partir da pasta de
+              // origem, ver scripts/syncFurnitureAssets.mjs), senão cai
+              // em FURNITURE_COLORS[type] (design único, hoje sempre
+              // vazio -- "Em breve", mesmo padrão de cabelo/acessório sem
+              // gerar ainda).
+              const colorOptions = selectedEntry.colors ?? FURNITURE_COLORS[selectedEntry.type] ?? [];
+              const activeColorId = selectedColorId ?? selectedEntry.colorId;
               return (
                 <div className="item-preview">
                   <div className="item-preview-main">
@@ -2815,11 +3022,7 @@ function EditPanel({
                         <RotateLeftIcon />
                       </button>
                       {artFile && (
-                        <img
-                          className="item-preview-img"
-                          src={`/assets/${artFile}`}
-                          alt={FURNITURE_TYPE_LABEL[selectedEntry.type]}
-                        />
+                        <img className="item-preview-img" src={`/assets/${artFile}`} alt={selectedEntry.label} />
                       )}
                       <button
                         className="item-preview-rotate"
@@ -2830,26 +3033,35 @@ function EditPanel({
                         <RotateRightIcon />
                       </button>
                     </div>
-                    <p className="item-preview-label">{FURNITURE_TYPE_LABEL[selectedEntry.type]}</p>
+                    <p className="item-preview-label">{selectedEntry.label}</p>
                   </div>
 
                   <div className="item-preview-colors">
                     <span className="color-picker-label">Cores</span>
                     {colorOptions.length > 0 ? (
                       <div className="color-swatches">
-                        {colorOptions.map((c) => (
-                          <button
-                            key={c.id}
-                            className="color-swatch"
-                            style={{
-                              width: 22,
-                              height: 22,
-                              backgroundImage: `url(/assets/${furnitureColorArtFile(c, selectedEntry.facing)})`,
-                              backgroundSize: "cover",
-                            }}
-                            title={c.label}
-                          />
-                        ))}
+                        {colorOptions.map((c) => {
+                          // FurnitureModelColorOption (modelo) e
+                          // FurnitureColorOption (design único) têm o
+                          // MESMO formato de `art` na prática (só muda se
+                          // é obrigatório ou parcial no tipo) -- mesma
+                          // função serve pras duas, ver furnitureColorArtFile.
+                          const swatchArt = furnitureColorArtFile(c, selectedEntry.facing);
+                          return (
+                            <button
+                              key={c.id}
+                              className={c.id === activeColorId ? "color-swatch selected" : "color-swatch"}
+                              style={{
+                                width: 22,
+                                height: 22,
+                                backgroundImage: swatchArt ? `url(/assets/${swatchArt})` : undefined,
+                                backgroundSize: "cover",
+                              }}
+                              onClick={() => onSelectColor(c.id)}
+                              title={c.label}
+                            />
+                          );
+                        })}
                       </div>
                     ) : (
                       <span className="color-picker-empty">Em breve</span>
@@ -2859,7 +3071,14 @@ function EditPanel({
               );
             })()}
 
-          <h3>Itens colocados ({draftItems.length})</h3>
+          <h3>
+            Itens colocados ({draftItems.length})
+            <span className={`floor-save-status floor-save-status-${furnitureSaveStatus}`}>
+              {furnitureSaveStatus === "saving" && "Salvando…"}
+              {furnitureSaveStatus === "saved" && "Salvo ✓"}
+              {furnitureSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
           {draftItems.length === 0 ? (
             <p className="edit-hint">Nenhum item colocado ainda.</p>
           ) : (
@@ -2881,12 +3100,6 @@ function EditPanel({
               Limpar tudo
             </button>
           )}
-
-          <h3>Código pra colar em furniture.ts</h3>
-          <textarea readOnly value={generatedCode} className="code-box" spellCheck={false} />
-          <button className="copy-btn" onClick={onCopyCode}>
-            {copied ? "Copiado!" : "Copiar código"}
-          </button>
         </>
       )}
     </div>
@@ -3037,6 +3250,21 @@ function AreaIcon() {
         strokeDasharray="4 3"
       />
       <circle cx="12" cy="12" r="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+// ícone da aba "Assento" (ver EDIT_CATEGORY_TABS) -- 4 setas ao redor de
+// um ponto central (ajuste fino de posição), pra diferenciar visualmente
+// de área (quadrado tracejado com alvo) e piso (grade cheia).
+function SeatTuneIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="12" r="2.6" />
+      <path d="M12 2.5 9.3 6.6h5.4L12 2.5z" />
+      <path d="M12 21.5 9.3 17.4h5.4L12 21.5z" />
+      <path d="M2.5 12 6.6 9.3v5.4L2.5 12z" />
+      <path d="M21.5 12 17.4 9.3v5.4L21.5 12z" />
     </svg>
   );
 }

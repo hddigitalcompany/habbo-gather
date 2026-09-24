@@ -118,6 +118,23 @@
 //     -> 200 { ok: true, list, tiles }
 //     -> 403, mesma trava de produção do /room/floor acima.
 //
+// Mobília da sala ("Editar espaço" -> abas de móvel, ver
+// game/furniture.ts pro conceito de MODELO/cor -- FurnitureModelDef,
+// gerado a partir da pasta de origem, ver scripts/syncFurnitureAssets.mjs)
+// -- MESMO arquivo data/room.json do piso/área, mesma trava de produção:
+//   GET  /room/furniture  -> 200 { items: FurnitureDef[], seatOffsets: FurnitureSeatOffsetsMap }
+//                          (itens colocados pelo editor + ajuste de onde o
+//                          boneco senta, por MODELO+direção -- ver
+//                          "Assento" no editor, NÃO por instância. Isso é
+//                          ADICIONAL a ROOM_FURNITURE, furniture.ts, que
+//                          continua fixo/sempre desenhado)
+//   POST /room/furniture  (corpo JSON: { items: FurnitureDef[], seatOffsets:
+//                          FurnitureSeatOffsetsMap }, sempre os DOIS
+//                          inteiros, não um diff -- ver autosave combinado
+//                          em GameRoom.tsx)
+//     -> 200 { ok: true, items, seatOffsets }
+//     -> 403, mesma trava de produção do /room/floor acima.
+//
 // Posse de mesa privada (clicar "Tomar posse" numa área tipo
 // "mesa-privada", ver onClaimArea/onReleaseArea em MainScene.ts) NÃO usa
 // os endpoints acima -- é estado só em memória, pelo WebSocket (ver
@@ -527,6 +544,16 @@ function handleGetAreas(req, res) {
   res.end(JSON.stringify({ list, tiles }));
 }
 
+/** GET /room/furniture -- ver comentário grande no topo do arquivo. Devolve
+ * a mobília colocada + o ajuste de assento por modelo (ver
+ * loadSavedFurniture/setSeatOffsets em MainScene.ts, chamado pelo React em
+ * GameRoom.tsx). */
+function handleGetFurniture(req, res) {
+  const { items, seatOffsets } = roomStore.getFurnitureState();
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ items, seatOffsets }));
+}
+
 const MAX_ROOM_BODY_BYTES = 500_000; // generoso pro tamanho da sala hoje (12x7), evita payload absurdo
 
 /** POST /room/floor -- ver comentário grande no topo do arquivo. Desativado
@@ -650,6 +677,67 @@ function handlePostAreas(req, res) {
   });
 }
 
+/** POST /room/furniture -- mesma ideia/travas do handlePostAreas acima, só
+ * troca roomStore.setAreaState por roomStore.setFurnitureState (ver
+ * validação em server/roomStore.js -- espera { items, seatOffsets } em
+ * vez de { list, tiles }). */
+function handlePostFurniture(req, res) {
+  if (process.env.NODE_ENV === "production") {
+    res.writeHead(403, corsHeaders());
+    res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_ROOM_BODY_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Corpo grande demais");
+    return;
+  }
+
+  const chunks = [];
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
+      aborted = true;
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Corpo grande demais");
+      }
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, corsHeaders());
+      res.end("JSON inválido");
+      return;
+    }
+    const saved = roomStore.setFurnitureState(data);
+    if (saved === null) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "items" (array)');
+      return;
+    }
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, items: saved.items, seatOffsets: saved.seatOffsets }));
+  });
+
+  req.on("error", () => {
+    aborted = true;
+  });
+}
+
 const httpServer = createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
@@ -686,6 +774,16 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/room/areas") {
     handlePostAreas(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/room/furniture") {
+    handleGetFurniture(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/room/furniture") {
+    handlePostFurniture(req, res);
     return;
   }
 

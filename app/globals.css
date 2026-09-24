@@ -1832,6 +1832,42 @@ body {
   margin-bottom: 0;
 }
 
+/* Painel da aba "Assento" (ver EditPanel/seatTuningInfo em
+   GameRoom.tsx) -- mostra o modelo+direção sendo ajustado e o x/y atual
+   (ver resolveSeatOffset em game/furniture.ts) enquanto o Douglas usa as
+   setas do teclado pra nudge fino, sentado na peça de teste. */
+.seat-tuning-panel {
+  margin: 10px 0;
+  padding: 14px;
+  background: #0d0715;
+  border: 1px solid #2f2245;
+  border-radius: 10px;
+}
+
+.seat-tuning-target {
+  margin: 0 0 4px;
+  font-weight: 600;
+  color: #e8e2ff;
+}
+
+.seat-tuning-coords {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #a89cd6;
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-tuning-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.seat-tuning-actions .clear-btn {
+  margin: 0;
+  width: auto;
+  flex: 1;
+}
+
 .item-preview-rotate {
   width: 30px;
   height: 30px;

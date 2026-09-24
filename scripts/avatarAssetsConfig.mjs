@@ -15,7 +15,8 @@
 //     "barbaSourceRoot": "/caminho/completo/pra/pasta/Barba",
 //     "acessorioSourceRoot": "/caminho/completo/pra/pasta/Acessório",
 //     "trajeSourceRoot": "/caminho/completo/pra/pasta/Trajes",
-//     "pisoSourceRoot": "/caminho/completo/pra/pasta/Piso"
+//     "pisoSourceRoot": "/caminho/completo/pra/pasta/Piso",
+//     "poltronasSourceRoot": "/caminho/completo/pra/pasta/Poltronas"
 //   }
 //
 // Esse arquivo fica de fora do git (ver .gitignore) porque o caminho é
@@ -80,3 +81,13 @@ export const TRAJE_SRC_ROOT = cfg.trajeSourceRoot
 export const PISO_SRC_ROOT = cfg.pisoSourceRoot
   ? cfg.pisoSourceRoot
   : path.join(ROOT, "assets-source", "piso");
+
+// pasta de móveis "Poltrona" -- esquema PRÓPRIO, mais fundo que o de piso:
+// pasta de primeiro nível = MODELO (ex: "Gamer", "Poltrona Lecce"), dentro
+// dela uma subpasta por COR, e dentro de cada cor os 4 arquivos de direção
+// (frente/esquerda/direita/costas). Ver scripts/syncFurnitureAssets.mjs.
+// Chave "poltronasSourceRoot" no avatar-assets.local.json (mesmo esquema
+// das outras acima) pra apontar pra fora do projeto.
+export const POLTRONAS_SRC_ROOT = cfg.poltronasSourceRoot
+  ? cfg.poltronasSourceRoot
+  : path.join(ROOT, "assets-source", "poltronas");

@@ -22,6 +22,7 @@ import {
   ACESSORIO_SRC_ROOT,
   TRAJE_SRC_ROOT,
   PISO_SRC_ROOT,
+  POLTRONAS_SRC_ROOT,
 } from "./avatarAssetsConfig.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,7 @@ const TARGETS = [
   { label: "acessório", srcRoot: ACESSORIO_SRC_ROOT, script: path.join(__dirname, "syncAccessoryAssets.mjs") },
   { label: "traje", srcRoot: TRAJE_SRC_ROOT, script: path.join(__dirname, "syncOutfitAssets.mjs") },
   { label: "piso", srcRoot: PISO_SRC_ROOT, script: path.join(__dirname, "syncFloorAssets.mjs") },
+  { label: "poltrona", srcRoot: POLTRONAS_SRC_ROOT, script: path.join(__dirname, "syncFurnitureAssets.mjs") },
 ];
 
 function watchTarget({ label, srcRoot, script }) {

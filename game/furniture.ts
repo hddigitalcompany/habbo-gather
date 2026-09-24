@@ -22,10 +22,23 @@ export interface FurnitureDef {
   row: number;
   /** direção que o avatar (e a arte do móvel) fica "olhando" */
   facing: Direction;
+  /** qual MODELO desse tipo (ver FurnitureModelDef/FURNITURE_MODELS
+   * abaixo) -- só tipos com modelo cadastrado usam isso (hoje só
+   * "poltrona", ver Gamer/Poltrona Lecce). undefined = design único do
+   * tipo (ver FURNITURE_ART), caso do "vidro" e dos itens antigos de
+   * ROOM_FURNITURE colocados antes dos modelos existirem. */
+  modelId?: string;
+  /** cor escolhida dentro do modelo (ver FurnitureModelDef.colors) --
+   * só faz sentido junto com modelId. Sem valor, cai na primeira cor
+   * cadastrada do modelo (ver resolveFurnitureArt). */
+  colorId?: string;
   /** ajuste fino (px) pra onde o avatar aparece sentado, em relação ao
    * ponto-âncora do móvel (que é onde o pé/base do móvel toca o chão).
-   * Negativo = avatar sobe (senta na altura do assento); ainda é uma
-   * estimativa visual, ajustar depois de ver renderizado. */
+   * Negativo = avatar sobe (senta na altura do assento). Nos itens
+   * antigos (sem modelId) esse valor é usado direto; nos itens com
+   * modelo, serve só de PADRÃO até alguém ajustar fino no "Assento" do
+   * editor de espaço, que persiste por MODELO+direção (ver
+   * FurnitureSeatOffsetsMap/resolveSeatOffset), não por instância. */
   seatOffsetY?: number;
   /** mesma ideia, no eixo horizontal -- usado principalmente nas poses
    * de lado, pra jogar o boneco um pouco mais "pra frente" (na direção
@@ -106,6 +119,95 @@ export const FURNITURE_COLORS: Partial<Record<FurnitureType, FurnitureColorOptio
 /** Nome do arquivo em public/assets pra uma COR+direção (com fallback pra "down"), mesma lógica de furnitureArtFile. */
 export function furnitureColorArtFile(color: FurnitureColorOption, facing: Direction): string | null {
   return color.art[facing] ?? color.art.down ?? null;
+}
+
+/**
+ * MODELO dentro de um tipo de móvel -- diferente de FurnitureColorOption
+ * acima (que é só uma variação de cor de um design ÚNICO): um modelo é
+ * um DESENHO/FORMATO diferente da peça (ex: poltrona "Gamer" x "Poltrona
+ * Lecce" -- formatos bem diferentes, não só cor), cada um com sua
+ * própria lista de cores (ver scripts/syncFurnitureAssets.mjs, pasta
+ * Modelo/Cor/{frente,esquerda,direita,costas}). Hoje só "poltrona" tem
+ * modelo cadastrado -- os outros tipos (vidro) continuam com design
+ * único, direto em FURNITURE_ART, sem passar por aqui.
+ */
+export interface FurnitureModelColorOption {
+  id: string;
+  label: string;
+  art: Record<Direction, string>;
+}
+
+export interface FurnitureModelDef {
+  id: string;
+  type: FurnitureType;
+  label: string;
+  colors: FurnitureModelColorOption[];
+}
+
+// modelos gerados automaticamente a partir da pasta de origem (ver
+// scripts/avatarAssetsConfig.mjs/syncFurnitureAssets.mjs, roda sozinho
+// junto com `npm run dev`). NÃO editar esse import nem o arquivo dele à
+// mão -- pra adicionar um modelo novo, sobe a pasta na origem (ver
+// POLTRONAS_SRC_ROOT).
+import { GENERATED_FURNITURE_MODELS } from "./furnitureModels.generated";
+
+export const FURNITURE_MODELS: FurnitureModelDef[] = [...GENERATED_FURNITURE_MODELS];
+
+export function furnitureModelById(id: string): FurnitureModelDef | undefined {
+  return FURNITURE_MODELS.find((m) => m.id === id);
+}
+
+/** Modelos cadastrados pra um TIPO de móvel (ex: os 2 modelos de poltrona) -- lista vazia = tipo ainda usa o design único de FURNITURE_ART. */
+export function furnitureModelsForType(type: FurnitureType): FurnitureModelDef[] {
+  return FURNITURE_MODELS.filter((m) => m.type === type);
+}
+
+/** Cor de um modelo pelo id, com fallback pra primeira cor cadastrada (nunca null se o modelo tiver pelo menos 1 cor). */
+export function furnitureModelColor(model: FurnitureModelDef, colorId?: string): FurnitureModelColorOption | undefined {
+  return (colorId && model.colors.find((c) => c.id === colorId)) || model.colors[0];
+}
+
+/**
+ * Resolve modelo+cor de um item colocado (com fallback pra primeira cor
+ * cadastrada do modelo quando f.colorId não bate/não veio, ver
+ * furnitureModelColor) -- devolve null se o item não tiver modelo (caso
+ * do vidro e dos itens antigos de ROOM_FURNITURE, ver FurnitureDef) ou
+ * se o modelId não existir mais no catálogo gerado (ex: pasta de origem
+ * renomeada/apagada).
+ */
+function resolveFurnitureModelColor(f: FurnitureDef): { model: FurnitureModelDef; color: FurnitureModelColorOption } | null {
+  if (!f.modelId) return null;
+  const model = furnitureModelById(f.modelId);
+  if (!model) return null;
+  const color = furnitureModelColor(model, f.colorId);
+  if (!color) return null;
+  return { model, color };
+}
+
+/**
+ * Arte final (nome do arquivo em public/assets) pra um item COLOCADO --
+ * resolve pelo MODELO+COR quando o item tiver (f.modelId, ver
+ * FurnitureDef), senão cai no design único do tipo (furnitureArtFile,
+ * caso do vidro e dos itens antigos sem modelo). Usado no lugar de
+ * furnitureArtFile(f.type, f.facing) em qualquer lugar que já tenha o
+ * FurnitureDef inteiro em mãos (ver addFurnitureSprite em MainScene.ts).
+ */
+export function resolveFurnitureArt(f: FurnitureDef): string | null {
+  const resolved = resolveFurnitureModelColor(f);
+  if (resolved) return resolved.color.art[f.facing] ?? resolved.color.art.down ?? null;
+  return furnitureArtFile(f.type, f.facing);
+}
+
+/** Chave da textura no Phaser pra um item COLOCADO -- mesma ideia de furnitureTextureKey, mas cobrindo também a variação modelo+cor (ver resolveFurnitureArt). Usa a cor JÁ RESOLVIDA (com fallback), pra bater exatamente com a chave pré-carregada em preloadFurnitureVariantTextures (MainScene.ts). */
+export function furnitureTextureKeyFor(f: FurnitureDef): string {
+  const resolved = resolveFurnitureModelColor(f);
+  if (resolved) return furnitureVariantTextureKey(resolved.model.id, resolved.color.id, f.facing);
+  return furnitureTextureKey(f.type, f.facing);
+}
+
+/** Chave da textura no Phaser pra um modelo+cor+direção (ex: "gamer"+"rosa"+"left" -> "furniture-variant-gamer-rosa-left"). */
+export function furnitureVariantTextureKey(modelId: string, colorId: string, facing: Direction): string {
+  return `furniture-variant-${modelId}-${colorId}-${facing}`;
 }
 
 /**
@@ -216,34 +318,67 @@ export interface FurnitureCatalogEntry {
   seatOffsetY?: number;
   seatOffsetX?: number;
   baseOffsetY?: number;
+  /** entrada gerada a partir de um MODELO (ver FURNITURE_MODELS) -- tem
+   * modelId + a lista de cores dele; a paleta do editor (EditPanel,
+   * GameRoom.tsx) usa isso pra desenhar o seletor de cor e passar
+   * modelId/colorId adiante pro FurnitureDef colocado. undefined = design
+   * único do tipo (caso do vidro), sem seleção de cor. */
+  modelId?: string;
+  colorId?: string;
+  colors?: FurnitureModelColorOption[];
 }
 
-export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
-  { type: "poltrona", facing: "down", label: "Poltrona (frente)", seatOffsetY: SEAT_Y_FRENTE_COSTAS },
-  { type: "poltrona", facing: "up", label: "Poltrona (costas)", seatOffsetY: SEAT_Y_FRENTE_COSTAS },
-  {
-    type: "poltrona",
-    facing: "left",
-    label: "Poltrona (lado esq.)",
-    seatOffsetY: SEAT_Y_LADO,
-    seatOffsetX: -SEAT_X_LADO,
-  },
-  {
-    type: "poltrona",
-    facing: "right",
-    label: "Poltrona (lado dir.)",
-    seatOffsetY: SEAT_Y_LADO,
-    seatOffsetX: SEAT_X_LADO,
-  },
+/**
+ * Ordem de rotação (sentido horário, começando de frente) usada pelo
+ * botão de girar no preview do item selecionado -- ver
+ * catalogIndicesForGroup abaixo. Precisa vir ANTES de FURNITURE_CATALOG
+ * (usada por furnitureModelCatalogEntries logo abaixo, que roda na hora
+ * que o módulo carrega).
+ */
+export const FURNITURE_ROTATE_ORDER: Direction[] = ["down", "right", "up", "left"];
+
+// entradas do design ÚNICO por tipo (sem modelo) -- hoje só o vidro
+// (divisória); poltrona deixou de ter entrada fixa aqui desde que ganhou
+// modelo (ver furnitureModelCatalogEntries abaixo, gerado a partir
+// da pasta de origem) -- os 4 itens antigos de ROOM_FURNITURE continuam
+// renderizando normalmente (usam o design único como PADRÃO quando não
+// têm modelId, ver resolveFurnitureArt), só não aparecem mais como opção
+// nova na paleta.
+const FURNITURE_CATALOG_STATIC: FurnitureCatalogEntry[] = [
   { type: "vidro", facing: "down", label: "Vidro (divisória)", baseOffsetY: VIDRO_BASE_OFFSET_Y },
 ];
 
+/** Uma entrada de catálogo por MODELO+direção cadastrada (ver FURNITURE_MODELS) -- a cor default é sempre a primeira da lista do modelo; trocar de cor no editor não muda de entrada, só o colorId escolhido por cima (ver EditPanel em GameRoom.tsx). */
+function furnitureModelCatalogEntries(): FurnitureCatalogEntry[] {
+  const entries: FurnitureCatalogEntry[] = [];
+  for (const model of FURNITURE_MODELS) {
+    const defaultColor = model.colors[0];
+    if (!defaultColor) continue;
+    for (const facing of FURNITURE_ROTATE_ORDER) {
+      if (!defaultColor.art[facing]) continue;
+      entries.push({
+        type: model.type,
+        facing,
+        label: model.label,
+        modelId: model.id,
+        colorId: defaultColor.id,
+        colors: model.colors,
+      });
+    }
+  }
+  return entries;
+}
+
+export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
+  ...FURNITURE_CATALOG_STATIC,
+  ...furnitureModelCatalogEntries(),
+];
+
 /**
- * Nome "de tipo" (sem a direção) -- usado na grade do editor de espaço,
- * que agora mostra UM botão por peça (não um por direção, ver
- * FURNITURE_CATALOG acima) e deixa girar pra escolher a direção depois
- * de selecionar (ver FURNITURE_ROTATE_ORDER/catalogIndicesForType e o
- * preview com setas de girar em EditPanel, GameRoom.tsx).
+ * Nome "de tipo" (sem a direção) -- usado só pro vidro/design único
+ * agora (peça com modelo usa model.label direto, ver
+ * FurnitureCatalogEntry.label já vir preenchido com o nome do modelo em
+ * furnitureModelCatalogEntries).
  */
 export const FURNITURE_TYPE_LABEL: Record<FurnitureType, string> = {
   poltrona: "Poltrona",
@@ -251,21 +386,26 @@ export const FURNITURE_TYPE_LABEL: Record<FurnitureType, string> = {
 };
 
 /**
- * Ordem de rotação (sentido horário, começando de frente) usada pelo
- * botão de girar no preview do item selecionado -- ver
- * catalogIndicesForType abaixo.
+ * Chave de AGRUPAMENTO de uma entrada de catálogo -- o modelo (quando
+ * tiver, ver FurnitureCatalogEntry.modelId) ou o tipo (design único, ex:
+ * vidro). É por isso que dá pra ter 2 modelos do MESMO tipo (poltrona
+ * "Gamer" x "Poltrona Lecce") sem as 8 direções (4+4) se misturarem num
+ * giro só -- cada modelo gira dentro do próprio grupo.
  */
-export const FURNITURE_ROTATE_ORDER: Direction[] = ["down", "right", "up", "left"];
+export function catalogEntryGroupKey(entry: FurnitureCatalogEntry): string {
+  return entry.modelId ?? entry.type;
+}
 
 /**
- * Índices (em FURNITURE_CATALOG) de todas as direções cadastradas pra
- * um tipo de móvel, na ordem de FURNITURE_ROTATE_ORDER -- direções sem
- * entrada no catálogo (ex: vidro só tem "down") ficam de fora. Se tiver
- * só 1 direção, não tem o que girar (ver canRotate no preview).
+ * Índices (em FURNITURE_CATALOG) de todas as direções cadastradas pro
+ * grupo (modelo ou tipo, ver catalogEntryGroupKey) dado, na ordem de
+ * FURNITURE_ROTATE_ORDER -- direções sem entrada ficam de fora. Se tiver
+ * só 1 direção, não tem o que girar (ver canRotate no preview,
+ * GameRoom.tsx).
  */
-export function catalogIndicesForType(type: FurnitureType): number[] {
+export function catalogIndicesForGroup(groupKey: string): number[] {
   return FURNITURE_ROTATE_ORDER.map((facing) =>
-    FURNITURE_CATALOG.findIndex((e) => e.type === type && e.facing === facing)
+    FURNITURE_CATALOG.findIndex((e) => catalogEntryGroupKey(e) === groupKey && e.facing === facing)
   ).filter((i) => i !== -1);
 }
 
@@ -357,4 +497,59 @@ export function furnitureWorldPos(f: FurnitureDef) {
   // pra baixo -- isso é o overflow esperado, como no Habbo.
   const center = tileToWorld(f.col, f.row);
   return { x: center.x, y: center.y + TILE / 2 + (f.baseOffsetY ?? 0) };
+}
+
+// --- assento por MODELO (ver "Assento" no editor de espaço,
+// GameRoom.tsx/MainScene.ts) --------------------------------------
+
+/** Chave de agrupamento do assento -- por MODELO (não por instância colocada, ver FurnitureDef.modelId), pra ajustar um modelo UMA vez e valer pra todo item já colocado dele. Itens antigos sem modelId (ROOM_FURNITURE de antes dos modelos existirem) caem no grupo especial "classic". */
+export function seatOffsetGroupKey(f: FurnitureDef): string {
+  return f.modelId ?? "classic";
+}
+
+/** { grupo (ver seatOffsetGroupKey): { direção: {x,y} } } -- só guarda os que JÁ foram ajustados manualmente (ver "Assento"); um modelo nunca ajustado nem entra aqui, cai direto no padrão (ver resolveSeatOffset). Persistido no servidor junto com os móveis colocados (ver GET/POST /room/furniture em server/index.js). */
+export type FurnitureSeatOffsetsMap = Record<string, Partial<Record<Direction, { x: number; y: number }>>>;
+
+/**
+ * Deslocamento (px) de onde o boneco aparece sentado num móvel -- ordem
+ * de prioridade:
+ *  1. Ajuste salvo por MODELO+direção (ver FurnitureSeatOffsetsMap,
+ *     "Assento" no editor) -- vale pra TODO item já colocado desse
+ *     modelo, não só o que foi usado pra ajustar.
+ *  2. Valor gravado na própria instância (seatOffsetX/Y no FurnitureDef)
+ *     -- só existe nos itens antigos de ROOM_FURNITURE escritos à mão
+ *     antes dos modelos existirem.
+ *  3. Padrão genérico por GRUPO de direção (frente/costas x lado) -- pra
+ *     um modelo novo, recém-sincronizado, já sentar numa posição
+ *     razoável antes de qualquer ajuste fino (mesmos valores que já
+ *     eram usados fixos pra poltrona, ver SEAT_Y_FRENTE_COSTAS/
+ *     SEAT_Y_LADO/SEAT_X_LADO).
+ */
+export function resolveSeatOffset(f: FurnitureDef, seatOffsets: FurnitureSeatOffsetsMap): { x: number; y: number } {
+  const override = seatOffsets[seatOffsetGroupKey(f)]?.[f.facing];
+  if (override) return override;
+  if (f.seatOffsetX !== undefined || f.seatOffsetY !== undefined) {
+    return { x: f.seatOffsetX ?? 0, y: f.seatOffsetY ?? 0 };
+  }
+  const isSide = f.facing === "left" || f.facing === "right";
+  if (!isSide) return { x: 0, y: SEAT_Y_FRENTE_COSTAS };
+  return { x: f.facing === "left" ? -SEAT_X_LADO : SEAT_X_LADO, y: SEAT_Y_LADO };
+}
+
+/** Nome pra mostrar no "Assento" do editor pro grupo de um item (ver seatOffsetGroupKey) -- nome do modelo quando tiver, senão o nome do tipo + "(clássica)" pros itens antigos sem modelo. */
+export function seatOffsetGroupLabel(f: FurnitureDef): string {
+  if (f.modelId) {
+    const model = furnitureModelById(f.modelId);
+    if (model) return model.label;
+  }
+  return `${FURNITURE_TYPE_LABEL[f.type]} (clássica)`;
+}
+
+/** Info mostrada/editada no "Assento" do editor de espaço (ver EditPanel em GameRoom.tsx) -- emitida pela cena (MainScene.ts) toda vez que o boneco local senta/levanta/tem o assento ajustado com as setas, enquanto o modo de ajuste está ligado. */
+export interface SeatTuningInfo {
+  groupKey: string;
+  label: string;
+  facing: Direction;
+  x: number;
+  y: number;
 }

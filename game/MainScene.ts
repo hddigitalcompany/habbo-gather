@@ -7,9 +7,18 @@ import {
   FurnitureType,
   FurnitureCatalogEntry,
   FURNITURE_ART,
+  FURNITURE_MODELS,
+  FurnitureSeatOffsetsMap,
+  SeatTuningInfo,
   furnitureWorldPos,
   furnitureTextureKey,
+  furnitureVariantTextureKey,
+  furnitureTextureKeyFor,
+  furnitureBlocksMovement,
   blockingFurnitureAt,
+  resolveSeatOffset,
+  seatOffsetGroupKey,
+  seatOffsetGroupLabel,
 } from "./furniture";
 import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS } from "./grid";
 import {
@@ -377,19 +386,44 @@ export default class MainScene extends Phaser.Scene {
 
   // --- editor de espaço ("Editar espaço", ver setEditMode) ---------
   // itens colocados pelo editor ainda não são "de verdade" (não entram
-  // em ROOM_FURNITURE nem salvam em lugar nenhum) -- é um RASCUNHO só
-  // desta sessão, que o editor mostra como código TS pra colar à mão
-  // em furniture.ts (ver game/furnitureCodegen.ts). Por isso ficam à
-  // parte de ROOM_FURNITURE, num Map próprio (id -> definição/sprite).
+  // em ROOM_FURNITURE) -- ver comentário grande em draftFurniture logo
+  // abaixo: hoje salva sozinho (POST /room/furniture), não gera mais
+  // código pra colar à mão (game/furnitureCodegen.ts não é mais usado).
   private editMode = false;
   private selectedCatalogEntry: FurnitureCatalogEntry | null = null;
+  // draftFurniture/draftSprites guardam TODA a mobília ADICIONAL da sala
+  // (tanto a já salva no servidor, carregada por loadSavedFurniture,
+  // quanto a colocada agora nesta sessão pelo editor -- MESMO Map pros
+  // dois, igual draftFloor/draftFloorSprites já fazem pro piso). Já salva
+  // sozinha (ver POST /room/furniture em server/index.js, autosave em
+  // GameRoom.tsx) -- ROOM_FURNITURE (furniture.ts) continua existindo à
+  // parte, sempre desenhado, mobília "de fábrica" fixa no código.
   private draftFurniture: Map<string, FurnitureDef> = new Map();
   private draftSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private gridGraphics?: Phaser.GameObjects.Graphics;
   private hoverGraphics?: Phaser.GameObjects.Graphics;
 
-  /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido no editor, pra React manter a lista/código em dia. */
+  /** Definido de fora (GameRoom.tsx) -- chamado toda vez que um item é colocado/removido/carregado no editor, pra React manter a lista/autosave em dia. */
   onDraftChange?: (items: FurnitureDef[]) => void;
+
+  // --- ajuste de assento por MODELO ("Assento" no editor de espaço,
+  // ver resolveSeatOffset em game/furniture.ts) ----------------------
+  // mapa carregado do servidor (ver setSeatOffsets, chamado pelo React
+  // junto com loadSavedFurniture assim que GET /room/furniture responde)
+  // -- só os grupos JÁ ajustados manualmente entram aqui, o resto usa o
+  // padrão genérico (ver resolveSeatOffset).
+  private seatOffsets: FurnitureSeatOffsetsMap = {};
+  // true só enquanto o Douglas liga o "Assento" no editor (ver
+  // setSeatTuningMode) -- com isso ligado E sentado, as setas de direção
+  // NÃO levantam mais (ver update()), viram nudge fino do assento (ver
+  // os listeners "keydown-LEFT" etc, registrados no create()).
+  private seatTuningActive = false;
+  /** Definido de fora (GameRoom.tsx) -- emitido toda vez que o estado do ajuste de assento muda (sentou/levantou/nudge), null quando não há nada pra ajustar agora (não sentado, ou modo desligado). */
+  onSeatTuningChange?: (info: SeatTuningInfo | null) => void;
+  /** Definido de fora (GameRoom.tsx) -- emitido só pelo botão "Redefinir" (ver resetSeatOffset), separado do onSeatTuningChange acima porque aqui o React precisa APAGAR a entrada (não só atualizar x/y): sem isso o valor salvo continuaria "travado" no que já era o padrão, em vez de voltar a acompanhar o padrão se ele mudar depois. */
+  onSeatOffsetReset?: (groupKey: string, facing: Direction) => void;
+  /** Definido de fora (GameRoom.tsx) -- emitido só por um NUDGE de verdade (ver nudgeSeatOffset), nunca só por sentar/levantar/ligar o modo (isso é só onSeatTuningChange, puramente de EXIBIÇÃO). É esse aqui que o React usa pra atualizar o mapa que autosalva -- sentar numa cadeira com o modo ligado não pode sozinho "gravar" o valor default como se fosse um ajuste manual. */
+  onSeatOffsetChange?: (groupKey: string, facing: Direction, x: number, y: number) => void;
 
   // --- piso do editor de espaço (aba "Piso", ver selectFloorTool) --
   // draftFloor/draftFloorSprites guardam TODO o piso da sala (tanto o já
@@ -594,6 +628,20 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
+    // mesma ideia acima, mas pra MODELO+cor (ver FURNITURE_MODELS,
+    // game/furniture.ts) -- item colocado com modelId usa essas texturas
+    // em vez das de FURNITURE_ART (ver resolveFurnitureArt/
+    // furnitureTextureKeyFor, usadas em addFurnitureSprite).
+    for (const model of FURNITURE_MODELS) {
+      for (const color of model.colors) {
+        for (const facing of Object.keys(color.art) as Direction[]) {
+          const file = color.art[facing];
+          if (!file) continue;
+          this.load.image(furnitureVariantTextureKey(model.id, color.id, facing), `/assets/${file}`);
+        }
+      }
+    }
+
     // cada modelo de piso (ver FLOOR_CATALOG) é uma imagem PLANA só,
     // sem poses/direção (diferente do avatar) -- carrega todos de uma
     // vez pra pintar ao vivo no editor sem recarregar nada.
@@ -662,6 +710,19 @@ export default class MainScene extends Phaser.Scene {
       this.stopFloorPaint();
       this.stopAreaPaint();
     });
+
+    // nudge fino do assento (ver "Assento" no editor de espaço) -- só faz
+    // algo com seatTuningActive ligado E sentado (ver nudgeSeatOffset),
+    // senão essas teclas não fazem nada aqui (o movimento normal usa
+    // this.cursors por polling, ver readInputDir -- os dois mecanismos
+    // convivem sem conflito, o Phaser suporta os dois ao mesmo tempo).
+    // Shift+seta move 5px de uma vez (ajuste grosso), sem Shift move 1px
+    // (fino) -- repete sozinho enquanto segura a tecla (key repeat do
+    // sistema operacional), não precisa ficar clicando várias vezes.
+    this.input.keyboard!.on("keydown-LEFT", (e: KeyboardEvent) => this.nudgeSeatOffset(-1, 0, e.shiftKey));
+    this.input.keyboard!.on("keydown-RIGHT", (e: KeyboardEvent) => this.nudgeSeatOffset(1, 0, e.shiftKey));
+    this.input.keyboard!.on("keydown-UP", (e: KeyboardEvent) => this.nudgeSeatOffset(0, -1, e.shiftKey));
+    this.input.keyboard!.on("keydown-DOWN", (e: KeyboardEvent) => this.nudgeSeatOffset(0, 1, e.shiftKey));
   }
 
   /**
@@ -676,7 +737,7 @@ export default class MainScene extends Phaser.Scene {
     // pontinho onde ele "toca o chão", alinhado ao tile dele
     const pos = furnitureWorldPos(f);
     return this.add
-      .image(pos.x, pos.y, furnitureTextureKey(f.type, f.facing))
+      .image(pos.x, pos.y, furnitureTextureKeyFor(f))
       .setOrigin(0.5, 1)
       .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
       .setAlpha(f.transparent ? GLASS_ALPHA : 1);
@@ -1131,17 +1192,26 @@ export default class MainScene extends Phaser.Scene {
     // nenhuma (posse só muda via botão "Tomar posse"/onReleaseArea, ver
     // updateAreaHoverLabels).
     this.onLocalSeatChange?.(null);
+    this.emitSeatTuningState();
+  }
+
+  /** Levanta o boneco local de fora (ver botão "Sair do assento" no "Assento" do editor de espaço, GameRoom.tsx) -- mesma coisa de levantar andando, só que sem precisar apertar seta (que durante o ajuste de assento não levanta mais, ver update()). Sem efeito se não estiver sentado. */
+  standUpNow() {
+    if (this.localActivity === "sentado") this.standUp();
+  }
+
+  /** Repõe o boneco local na posição de sentado, a partir do ajuste ATUAL (ver resolveSeatOffset) -- separado de sitAt() pra poder ser chamado nos dois casos: sentar de verdade (primeira vez) e só reposicionar depois de um nudge (ver nudgeSeatOffset), sem repetir toda a troca de pose/profundidade/aviso ao servidor. */
+  private applySeatVisualPosition(furniture: FurnitureDef) {
+    const pos = furnitureWorldPos(furniture);
+    const offset = resolveSeatOffset(furniture, this.seatOffsets);
+    this.localContainer.setPosition(pos.x + offset.x, pos.y + offset.y);
   }
 
   /** Senta automaticamente no móvel passado (chamado ao PARAR no tile dele). */
   private sitAt(furniture: FurnitureDef) {
-    const pos = furnitureWorldPos(furniture);
     this.localActivity = "sentado";
     this.seatedAt = furniture;
-    this.localContainer.setPosition(
-      pos.x + (furniture.seatOffsetX ?? 0),
-      pos.y + (furniture.seatOffsetY ?? 0)
-    );
+    this.applySeatVisualPosition(furniture);
     // a pose sentada segue a direção que o móvel "olha" (facing), não a
     // direção que o jogador estava andando antes de sentar
     this.localContainer.setData("dir", furniture.facing);
@@ -1163,6 +1233,66 @@ export default class MainScene extends Phaser.Scene {
     // mesa nenhuma (posse só muda via botão "Tomar posse", ver
     // onClaimArea/updateAreaHoverLabels).
     this.onLocalSeatChange?.(furniture.id);
+    this.emitSeatTuningState();
+  }
+
+  /** Manda pro React (ver onSeatTuningChange) o estado atual do "Assento" -- null se não há nada pra ajustar agora (modo desligado, ou não sentado). Chamado sempre que esse estado pode ter mudado: sentou, levantou, ligou/desligou o modo, ou fez um nudge. */
+  private emitSeatTuningState() {
+    if (!this.seatTuningActive || !this.seatedAt) {
+      this.onSeatTuningChange?.(null);
+      return;
+    }
+    const offset = resolveSeatOffset(this.seatedAt, this.seatOffsets);
+    this.onSeatTuningChange?.({
+      groupKey: seatOffsetGroupKey(this.seatedAt),
+      label: seatOffsetGroupLabel(this.seatedAt),
+      facing: this.seatedAt.facing,
+      x: offset.x,
+      y: offset.y,
+    });
+  }
+
+  /** Liga/desliga o modo de ajuste de assento (ver "Assento" no editor de espaço, GameRoom.tsx) -- com isso ligado E sentado, as setas de direção não levantam mais, viram nudge fino (ver update()/nudgeSeatOffset). */
+  setSeatTuningMode(active: boolean) {
+    this.seatTuningActive = active;
+    this.emitSeatTuningState();
+  }
+
+  /** Carrega o mapa de ajuste de assento já salvo (ver GET /room/furniture em server/index.js) -- chamado pelo React assim que a busca inicial responder, mesmo timing de loadSavedFurniture/loadSavedFloor. */
+  setSeatOffsets(map: FurnitureSeatOffsetsMap) {
+    this.seatOffsets = map;
+  }
+
+  /** Ajusta fino (px) o assento do GRUPO (modelo, ver seatOffsetGroupKey) do item em que o boneco local está sentado agora -- ignorado se não estiver com o modo de ajuste ligado E sentado (ver setSeatTuningMode/update()). Reposiciona o boneco NA HORA (ver applySeatVisualPosition) e avisa o React (ver onSeatTuningChange), que autosalva (mesmo esquema de piso/área, debounced). */
+  private nudgeSeatOffset(dx: number, dy: number, big: boolean) {
+    if (!this.seatTuningActive || !this.seatedAt || this.movementLocked) return;
+    const furniture = this.seatedAt;
+    const step = big ? 5 : 1;
+    const current = resolveSeatOffset(furniture, this.seatOffsets);
+    const groupKey = seatOffsetGroupKey(furniture);
+    const nextByFacing = { ...(this.seatOffsets[groupKey] ?? {}) };
+    const nextValue = { x: current.x + dx * step, y: current.y + dy * step };
+    nextByFacing[furniture.facing] = nextValue;
+    this.seatOffsets = { ...this.seatOffsets, [groupKey]: nextByFacing };
+    this.applySeatVisualPosition(furniture);
+    this.emitSeatTuningState();
+    this.onSeatOffsetChange?.(groupKey, furniture.facing, nextValue.x, nextValue.y);
+  }
+
+  /** Botão "Redefinir" do "Assento" (ver EditPanel, GameRoom.tsx) -- apaga o ajuste manual do grupo+direção atual (volta pro padrão genérico, ver resolveSeatOffset). Ignorado se não estiver sentado. */
+  resetSeatOffset() {
+    if (!this.seatedAt) return;
+    const furniture = this.seatedAt;
+    const groupKey = seatOffsetGroupKey(furniture);
+    const byFacing = this.seatOffsets[groupKey];
+    if (byFacing && furniture.facing in byFacing) {
+      const nextByFacing = { ...byFacing };
+      delete nextByFacing[furniture.facing];
+      this.seatOffsets = { ...this.seatOffsets, [groupKey]: nextByFacing };
+    }
+    this.applySeatVisualPosition(furniture);
+    this.emitSeatTuningState();
+    this.onSeatOffsetReset?.(groupKey, furniture.facing);
   }
 
   /**
@@ -1173,10 +1303,17 @@ export default class MainScene extends Phaser.Scene {
   private findChairAtCurrentTile(): FurnitureDef | null {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
+    // só "poltrona" é sentável -- vidro (e outros móveis de decoração
+    // que forem chegando) não deve disparar o auto-sentar só por o
+    // boneco parar em cima do tile dele. Procura tanto na mobília FIXA
+    // (ROOM_FURNITURE) quanto na colocada pelo editor (draftFurniture --
+    // desde que ganhou persistência de verdade, ver POST /room/furniture,
+    // esses itens também precisam ser sentáveis na hora, sem precisar de
+    // restart/deploy).
     for (const f of ROOM_FURNITURE) {
-      // só "poltrona" é sentável -- vidro (e outros móveis de decoração
-      // que forem chegando) não deve disparar o auto-sentar só por o
-      // boneco parar em cima do tile dele.
+      if (f.type === "poltrona" && f.col === col && f.row === row) return f;
+    }
+    for (const f of this.draftFurniture.values()) {
       if (f.type === "poltrona" && f.col === col && f.row === row) return f;
     }
     return null;
@@ -1305,7 +1442,7 @@ export default class MainScene extends Phaser.Scene {
     // vira de frente pra direção pedida, sem "andar" de verdade.
     const blocked =
       (targetPos.x === this.localContainer.x && targetPos.y === this.localContainer.y) ||
-      !!blockingFurnitureAt(target.col, target.row);
+      this.isMovementBlockedAt(target.col, target.row);
     if (blocked) {
       this.localContainer.setData("dir", dir);
       this.stopWalk(this.localContainer);
@@ -1324,7 +1461,11 @@ export default class MainScene extends Phaser.Scene {
     const inputDir = this.readInputDir();
 
     if (this.localActivity === "sentado") {
-      if (inputDir) {
+      // com o "Assento" ligado (ver setSeatTuningMode), a seta NÃO
+      // levanta mais -- vira nudge fino do assento (ver
+      // nudgeSeatOffset, disparado pelos listeners "keydown-*" no
+      // create(), não por aqui/por polling).
+      if (inputDir && !this.seatTuningActive) {
         // qualquer tecla de direção levanta -- o passo de verdade só
         // começa no próximo frame (já sai da cadeira "de pé" primeiro)
         this.standUp();
@@ -1461,6 +1602,25 @@ export default class MainScene extends Phaser.Scene {
 
   getDraftFurnitureList(): FurnitureDef[] {
     return Array.from(this.draftFurniture.values());
+  }
+
+  /**
+   * Carrega a mobília ADICIONAL já salva (ver GET /room/furniture em
+   * server/index.js) -- chamado pelo React assim que a cena fica pronta,
+   * mesmo timing/mesma ideia de loadSavedFloor: cada item carregado
+   * entra direto em draftFurniture/draftSprites (MESMO Map que o clique
+   * do editor usa), já sentável na hora (ver findChairAtCurrentTile) e
+   * travando passagem se for o caso (ver isMovementBlockedAt), sem
+   * precisar entrar no modo de edição pra isso valer.
+   */
+  loadSavedFurniture(items: FurnitureDef[]) {
+    for (const f of items) {
+      if (this.draftFurniture.has(f.id)) continue; // já carregado (ex: chamado 2x) -- não duplica sprite
+      const sprite = this.addFurnitureSprite(f);
+      this.draftFurniture.set(f.id, f);
+      this.draftSprites.set(f.id, sprite);
+    }
+    this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
   removeDraftFurniture(id: string) {
@@ -1940,6 +2100,15 @@ export default class MainScene extends Phaser.Scene {
     return false;
   }
 
+  /** Esse tile trava a passagem por causa de algum móvel (fixo OU colocado pelo editor, ver FURNITURE_BLOCKS_MOVEMENT em furniture.ts) -- usado em startStep(). blockingFurnitureAt (furniture.ts) só sabe de ROOM_FURNITURE; aqui completa com draftFurniture, pra um item colocado pelo editor (ex: nova divisória de vidro) travar passagem na hora, sem precisar de restart. */
+  private isMovementBlockedAt(col: number, row: number): boolean {
+    if (blockingFurnitureAt(col, row)) return true;
+    for (const f of this.draftFurniture.values()) {
+      if (f.col === col && f.row === row && furnitureBlocksMovement(f.type)) return true;
+    }
+    return false;
+  }
+
   private draftIdAt(col: number, row: number): string | null {
     for (const [id, f] of this.draftFurniture.entries()) {
       if (f.col === col && f.row === row) return id;
@@ -2079,6 +2248,14 @@ export default class MainScene extends Phaser.Scene {
       col,
       row,
       facing: entry.facing,
+      // modelId/colorId só existem em entradas geradas a partir de um
+      // modelo (ver furnitureModelCatalogEntries em furniture.ts) -- pra
+      // "vidro" (design único) ficam undefined, igual antes. seatOffsetY/X
+      // NÃO vem mais da entrada pra item com modelo (fica undefined,
+      // resolveSeatOffset cuida do padrão/ajuste salvo por modelo) -- só
+      // os itens sem modelId ainda usam esses dois campos direto.
+      modelId: entry.modelId,
+      colorId: entry.colorId,
       seatOffsetY: entry.seatOffsetY,
       seatOffsetX: entry.seatOffsetX,
       baseOffsetY: entry.baseOffsetY,
