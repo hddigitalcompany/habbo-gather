@@ -622,13 +622,24 @@ export default class MainScene extends Phaser.Scene {
   private areaOwnerByAreaId: Map<string, { playerId: string; name: string }> = new Map();
 
   // "véu" de escurecer fora da área onde o LOCAL está agora (ver
-  // updateAreaDim/DEPTH_AREA_DIM) -- até 4 retângulos (cima/baixo/
-  // esquerda/direita do retângulo da área, o que sobra do mapa
-  // GAME_WIDTH x GAME_HEIGHT em volta dele). areaDimAreaId guarda a
+  // updateAreaDim/DEPTH_AREA_DIM) -- UM retângulo preto cobrindo o mapa
+  // inteiro, com uma MÁSCARA (areaDimMaskGfx, invertida) recortando o
+  // "buraco" aceso: o retângulo da área + a silhueta de tela de cada
+  // móvel que esteja de pé num tile dela (ver addFurnitureHole em
+  // updateAreaDim -- sem isso, um móvel desenhado maior que 1 tile de
+  // altura, ex: poltrona gamer, ficava com o topo "cortado" pelo véu na
+  // borda da área mesmo estando DENTRO dela). areaDimAreaId guarda a
   // área usada pra desenhar da ÚLTIMA vez, só pra updateAreaDim não
   // redesenhar à toa todo frame quando o jogador não mudou de área.
   private areaDimSprites: Phaser.GameObjects.Rectangle[] = [];
+  private areaDimMaskGfx?: Phaser.GameObjects.Graphics;
   private areaDimAreaId: string | null | undefined = undefined;
+
+  // sprite de cada móvel FIXO (ROOM_FURNITURE, ver create() logo abaixo)
+  // -- guardado só pra updateAreaDim conseguir ler o tamanho/posição
+  // real na TELA dele (getBounds()) na hora de recortar a máscara do véu.
+  // A mobília colocada pelo editor já tem isso em draftSprites.
+  private roomFurnitureSprites: Map<string, Phaser.GameObjects.Image> = new Map();
 
   /** Definido de fora (GameRoom.tsx) -- chamado ao clicar em "Tomar posse" numa mesa privada sem dono. */
   onClaimArea?: (areaId: string) => void;
@@ -828,7 +839,7 @@ export default class MainScene extends Phaser.Scene {
     // espera por ele.
 
     for (const f of ROOM_FURNITURE) {
-      this.addFurnitureSprite(f);
+      this.roomFurnitureSprites.set(f.id, this.addFurnitureSprite(f));
     }
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -2690,6 +2701,8 @@ export default class MainScene extends Phaser.Scene {
 
     for (const r of this.areaDimSprites) r.destroy();
     this.areaDimSprites = [];
+    this.areaDimMaskGfx?.destroy();
+    this.areaDimMaskGfx = undefined;
     if (!areaId) return; // fora de qualquer área -- mapa inteiro aceso, sem véu nenhum
 
     const tiles = this.tilesByAreaId().get(areaId);
@@ -2706,21 +2719,39 @@ export default class MainScene extends Phaser.Scene {
     const litRight = bottomRight.x + TILE / 2;
     const litBottom = bottomRight.y + TILE / 2;
 
-    // 4 retângulos (cima/baixo/esquerda/direita do retângulo aceso) --
-    // cobrem tudo que SOBRA do mapa (0..GAME_WIDTH, 0..GAME_HEIGHT) em
-    // volta dele, deixando o miolo sem nenhum véu por cima (é isso que
-    // "acende" a área). Simplificação aceitável pra área de formato
-    // irregular, mesmo caso já documentado em areaTileBounds.
-    const addDimRect = (x: number, y: number, w: number, h: number) => {
-      if (w <= 0 || h <= 0) return;
-      this.areaDimSprites.push(
-        this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x000000, AREA_DIM_ALPHA).setDepth(DEPTH_AREA_DIM)
-      );
+    // véu ÚNICO cobrindo o mapa inteiro, recortado por uma MÁSCARA
+    // (Graphics + GeometryMask invertida) em vez dos 4 retângulos de
+    // antes -- o "buraco" da máscara é o retângulo aceso ACIMA + a
+    // silhueta de tela (getBounds()) de cada móvel de pé num tile dessa
+    // área. Corrige o bug reportado pelo Douglas ("o escurecer não tá
+    // pegando certo todos os quadrados da área"): um móvel desenhado
+    // maior que 1 tile (ex: poltrona gamer, CUSTOM_ITEM_TARGET_WIDTH em
+    // furniture.ts pode passar de 2 tiles de largura/altura) tinha o
+    // topo "cortado" pelo véu bem na borda do retângulo aceso, mesmo
+    // estando DENTRO da área -- agora o móvel inteiro entra no recorte,
+    // não só o quadradinho de 1 tile onde ele está ancorado.
+    const tileKeys = new Set(tiles.map((t) => `${t.col},${t.row}`));
+    const maskGfx = this.add.graphics();
+    maskGfx.fillStyle(0xffffff);
+    maskGfx.fillRect(litLeft, litTop, litRight - litLeft, litBottom - litTop);
+    const addFurnitureHole = (f: FurnitureDef, sprite: Phaser.GameObjects.Image | undefined) => {
+      if (!sprite || !tileKeys.has(`${f.col},${f.row}`)) return;
+      const b = sprite.getBounds();
+      maskGfx.fillRect(b.x, b.y, b.width, b.height);
     };
-    addDimRect(0, 0, GAME_WIDTH, litTop); // faixa de cima
-    addDimRect(0, litBottom, GAME_WIDTH, GAME_HEIGHT - litBottom); // faixa de baixo
-    addDimRect(0, litTop, litLeft, litBottom - litTop); // faixa da esquerda
-    addDimRect(litRight, litTop, GAME_WIDTH - litRight, litBottom - litTop); // faixa da direita
+    for (const f of ROOM_FURNITURE) addFurnitureHole(f, this.roomFurnitureSprites.get(f.id));
+    for (const [id, f] of this.draftFurniture) addFurnitureHole(f, this.draftSprites.get(id));
+    maskGfx.setVisible(false); // só serve de fonte pra máscara, não desenha por cima da cena
+    this.areaDimMaskGfx = maskGfx;
+    const mask = maskGfx.createGeometryMask();
+    mask.invertAlpha = true; // escurece TUDO, exceto onde a máscara desenhou (o "buraco" aceso)
+
+    this.areaDimSprites.push(
+      this.add
+        .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, AREA_DIM_ALPHA)
+        .setDepth(DEPTH_AREA_DIM)
+        .setMask(mask)
+    );
   }
 
   /**
