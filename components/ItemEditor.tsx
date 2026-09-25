@@ -893,11 +893,12 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // padrão como o resto do editor faz pro móvel) e NA POSE da direção
   // ativa (ver DIRECTION_FIRST_FRAME_INDEX acima) -- pedido do Douglas:
   // "editor de posicionamento dos itens... em relação ao avatar". CRU
-  // de propósito (só o tom de pele -- SEM cabelo/traje padrão em cima,
-  // pedido do Douglas: "nessa aba o avatar tem que estar cru, pra
-  // adicionar os itens") -- cabelo/traje/barba/acessório "de fábrica"
-  // só confundiriam a posição de quem tá sendo cadastrado agora,
-  // inclusive quando a categoria É cabelo/traje (arte de referência
+  // de propósito na ausência de Avatar Padrão (só o tom de pele -- SEM
+  // cabelo/traje "de fábrica" em cima, pedido do Douglas: "nessa aba o
+  // avatar tem que estar cru, pra adicionar os itens") -- cabelo/traje/
+  // barba/acessório "de fábrica" só confundiriam a posição de quem tá
+  // sendo cadastrado agora, inclusive quando a categoria É cabelo/traje
+  // (arte de referência
   // diferente da que tá subindo, sobreposta/atrás sem sentido nenhum).
   // sem NENHUM tom cadastrado ainda pro sexo escolhido (pedido do
   // Douglas: "cadê o tile na rotação, tô sem referência pra subir
@@ -920,27 +921,47 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // de tom pra começo de conversa).
   const selectedReferenceSkin =
     usesBySkin && selectedSkinIds.length > 0 ? SKIN_CATALOG.find((s) => s.id === selectedSkinIds[0]) : undefined;
-  // "Avatar Padrão" do sexo (ver DefaultReferenceRow acima) -- só entra
-  // pra categorias que NÃO são avatar/avatar_padrao (essas continuam
-  // cruas de propósito, ver comentário grande acima). Pedido do
-  // Douglas: "esse padrao voce coloca ele inteiro montado no editor
-  // quando eu for criar outros... eu uso ele exatamente de referencia
-  // sempre, pra tudo em avatares".
-  const genderDefaultReference = !isAvatarPadrao && category !== "avatar" ? defaultReference[gender] : null;
+  // "Avatar Padrão" do sexo (ver DefaultReferenceRow acima) -- entra em
+  // TODAS as categorias, incluindo "avatar" (cadastro de tom de pele
+  // novo) -- pedido do Douglas: "eu uso ele exatamente de referencia
+  // sempre, pra tudo em avatares" (e depois, quando só aparecia nas
+  // outras: "ele so nao aparece na opcao de avatar"). Só a própria aba
+  // "avatar_padrao" fica de fora (ela É o cadastro do padrão, não faz
+  // sentido usar ele de referência de si mesmo enquanto ainda não
+  // existe -- ver avatarPadraoSaved mais abaixo, que cobre esse caso à
+  // parte).
+  const genderDefaultReference = !isAvatarPadrao ? defaultReference[gender] : null;
   const referenceSkin = selectedReferenceSkin ?? genderSkins[0] ?? SKIN_CATALOG[0];
   const referenceSkinIsFallback =
     Boolean(referenceSkin) && !selectedReferenceSkin && !genderDefaultReference && genderSkins.length === 0;
+  // pedido do Douglas depois de cadastrar um Avatar Padrão: "eu acabei
+  // de criar um avatar padrao e ele sumiu kkk ai e foda" -- ao clicar
+  // Cadastrar, resetCreatorForm() limpa padraoHeadFiles/padraoBodyFiles
+  // (upload consumido), e como essa aba não usava genderDefaultReference
+  // (só o par AO VIVO, ver otherPadraoArtUrl), o boneco sumia por
+  // completo sem confirmar que salvou. Fix: SEM nenhuma foto sendo
+  // subida agora (upload em branco -- acabou de abrir a aba, ou acabou
+  // de cadastrar), cai no Avatar Padrão JÁ SALVO desse sexo (se tiver)
+  // em vez de ficar vazio; assim que ele sobe uma foto de novo (pra
+  // trocar/atualizar), volta a mostrar só o par ao vivo de sempre.
+  const avatarPadraoHasLiveUpload =
+    isAvatarPadrao && (Object.keys(padraoHeadFiles).length > 0 || Object.keys(padraoBodyFiles).length > 0);
+  const avatarPadraoSaved = isAvatarPadrao && !avatarPadraoHasLiveUpload ? defaultReference[gender] : null;
   // URL da CABEÇA mostrada no boneco: tom explicitamente selecionado (ver
   // selectedReferenceSkin acima) vence sempre que existir; senão, o
   // Avatar Padrão do sexo (mais estável/consistente que "qualquer tom
   // cadastrado"); senão cai no referenceSkin de sempre. Na própria aba
-  // "Avatar Padrão" isso fica DESLIGADO (undefined) -- mostrar um tom
-  // qualquer ali só atrapalha (pedido do Douglas: "essa cabeca ai" era
-  // confuso, sem relação com o que ele tava subindo); nessa aba quem
-  // aparece é só o PRÓPRIO par cabeça/traje que ele tá montando, ver
-  // otherPadraoArtUrl mais abaixo.
+  // "Avatar Padrão", ENQUANTO tá subindo foto, isso fica DESLIGADO
+  // (undefined) -- mostrar um tom qualquer ali só atrapalha (pedido do
+  // Douglas: "essa cabeca ai" era confuso, sem relação com o que ele
+  // tava subindo); nessa hora quem aparece é só o PRÓPRIO par cabeça/
+  // traje que ele tá montando, ver otherPadraoArtUrl mais abaixo. SEM
+  // upload em andamento, mostra o Avatar Padrão já salvo (avatarPadraoSaved
+  // acima) em vez de ficar vazio.
   const referenceHeadUrl = isAvatarPadrao
-    ? undefined
+    ? avatarPadraoSaved
+      ? avatarAssetUrl(avatarPadraoSaved.head_sheet_url)
+      : undefined
     : selectedReferenceSkin
       ? avatarAssetUrl(selectedReferenceSkin.file)
       : genderDefaultReference
@@ -951,7 +972,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // corpo/traje "limpo" do Avatar Padrão, desenhado ATRÁS da cabeça
   // (mesma ordem de LAYER_DRAW_ORDER em MainScene.ts: traje antes de
   // base) -- independe de qual cabeça/tom tá sendo mostrada em cima.
-  const referenceBodyUrl = genderDefaultReference ? avatarAssetUrl(genderDefaultReference.body_sheet_url) : undefined;
+  // Mesma lógica de fallback pro salvo na própria aba "Avatar Padrão".
+  const referenceBodyUrl = isAvatarPadrao
+    ? avatarPadraoSaved
+      ? avatarAssetUrl(avatarPadraoSaved.body_sheet_url)
+      : undefined
+    : genderDefaultReference
+      ? avatarAssetUrl(genderDefaultReference.body_sheet_url)
+      : undefined;
   const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
   const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
   const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
