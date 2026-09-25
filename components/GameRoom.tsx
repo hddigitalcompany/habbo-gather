@@ -4529,15 +4529,19 @@ const HAIR_SHEET_H = 522;
 // é o "boneco" que fica fixo no topo do editor mostrando ao vivo o
 // resultado de cada escolha (base + cabelo selecionado empilhados, ver
 // AvatarPreviewLayer), igual ao editor de personagem do Habbo. Pedido
-// do Douglas: "aumentar o tamanho da exibição do avatar também em 30%"
-// (+30% em cima do 104x135.2 de antes).
-const AVATAR_PREVIEW_W = 135.2;
-const AVATAR_PREVIEW_H = 175.76; // mantém a proporção 200:260 do frame
+// do Douglas: "aumenta a exibicao do avatar proporcional ao espaco que
+// ele tem na altura sobrando ali" -- depois de tirar a linha "Sexo"
+// (virou 2 ícones pequenos dentro da coluna estreita, ver
+// profile-edit-gender-icons) sobrou mais altura na coluna principal;
+// esse aumento (135.2x175.76 -> 176x229, mesma proporção 200:260)
+// ocupa esse espaço em vez de deixar só a grade de itens crescer.
+const AVATAR_PREVIEW_W = 176;
+const AVATAR_PREVIEW_H = 228.8; // mantém a proporção 200:260 do frame
 
 // altura mínima da tela "Editar meu personagem" -- ver comentário no
-// style inline dela (profile-card.editing) mais abaixo. Cabe: título +
-// sexo (~70px) + as duas colunas (tom de pele/cores à esquerda, boneco +
-// abas + grade de 2 linhas de item à direita, ~560px) + ações (~60px).
+// style inline dela (profile-card.editing) mais abaixo. Cabe: título
+// (~40px) + as duas colunas (tom de pele/cores/sexo à esquerda, boneco +
+// abas + grade de 2 linhas de item à direita, ~620px) + ações (~60px).
 const EDITING_MIN_HEIGHT = 720;
 
 // pedido do Douglas: "pra todos os itens eu tenho que subir os 4 lados
@@ -4788,35 +4792,6 @@ function ProfileCard({
         >
           <h3 className="profile-edit-title">Editar meu personagem</h3>
 
-          {/* Sexo (ver AvatarGender) -- pedido do Douglas: "quero esse
-              masculino e feminino fixo lá encima, e não mexendo assim
-              conforme ocupam o espaço ou não" -- antes vivia DENTRO de
-              .skin-picker (coluna ao lado do boneco, ver mais abaixo),
-              que é flex:1 e encolhe/cresce junto com o espaço que sobra
-              do boneco+setas -- isso fazia o botão "Feminino" mudar de
-              largura de sexo pra sexo e às vezes comer a borda
-              arredondada do card. Linha PRÓPRIA, LARGURA TOTAL do card,
-              fixa antes do resto -- nunca disputa espaço com o boneco. */}
-          <div className="profile-edit-gender-row">
-            <span className="skin-picker-label">Sexo</span>
-            <div className="gender-switch">
-              <button
-                type="button"
-                className={selectedGender === "masculino" ? "gender-btn selected" : "gender-btn"}
-                onClick={() => onSelectGender("masculino")}
-              >
-                Masculino
-              </button>
-              <button
-                type="button"
-                className={selectedGender === "feminino" ? "gender-btn selected" : "gender-btn"}
-                onClick={() => onSelectGender("feminino")}
-              >
-                Feminino
-              </button>
-            </div>
-          </div>
-
           {/* pedido do Douglas: "fim das cores em tom de pele, uma
               traço vertical, linha cinza igual nos outros limites / pra
               direita posicionar o avatar / embaixo do tom vai vir as
@@ -4838,6 +4813,43 @@ function ProfileCard({
               inteiro (era o "trocar de traje mexe no card" reclamado). */}
           <div className="profile-edit-body">
             <div className="profile-edit-side">
+              {/* pedido do Douglas: "masculino e feminino vira doi botoes
+                  com icone de homem mulher pra caber responsivo encima
+                  das cores" / "tire o titulo sexo" -- os dois botões de
+                  texto ("Masculino"/"Feminino", linha própria de largura
+                  total do card) viram DOIS ÍCONES lado a lado, compactos
+                  o bastante pra caber na coluna estreita (132px), sem
+                  legenda "Sexo" em cima (o ícone já fala por si). Classe
+                  PRÓPRIA (profile-edit-gender-icon*, não .gender-switch/
+                  .gender-btn) -- essas duas são reaproveitadas em vários
+                  outros toggles do Editor de Itens (cabeça/traje,
+                  parado/passoA/passoB, sentado sim/não, ver ItemEditor.tsx)
+                  e mexer no visual delas ali quebraria os outros. */}
+              <div className="profile-edit-gender-icons">
+                <button
+                  type="button"
+                  className={selectedGender === "masculino" ? "profile-edit-gender-icon-btn selected" : "profile-edit-gender-icon-btn"}
+                  onClick={() => onSelectGender("masculino")}
+                  title="Masculino"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <circle cx="10" cy="14" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+                    <path d="M14.6 9.4 20 4M20 4h-5M20 4v5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={selectedGender === "feminino" ? "profile-edit-gender-icon-btn selected" : "profile-edit-gender-icon-btn"}
+                  onClick={() => onSelectGender("feminino")}
+                  title="Feminino"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <circle cx="12" cy="9" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+                    <path d="M12 15v7M8.5 19h7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+
               <div className="skin-picker">
                 <span className="skin-picker-label">Tom de pele</span>
                 <div className="skin-swatches">

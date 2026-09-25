@@ -2600,23 +2600,42 @@ body {
   flex-shrink: 0;
 }
 
-/* pedido do Douglas: "quero esse masculino e feminino fixo lá encima,
-   e não mexendo assim conforme ocupam o espaço ou não" -- linha PRÓPRIA
-   de largura total do card (mesmo padding horizontal do título acima),
-   fixa (flex-shrink:0, mesma família de .profile-edit-title) e ANTES
-   do boneco -- antes vivia dentro de .skin-picker, que é flex:1 e
-   encolhe/cresce disputando espaço com o boneco+setas ao lado, o que
-   fazia o botão "Feminino" mudar de largura e às vezes passar da borda
-   arredondada do card ("comendo beirada"). max-width no .gender-switch
-   evita esticar os botões a largura toda do card à toa. */
-.profile-edit-gender-row {
+/* pedido do Douglas: "masculino e feminino vira doi botoes com icone de
+   homem mulher pra caber responsivo encima das cores" / "tire o titulo
+   sexo" -- os botões de texto ("Masculino"/"Feminino", linha própria de
+   largura TOTAL do card) viraram dois ícones compactos, lado a lado, no
+   TOPO da coluna estreita (.profile-edit-side), antes do "Tom de pele".
+   Classe própria (não .gender-switch/.gender-btn -- essas são
+   reaproveitadas em vários outros toggles do Editor de Itens, ver
+   ItemEditor.tsx, mexer no visual delas ali quebraria os outros). */
+.profile-edit-gender-icons {
+  display: flex;
+  gap: 6px;
   flex-shrink: 0;
-  padding: 0 18px 10px;
 }
 
-.profile-edit-gender-row .gender-switch {
-  max-width: 220px;
-  margin-bottom: 0;
+.profile-edit-gender-icon-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 0;
+  background: #241933;
+  border: 1px solid #362552;
+  border-radius: 8px;
+  color: #cdbdf0;
+  cursor: pointer;
+}
+
+.profile-edit-gender-icon-btn:hover {
+  border-color: #3a2a55;
+  color: #f5f0ff;
+}
+
+.profile-edit-gender-icon-btn.selected {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #ffffff;
 }
 
 /* boneco fixo no topo do editor, mostrando ao vivo cada escolha (ver
