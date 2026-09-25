@@ -4097,12 +4097,20 @@ body {
   cursor: default;
 }
 
-/* Editor de Itens (ver ItemEditor.tsx) -- mais LARGO que os 400px
-   padrão pra caber o preview grande de tamanho (.item-size-card
-   abaixo), que pode passar de 600px de largura num item grande (ex:
-   sofá). */
+/* Editor de Itens (ver ItemEditor.tsx) -- pedido do Douglas: "seria
+   mais interessante essa aba de criar mobis/avatar, ser maior, ocupar
+   a tela toda quando abre ela, porque vao ter muitas opcoes ali
+   dentro" -- ocupa quase a tela toda (era 640px fixo) ao abrir, tanto
+   no modo "Criar Avatar" quanto no modo mobi/item (mesmo modal, ver
+   comentário grande no JSX -- .items-panel-editor é a MESMA div pros
+   dois, só o formulário de dentro muda com `mode`). max-height/height
+   sobrescrevem os 84vh padrão de .items-panel (que ainda vale pros
+   outros painéis menores, tipo membros -- essa classe só entra aqui). */
 .items-panel-editor {
-  width: 640px;
+  width: 96vw;
+  max-width: 1400px;
+  height: 92vh;
+  max-height: 92vh;
 }
 
 /* Preview grande do Editor de Itens -- pedido do Douglas: "preciso

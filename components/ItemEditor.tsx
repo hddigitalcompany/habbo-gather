@@ -107,7 +107,18 @@ const TILE_SIZE_PX = TILE * PREVIEW_SCALE;
 // margem abaixo da base do tile -- espaço pra arrastar o item pra baixo
 // (offsetY positivo) e pro quadrado continuar visível inteiro.
 const STAGE_BASELINE_PAD = 70;
-const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + 24);
+// margem ACIMA da cabeça do boneco -- pedido do Douglas: "aumente essa
+// area de exibicao eu preciso ver a cabeca toda dele, nao mude a
+// dimensao do boneco nem posicionamento". Cabelo alto/grande (ex:
+// gerado por IA, penteados enrolados/compridos) passa da altura da
+// própria cabeça e ficava cortado (overflow-y:hidden do .item-stage) --
+// era só 24px de sobra ali em cima. O boneco em si é ancorado pela
+// BASE (bottom:STAGE_BASELINE_PAD+AVATAR_FOOT_FROM_TILE_BOTTOM, ver
+// item-stage-avatar no JSX), então aumentar só essa margem do TOPO
+// cresce o card SEM mexer no tamanho/posição do boneco -- ele continua
+// exatamente onde estava, só sobra mais espaço vazio acima dele agora.
+const STAGE_TOP_PAD = 160;
+const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + STAGE_TOP_PAD);
 
 // Réguas de medida no preview (pedido do Douglas: "coloca umas linhas de
 // medida, a partir do tile, pra eu conseguir me posicionar melhor") --
@@ -119,7 +130,10 @@ const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM
 // graça pelo overflow do .item-stage, não precisa ser exato).
 const RULER_UNIT = 10;
 const RULER_X_RANGE: [number, number] = [-100, 100];
-const RULER_Y_RANGE: [number, number] = [-180, 60];
+// -180 -> -240: acompanha o STAGE_TOP_PAD maior acima (senão a grade
+// parava de desenhar antes do topo novo do card, deixando uma faixa em
+// branco sem régua ali).
+const RULER_Y_RANGE: [number, number] = [-240, 60];
 
 function rulerTicks(range: [number, number], unit: number): number[] {
   const ticks: number[] = [];
