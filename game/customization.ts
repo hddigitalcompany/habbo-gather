@@ -97,13 +97,21 @@ export interface SkinOption {
   custom?: boolean;
 }
 
-// gerado automaticamente -- ver scripts/syncSkinAssets.mjs, NÃO editar
-// esse import nem o arquivo dele à mão.
-import { GENERATED_SKIN_CATALOG } from "./skinCatalog.generated";
-
-export const SKIN_CATALOG: SkinOption[] = [...GENERATED_SKIN_CATALOG].sort((a, b) =>
-  a.id === "branco" ? -1 : b.id === "branco" ? 1 : 0
-);
+// pedido do Douglas: "tira as cabeças da pasta, sobe o avatar no lugar"
+// -- mesmo tratamento que HAIR/BEARD/ACCESSORY/OUTFIT_CATALOG já
+// levaram acima: tirou o tom de pele "de fábrica" (pasta local, ver
+// scripts/syncSkinAssets.mjs) daqui. Começa VAZIO -- só ganha conteúdo
+// em tempo de execução via registerCustomSkins (tom CUSTOM cadastrado
+// em "Tons cadastrados", Editor de Itens > Criar Avatar > Avatar) ou,
+// quando ainda não tem NENHUM tom custom carregado pro sexo escolhido,
+// cai no "Avatar Padrão" como base (ver AVATAR_DEFAULT_REFERENCE/
+// avatar-preview-wrap em GameRoom.tsx e a mesma ideia em MainScene.ts --
+// "porque não tem nada selecionado, a lógica é pra aparecer o avatar
+// padrão de cada sexo"). O arquivo/script da pasta local CONTINUA
+// existindo (só parou de entrar aqui) -- é só reimportar
+// GENERATED_SKIN_CATALOG de ./skinCatalog.generated (mesmo esquema de
+// antes) se um dia quiser voltar a usá-lo.
+export const SKIN_CATALOG: SkinOption[] = [];
 
 export const DEFAULT_SKIN_ID = SKIN_CATALOG[0]?.id ?? "branco";
 

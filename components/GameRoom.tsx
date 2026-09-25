@@ -956,8 +956,51 @@ export default function GameRoom({
         if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
         else resolve();
       });
+      // SKIN_CATALOG agora começa vazio (pedido do Douglas: "tira as
+      // cabeças da pasta") -- a primeira chamada de setLocalSkinId (ver
+      // init() no useEffect do Phaser.Game) pode ter rodado ANTES da
+      // textura de verdade terminar de carregar aqui em cima, e nesse
+      // caso o boneco ficou escondido (ver checagem em setLocalSkinId,
+      // MainScene.ts). Chama de novo agora que a textura já existe, pra
+      // reaparecer sem precisar de F5 -- reaplicar com o mesmo id de
+      // sempre é inofensivo quando já estava tudo certo.
+      sceneRef.current?.setLocalSkinId(selectedSkinId);
     } catch {
       // Supabase fora do ar/não configurado -- segue sem tom custom, sala funciona igual
+    }
+  }
+
+  /**
+   * "Avatar Padrão" por sexo (ver avatar_default_reference,
+   * supabase/migrations/0008_avatar_default_reference.sql) -- pedido do
+   * Douglas: "sim, quero que apareça pro jogador agora" (antes só era
+   * guia de alinhamento do Editor de Itens). Leitura pública (mesma
+   * policy de avatar_skins/avatar_items), só metadados/URL -- não
+   * precisa carregar textura nenhuma no Phaser (ainda só usado no
+   * preview de "Editar meu personagem", ver ProfileCard, que é HTML/CSS
+   * puro). Chamado uma vez quando a cena fica pronta, mesmo lugar de
+   * fetchAndRegisterCustomSkins/fetchAndRegisterCustomAvatarItems.
+   */
+  async function fetchDefaultReferences(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("avatar_default_reference")
+        .select("gender, head_sheet_url, body_sheet_url");
+      if (error || !data) return;
+      const next: Record<AvatarGender, { headUrl: string; bodyUrl: string } | null> = {
+        masculino: null,
+        feminino: null,
+      };
+      for (const row of data as { gender: string; head_sheet_url: string; body_sheet_url: string }[]) {
+        if (row.gender === "masculino" || row.gender === "feminino") {
+          next[row.gender] = { headUrl: row.head_sheet_url, bodyUrl: row.body_sheet_url };
+        }
+      }
+      setDefaultReferences(next);
+    } catch {
+      // Supabase fora do ar/não configurado -- segue sem avatar padrão, sala funciona igual
     }
   }
 
@@ -1230,6 +1273,19 @@ export default function GameRoom({
   // ao lado do boneco no topo do editor (ver AvatarPreviewWrap), não
   // dentro da grade de categorias.
   const [selectedSkinId, setSelectedSkinId] = useState(() => loadSavedAvatar().skinId ?? DEFAULT_SKIN_ID);
+  // "Avatar Padrão" (ver avatar_default_reference, cadastrado no Editor
+  // de Itens > aba "Avatar Padrão") -- pedido do Douglas: "sim, quero
+  // que apareça pro jogador agora" (antes só era guia de alinhamento
+  // interno do editor, nunca aparecia aqui). Usado como FALLBACK do
+  // boneco em "Editar meu personagem" (ver ProfileCard) quando
+  // SKIN_CATALOG não tem nenhum tom cadastrado pro sexo escolhido --
+  // SKIN_CATALOG agora começa vazio (tom "de fábrica" saiu, ver
+  // customization.ts), só ganha conteúdo quando o Douglas sobe algo em
+  // "Tons cadastrados". Buscado uma vez quando a cena fica pronta (ver
+  // fetchDefaultReferences abaixo).
+  const [defaultReferences, setDefaultReferences] = useState<
+    Record<AvatarGender, { headUrl: string; bodyUrl: string } | null>
+  >({ masculino: null, feminino: null });
   // barba: sem cor manual (a arte já muda sozinha com o tom de pele
   // escolhido acima, mesmo esquema do traje -- ver beardFileForSkin).
   const [selectedBeardId, setSelectedBeardId] = useState(() => loadSavedAvatar().beardId ?? DEFAULT_BEARD_ID);
@@ -1905,6 +1961,7 @@ export default function GameRoom({
         // nenhum desses três depende dos outros.
         fetchAndRegisterCustomSkins();
         fetchAndRegisterCustomAvatarItems();
+        fetchDefaultReferences();
         fetchAndRegisterCustomFurniture().finally(() => {
           fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
             .then((r) => (r.ok ? r.json() : null))
@@ -3266,6 +3323,7 @@ export default function GameRoom({
             onSelectGender={selectGender}
             selectedSkinId={selectedSkinId}
             onSelectSkin={selectSkin}
+            defaultReferences={defaultReferences}
             selectedBeardId={selectedBeardId}
             onSelectBeard={selectBeard}
             selectedAccessoryId={selectedAccessoryId}
@@ -3360,6 +3418,7 @@ export default function GameRoom({
               fetchAndRegisterCustomFurniture();
               fetchAndRegisterCustomSkins();
               fetchAndRegisterCustomAvatarItems();
+              fetchDefaultReferences();
             }}
           />
         )}
@@ -4442,6 +4501,7 @@ function ProfileCard({
   onSelectGender,
   selectedSkinId,
   onSelectSkin,
+  defaultReferences,
   selectedBeardId,
   onSelectBeard,
   selectedAccessoryId,
@@ -4476,6 +4536,15 @@ function ProfileCard({
   onSelectGender: (gender: AvatarGender) => void;
   selectedSkinId: string;
   onSelectSkin: (id: string) => void;
+  // "Avatar Padrão" (ver avatar_default_reference/AvatarCreatorPanel em
+  // ItemEditor.tsx) -- pedido do Douglas: "sim, quero que apareça pro
+  // jogador agora" (antes era só guia interno de alinhamento, nunca
+  // aparecia aqui). Cabeça/corpo por sexo, já buscados em GameRoom (ver
+  // fetchDefaultReferences) -- usado só como FALLBACK do boneco abaixo,
+  // quando SKIN_CATALOG não tem nenhum tom pro sexo escolhido (tom "de
+  // fábrica" foi removido, ver customization.ts -- só sobra o que o
+  // Douglas cadastrar em "Tons cadastrados").
+  defaultReferences: Record<AvatarGender, { headUrl: string; bodyUrl: string } | null>;
   selectedBeardId: string;
   onSelectBeard: (id: string) => void;
   selectedAccessoryId: string;
@@ -4539,7 +4608,17 @@ function ProfileCard({
       ? selectedHairOption?.colors?.find((c) => c.id === selectedHairColorId)
       : undefined;
     const effectiveHairFile = selectedColorOption?.file ?? selectedHairOption?.file;
-    const selectedSkinOption = SKIN_CATALOG.find((opt) => opt.id === selectedSkinId) ?? SKIN_CATALOG[0];
+    // pode não achar NENHUM (SKIN_CATALOG começa vazio agora, só ganha
+    // tom quando o Douglas cadastra em "Tons cadastrados", ver
+    // customization.ts) -- nesse caso cai no Avatar Padrão do sexo atual
+    // como base (ver defaultReferenceForGender/avatar-preview-layer
+    // "traje limpo"+"cabeça" mais abaixo), em vez de undefined.file
+    // quebrando a prévia.
+    const selectedSkinOption =
+      SKIN_CATALOG.find((opt) => opt.id === selectedSkinId) ??
+      SKIN_CATALOG.find((opt) => (opt.gender ?? "masculino") === selectedGender) ??
+      SKIN_CATALOG[0];
+    const activeDefaultReference = selectedSkinOption ? null : defaultReferences[selectedGender];
     // barba: sem cor manual -- o arquivo efetivo já é resolvido pelo tom
     // de pele ATUAL, mesmo esquema do traje mais abaixo (ver
     // beardFileForSkin/resolveBeardSkinId).
@@ -4576,14 +4655,42 @@ function ProfileCard({
               LAYER_DRAW_ORDER em MainScene.ts. */}
           <div className="avatar-preview-wrap">
             <div className="avatar-preview" style={{ width: AVATAR_PREVIEW_W, height: AVATAR_PREVIEW_H }}>
-              <span
-                className="avatar-preview-layer"
-                style={{
-                  backgroundImage: `url(${furnitureAssetUrl(selectedSkinOption.file)})`,
-                  backgroundPosition: "0 0",
-                  backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                }}
-              />
+              {selectedSkinOption ? (
+                <span
+                  className="avatar-preview-layer"
+                  style={{
+                    backgroundImage: `url(${furnitureAssetUrl(selectedSkinOption.file)})`,
+                    backgroundPosition: "0 0",
+                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                  }}
+                />
+              ) : (
+                activeDefaultReference && (
+                  // sem NENHUM tom cadastrado pro sexo atual (ver
+                  // selectedSkinOption acima) -- cai no Avatar Padrão
+                  // (corpo/traje limpo primeiro, cabeça por cima, mesma
+                  // ordem do boneco de verdade) em vez de deixar a
+                  // prévia sem base nenhuma.
+                  <>
+                    <span
+                      className="avatar-preview-layer"
+                      style={{
+                        backgroundImage: `url(${furnitureAssetUrl(activeDefaultReference.bodyUrl)})`,
+                        backgroundPosition: "0 0",
+                        backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                      }}
+                    />
+                    <span
+                      className="avatar-preview-layer"
+                      style={{
+                        backgroundImage: `url(${furnitureAssetUrl(activeDefaultReference.headUrl)})`,
+                        backgroundPosition: "0 0",
+                        backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                      }}
+                    />
+                  </>
+                )
+              )}
               {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
                   traje fica sobre a base, barba fica ATRÁS do cabelo,
                   óculos fica NA FRENTE de tudo -- "nenhuma(o)"/"Nenhum"

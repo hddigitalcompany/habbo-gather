@@ -1183,6 +1183,17 @@ export default class MainScene extends Phaser.Scene {
         );
         sprite.setOrigin(0.5, 1);
         sprite.setScale(AVATAR_SCALE);
+        // pedido do Douglas: "tira as cabeças da pasta, sobe o avatar no
+        // lugar" -- SKIN_CATALOG agora começa VAZIO (só ganha tom em
+        // tempo de execução, ver fetchAndRegisterCustomSkins em
+        // GameRoom.tsx), então a textura acima pode não existir AINDA
+        // nesse instante (spritesheet carregado depois, via
+        // loadCustomAvatarLayerTextures). Sem essa checagem o Phaser
+        // desenharia o quadriculado preto/verde de "textura faltando" --
+        // esconde em vez disso (fetchAndRegisterCustomSkins chama
+        // setLocalSkinId de novo assim que a textura de verdade estiver
+        // pronta, o que reaplica e reexibe).
+        sprite.setVisible(this.textures.exists(skinTextureKey(DEFAULT_SKIN_ID)));
         layerSprites.push(sprite);
         skinSprite = sprite;
         continue;
@@ -1527,8 +1538,18 @@ export default class MainScene extends Phaser.Scene {
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("skinSprite") as Phaser.GameObjects.Sprite | null;
     if (sprite) {
-      const currentFrame = sprite.frame.name;
-      sprite.setTexture(skinTextureKey(skinId), currentFrame);
+      // mesma checagem de createAvatar/"base" acima -- SKIN_CATALOG pode
+      // não ter (ainda) nenhum tom custom carregado pro id escolhido
+      // (ver fetchAndRegisterCustomSkins em GameRoom.tsx, que chama essa
+      // função de novo assim que a textura terminar de carregar) --
+      // esconde em vez de mostrar o quadriculado de "textura faltando".
+      const textureKey = skinTextureKey(skinId);
+      const exists = this.textures.exists(textureKey);
+      if (exists) {
+        const currentFrame = sprite.frame.name;
+        sprite.setTexture(textureKey, currentFrame);
+      }
+      sprite.setVisible(exists);
     }
     this.localContainer.setData("skinId", skinId);
 
