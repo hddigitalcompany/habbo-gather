@@ -19,6 +19,8 @@ import MainScene, {
   DEFAULT_ZOOM_LEVEL,
   MIN_ZOOM_LEVEL,
   MAX_ZOOM_LEVEL,
+  FRAME_W,
+  FRAME_H,
   skinTextureKey,
   hairTextureKey,
   accessoryTextureKey,
@@ -4447,9 +4449,25 @@ const HAIR_SHEET_H = 522;
 // mesmo recorte (frame 0, mesmo spritesheet 1614x522), só que MAIOR --
 // é o "boneco" que fica fixo no topo do editor mostrando ao vivo o
 // resultado de cada escolha (base + cabelo selecionado empilhados, ver
-// AvatarPreviewLayer), igual ao editor de personagem do Habbo.
-const AVATAR_PREVIEW_W = 104;
-const AVATAR_PREVIEW_H = 135.2; // mantém a proporção 200:260 do frame
+// AvatarPreviewLayer), igual ao editor de personagem do Habbo. Pedido
+// do Douglas: "aumentar o tamanho da exibição do avatar também em 30%"
+// (+30% em cima do 104x135.2 de antes).
+const AVATAR_PREVIEW_W = 135.2;
+const AVATAR_PREVIEW_H = 175.76; // mantém a proporção 200:260 do frame
+
+// pedido do Douglas: "pra todos os itens eu tenho que subir os 4 lados
+// [...] o cara tem que poder ver o boneco dele em 4 lados também em
+// personalizar, apenas as posições paradas" -- deixa o boneco fixo do
+// editor girar entre as 4 direções (setas do lado, ver
+// avatar-preview-rotate-wrap), sempre no frame PARADO de cada uma
+// (índice 0 de cada trinca -- mesmo esquema de WALK_FRAMES em
+// MainScene.ts, "andando" fica só pro boneco de verdade na sala).
+// Frame -> coluna/linha da folha 8x2 (FRAME_W/FRAME_H/spacing:2, ver
+// frameOffsetXPx/frameOffsetYPx em ItemEditor.tsx, mesma conta).
+const PREVIEW_DIRECTION_FRAME: Record<Direction, number> = { down: 0, left: 3, right: 6, up: 9 };
+// ordem do "girar" (seta ›): frente -> lado direito -> costas -> lado
+// esquerdo -> frente nesse ciclo (a seta ‹ anda o ciclo ao contrário).
+const PREVIEW_DIRECTION_ORDER: Direction[] = ["down", "right", "up", "left"];
 
 // miniatura de uma COR de cabelo (dentro de "Cores de ..."): mesmo
 // recorte de frame 0 que hair-thumb/avatar-preview, só que BEM menor --
@@ -4564,6 +4582,14 @@ function ProfileCard({
   const thumbScale = HAIR_THUMB_W / 200;
   const photoInputRef = useRef<HTMLInputElement>(null);
   const baseCardRef = useRef<HTMLDivElement>(null);
+  // pra qual lado o boneco fixo do topo tá virado agora (setas ‹ ›, ver
+  // avatar-preview-rotate-wrap mais abaixo) -- só existe/importa na tela
+  // de edição, mas mora aqui em cima (fora do `if (editing)`) porque
+  // hook não pode ser condicional. Sempre volta pra "down" ao abrir a
+  // edição de novo (ver reset no onStartEdit já existente lá em
+  // GameRoom, esse aqui é só o estado local da prévia -- não precisa
+  // persistir).
+  const [previewDirection, setPreviewDirection] = useState<Direction>("down");
 
   const fields: RemoteProfile = info.isLocal
     ? { ...myProfile, role: "" }
@@ -4640,6 +4666,22 @@ function ProfileCard({
       ? outfitFileForSkin(selectedOutfitOption, selectedSkinId)
       : undefined;
     const colorSwatchScale = COLOR_SWATCH_W / 200;
+    // posição do frame PARADO da direção escolhida (ver
+    // PREVIEW_DIRECTION_FRAME acima) dentro da folha 8x2 -- mesma conta
+    // de frameOffsetXPx/frameOffsetYPx em ItemEditor.tsx, só que em
+    // background-position (negativo) em vez de transform: translate.
+    // Reaproveitada em TODAS as camadas do boneco (base/traje/barba/
+    // cabelo/acessório) pra girarem juntas.
+    const previewFrameIndex = PREVIEW_DIRECTION_FRAME[previewDirection];
+    const previewScale = AVATAR_PREVIEW_W / FRAME_W;
+    const previewBgPos = `${-(previewFrameIndex % 8) * (FRAME_W + 2) * previewScale}px ${-Math.floor(previewFrameIndex / 8) * (FRAME_H + 2) * previewScale}px`;
+    function rotatePreview(delta: 1 | -1) {
+      setPreviewDirection((prev) => {
+        const idx = PREVIEW_DIRECTION_ORDER.indexOf(prev);
+        const nextIdx = (idx + delta + PREVIEW_DIRECTION_ORDER.length) % PREVIEW_DIRECTION_ORDER.length;
+        return PREVIEW_DIRECTION_ORDER[nextIdx];
+      });
+    }
     return (
       <div className="profile-backdrop" onClick={onClose}>
         <div
@@ -4654,88 +4696,116 @@ function ProfileCard({
               mesmo recorte de frame 0 dos thumbnails), ver
               LAYER_DRAW_ORDER em MainScene.ts. */}
           <div className="avatar-preview-wrap">
-            <div className="avatar-preview" style={{ width: AVATAR_PREVIEW_W, height: AVATAR_PREVIEW_H }}>
-              {selectedSkinOption ? (
-                <span
-                  className="avatar-preview-layer"
-                  style={{
-                    backgroundImage: `url(${furnitureAssetUrl(selectedSkinOption.file)})`,
-                    backgroundPosition: "0 0",
-                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                  }}
-                />
-              ) : (
-                activeDefaultReference && (
-                  // sem NENHUM tom cadastrado pro sexo atual (ver
-                  // selectedSkinOption acima) -- cai no Avatar Padrão
-                  // (corpo/traje limpo primeiro, cabeça por cima, mesma
-                  // ordem do boneco de verdade) em vez de deixar a
-                  // prévia sem base nenhuma.
-                  <>
-                    <span
-                      className="avatar-preview-layer"
-                      style={{
-                        backgroundImage: `url(${furnitureAssetUrl(activeDefaultReference.bodyUrl)})`,
-                        backgroundPosition: "0 0",
-                        backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                      }}
-                    />
-                    <span
-                      className="avatar-preview-layer"
-                      style={{
-                        backgroundImage: `url(${furnitureAssetUrl(activeDefaultReference.headUrl)})`,
-                        backgroundPosition: "0 0",
-                        backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                      }}
-                    />
-                  </>
-                )
-              )}
-              {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
-                  traje fica sobre a base, barba fica ATRÁS do cabelo,
-                  óculos fica NA FRENTE de tudo -- "nenhuma(o)"/"Nenhum"
-                  é um arquivo transparente, então sempre renderiza (sem
-                  condicional), só não aparece nada. */}
-              {effectiveOutfitFile && (
-                <span
-                  className="avatar-preview-layer"
-                  style={{
-                    backgroundImage: `url(/assets/${effectiveOutfitFile})`,
-                    backgroundPosition: "0 0",
-                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                  }}
-                />
-              )}
-              {effectiveBeardFile && (
-                <span
-                  className="avatar-preview-layer"
-                  style={{
-                    backgroundImage: `url(/assets/${effectiveBeardFile})`,
-                    backgroundPosition: "0 0",
-                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                  }}
-                />
-              )}
-              {effectiveHairFile && (
-                <span
-                  className="avatar-preview-layer"
-                  style={{
-                    backgroundImage: `url(/assets/${effectiveHairFile})`,
-                    backgroundPosition: "0 0",
-                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                  }}
-                />
-              )}
-              {effectiveAccessoryFile && (
-                <span
-                  className="avatar-preview-layer"
-                  style={{
-                    backgroundImage: `url(/assets/${effectiveAccessoryFile})`,
-                    backgroundPosition: "0 0",
-                    backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                  }}
-                />
-              )}
+            {/* pedido do Douglas: "colocar do lado dele setas, pra ele
+                girar o avatar" -- gira entre os 4 lados (sempre parado,
+                ver PREVIEW_DIRECTION_FRAME/rotatePreview acima), já que
+                agora todo item cadastrado tem arte nas 4 direções.
+                Coluna própria (setas+boneco em cima, legenda do lado
+                embaixo) pra não brigar de layout com o skin-picker ao
+                lado (ver .avatar-preview-wrap, flex-direction:row). */}
+            <div className="avatar-preview-column">
+            <div className="avatar-preview-rotate-wrap">
+              <button
+                type="button"
+                className="avatar-preview-rotate-btn"
+                onClick={() => rotatePreview(-1)}
+                title="Girar"
+              >
+                ‹
+              </button>
+              <div className="avatar-preview" style={{ width: AVATAR_PREVIEW_W, height: AVATAR_PREVIEW_H }}>
+                {selectedSkinOption ? (
+                  <span
+                    className="avatar-preview-layer"
+                    style={{
+                      backgroundImage: `url(${furnitureAssetUrl(selectedSkinOption.file)})`,
+                      backgroundPosition: previewBgPos,
+                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                    }}
+                  />
+                ) : (
+                  activeDefaultReference && (
+                    // sem NENHUM tom cadastrado pro sexo atual (ver
+                    // selectedSkinOption acima) -- cai no Avatar Padrão
+                    // (corpo/traje limpo primeiro, cabeça por cima, mesma
+                    // ordem do boneco de verdade) em vez de deixar a
+                    // prévia sem base nenhuma.
+                    <>
+                      <span
+                        className="avatar-preview-layer"
+                        style={{
+                          backgroundImage: `url(${furnitureAssetUrl(activeDefaultReference.bodyUrl)})`,
+                          backgroundPosition: previewBgPos,
+                          backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                        }}
+                      />
+                      <span
+                        className="avatar-preview-layer"
+                        style={{
+                          backgroundImage: `url(${furnitureAssetUrl(activeDefaultReference.headUrl)})`,
+                          backgroundPosition: previewBgPos,
+                          backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                        }}
+                      />
+                    </>
+                  )
+                )}
+                {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
+                    traje fica sobre a base, barba fica ATRÁS do cabelo,
+                    óculos fica NA FRENTE de tudo -- "nenhuma(o)"/"Nenhum"
+                    é um arquivo transparente, então sempre renderiza (sem
+                    condicional), só não aparece nada. */}
+                {effectiveOutfitFile && (
+                  <span
+                    className="avatar-preview-layer"
+                    style={{
+                      backgroundImage: `url(/assets/${effectiveOutfitFile})`,
+                      backgroundPosition: previewBgPos,
+                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                    }}
+                  />
+                )}
+                {effectiveBeardFile && (
+                  <span
+                    className="avatar-preview-layer"
+                    style={{
+                      backgroundImage: `url(/assets/${effectiveBeardFile})`,
+                      backgroundPosition: previewBgPos,
+                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                    }}
+                  />
+                )}
+                {effectiveHairFile && (
+                  <span
+                    className="avatar-preview-layer"
+                    style={{
+                      backgroundImage: `url(/assets/${effectiveHairFile})`,
+                      backgroundPosition: previewBgPos,
+                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                    }}
+                  />
+                )}
+                {effectiveAccessoryFile && (
+                  <span
+                    className="avatar-preview-layer"
+                    style={{
+                      backgroundImage: `url(/assets/${effectiveAccessoryFile})`,
+                      backgroundPosition: previewBgPos,
+                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                    }}
+                  />
+                )}
+              </div>
+              <button
+                type="button"
+                className="avatar-preview-rotate-btn"
+                onClick={() => rotatePreview(1)}
+                title="Girar"
+              >
+                ›
+              </button>
+            </div>
+            <span className="avatar-preview-direction-label">{FACING_LABEL[previewDirection]}</span>
             </div>
 
             {/* tons de pele (ver SKIN_CATALOG) -- selecionáveis aqui do
