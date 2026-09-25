@@ -16,8 +16,11 @@ import { tileToWorld } from "./grid";
  * áreas do tipo "mesa-privada" podem inclusive ficar coladas lado a lado
  * sem virar uma coisa só.
  *
- * Dois tipos:
- * - "mesa-privada": tem um botão "Tomar posse" (ver
+ * Três tipos (pedido do Douglas: "os nomes renomeie, sala privada /
+ * Mesa privada / sala aberta" -- viraram 3 em vez de 2; só
+ * "mesa-privada" tem dono, os outros dois só diferem no nome/cor pra
+ * organizar o mapa):
+ * - "mesa-privada" ("Mesa privada"): tem um botão "Tomar posse" (ver
  *   onClaimArea/onReleaseArea em MainScene.ts) que só aparece enquanto
  *   NINGUÉM for dono -- clicar toma posse (some o botão, aparece o nome
  *   do dono ao passar o mouse; clicar no nome de outra pessoa abre o
@@ -25,18 +28,24 @@ import { tileToWorld } from "./grid";
  *   quem tá numa mesa privada fica isolado do resto da sala (só ouve/é
  *   ouvido por quem também tá na MESMA área) -- ver areaZoneAt/
  *   checkProximity em GameRoom.tsx.
- * - "sala": mesma isolação de áudio/vídeo, sem dono/botão de posse -- pra
- *   área de reunião compartilhada que não pertence a ninguém.
+ * - "sala-privada" ("Sala privada"): mesma isolação de áudio/vídeo,
+ *   sem dono/botão de posse -- pra área de reunião compartilhada que
+ *   não pertence a ninguém.
+ * - "sala" ("Sala aberta"): mesma isolação de áudio/vídeo também, sem
+ *   dono -- mesma mecânica de "sala-privada", só existe como categoria
+ *   separada pro Douglas organizar/colorir o mapa diferente (ex:
+ *   áreas de passagem/convivência vs. salas de reunião fechadas).
  */
-export type AreaType = "mesa-privada" | "sala";
+export type AreaType = "mesa-privada" | "sala-privada" | "sala";
 
-// pedido do Douglas: "os nomes renomeie, sala privada / sala aberta" --
-// só o TEXTO exibido mudou (label); o `id` de cada tipo continua
-// "mesa-privada"/"sala" por baixo (não mexe em nada salvo/persistido,
-// nem no resto do código que compara por id, ver comentário grande no
-// topo do arquivo).
+// pedido do Douglas: "os nomes renomeie, sala privada / Mesa privada /
+// sala aberta" -- 3 tipos na lista agora. "mesa-privada" e "sala"
+// mantêm o ID de sempre por baixo (nada salvo/persistido quebra);
+// "sala-privada" é um ID novo (nunca existiu antes, sem área antiga
+// pra migrar).
 export const AREA_TYPES: { id: AreaType; label: string; color: number }[] = [
-  { id: "mesa-privada", label: "Sala privada", color: 0xffb84d },
+  { id: "mesa-privada", label: "Mesa privada", color: 0xffb84d },
+  { id: "sala-privada", label: "Sala privada", color: 0xb388ff },
   { id: "sala", label: "Sala aberta", color: 0x4da6ff },
 ];
 

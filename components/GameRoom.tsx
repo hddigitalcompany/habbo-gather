@@ -4050,10 +4050,13 @@ function EditPanel({
           <p className="edit-hint">
             Primeiro crie a área (nome + tipo) abaixo, depois selecione ela na
             lista pra pintar/arrastar os tiles dela -- áreas diferentes NÃO se
-            fundem mesmo encostadas. "Sala privada" ganha um botão "Tomar
-            posse" na sala (só aparece enquanto ninguém for dono; áudio/vídeo
-            de quem tá dentro fica isolado). "Sala aberta": mesma isolação de
-            áudio/vídeo, sem dono. Salva sozinho.
+            fundem mesmo encostadas. "Mesa privada" ganha um botão "Tomar
+            posse" na sala (só aparece enquanto ninguém for dono). Nas 3 --
+            "Mesa privada", "Sala privada" e "Sala aberta" -- áudio/vídeo de
+            quem tá dentro fica isolado do resto da sala (só ouve/é ouvido por
+            quem também tá na mesma área); só "Mesa privada" tem dono, as
+            outras duas são só pra organizar/colorir o mapa diferente. Salva
+            sozinho.
           </p>
 
           <AreaCreateForm onCreate={onCreateArea} />

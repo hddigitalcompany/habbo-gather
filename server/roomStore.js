@@ -44,7 +44,11 @@ const MAX_COORD = 1000;
 const MAX_AREA_DEFS = 200;
 const MAX_AREA_NAME_LEN = 100;
 const MAX_AREA_TILES = 2000;
-const AREA_TYPES = new Set(["mesa-privada", "sala"]);
+// pedido do Douglas: "os nomes renomeie, sala privada / Mesa privada /
+// sala aberta" -- 3 tipos agora (ver AreaType em game/areas.ts), "sala"
+// e "mesa-privada" continuam com o mesmo id de sempre (área antiga
+// salva com esse type continua válida), "sala-privada" é o novo.
+const AREA_TYPES = new Set(["mesa-privada", "sala-privada", "sala"]);
 
 // mobília colocada pelo editor -- limite mais folgado que piso/área
 // porque cada item também carrega id/modelId/colorId (strings), não só
@@ -125,7 +129,7 @@ export function setFloor(items) {
 
 /** Valida/saneia uma área da LISTA (nome + tipo, ver AreaDef em
  * game/areas.ts) -- devolve null se o item for inválido (sem nome, nome
- * grande demais, ou `type` que não é nem "mesa-privada" nem "sala"). */
+ * grande demais, ou `type` que não é um dos 3 de AREA_TYPES acima). */
 function sanitizeAreaDef(item) {
   if (!item || typeof item !== "object") return null;
   const id = String(item.id ?? "").slice(0, MAX_AREA_NAME_LEN);
