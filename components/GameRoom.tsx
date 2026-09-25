@@ -4529,14 +4529,12 @@ const HAIR_SHEET_H = 522;
 // é o "boneco" que fica fixo no topo do editor mostrando ao vivo o
 // resultado de cada escolha (base + cabelo selecionado empilhados, ver
 // AvatarPreviewLayer), igual ao editor de personagem do Habbo. Pedido
-// do Douglas: "aumenta a exibicao do avatar proporcional ao espaco que
-// ele tem na altura sobrando ali" -- depois de tirar a linha "Sexo"
-// (virou 2 ícones pequenos dentro da coluna estreita, ver
-// profile-edit-gender-icons) sobrou mais altura na coluna principal;
-// esse aumento (135.2x175.76 -> 176x229, mesma proporção 200:260)
-// ocupa esse espaço em vez de deixar só a grade de itens crescer.
-const AVATAR_PREVIEW_W = 176;
-const AVATAR_PREVIEW_H = 228.8; // mantém a proporção 200:260 do frame
+// do Douglas: "aumenta o avatar, ele pode dobrar de tamanho na
+// exibicao" -- 176x228.8 -> 352x457.6, o DOBRO (mesma proporção
+// 200:260 de sempre). Cabe na coluna do boneco (.profile-edit-avatar-col
+// -- flex-shrink:0, só encolhe o que sobra pras abas+grade do lado).
+const AVATAR_PREVIEW_W = 352;
+const AVATAR_PREVIEW_H = 457.6; // mantém a proporção 200:260 do frame
 
 
 // pedido do Douglas: "pra todos os itens eu tenho que subir os 4 lados
