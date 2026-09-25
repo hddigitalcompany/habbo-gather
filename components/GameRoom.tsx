@@ -4788,7 +4788,7 @@ function ProfileCard({
                   <span
                     className="avatar-preview-layer"
                     style={{
-                      backgroundImage: `url(/assets/${effectiveOutfitFile})`,
+                      backgroundImage: `url(${furnitureAssetUrl(effectiveOutfitFile)})`,
                       backgroundPosition: previewBgPos,
                       backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                     }}
@@ -4798,7 +4798,7 @@ function ProfileCard({
                   <span
                     className="avatar-preview-layer"
                     style={{
-                      backgroundImage: `url(/assets/${effectiveBeardFile})`,
+                      backgroundImage: `url(${furnitureAssetUrl(effectiveBeardFile)})`,
                       backgroundPosition: previewBgPos,
                       backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                     }}
@@ -4808,7 +4808,7 @@ function ProfileCard({
                   <span
                     className="avatar-preview-layer"
                     style={{
-                      backgroundImage: `url(/assets/${effectiveHairFile})`,
+                      backgroundImage: `url(${furnitureAssetUrl(effectiveHairFile)})`,
                       backgroundPosition: previewBgPos,
                       backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                     }}
@@ -4818,7 +4818,7 @@ function ProfileCard({
                   <span
                     className="avatar-preview-layer"
                     style={{
-                      backgroundImage: `url(/assets/${effectiveAccessoryFile})`,
+                      backgroundImage: `url(${furnitureAssetUrl(effectiveAccessoryFile)})`,
                       backgroundPosition: previewBgPos,
                       backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                     }}
@@ -4889,7 +4889,7 @@ function ProfileCard({
                         style={{
                           width: HAIR_THUMB_W,
                           height: HAIR_THUMB_H,
-                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundImage: `url(${furnitureAssetUrl(opt.file)})`,
                           backgroundPosition: "0 0",
                           backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
                         }}
@@ -4920,7 +4920,7 @@ function ProfileCard({
                             style={{
                               width: COLOR_SWATCH_W,
                               height: COLOR_SWATCH_H,
-                              backgroundImage: `url(/assets/${c.file})`,
+                              backgroundImage: `url(${furnitureAssetUrl(c.file)})`,
                               backgroundPosition: "0 0",
                               backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
                             }}
@@ -4955,7 +4955,7 @@ function ProfileCard({
                         style={{
                           width: HAIR_THUMB_W,
                           height: HAIR_THUMB_H,
-                          backgroundImage: thumbFile ? `url(/assets/${thumbFile})` : undefined,
+                          backgroundImage: thumbFile ? `url(${furnitureAssetUrl(thumbFile)})` : undefined,
                           backgroundPosition: "0 0",
                           backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
                         }}
@@ -4980,7 +4980,7 @@ function ProfileCard({
                         style={{
                           width: HAIR_THUMB_W,
                           height: HAIR_THUMB_H,
-                          backgroundImage: `url(/assets/${opt.file})`,
+                          backgroundImage: `url(${furnitureAssetUrl(opt.file)})`,
                           backgroundPosition: "0 0",
                           backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
                         }}
@@ -5002,7 +5002,7 @@ function ProfileCard({
                             style={{
                               width: COLOR_SWATCH_W,
                               height: COLOR_SWATCH_H,
-                              backgroundImage: `url(/assets/${c.file})`,
+                              backgroundImage: `url(${furnitureAssetUrl(c.file)})`,
                               backgroundPosition: "0 0",
                               backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
                             }}
@@ -5037,7 +5037,7 @@ function ProfileCard({
                         style={{
                           width: HAIR_THUMB_W,
                           height: HAIR_THUMB_H,
-                          backgroundImage: thumbFile ? `url(/assets/${thumbFile})` : undefined,
+                          backgroundImage: thumbFile ? `url(${furnitureAssetUrl(thumbFile)})` : undefined,
                           backgroundPosition: "0 0",
                           backgroundSize: `${HAIR_SHEET_W * thumbScale}px ${HAIR_SHEET_H * thumbScale}px`,
                         }}
