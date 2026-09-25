@@ -3621,6 +3621,18 @@ body {
   flex-shrink: 0;
 }
 
+.color-zone-hex-input {
+  width: 80px;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  color: #f5f0ff;
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+}
+
 .color-zone-label-input {
   flex: 1;
   min-width: 60px;

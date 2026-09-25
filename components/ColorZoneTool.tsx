@@ -108,6 +108,16 @@ export default function ColorZoneTool({
   onSaved: () => void;
 }) {
   const [zones, setZones] = useState<Zone[]>([]);
+  // texto DIGITADO no campo de hex de cada zona (ver zone-hex-input no
+  // JSX) -- separado de zone.targetHex de propósito: o Douglas reclamou
+  // "muito difícil acertar nesse rgb" usando só o seletor nativo
+  // <input type="color"> (no Mac abre a roda de cor do sistema, sem
+  // campo de hex à mão) -- agora dá pra digitar/colar o hex direto
+  // (mesmo formato que ele já usa no chat, tipo "#d1a276"). Guarda o
+  // texto BRUTO enquanto digita (pode estar incompleto, tipo "#d1a") e
+  // só grava em zone.targetHex quando fechar 6 dígitos válidos -- assim
+  // nunca chega hex quebrado no algoritmo (ver commitHexDraft abaixo).
+  const [hexDrafts, setHexDrafts] = useState<Record<string, string>>({});
   const [activeZoneKey, setActiveZoneKey] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -220,6 +230,41 @@ export default function ColorZoneTool({
   function updateZone(key: string, patch: Partial<Zone>) {
     setZones((prev) => prev.map((z) => (z.key === key ? { ...z, ...patch } : z)));
     setPreviewCounts(null);
+  }
+
+  // texto mostrado no campo de hex -- o que o Douglas digitou por
+  // último (mesmo incompleto), ou o hex já salvo da zona se ele ainda
+  // não mexeu nesse campo.
+  function hexDraftFor(zone: Zone): string {
+    return hexDrafts[zone.key] ?? zone.targetHex;
+  }
+
+  // só GRAVA em zone.targetHex (o que o algoritmo de fato usa) quando o
+  // texto fecha um hex de 6 dígitos válido -- aceita com ou sem "#" na
+  // frente, maiúsculo ou minúsculo (mesmo jeito que o Douglas colou hex
+  // no chat, ex: "#d1a276"). Enquanto não fecha, só guarda o rascunho
+  // (hexDrafts) sem tocar targetHex -- não passa lixo pro colorTint.ts.
+  function handleHexInput(key: string, raw: string) {
+    setHexDrafts((prev) => ({ ...prev, [key]: raw }));
+    const cleaned = raw.trim().replace(/^#/, "");
+    if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+      updateZone(key, { targetHex: `#${cleaned.toLowerCase()}` });
+    }
+  }
+
+  // ao sair do campo (ou trocar de zona), se o que ficou digitado não
+  // fechou um hex válido, volta o campo a mostrar o hex de verdade da
+  // zona -- sem isso um "#d1a" largado pela metade ficava exibido pra
+  // sempre, mesmo a zona continuando com a última cor válida por baixo.
+  function handleHexBlur(zone: Zone) {
+    const cleaned = (hexDrafts[zone.key] ?? "").trim().replace(/^#/, "");
+    if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+      setHexDrafts((prev) => {
+        const next = { ...prev };
+        delete next[zone.key];
+        return next;
+      });
+    }
   }
 
   function clearZonePaint(key: string) {
@@ -485,8 +530,29 @@ export default function ColorZoneTool({
                   type="color"
                   value={zone.targetHex}
                   onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => updateZone(zone.key, { targetHex: e.target.value })}
-                  title="Cor alvo dessa zona"
+                  onChange={(e) => {
+                    updateZone(zone.key, { targetHex: e.target.value });
+                    setHexDrafts((prev) => {
+                      const next = { ...prev };
+                      delete next[zone.key];
+                      return next;
+                    });
+                  }}
+                  title="Cor alvo dessa zona (roda de cor)"
+                />
+                {/* campo de hex digitado -- ver comentário de hexDrafts
+                    acima ("muito difícil acertar nesse rgb" com só a roda
+                    de cor nativa). Aceita colar "#d1a276" direto. */}
+                <input
+                  type="text"
+                  className="color-zone-hex-input"
+                  value={hexDraftFor(zone)}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => handleHexInput(zone.key, e.target.value)}
+                  onBlur={() => handleHexBlur(zone)}
+                  placeholder="#d1a276"
+                  maxLength={7}
+                  title="Cor alvo dessa zona (hex -- pode colar direto)"
                 />
                 <span className="color-zone-sample-count">{zone.samples.length}px amostrado</span>
                 <button
