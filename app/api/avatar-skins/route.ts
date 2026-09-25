@@ -6,10 +6,8 @@
 // ver 0005_avatar_skins.sql) ANTES dessa chamada -- aqui só grava os
 // metadados (nome/sexo/URL/hex) depois de conferir de novo que quem
 // pediu é owner (defesa em profundidade, mesmo padrão de app/api/items).
-//
-// Sem PATCH/DELETE por enquanto (editar/apagar tom custom ainda não tem
-// UI -- diferente do móvel, que já ganhou isso -- fica pra depois se o
-// Douglas pedir).
+// PATCH (editar/gerar cor) e DELETE (apagar) ficam em
+// app/api/avatar-skins/[id]/route.ts.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";

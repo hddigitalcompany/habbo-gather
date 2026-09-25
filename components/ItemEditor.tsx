@@ -1009,10 +1009,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // ids vêm de tabelas diferentes (avatar_items/avatar_skins, sempre
   // uuid), então nunca colidem -- abrir um fecha o outro sozinho.
   const [colorToolItemId, setColorToolItemId] = useState<string | null>(null);
-  // "Editar" pro item de avatar CUSTOM (cabelo/acessório/barba/traje --
-  // NÃO tom de pele, esse continua só criar/apagar) -- pedido do
-  // Douglas: "quero editar as coisas ja criadas, fotos etc". null =
-  // formulário em modo "cadastrar item novo" (de sempre), igual
+  // "Editar" pro item de avatar CUSTOM (cabelo/acessório/barba/traje) --
+  // pedido do Douglas: "quero editar as coisas ja criadas, fotos etc".
+  // null = formulário em modo "cadastrar item novo" (de sempre), igual
   // editingId do ItemEditor de Mobi mais abaixo -- reusa o MESMO
   // formulário (label/gender/category/selectedSkinIds/rawFiles/etc já
   // existentes), só troca o botão final e o destino do submit (PATCH em
@@ -1023,6 +1022,17 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // o resto igual, mesma ideia do "Editar" de Mobi.
   const [editingAvatarItemId, setEditingAvatarItemId] = useState<string | null>(null);
   const [editingAvatarItemSheetUrl, setEditingAvatarItemSheetUrl] = useState<string | null>(null);
+  // Mesma ideia, só que pro TOM DE PELE ("Tons cadastrados") -- pedido
+  // do Douglas: "quero editar o Avatar tambem" (continuação direta do
+  // pedido acima, que só cobria cabelo/acessório/barba/traje). Estado
+  // SEPARADO de propósito (não reaproveita editingAvatarItemId): tom de
+  // pele salva na tabela avatar_skins (PATCH /api/avatar-skins/[id]),
+  // não avatar_items -- categorias diferentes nunca ficam "editando" as
+  // duas ao mesmo tempo (só uma aba fica ativa por vez), mas manter os
+  // dois PATCHs decididos por ids distintos evita depender dessa
+  // premissa pra não disparar o endpoint errado.
+  const [editingSkinId, setEditingSkinId] = useState<string | null>(null);
+  const [editingSkinSheetUrl, setEditingSkinSheetUrl] = useState<string | null>(null);
   // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
   // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
   // com o próprio estado de arquivo/posição, chaveadas por
@@ -1330,6 +1340,8 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setActiveDirection("down");
     setEditingAvatarItemId(null);
     setEditingAvatarItemSheetUrl(null);
+    setEditingSkinId(null);
+    setEditingSkinSheetUrl(null);
     for (const key of Object.keys(fileInputRefs.current)) {
       const input = fileInputRefs.current[key];
       if (input) input.value = "";
@@ -1342,8 +1354,8 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   }
 
   /** Botão "Editar" na lista "X cadastrados" -- carrega o item CUSTOM
-   * inteiro (cabelo/acessório/barba/traje, nunca tom de pele, ver
-   * comentário em editingAvatarItemId acima) de volta pro formulário
+   * inteiro (cabelo/acessório/barba/traje -- tom de pele usa
+   * startEditSkin logo abaixo, mesma ideia) de volta pro formulário
    * (mesmos campos de sempre) e liga o modo "editando" (troca o botão
    * final e o destino do submit pra PATCH, ver handleAvatarCreatorSubmit).
    * setCategory DIRETO (não handleCategoryChange) de propósito -- esse
@@ -1365,6 +1377,37 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setActiveDirection("down");
     setEditingAvatarItemId(item.id);
     setEditingAvatarItemSheetUrl(item.sheet_url);
+    setEditingSkinId(null);
+    setEditingSkinSheetUrl(null);
+    setColorToolItemId(null);
+    setError(null);
+    for (const key of Object.keys(fileInputRefs.current)) {
+      const input = fileInputRefs.current[key];
+      if (input) input.value = "";
+    }
+  }
+
+  /** Mesma ideia de startEditAvatarItem acima, só que pro TOM DE PELE
+   * ("Tons cadastrados") -- pedido do Douglas: "quero editar o Avatar
+   * tambem". setHex vem do que JÁ tava salvo (não do preset do
+   * tone-chip -- ver AVATAR_TONE_NAMES/tone-select no JSX, que
+   * SOBRESCREVE hex pro preset padrão da label ao clicar; aqui a gente
+   * quer preservar o hex de verdade que o tom já tinha, mesmo que o
+   * Douglas tenha ajustado manualmente no color picker na hora de
+   * criar). Sem foto nova nenhuma (rawFiles vazio, igual
+   * startEditAvatarItem) -- fallback cobre com o que já tava salvo. */
+  function startEditSkin(skin: CustomSkinRow) {
+    setCategory("avatar");
+    setGender(skin.gender);
+    setLabel(skin.label);
+    setHex(skin.hex ?? AVATAR_TONE_NAMES[0].hex);
+    setRawFiles({});
+    setRawPlacements({});
+    setActiveDirection("down");
+    setEditingSkinId(skin.id);
+    setEditingSkinSheetUrl(skin.sheet_url);
+    setEditingAvatarItemId(null);
+    setEditingAvatarItemSheetUrl(null);
     setColorToolItemId(null);
     setError(null);
     for (const key of Object.keys(fileInputRefs.current)) {
@@ -1540,11 +1583,12 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     // `files` computado acima, que no TRAJE pode estar apontando pra
     // aba Passo A/Passo B/Sentado no momento do clique em Cadastrar; nas
     // outras categorias `files === rawFiles` sempre, então não muda
-    // nada pra elas). EDITANDO (editingAvatarItemId) isso deixa de ser
-    // obrigatório -- sem foto nova de frente, o fallback (folha já
-    // salva, ver composeAvatarArtSheet) cobre esse quadro igual aos
-    // outros, mesma ideia do Mobi ("Editar" não exige reenviar tudo).
-    if (!editingAvatarItemId && !rawFiles.down) {
+    // nada pra elas). EDITANDO (editingAvatarItemId OU editingSkinId)
+    // isso deixa de ser obrigatório -- sem foto nova de frente, o
+    // fallback (folha já salva, ver composeAvatarArtSheet) cobre esse
+    // quadro igual aos outros, mesma ideia do Mobi ("Editar" não exige
+    // reenviar tudo).
+    if (!editingAvatarItemId && !editingSkinId && !rawFiles.down) {
       setError("A imagem de frente (pose Parado) é obrigatória.");
       return;
     }
@@ -1557,14 +1601,16 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setSubmitting(true);
     let fallbackBitmap: ImageBitmap | null = null;
     try {
-      // EDITANDO -- carrega a folha JÁ salva desse item como fallback
-      // (ver comentário grande em composeAvatarArtSheet): qualquer
-      // quadro sem foto nova reaproveita o pixel já salvo em vez de
-      // ficar em branco. Não bloqueia o save se não conseguir carregar
-      // (fica null -- editingAvatarItemSheetUrl só existe em modo
+      // EDITANDO -- carrega a folha JÁ salva desse item OU tom de pele
+      // como fallback (ver comentário grande em composeAvatarArtSheet):
+      // qualquer quadro sem foto nova reaproveita o pixel já salvo em
+      // vez de ficar em branco. Não bloqueia o save se não conseguir
+      // carregar (fica null -- os dois *SheetUrl só existem em modo
       // edição, então isso nunca roda numa criação nova).
       if (editingAvatarItemId && editingAvatarItemSheetUrl) {
         fallbackBitmap = await loadImageBitmapFromUrl(avatarAssetUrl(editingAvatarItemSheetUrl));
+      } else if (editingSkinId && editingSkinSheetUrl) {
+        fallbackBitmap = await loadImageBitmapFromUrl(avatarAssetUrl(editingSkinSheetUrl));
       }
       // TRAJE monta a folha combinando as 4 poses (parado + opcional
       // passoA/passoB/sentado, ver composeAvatarArtSheetMultiPose e
@@ -1601,7 +1647,20 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       if (uploadError) throw uploadError;
       const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
 
-      if (category === "avatar") {
+      if (category === "avatar" && editingSkinId) {
+        // "Editar" (pedido do Douglas: "quero editar o Avatar tambem")
+        // -- PATCH no lugar de POST, mesmo tom (não cria uma linha
+        // nova). O PATCH também apaga a folha ANTIGA no Storage por
+        // melhor esforço (ver app/api/avatar-skins/[id]/route.ts).
+        const res = await fetch(`/api/avatar-skins/${editingSkinId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ label: trimmedLabel, gender, sheetUrl: publicUrlData.publicUrl, hex }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "erro ao salvar alterações");
+        await loadSkins();
+      } else if (category === "avatar") {
         const res = await fetch("/api/avatar-skins", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
@@ -1790,14 +1849,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       </div>
 
       {/* nota de "editando" -- pedido do Douglas: "quero editar as
-          coisas ja criadas, fotos etc". Mesmo padrão do "Editar" de
-          Mobi (texto extra encostado no hint de sempre, ver
-          "Só reenvie a foto..." mais abaixo no form de Mobi) -- só
-          aparece pro item de avatar CUSTOM (cabelo/acessório/barba/
-          traje, ver editingAvatarItemId acima), tom de pele continua só
-          criar/apagar. */}
+          coisas ja criadas, fotos etc" / "quero editar o Avatar
+          tambem". Mesmo padrão do "Editar" de Mobi (texto extra
+          encostado no hint de sempre, ver "Só reenvie a foto..." mais
+          abaixo no form de Mobi) -- cobre tanto item CUSTOM (cabelo/
+          acessório/barba/traje, editingAvatarItemId) quanto tom de pele
+          (editingSkinId), ver os dois acima. */}
       <p className="settings-hint">
-        {editingAvatarItemId
+        {editingAvatarItemId || editingSkinId
           ? "Editando -- nenhuma foto é obrigatória aqui, reenvie só a(s) direção/pose que quiser TROCAR, o resto continua com a arte já salva."
           : 'Só a foto de "Frente" é obrigatória -- sem as outras, o jogo reaproveita a de frente virada nas outras direções (prévia rápida até você subir o resto).'}{" "}
         Arraste a foto em cima do boneco pra posicionar, e use o slider pra ajustar o tamanho -- cada direção guarda o
@@ -2236,9 +2295,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
 
         <div className="items-panel-submit-row">
           <button type="submit" className="items-panel-submit" disabled={submitting}>
-            {submitting ? "Enviando..." : editingAvatarItemId ? "Salvar alterações" : "Cadastrar"}
+            {submitting ? "Enviando..." : editingAvatarItemId || editingSkinId ? "Salvar alterações" : "Cadastrar"}
           </button>
-          {editingAvatarItemId && (
+          {(editingAvatarItemId || editingSkinId) && (
             <button type="button" className="clear-btn" onClick={cancelEditAvatarItem} disabled={submitting}>
               Cancelar edição
             </button>
@@ -2284,6 +2343,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                           <span className="items-panel-category"> -- {skin.colors.length} cor(es)</span>
                         )}
                       </span>
+                      {/* "Editar" -- pedido do Douglas: "quero editar o Avatar
+                          tambem" (continuação de "quero editar as coisas ja
+                          criadas, fotos etc", que já cobria cabelo/acessório/
+                          barba/traje). Mesmo padrão de startEditAvatarItem, ver
+                          startEditSkin acima. */}
+                      <button type="button" onClick={() => startEditSkin(skin)}>
+                        Editar
+                      </button>
                       {/* "Gerar cor" pro TOM DE PELE, mesma ferramenta de
                           cabelo/acessório/traje (ver comentário grande em
                           ColorZoneTool.tsx) -- pedido do Douglas:
