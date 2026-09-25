@@ -2193,15 +2193,29 @@ body {
   background: #9376ff;
 }
 
+/* pedido do Douglas: "nao fecha o card se eu clicar fora" -- era
+   `position: absolute` (preso dentro de .room-wrapper, que ENCOLHE
+   sempre que um painel irmão abre do lado -- ver comentário de
+   .room-wrapper/min-width:0 em globals.css: chat lateral, "Editar
+   espaço" etc -- então o fundo escurecido não cobria a tela INTEIRA, só
+   a área do jogo; clicar fora do card mas fora TAMBÉM dessa área menor
+   não acertava o backdrop, não fechava nada) e z-index:20 (bem abaixo
+   dos outros backdrops do app -- items-panel-backdrop/members-panel-
+   backdrop usam 400, auth-gate-backdrop usa 500). Troca pra `position:
+   fixed` (cobre o VIEWPORT inteiro, não fica preso a nenhum ancestral) e
+   z-index:400, igual o resto -- mesmo padrão que já funcionava certo em
+   .items-panel-backdrop/.members-panel-backdrop. border-radius:12px
+   saiu junto (só fazia sentido quando o backdrop ficava do tamanho do
+   canto arredondado de .room-wrapper -- cobrindo o viewport inteiro não
+   tem canto nenhum pra arredondar). */
 .profile-backdrop {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 20;
-  border-radius: 12px;
+  z-index: 400;
 }
 
 .profile-card {
