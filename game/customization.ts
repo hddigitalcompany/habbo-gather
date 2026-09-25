@@ -31,50 +31,24 @@ export interface HairOption {
   colors?: ColorOption[];
 }
 
-// itens gerados automaticamente a partir da pasta de origem de cabelo
-// (ver scripts/avatarAssetsConfig.mjs/syncAvatarAssets.mjs, roda sozinho
-// junto com `npm run dev`). NÃO editar esse import nem o arquivo dele à
-// mão, ele é reescrito toda vez que a pasta muda.
-//
-// GENERATED_HAIR_CATALOG: penteados novos, que ainda não existem abaixo
-// à mão (cada um já vem com suas próprias cores, se a pasta de origem
-// tiver estilo/cor aninhados).
-// GENERATED_HAIR_COLORS_BY_STYLE: cores de um penteado que JÁ existe
-// aqui embaixo (casadas pelo nome da pasta de estilo -- "Cabelinho pra
-// trás"/"Vorcarinho do Rói" -- ver MANUAL_STYLE_MATCH no script) --
-// entram dentro do `colors` do item manual correspondente, em vez de
-// criar um item novo na grade principal.
-import { GENERATED_HAIR_CATALOG, GENERATED_HAIR_COLORS_BY_STYLE } from "./customizationCatalog.generated";
-
+// pedido do Douglas: "rapa tudo que tem de item, vou subir tudo pela
+// plataforma" -- tirou os penteados "de fábrica" (pasta local, ver
+// scripts/syncAvatarAssets.mjs) do catálogo: só sobra "Nenhum" até ele
+// recadastrar tudo pelo Editor de Itens (botão "Criar Avatar" > Cabelo,
+// vai pra tabela avatar_items em vez da pasta local, ver
+// registerCustomHair mais abaixo). Os arquivos/scripts da pasta local
+// CONTINUAM existindo (só pararam de entrar aqui) -- é só reimportar
+// GENERATED_HAIR_CATALOG/GENERATED_HAIR_COLORS_BY_STYLE de
+// ./customizationCatalog.generated (mesmo esquema de antes) se um dia
+// quiser voltar a usá-los.
 export const HAIR_CATALOG: HairOption[] = [
-  // pedido do Douglas: opção "Nenhum" (arquivo transparente, mesmo
-  // esquema de BEARD_CATALOG/ACCESSORY_CATALOG/OUTFIT_CATALOG) -- útil
-  // pra tons de pele cuja arte já vem com o cabelo desenhado junto (ver
-  // AvatarGender/"feminino" acima), pra não desenhar um penteado do
-  // catálogo por cima/atrás dele. NÃO é o padrão de quem cria um avatar
-  // novo (ver DEFAULT_HAIR_ID abaixo, fixado em "ondulado" -- diferente
-  // de BEARD/ACCESSORY, onde "nenhum(a)" sendo o item [0] também é o
-  // padrão certo), só mais uma opção escolhível no editor.
   { id: "nenhum", label: "Nenhum", file: "cabelo_nenhum.png" },
-  {
-    id: "ondulado",
-    label: "Cabelinho pra trás",
-    file: "cabelo_1.png",
-    colors: GENERATED_HAIR_COLORS_BY_STYLE["ondulado"],
-  },
-  {
-    id: "vorcarinho-do-roi",
-    label: "Vorcarinho do Rói",
-    file: "cabelo_3.png",
-    colors: GENERATED_HAIR_COLORS_BY_STYLE["vorcarinho-do-roi"],
-  },
-  ...GENERATED_HAIR_CATALOG,
 ];
 
-// fixo em "ondulado" (não HAIR_CATALOG[0].id) -- ver comentário acima:
-// "Nenhum" é [0] só por convenção visual (mesmo lugar dos outros
-// catálogos), não deve virar o cabelo de quem cria um avatar novo.
-export const DEFAULT_HAIR_ID = "ondulado";
+// "Nenhum" agora é o único item -- fixo nele (era "ondulado", que saiu
+// do catálogo junto com o resto "de fábrica" acima). Mesmo padrão que
+// BEARD/ACCESSORY/OUTFIT já usavam (DEFAULT_X_ID = CATALOG[0].id).
+export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
 
 /**
  * Tom de pele/corpo base (camada "base" do avatar, ver LAYER_TEXTURE_FILE
@@ -195,13 +169,15 @@ export interface BeardOption {
   bySkin: Partial<Record<string, string>>;
 }
 
-// gerado automaticamente -- ver scripts/syncBeardAssets.mjs, NÃO editar
-// esse import nem o arquivo dele à mão.
-import { GENERATED_BEARD_CATALOG } from "./beardCatalog.generated";
-
+// pedido do Douglas: "rapa tudo que tem de item, vou subir tudo pela
+// plataforma" -- mesma ideia de HAIR_CATALOG acima, tirou as barbas "de
+// fábrica" (pasta local, ver scripts/syncBeardAssets.mjs) daqui, só
+// sobra "Nenhuma" até ele recadastrar pelo Editor de Itens > Barba
+// (tabela avatar_items). Arquivos/script continuam existindo -- é só
+// reimportar GENERATED_BEARD_CATALOG de ./beardCatalog.generated (mesmo
+// esquema de antes) se quiser voltar a usá-los.
 export const BEARD_CATALOG: BeardOption[] = [
   { id: "nenhuma", label: "Nenhuma", bySkin: { [DEFAULT_SKIN_ID]: "barba_nenhuma.png" } },
-  ...GENERATED_BEARD_CATALOG,
 ];
 
 export const DEFAULT_BEARD_ID = BEARD_CATALOG[0].id;
@@ -243,13 +219,16 @@ export interface AccessoryOption {
   colors?: ColorOption[];
 }
 
-// gerado automaticamente -- ver scripts/syncAccessoryAssets.mjs, NÃO
-// editar esse import nem o arquivo dele à mão.
-import { GENERATED_ACCESSORY_CATALOG } from "./accessoryCatalog.generated";
-
+// pedido do Douglas: "rapa tudo que tem de item, vou subir tudo pela
+// plataforma" -- mesma ideia de HAIR_CATALOG acima, tirou os acessórios
+// "de fábrica" (pasta local, ver scripts/syncAccessoryAssets.mjs) daqui,
+// só sobra "Nenhum" até ele recadastrar pelo Editor de Itens >
+// Acessório (tabela avatar_items). Arquivos/script continuam existindo
+// -- é só reimportar GENERATED_ACCESSORY_CATALOG de
+// ./accessoryCatalog.generated (mesmo esquema de antes) se quiser voltar
+// a usá-los.
 export const ACCESSORY_CATALOG: AccessoryOption[] = [
   { id: "nenhum", label: "Nenhum", file: "acessorio_nenhum.png" },
-  ...GENERATED_ACCESSORY_CATALOG,
 ];
 
 export const DEFAULT_ACCESSORY_ID = ACCESSORY_CATALOG[0].id;
@@ -274,11 +253,16 @@ export interface OutfitOption {
 
 // gerado automaticamente -- ver scripts/syncOutfitAssets.mjs, NÃO editar
 // esse import nem o arquivo dele à mão.
-import { GENERATED_OUTFIT_CATALOG } from "./outfitCatalog.generated";
-
+//
+// pedido do Douglas: "rapa tudo que tem de item, vou subir tudo pela
+// plataforma" -- mesma ideia de HAIR_CATALOG acima, tirou os trajes "de
+// fábrica" (pasta local, ver scripts/syncOutfitAssets.mjs) daqui, só
+// sobra "Nenhum" até ele recadastrar pelo Editor de Itens > Traje
+// (tabela avatar_items). Arquivo/script continuam existindo -- é só
+// reimportar GENERATED_OUTFIT_CATALOG de ./outfitCatalog.generated
+// (mesmo esquema de antes) se quiser voltar a usá-los.
 export const OUTFIT_CATALOG: OutfitOption[] = [
   { id: "nenhum", label: "Nenhum", bySkin: { [DEFAULT_SKIN_ID]: "traje_nenhum.png" } },
-  ...GENERATED_OUTFIT_CATALOG,
 ];
 
 export const DEFAULT_OUTFIT_ID = OUTFIT_CATALOG[0].id;
