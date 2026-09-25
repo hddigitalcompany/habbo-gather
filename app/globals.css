@@ -3584,6 +3584,23 @@ body {
   opacity: 0.55;
 }
 
+/* "Avatar Padrão" (ver otherPadraoArtUrl em ItemEditor.tsx) -- a OUTRA
+   parte (cabeça ou traje) já upada nessa mesma sessão, mostrada fixa
+   atrás/na frente da que tá sendo ajustada agora, só de referência
+   visual (não arrasta -- pra mexer nela, troca de aba com o toggle
+   Cabeça/Traje). Pedido do Douglas: "eu tenho que subir a cabeca aqui,
+   e o corpo junto, vendo a cabeca, se nao eu nao acerto". Opacidade
+   cheia (diferente do avatar-art-drag-box-ghost acima, que é só uma
+   prévia rápida de baixa importância) porque aqui é o próprio par que
+   importa alinhar certinho.
+*/
+.avatar-art-drag-box-other-part {
+  cursor: default;
+  pointer-events: none;
+  outline: 1px dashed rgba(124, 92, 255, 0.5);
+  outline-offset: 2px;
+}
+
 .avatar-art-drag-img {
   width: 100%;
   height: 100%;

@@ -593,6 +593,44 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFile]);
 
+  // "Avatar Padrão": pedido do Douglas: "eu tenho que subir a cabeca
+  // aqui, e o corpo junto, vendo a cabeca, se nao eu nao acerto, isso so
+  // no nosso padrao" -- enquanto ele ajusta uma parte (cabeça OU traje),
+  // mostra a OUTRA parte já upada NESSA MESMA sessão (mesmo antes de
+  // clicar Cadastrar) como camada FIXA, só de referência (sem arrastar
+  // -- pra ajustar ELA, ele troca de aba com o toggle Cabeça/Traje). Sem
+  // isso não tem como alinhar cabeça x corpo entre si, já que os dois
+  // ainda não existem cadastrados em lugar nenhum.
+  const otherPadraoFiles = isAvatarPadrao ? (padraoPart === "cabeca" ? padraoBodyFiles : padraoHeadFiles) : null;
+  const otherPadraoPlacements = isAvatarPadrao
+    ? padraoPart === "cabeca"
+      ? padraoBodyPlacements
+      : padraoHeadPlacements
+    : null;
+  const otherPadraoHasOwnFile = Boolean(otherPadraoFiles?.[activeDirection]);
+  const otherPadraoFile = otherPadraoFiles ? otherPadraoFiles[activeDirection] ?? otherPadraoFiles.down : undefined;
+  const otherPadraoPlacement = otherPadraoHasOwnFile
+    ? otherPadraoPlacements?.[activeDirection] ?? DEFAULT_PLACEMENT
+    : DEFAULT_PLACEMENT;
+
+  const [otherPadraoArtUrl, setOtherPadraoArtUrl] = useState<string | null>(null);
+  const otherPadraoArtUrlRef = useRef<string | null>(null);
+  otherPadraoArtUrlRef.current = otherPadraoArtUrl;
+
+  useEffect(() => {
+    setOtherPadraoArtUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return otherPadraoFile ? URL.createObjectURL(otherPadraoFile) : null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherPadraoFile]);
+
+  useEffect(() => {
+    return () => {
+      if (otherPadraoArtUrlRef.current) URL.revokeObjectURL(otherPadraoArtUrlRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (activeArtUrlRef.current) URL.revokeObjectURL(activeArtUrlRef.current);
@@ -831,14 +869,21 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // URL da CABEÇA mostrada no boneco: tom explicitamente selecionado (ver
   // selectedReferenceSkin acima) vence sempre que existir; senão, o
   // Avatar Padrão do sexo (mais estável/consistente que "qualquer tom
-  // cadastrado"); senão cai no referenceSkin de sempre.
-  const referenceHeadUrl = selectedReferenceSkin
-    ? avatarAssetUrl(selectedReferenceSkin.file)
-    : genderDefaultReference
-      ? avatarAssetUrl(genderDefaultReference.head_sheet_url)
-      : referenceSkin
-        ? avatarAssetUrl(referenceSkin.file)
-        : undefined;
+  // cadastrado"); senão cai no referenceSkin de sempre. Na própria aba
+  // "Avatar Padrão" isso fica DESLIGADO (undefined) -- mostrar um tom
+  // qualquer ali só atrapalha (pedido do Douglas: "essa cabeca ai" era
+  // confuso, sem relação com o que ele tava subindo); nessa aba quem
+  // aparece é só o PRÓPRIO par cabeça/traje que ele tá montando, ver
+  // otherPadraoArtUrl mais abaixo.
+  const referenceHeadUrl = isAvatarPadrao
+    ? undefined
+    : selectedReferenceSkin
+      ? avatarAssetUrl(selectedReferenceSkin.file)
+      : genderDefaultReference
+        ? avatarAssetUrl(genderDefaultReference.head_sheet_url)
+        : referenceSkin
+          ? avatarAssetUrl(referenceSkin.file)
+          : undefined;
   // corpo/traje "limpo" do Avatar Padrão, desenhado ATRÁS da cabeça
   // (mesma ordem de LAYER_DRAW_ORDER em MainScene.ts: traje antes de
   // base) -- independe de qual cabeça/tom tá sendo mostrada em cima.
@@ -1115,6 +1160,26 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               style={{ bottom: STAGE_BASELINE_PAD, width: TILE_SIZE_PX, height: TILE_SIZE_PX }}
             />
 
+            {/* "Avatar Padrão" editando a CABEÇA: mostra o TRAJE já upado
+                (se tiver) por baixo, fixo -- pra alinhar a cabeça contra
+                o corpo. Vem ANTES do boneco ativo no DOM de propósito
+                (traje embaixo, cabeça em cima, mesma ordem de
+                LAYER_DRAW_ORDER). */}
+            {isAvatarPadrao && padraoPart === "cabeca" && otherPadraoArtUrl && (
+              <div
+                className="avatar-art-drag-box avatar-art-drag-box-other-part"
+                style={{
+                  width: FRAME_W * PREVIEW_SCALE,
+                  height: FRAME_H * PREVIEW_SCALE,
+                  bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                  transform: `translate(calc(-50% + ${otherPadraoPlacement.offsetX * PREVIEW_SCALE}px), ${otherPadraoPlacement.offsetY * PREVIEW_SCALE}px) scale(${otherPadraoPlacement.scale})`,
+                }}
+                title="Traje (corpo limpo) já upado -- só referência aqui, pra ajustar troque pra aba Traje"
+              >
+                <img className="avatar-art-drag-img" src={otherPadraoArtUrl} alt="" />
+              </div>
+            )}
+
             {activeArtUrl ? (
               <div
                 className={hasOwnFile ? "avatar-art-drag-box" : "avatar-art-drag-box avatar-art-drag-box-ghost"}
@@ -1131,6 +1196,25 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               </div>
             ) : (
               <p className="edit-hint item-size-empty">Escolha a foto de "{activeDirectionLabel}" pra ver o preview aqui.</p>
+            )}
+
+            {/* "Avatar Padrão" editando o TRAJE: mostra a CABEÇA já upada
+                por cima, fixa -- pra alinhar o corpo contra a cabeça.
+                Vem DEPOIS do boneco ativo de propósito (cabeça sempre em
+                cima do traje). */}
+            {isAvatarPadrao && padraoPart === "traje" && otherPadraoArtUrl && (
+              <div
+                className="avatar-art-drag-box avatar-art-drag-box-other-part"
+                style={{
+                  width: FRAME_W * PREVIEW_SCALE,
+                  height: FRAME_H * PREVIEW_SCALE,
+                  bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                  transform: `translate(calc(-50% + ${otherPadraoPlacement.offsetX * PREVIEW_SCALE}px), ${otherPadraoPlacement.offsetY * PREVIEW_SCALE}px) scale(${otherPadraoPlacement.scale})`,
+                }}
+                title="Cabeça já upada -- só referência aqui, pra ajustar troque pra aba Cabeça"
+              >
+                <img className="avatar-art-drag-img" src={otherPadraoArtUrl} alt="" />
+              </div>
             )}
           </div>
 
