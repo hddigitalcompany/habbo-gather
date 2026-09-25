@@ -809,12 +809,37 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "erro ao salvar avatar padrão");
       await loadDefaultReference();
-      resetCreatorForm();
+      // SEM resetCreatorForm() aqui de propósito -- pedido do Douglas:
+      // "opcao de editar o avatar padrao e interessante tbm". Diferente
+      // das outras categorias (onde salvar e limpar faz sentido, cada
+      // "Cadastrar" é um item NOVO), o Avatar Padrão é só 1 por sexo e
+      // ele vai voltar a mexer na posição várias vezes -- resetar aqui
+      // forçava reescolher os 4 arquivos do zero a cada ajuste. Mantém
+      // as fotos/posições como estão (upload continua no navegador),
+      // então ele pode nudgear e clicar Cadastrar de novo (upsert já
+      // substitui). Pra recomeçar com fotos diferentes, ver
+      // handleClearPadrao/botão "Começar do zero" no JSX abaixo.
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "erro ao salvar");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // "Começar do zero" (ver JSX abaixo) -- limpa só as fotos/posições do
+  // Avatar Padrão (as duas partes), sem mexer no resto do formulário
+  // (label/categoria/etc de outras abas). Separado do resetCreatorForm
+  // de sempre porque aqui é uma limpeza PEDIDA, não automática pós-save.
+  function handleClearPadrao() {
+    setPadraoHeadFiles({});
+    setPadraoHeadPlacements({});
+    setPadraoBodyFiles({});
+    setPadraoBodyPlacements({});
+    setPadraoPart("cabeca");
+    for (const key of Object.keys(fileInputRefs.current)) {
+      const input = fileInputRefs.current[key];
+      if (input) input.value = "";
     }
   }
 
@@ -1053,9 +1078,17 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             </div>
             <p className="settings-hint">
               Sobe as duas partes (cabeça e traje/corpo limpo) e clica em Cadastrar UMA vez só no final -- as fotos
-              ficam guardadas ao trocar de aba aqui em cima.
-              {defaultReference[gender] ? " Já existe um Avatar Padrão " + gender + "; cadastrar de novo substitui." : ""}
+              ficam guardadas ao trocar de aba aqui em cima. Depois de cadastrar, as fotos CONTINUAM aqui -- pode
+              seguir ajustando a posição e clicar em Cadastrar de novo quantas vezes quiser (substitui o anterior).
+              {defaultReference[gender] ? " Já existe um Avatar Padrão " + gender + " salvo." : ""}
             </p>
+            {(Object.keys(padraoHeadFiles).length > 0 || Object.keys(padraoBodyFiles).length > 0) && (
+              <div className="items-panel-submit-row">
+                <button type="button" className="clear-btn" onClick={handleClearPadrao}>
+                  Começar do zero (trocar as fotos)
+                </button>
+              </div>
+            )}
           </>
         ) : category === "avatar" ? (
           <div className="tone-select">
