@@ -662,8 +662,21 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // preview vazio (proporção do corpo pode não bater exatamente, mas
   // ainda dá um boneco de verdade pra alinhar a foto por cima). Aviso
   // embaixo (ver referenceSkinIsFallback) quando isso acontece.
-  const referenceSkin = genderSkins[0] ?? SKIN_CATALOG[0];
-  const referenceSkinIsFallback = Boolean(referenceSkin) && genderSkins.length === 0;
+  // pedido do Douglas: "a cabeça selecionada deveria aparecer no editor,
+  // na posição que eu setei ela, pra dai sim eu salvar o restante a
+  // partir dela, e que fique travado nela" -- em categoria bySkin
+  // (barba/traje), o boneco de referência tem que ser o(s) TOM(NS) que
+  // a pessoa marcou nos chips acima (ver tone-chip mais abaixo), não
+  // qualquer um do mesmo sexo -- senão a posição alinhada no editor
+  // (contra um corpo) pode não bater com o corpo de verdade que a peça
+  // vai vestir. Só cai no "qualquer um do sexo" (ou de outro sexo, ver
+  // referenceSkinIsFallback) quando ainda não marcou nenhum tom, ou a
+  // categoria nem usa bySkin (cabelo/acessório, onde não existe seleção
+  // de tom pra começo de conversa).
+  const selectedReferenceSkin =
+    usesBySkin && selectedSkinIds.length > 0 ? SKIN_CATALOG.find((s) => s.id === selectedSkinIds[0]) : undefined;
+  const referenceSkin = selectedReferenceSkin ?? genderSkins[0] ?? SKIN_CATALOG[0];
+  const referenceSkinIsFallback = Boolean(referenceSkin) && !selectedReferenceSkin && genderSkins.length === 0;
   const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
   const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
   const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
@@ -834,6 +847,23 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             Ainda não tem nenhum tom de pele "{gender}" cadastrado -- o boneco abaixo é de OUTRO sexo, só pra não
             deixar o preview vazio (o corpo pode não bater exatamente). Cadastre um tom de pele "{gender}" em
             "Avatar" primeiro pra ter a referência certa.
+          </p>
+        )}
+
+        {/* confirma QUAL tom o boneco abaixo representa -- pedido do
+            Douglas: "a cabeça selecionada deveria aparecer no editor...
+            travado nela". Só aparece quando dá pra escolher mais de 1
+            tom (usesBySkin) -- se marcou vários, o boneco mostra o
+            PRIMEIRO da lista (selectedSkinIds[0]), então avisa qual é,
+            já que os outros tons marcados podem ter proporção um pouco
+            diferente (cada um foi alinhado/subido separado). */}
+        {usesBySkin && selectedReferenceSkin && (
+          <p className="settings-hint">
+            Boneco de referência abaixo: <strong>{selectedReferenceSkin.label}</strong>
+            {selectedSkinIds.length > 1
+              ? ` (o 1º dos ${selectedSkinIds.length} tons marcados -- os outros podem ter o corpo levemente diferente, cada um foi cadastrado à parte)`
+              : ""}
+            .
           </p>
         )}
 
