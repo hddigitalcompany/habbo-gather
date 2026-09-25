@@ -860,6 +860,15 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               </div>
             </div>
 
+            {/* tile de referência embaixo do boneco (pedido do Douglas:
+                "o tile continua nao aparecendo" -- faltava aqui, só o
+                editor de mobi tinha, ver item-stage-tile no form
+                principal mais abaixo). Mesmo tamanho/âncora ali. */}
+            <div
+              className="item-stage-tile"
+              style={{ bottom: STAGE_BASELINE_PAD, width: TILE_SIZE_PX, height: TILE_SIZE_PX }}
+            />
+
             {activeArtUrl ? (
               <div
                 className={hasOwnFile ? "avatar-art-drag-box" : "avatar-art-drag-box avatar-art-drag-box-ghost"}

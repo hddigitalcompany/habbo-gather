@@ -3479,13 +3479,23 @@ body {
   left: 50%;
   transform: translateX(-50%);
   pointer-events: none;
+  /* o corte pra mostrar só 1 quadro da folha (ver item-stage-avatar-crop
+     abaixo) TEM que ficar aqui, no container que NÃO tem transform --
+     bug encontrado testando o boneco sentado (pedido do Douglas):
+     overflow:hidden num elemento que também tem transform corta ANTES
+     do transform ser aplicado (no espaço LOCAL do próprio elemento), daí
+     a "janela" de corte anda/escala JUNTO com o transform em vez de
+     ficar fixa -- na prática, qualquer offset diferente de (0,0) virava
+     nada visível (ou o quadro 0 aparecendo fora do lugar), então toda
+     pose que não fosse "frente" (esquerda/direita/costas/sentado) nunca
+     mostrou o boneco direito, só ninguém tinha notado. */
+  overflow: hidden;
 }
 
 .item-stage-avatar-crop {
   position: relative;
   width: 100%;
   height: 100%;
-  overflow: hidden;
   transform-origin: bottom center;
   image-rendering: pixelated;
 }
@@ -3536,6 +3546,10 @@ body {
   border-radius: 6px;
   z-index: 2;
   filter: drop-shadow(0 0 4px rgba(255, 196, 0, 0.55));
+  /* mesmo motivo de item-stage-avatar acima -- overflow:hidden precisa
+     ficar aqui (fora do transform), senão o quadro sentado (12/13/14)
+     nunca aparece. */
+  overflow: hidden;
 }
 
 .item-stage-seat-avatar:active {
