@@ -3029,6 +3029,27 @@ body {
   border-color: #7c5cff;
 }
 
+/* pedido do Douglas: "quando eu adiciono a cor nao consigo voltar a
+   cor original / faca uma bolinha cinza com um risco no meio em
+   primeiro lugar nas cores, clicando nela volta na cor padrao" --
+   círculo cinza com um risco diagonal claro no meio (gradient em vez
+   de ícone/imagem à parte), primeiro item das listas "Cores de X" (só
+   nelas -- Tom de pele continua sem essa bolinha, é obrigatório ter
+   um tom escolhido). Clicar chama onSelect*Color(null), que volta o
+   item pra arte "padrão" dele (ver effectiveHairFile/
+   effectiveAccessoryFile/effectiveOutfitFile em GameRoom.tsx). */
+.skin-swatch-reset {
+  background:
+    linear-gradient(135deg, transparent calc(50% - 1.5px), #cfc4e6 calc(50% - 1.5px), #cfc4e6 calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+    #4a4360;
+}
+
+.skin-swatch-reset.selected {
+  background:
+    linear-gradient(135deg, transparent calc(50% - 1.5px), #ffffff calc(50% - 1.5px), #ffffff calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+    #5a527a;
+}
+
 /* Seletor de tom no Editor de Itens > "Criar Avatar" (ver AvatarCreatorPanel
    em components/ItemEditor.tsx) -- Branco/Pardo/Negro pra categoria
    "Avatar" (single-select, define o tom novo) e checkbox de "aplica pra

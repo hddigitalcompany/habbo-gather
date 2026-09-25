@@ -3063,8 +3063,11 @@ export default function GameRoom({
   }
 
   // troca a COR do penteado ATUAL (não troca de penteado -- ver
-  // comentário em selectedHairColorId acima).
-  function selectHairColor(colorId: string) {
+  // comentário em selectedHairColorId acima). colorId=null volta pra
+  // arte "padrão" do penteado, sem nenhuma cor escolhida (pedido do
+  // Douglas: "quando eu adiciono a cor nao consigo voltar a cor
+  // original" -- ver skin-swatch-reset no JSX).
+  function selectHairColor(colorId: string | null) {
     setSelectedHairColorId(colorId);
   }
 
@@ -3098,7 +3101,9 @@ export default function GameRoom({
     setSelectedAccessoryId(accessoryId);
     setSelectedAccessoryColorId(null);
   }
-  function selectAccessoryColor(colorId: string) {
+  // colorId=null volta pra arte "padrão" do acessório (mesmo esquema
+  // de selectHairColor acima).
+  function selectAccessoryColor(colorId: string | null) {
     setSelectedAccessoryColorId(colorId);
   }
 
@@ -3112,7 +3117,9 @@ export default function GameRoom({
     setSelectedOutfitId(outfitId);
     setSelectedOutfitColorId(null);
   }
-  function selectOutfitColor(colorId: string) {
+  // colorId=null volta pra arte "padrão" do traje (mesmo esquema de
+  // selectHairColor acima).
+  function selectOutfitColor(colorId: string | null) {
     setSelectedOutfitColorId(colorId);
   }
 
@@ -4627,7 +4634,11 @@ function ProfileCard({
   selectedHairId: string;
   onSelectHair: (id: string) => void;
   selectedHairColorId: string | null;
-  onSelectHairColor: (id: string) => void;
+  // pedido do Douglas: "quando eu adiciono a cor nao consigo voltar a
+  // cor original" -- aceita `null` agora (a bolinha cinza com risco no
+  // meio, ver skin-swatch-reset no JSX abaixo) pra voltar a arte
+  // "padrão" do item, sem nenhuma cor escolhida.
+  onSelectHairColor: (id: string | null) => void;
   selectedGender: AvatarGender;
   onSelectGender: (gender: AvatarGender) => void;
   selectedSkinId: string;
@@ -4646,11 +4657,11 @@ function ProfileCard({
   selectedAccessoryId: string;
   onSelectAccessory: (id: string) => void;
   selectedAccessoryColorId: string | null;
-  onSelectAccessoryColor: (id: string) => void;
+  onSelectAccessoryColor: (id: string | null) => void;
   selectedOutfitId: string;
   onSelectOutfit: (id: string) => void;
   selectedOutfitColorId: string | null;
-  onSelectOutfitColor: (id: string) => void;
+  onSelectOutfitColor: (id: string | null) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
   measuredHeight: number | null;
@@ -4892,6 +4903,19 @@ function ProfileCard({
             <div className="skin-picker">
               <span className="skin-picker-label">Cores de &quot;{selectedHairOption.label}&quot;</span>
               <div className="skin-swatches">
+                {/* pedido do Douglas: "quando eu adiciono a cor nao
+                    consigo voltar a cor original / faca uma bolinha
+                    cinza com um risco no meio em primeiro lugar nas
+                    cores, clicando nela volta na cor padrao" -- sempre
+                    em PRIMEIRO lugar na lista, chama onSelectHairColor
+                    com null (volta pro arquivo "padrão" do penteado,
+                    sem cor escolhida, ver effectiveHairFile acima). */}
+                <button
+                  type="button"
+                  className={selectedHairColorId === null ? "skin-swatch skin-swatch-reset selected" : "skin-swatch skin-swatch-reset"}
+                  onClick={() => onSelectHairColor(null)}
+                  title="Cor padrão"
+                />
                 {selectedHairOption.colors.map((c) => (
                   <button
                     key={c.id}
@@ -4910,6 +4934,15 @@ function ProfileCard({
               <div className="skin-picker">
                 <span className="skin-picker-label">Cores de &quot;{selectedAccessoryOption.label}&quot;</span>
                 <div className="skin-swatches">
+                  {/* mesma bolinha de reset acima, ver comentário lá. */}
+                  <button
+                    type="button"
+                    className={
+                      selectedAccessoryColorId === null ? "skin-swatch skin-swatch-reset selected" : "skin-swatch skin-swatch-reset"
+                    }
+                    onClick={() => onSelectAccessoryColor(null)}
+                    title="Cor padrão"
+                  />
                   {selectedAccessoryOption.colors.map((c) => (
                     <button
                       key={c.id}
@@ -4926,6 +4959,13 @@ function ProfileCard({
             <div className="skin-picker">
               <span className="skin-picker-label">Cores de &quot;{selectedOutfitOption.label}&quot;</span>
               <div className="skin-swatches">
+                {/* mesma bolinha de reset acima, ver comentário lá. */}
+                <button
+                  type="button"
+                  className={selectedOutfitColorId === null ? "skin-swatch skin-swatch-reset selected" : "skin-swatch skin-swatch-reset"}
+                  onClick={() => onSelectOutfitColor(null)}
+                  title="Cor padrão"
+                />
                 {selectedOutfitOption.colors.map((c) => (
                   <button
                     key={c.id}
