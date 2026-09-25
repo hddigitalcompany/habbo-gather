@@ -2522,18 +2522,20 @@ body {
 .profile-card.editing {
   display: flex;
   flex-direction: column;
-  /* pedido do Douglas: "Aumenta ele na altura pra caber os itens embaixo
-     com espaco bom" -- ver EDITING_MIN_HEIGHT/style inline em
-     GameRoom.tsx (a altura de VERDADE vem de lá; max-height aqui só
-     precisa dar folga suficiente pra não cortar esse valor). */
-  max-height: 780px;
-  /* pedido do Douglas: "aumentar o card de personalização na largura,
-     30%" e, depois, o layout em colunas (tom de pele | boneco+itens,
-     ver .profile-edit-body) pedindo mais espaço lateral -- só a tela de
-     EDIÇÃO cresce; o card de perfil normal (.profile-card sem .editing)
-     continua 290px de sempre. max-width:85% (herdado de .profile-card)
-     continua valendo, então em tela pequena ainda encolhe igual antes. */
-  width: 460px;
+  /* pedido do Douglas: "a altura fixa na altura do card do perfil" --
+     a altura de VERDADE vem do style inline (measuredHeight, mede o
+     card de perfil normal); max-height aqui só dá folga suficiente pra
+     não cortar esse valor. */
+  max-height: 640px;
+  /* pedido do Douglas: "estende o card na horizontal" -- boneco e
+     abas+grade agora ficam LADO A LADO (ver .profile-edit-main), não
+     mais um embaixo do outro, então o card precisou crescer bem mais
+     na largura (460 -> 740px) pra caber as TRÊS colunas (tom de pele |
+     boneco | itens) com espaço de sobra. Só a tela de EDIÇÃO cresce; o
+     card de perfil normal (.profile-card sem .editing) continua 290px
+     de sempre. max-width:85% (herdado de .profile-card) continua
+     valendo, então em tela pequena ainda encolhe igual antes. */
+  width: 740px;
 }
 
 /* corpo da tela de edição, DUAS colunas lado a lado (ver comentário
@@ -2575,12 +2577,33 @@ body {
   padding: 0;
 }
 
-/* coluna principal: boneco + abas + grade de itens -- "do lado direito"
-   do tom de pele/cores agora (pedido do Douglas: "aoinves de embaixo do
-   lado direito os itens"), no lugar de ficar tudo empilhado em largura
-   total como antes. flex-direction:column porque o boneco/abas/grade
-   continuam empilhados ENTRE si, só a coluna toda que mudou de lugar. */
+/* coluna principal: pedido do Douglas depois de ver a primeira versão
+   (abas+grade empilhadas embaixo do boneco): "vc nao entendeu... eu
+   quero na posicao do segundo print, estende o card na horizontal" --
+   agora é uma LINHA (não mais coluna): boneco de um lado
+   (.profile-edit-avatar-col), abas+grade do OUTRO lado
+   (.profile-edit-items-col), lado a lado -- é por isso que o card
+   precisou ficar bem mais largo (ver width em .profile-card.editing). */
 .profile-edit-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  min-height: 0;
+}
+
+/* boneco -- flex-shrink:0 (tamanho fixo, ver AVATAR_PREVIEW_W/H em
+   GameRoom.tsx), .avatar-preview-wrap por dentro já centraliza tudo. */
+.profile-edit-avatar-col {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* abas + grade -- pega o resto da largura que sobra do boneco.
+   flex-direction:column porque abas (fixas) e grade (rolando) dentro
+   dela continuam empilhadas ENTRE si, só a coluna toda que agora fica
+   do LADO do boneco em vez de embaixo. */
+.profile-edit-items-col {
   flex: 1;
   min-width: 0;
   display: flex;

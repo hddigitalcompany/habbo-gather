@@ -4538,11 +4538,6 @@ const HAIR_SHEET_H = 522;
 const AVATAR_PREVIEW_W = 176;
 const AVATAR_PREVIEW_H = 228.8; // mantém a proporção 200:260 do frame
 
-// altura mínima da tela "Editar meu personagem" -- ver comentário no
-// style inline dela (profile-card.editing) mais abaixo. Cabe: título
-// (~40px) + as duas colunas (tom de pele/cores/sexo à esquerda, boneco +
-// abas + grade de 2 linhas de item à direita, ~620px) + ações (~60px).
-const EDITING_MIN_HEIGHT = 720;
 
 // pedido do Douglas: "pra todos os itens eu tenho que subir os 4 lados
 // [...] o cara tem que poder ver o boneco dele em 4 lados também em
@@ -4778,16 +4773,15 @@ function ProfileCard({
       <div className="profile-backdrop" onClick={onClose}>
         <div
           className="profile-card editing"
-          // pedido do Douglas: "Aumenta ele na altura pra caber os itens
-          // embaixo com espaco bom" -- antes essa tela seguia CEGAMENTE a
-          // altura medida do card de perfil normal (measuredHeight, ver
-          // comentário grande mais abaixo em "Editar meu personagem toma
-          // o card INTEIRO"), que é bem mais baixo (só foto+nome+bio). A
-          // tela de edição agora tem sua PRÓPRIA altura mínima -- ainda
-          // respeita measuredHeight quando ele for MAIOR que isso (telas
-          // grandes, card de perfil mais alto), só nunca fica menor que
-          // EDITING_MIN_HEIGHT.
-          style={{ height: Math.max(measuredHeight ?? 0, EDITING_MIN_HEIGHT) }}
+          // pedido do Douglas: "a altura fixa na altura do card do
+          // perfil" -- volta a seguir CEGAMENTE a altura medida do card
+          // de perfil normal (measuredHeight, ver comentário grande mais
+          // abaixo em "Editar meu personagem toma o card INTEIRO"),
+          // igual sempre foi. O layout em 3 colunas lado a lado (boneco +
+          // abas+grade, ver .profile-edit-main) já não precisa de mais
+          // altura que isso -- foi só a largura que cresceu (ver width
+          // em .profile-card.editing).
+          style={{ height: measuredHeight ?? 560 }}
           onClick={(e) => e.stopPropagation()}
         >
           <h3 className="profile-edit-title">Editar meu personagem</h3>
@@ -4926,6 +4920,15 @@ function ProfileCard({
             </div>
 
             <div className="profile-edit-main">
+              {/* pedido do Douglas: "vc nao entendeu... eu quero na
+                  posicao do segundo print, estende o card na horizontal"
+                  -- abas + grade de itens NÃO ficam mais empilhadas
+                  EMBAIXO do boneco (era a leitura errada da vez
+                  anterior); ficam do LADO dele, mesma linha, cada um na
+                  sua coluna (.profile-edit-avatar-col /
+                  .profile-edit-items-col) -- por isso o card precisou
+                  esticar na horizontal (ver width em .profile-card.editing). */}
+              <div className="profile-edit-avatar-col">
           {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
               traje + cabelo/barba/acessório selecionados empilhados,
               mesmo recorte de frame 0 dos thumbnails), ver
@@ -5047,7 +5050,9 @@ function ProfileCard({
             <span className="avatar-preview-direction-label">{FACING_LABEL[previewDirection]}</span>
             </div>
           </div>
+              </div>
 
+              <div className="profile-edit-items-col">
           <div className="edit-category-tabs">
             {CUSTOMIZATION_CATEGORIES.map((cat) => (
               <button
@@ -5180,6 +5185,7 @@ function ProfileCard({
               <div className="edit-category-empty">Em breve</div>
             )}
           </div>
+              </div>
             </div>
           </div>
 
