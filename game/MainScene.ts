@@ -289,6 +289,21 @@ const DEPTH_AREA = -1_500_000;
 const DEPTH_AREA_HOVER = DEPTH_AREA + 1;
 const DEPTH_AREA_LABEL = DEPTH_AREA + 2;
 
+// pedido do Douglas: "quando o avatar entrar dentro de um ambiente,
+// area, o resto do mapa tem que esmaecer, e apenas os mobis que estao
+// dentro daquela area ficam na tonalidade normal, dando a sensacao de
+// luz acesa e luz esmaecido no que ta fora, igual o gather" -- ver
+// updateAreaDim abaixo. Fica ACIMA de TUDO (piso/área/móvel/boneco, que
+// usam profundidade em torno de -2M..+900) -- um "véu" preto
+// semitransparente cobrindo o mapa INTEIRO fora do retângulo da área
+// onde o jogador LOCAL está agora (dentro do retângulo, nada é
+// desenhado ali -- por isso "acende"). alpha 0.45 tenta bater na
+// proporção visual do Gather de verdade (nem clarinho demais, que não
+// dava pra notar, nem preto total, que escondia os móveis de fora por
+// completo -- ainda dá pra reconhecer o que tem lá, só mais escuro).
+const DEPTH_AREA_DIM = 10_000_000;
+const AREA_DIM_ALPHA = 0.45;
+
 // a arte de fundo da sala (textura "room", ver create()) precisa ficar
 // AINDA MAIS atrás que o piso pintado -- sem isso ela ficava com
 // profundidade padrão (0), ou seja, na FRENTE do piso (DEPTH_FLOOR é
@@ -605,6 +620,15 @@ export default class MainScene extends Phaser.Scene {
   // servidor), NUNCA derivado de quem tá sentado onde. playerId "local"
   // identifica o PRÓPRIO jogador (ver onAreaOwnerClick/isLocal).
   private areaOwnerByAreaId: Map<string, { playerId: string; name: string }> = new Map();
+
+  // "véu" de escurecer fora da área onde o LOCAL está agora (ver
+  // updateAreaDim/DEPTH_AREA_DIM) -- até 4 retângulos (cima/baixo/
+  // esquerda/direita do retângulo da área, o que sobra do mapa
+  // GAME_WIDTH x GAME_HEIGHT em volta dele). areaDimAreaId guarda a
+  // área usada pra desenhar da ÚLTIMA vez, só pra updateAreaDim não
+  // redesenhar à toa todo frame quando o jogador não mudou de área.
+  private areaDimSprites: Phaser.GameObjects.Rectangle[] = [];
+  private areaDimAreaId: string | null | undefined = undefined;
 
   /** Definido de fora (GameRoom.tsx) -- chamado ao clicar em "Tomar posse" numa mesa privada sem dono. */
   onClaimArea?: (areaId: string) => void;
@@ -1844,6 +1868,11 @@ export default class MainScene extends Phaser.Scene {
     if (_time - this.lastSent > 50) {
       this.lastSent = _time;
       this.onLocalMove?.(this.localContainer.x, this.localContainer.y);
+      // mesmo throttle de 50ms do relato pro servidor -- não precisa
+      // recalcular a cada frame de verdade, só reagir rápido o
+      // suficiente quando o jogador entra/sai de uma área (ver
+      // updateAreaDim/DEPTH_AREA_DIM acima).
+      this.updateAreaDim();
     }
   }
 
@@ -2612,6 +2641,11 @@ export default class MainScene extends Phaser.Scene {
   private refreshAreas() {
     this.redrawAreaBorders();
     this.updateAreaHoverLabels();
+    // force:true -- a área que o jogador já está pode ter mudado de
+    // FORMATO (tile pintado/apagado), mesmo continuando com o mesmo id,
+    // então o véu (ver updateAreaDim) precisa redesenhar mesmo sem
+    // "trocar" de área.
+    this.updateAreaDim(true);
   }
 
   /** Desenha (do zero) o contorno de cada área que já tem pelo menos 1 tile pintado -- um retângulo por área, do canto superior-esquerdo ao inferior-direito dela (ver areaTileBounds em game/areas.ts; numa área com formato irregular isso pode incluir algum tile de fora, simplificação aceitável pro uso esperado). Mais forte durante a edição, mais discreto no uso normal. */
@@ -2635,6 +2669,58 @@ export default class MainScene extends Phaser.Scene {
       );
       this.areaBorderGfx.push(g);
     }
+  }
+
+  /**
+   * "Apaga a luz" fora da área onde o jogador LOCAL está agora (pedido
+   * do Douglas: "quando o avatar entrar dentro de um ambiente, area, o
+   * resto do mapa tem que esmaecer... igual o gather", ver
+   * DEPTH_AREA_DIM/AREA_DIM_ALPHA acima). Chamada toda vez que o LOCAL
+   * anda (reportPosition, a cada frame mas throttled a 50ms) e toda vez
+   * que a área muda de forma (refreshAreas, `force=true` -- aí redesenha
+   * mesmo se o id da área continuar o mesmo, porque o RETÂNGULO dela
+   * pode ter mudado). Sem área nenhuma (jogador no espaço aberto), não
+   * desenha nada -- fica tudo aceso normal, como sempre foi.
+   */
+  private updateAreaDim(force = false) {
+    if (!this.localContainer) return; // pode ser chamado (via refreshAreas) antes do boneco local existir ainda
+    const areaId = this.areaZoneAt(this.localContainer.x, this.localContainer.y);
+    if (!force && areaId === this.areaDimAreaId) return; // não mudou de área -- nada novo pra desenhar
+    this.areaDimAreaId = areaId;
+
+    for (const r of this.areaDimSprites) r.destroy();
+    this.areaDimSprites = [];
+    if (!areaId) return; // fora de qualquer área -- mapa inteiro aceso, sem véu nenhum
+
+    const tiles = this.tilesByAreaId().get(areaId);
+    if (!tiles || tiles.length === 0) return; // área sem tile pintado (não deveria acontecer aqui, defensivo)
+
+    const { minCol, maxCol, minRow, maxRow } = areaTileBounds(tiles);
+    const topLeft = tileToWorld(minCol, minRow);
+    const bottomRight = tileToWorld(maxCol, maxRow);
+    // mesmo retângulo do contorno (ver redrawAreaBorders) -- meio tile de
+    // folga em volta, área "acesa" cobre o quadrado INTEIRO de cada tile
+    // pintado, não só o centro dele.
+    const litLeft = topLeft.x - TILE / 2;
+    const litTop = topLeft.y - TILE / 2;
+    const litRight = bottomRight.x + TILE / 2;
+    const litBottom = bottomRight.y + TILE / 2;
+
+    // 4 retângulos (cima/baixo/esquerda/direita do retângulo aceso) --
+    // cobrem tudo que SOBRA do mapa (0..GAME_WIDTH, 0..GAME_HEIGHT) em
+    // volta dele, deixando o miolo sem nenhum véu por cima (é isso que
+    // "acende" a área). Simplificação aceitável pra área de formato
+    // irregular, mesmo caso já documentado em areaTileBounds.
+    const addDimRect = (x: number, y: number, w: number, h: number) => {
+      if (w <= 0 || h <= 0) return;
+      this.areaDimSprites.push(
+        this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x000000, AREA_DIM_ALPHA).setDepth(DEPTH_AREA_DIM)
+      );
+    };
+    addDimRect(0, 0, GAME_WIDTH, litTop); // faixa de cima
+    addDimRect(0, litBottom, GAME_WIDTH, GAME_HEIGHT - litBottom); // faixa de baixo
+    addDimRect(0, litTop, litLeft, litBottom - litTop); // faixa da esquerda
+    addDimRect(litRight, litTop, GAME_WIDTH - litRight, litBottom - litTop); // faixa da direita
   }
 
   /**
