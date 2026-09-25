@@ -2619,11 +2619,23 @@ body {
 /* título e abas de categoria ficam FIXOS (fora da área que rola) --
    só a lista de itens + cores (ver .profile-edit-scroll) muda de
    tamanho por dentro, o card em volta nunca muda. */
+/* pedido do Douglas: "editar meu personagem deve estar centralizado no
+   avatar" -- marginLeft/width vêm inline (JSX, calculados em cima da
+   largura de .profile-edit-side + .profile-edit-avatar-col, ver
+   AVATAR_COL_WIDTH em GameRoom.tsx) pra essa caixa cair EXATAMENTE em
+   cima da coluna do boneco; box-sizing:border-box faz o padding entrar
+   na largura já calculada (sem isso o texto ficaria puxado pro lado) e
+   text-align:center centraliza o texto por dentro dela. Padding lateral
+   zerado (era 18px) porque agora quem posiciona a caixa é o marginLeft
+   -- padding horizontal aqui só ia encolher a área de centralização à
+   toa. */
 .profile-edit-title {
   font-size: 15px;
   font-weight: 700;
   margin: 0;
-  padding: 14px 18px 4px;
+  padding: 14px 0 4px;
+  box-sizing: border-box;
+  text-align: center;
   color: #f5f0ff;
   flex-shrink: 0;
 }
@@ -2681,8 +2693,12 @@ body {
      sem mudar o tamanho dela" -- padding lateral cai de 18 pra 12px
      (1/3 a menos), sobra mais largura pra coluna de itens do lado
      (largura TOTAL do card fica travada, ver .profile-card.editing --
-     "fixa a largura total do card como esta agora, nao mexe"). */
-  padding: 2px 12px 6px;
+     "fixa a largura total do card como esta agora, nao mexe"). Depois,
+     "diminua o espaco do avatar em mais 15%": 12px -> 10px (mais uns
+     15% a menos). Valor duplicado em AVATAR_WRAP_SIDE_PADDING
+     (GameRoom.tsx) pro cálculo de centralização do título -- mudar os
+     dois juntos. */
+  padding: 2px 10px 6px;
   flex-shrink: 0;
 }
 
@@ -2716,12 +2732,18 @@ body {
   display: flex;
   align-items: center;
   /* mesmo pedido acima -- gap de 8 pra ~5px (1/3 a menos), as setas
-     ficam mais coladas no boneco. */
-  gap: 5px;
+     ficam mais coladas no boneco. Depois, "diminua o espaco do avatar
+     em mais 15%": 5px -> 4px. Valor duplicado em AVATAR_ROTATE_GAP
+     (GameRoom.tsx) pro cálculo de centralização do título -- mudar os
+     dois juntos. */
+  gap: 4px;
 }
 
 /* pedido do Douglas: "ai vc aumenta as setas 50%" -- 26px -> 39px
-   (compensa ficarem mais coladas no boneco depois do gap encolher). */
+   (compensa ficarem mais coladas no boneco depois do gap encolher).
+   Valor duplicado em AVATAR_ROTATE_BTN (GameRoom.tsx) pro cálculo de
+   centralização do título -- mudar os dois juntos se esse tamanho
+   mudar de novo. */
 .avatar-preview-rotate-btn {
   flex-shrink: 0;
   width: 39px;
@@ -2786,10 +2808,17 @@ body {
   font-size: 13px;
 }
 
+/* pedido do Douglas: "alinhe os itens verticalmente com os icones do
+   sexo" -- padding-top zerado (era 16px) pra grade de itens começar na
+   MESMA altura que os ícones de sexo no topo de .profile-edit-side
+   (que não tem padding-top nenhum) e o boneco em .avatar-preview-wrap
+   (só 2px). Agora que as abas de categoria saíram daqui pra cima (ver
+   .edit-category-tabs/comentário grande no JSX), esse era o único
+   espaço extra empurrando a grade pra baixo. */
 .profile-edit-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 18px 8px;
+  padding: 0 18px 8px;
 }
 
 .color-picker {
@@ -2863,13 +2892,19 @@ body {
   gap: 8px;
 }
 
+/* pedido do Douglas: "copie as bordas dos baloes do sexo" -- borda
+   igual à de .profile-edit-gender-icon-btn (1px #362552, hover
+   #3a2a55, selecionado #7c5cff sólido) em vez da borda própria que o
+   card de item tinha antes (2px #2f2245). Só a borda muda -- o resto
+   (fundo, padding, layout) continua igual, é só pra reforçar
+   visualmente que os dois usam a mesma "linguagem" de botão. */
 .hair-option {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   background: #0d0715;
-  border: 2px solid #2f2245;
+  border: 1px solid #362552;
   border-radius: 8px;
   padding: 6px;
   cursor: pointer;

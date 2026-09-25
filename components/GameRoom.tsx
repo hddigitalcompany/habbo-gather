@@ -4767,6 +4767,24 @@ function ProfileCard({
         return PREVIEW_DIRECTION_ORDER[nextIdx];
       });
     }
+    // pedido do Douglas: "editar meu personagem deve estar centralizado
+    // no avatar" -- o título não pode mais só `text-align:center` no
+    // card INTEIRO (900px), porque a coluna estreita de tom de pele
+    // (.profile-edit-side) desequilibra onde o boneco cai visualmente;
+    // centraliza especificamente em cima da coluna do boneco
+    // (.profile-edit-avatar-col) via marginLeft (pula a coluna
+    // estreita) + width (largura da própria coluna do boneco) no <h3>,
+    // com text-align:center por dentro (ver .profile-edit-title). Os
+    // valores abaixo duplicam o CSS de propósito (.profile-edit-side,
+    // .avatar-preview-wrap, .avatar-preview-rotate-wrap/-btn) só pra
+    // esse cálculo -- se esses paddings/gaps mudarem de novo no CSS,
+    // atualizar aqui também.
+    const PROFILE_EDIT_SIDE_WIDTH = 132 + 1; // .profile-edit-side width + border-right
+    const AVATAR_WRAP_SIDE_PADDING = 10; // .avatar-preview-wrap padding lateral
+    const AVATAR_ROTATE_GAP = 4; // .avatar-preview-rotate-wrap gap
+    const AVATAR_ROTATE_BTN = 39; // .avatar-preview-rotate-btn width
+    const AVATAR_COL_WIDTH =
+      AVATAR_ROTATE_BTN * 2 + AVATAR_ROTATE_GAP * 2 + AVATAR_WRAP_SIDE_PADDING * 2 + AVATAR_PREVIEW_W;
     return (
       <div className="profile-backdrop" onClick={onClose}>
         <div
@@ -4782,7 +4800,38 @@ function ProfileCard({
           style={{ height: measuredHeight ?? 560 }}
           onClick={(e) => e.stopPropagation()}
         >
-          <h3 className="profile-edit-title">Editar meu personagem</h3>
+          <h3
+            className="profile-edit-title"
+            style={{ marginLeft: PROFILE_EDIT_SIDE_WIDTH, width: AVATAR_COL_WIDTH }}
+          >
+            Editar meu personagem
+          </h3>
+
+          {/* pedido do Douglas: "alinhe os itens verticalmente com os
+              icones do sexo" -- as abas de categoria SAÍRAM de dentro da
+              coluna de itens (.profile-edit-items-col) e viraram uma
+              linha de LARGURA TOTAL aqui em cima, entre o título e
+              .profile-edit-body. Assim o primeiro filho de CADA coluna
+              (ícones de sexo em .profile-edit-side, boneco em
+              .profile-edit-avatar-col, grade em .profile-edit-items-col
+              via .profile-edit-scroll) começa todo na MESMA altura --
+              antes as abas ficavam empilhadas só do lado do boneco,
+              empurrando a grade pra baixo dos ícones de sexo. Também
+              resolve de graça o "diminua o espaco do avatar em mais 15%
+              pra caber as categorias de itens tudo na mesma altura": as
+              abas agora têm a largura do card inteiro pra se espalhar,
+              não só a sobra ao lado do boneco. */}
+          <div className="edit-category-tabs">
+            {CUSTOMIZATION_CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                className={editorCategory === cat.id ? "edit-category-tab selected" : "edit-category-tab"}
+                onClick={() => onSelectCategory(cat.id)}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
 
           {/* pedido do Douglas: "fim das cores em tom de pele, uma
               traço vertical, linha cinza igual nos outros limites / pra
@@ -5057,18 +5106,6 @@ function ProfileCard({
               </div>
 
               <div className="profile-edit-items-col">
-          <div className="edit-category-tabs">
-            {CUSTOMIZATION_CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                className={editorCategory === cat.id ? "edit-category-tab selected" : "edit-category-tab"}
-                onClick={() => onSelectCategory(cat.id)}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-
           <div className="profile-edit-scroll">
             {editorCategory === "cabelo" ? (
               <>
