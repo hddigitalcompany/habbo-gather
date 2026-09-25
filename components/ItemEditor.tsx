@@ -333,6 +333,39 @@ const SKIN_SHEET_SLOT_DIRECTIONS: DirectionKey[] = [
 const SKIN_SHEET_COLS = 8;
 const SKIN_SHEET_SPACING = 2;
 
+// "somente o traje vai ter o movimento de andar e sentar" (pedido do
+// Douglas, depois de notar "os trajes nao tem os movimentos, andando,
+// sentado") -- até aqui, TODA categoria (inclusive traje) só aceitava 1
+// foto por direção, reaproveitada nos 3-4 quadros dela (ver comentário
+// de SKIN_SHEET_SLOT_DIRECTIONS acima) -- MainScene.ts (WALK_FRAMES/
+// SENTADO_FRAMES) já sabia tocar passoA/passoB alternados e uma pose
+// sentada de verdade, a folha 8x2 já tem os 15 quadros certos pra isso
+// (não precisou mudar NADA do lado do jogo) -- só faltava o EDITOR
+// aceitar fotos diferentes por quadro. Isso agora existe só pro TRAJE
+// (cabeça/cabelo/acessório/barba continuam 1 foto por direção, pedido
+// explícito: "a cabeca apenas lados, cabelos acessorios enfim").
+// SKIN_SHEET_SLOT_POSES casa índice-a-índice com SKIN_SHEET_SLOT_DIRECTIONS/
+// FOUR_DIR_SHEET_SLOTS acima -- qual POSE cada um dos 15 quadros é,
+// dentro da direção dele (ver composeAvatarArtSheetMultiPose mais
+// abaixo). "up" (costas) não tem quadro de sentado próprio (mesma
+// observação de SENTADO_FRAMES.up em MainScene.ts -- o móvel cobre o
+// corpo por trás, não faz diferença visual), por isso a aba "Sentado" do
+// traje esconde a direção "Costas" (ver activeDirectionFields).
+type PosePart = "passoA" | "passoB" | "sentado";
+type PoseKey = "parado" | PosePart;
+const SKIN_SHEET_SLOT_POSES: PoseKey[] = [
+  "parado", "passoA", "passoB",
+  "parado", "passoA", "passoB",
+  "parado", "passoA", "passoB",
+  "parado", "passoA", "passoB",
+  "sentado", "sentado", "sentado",
+];
+const TRAJE_POSE_PARTS: { id: PosePart; label: string }[] = [
+  { id: "passoA", label: "Passo A" },
+  { id: "passoB", label: "Passo B" },
+  { id: "sentado", label: "Sentado" },
+];
+
 // "avatar" (tom de pele -- pedido do Douglas: "esse 'tom' é a cabeça")
 // vira a primeira categoria do fluxo, irmã de cabelo/acessório/barba/
 // traje -- MESMO formulário, botões acima ("sexo/avatar-cabelo-etc/cor")
@@ -504,6 +537,81 @@ async function composeAvatarArtSheet(
 }
 
 /**
+ * Mesma ideia de composeAvatarArtSheet acima, só que por POSE além de
+ * direção -- usada só pelo TRAJE (ver comentário de SKIN_SHEET_SLOT_POSES/
+ * TRAJE_POSE_PARTS acima, pedido do Douglas: "somente o traje vai ter o
+ * movimento de andar e sentar"). `filesByPose`/`placementsByPose` trazem
+ * um pacote files/placements PARA CADA pose ("parado" é sempre o de
+ * sempre -- rawFiles/rawPlacements -- passoA/passoB/sentado são os novos,
+ * opcionais). Pra cada um dos 15 quadros da folha, `poses[i]` diz qual
+ * pose ele quer: se essa pose não tiver foto própria PRA AQUELA direção,
+ * cai na foto "parado" da MESMA direção (exatamente o reaproveitamento
+ * de sempre quando só sobe 1 foto -- zero regressão pra quem não usa
+ * passoA/passoB/sentado); só fica em branco se nem "parado" daquela
+ * direção tiver foto (mesmo caso de hoje).
+ */
+async function composeAvatarArtSheetMultiPose(
+  filesByPose: Record<PoseKey, Partial<Record<DirectionKey, File>>>,
+  placementsByPose: Record<PoseKey, Partial<Record<DirectionKey, DirectionPlacement>>>,
+  slots: SheetSlot[],
+  poses: PoseKey[]
+): Promise<Blob> {
+  const bitmapCache = new Map<string, ImageBitmap>();
+
+  async function bitmapFor(dir: DirectionKey, pose: PoseKey): Promise<ImageBitmap | null> {
+    const specific = filesByPose[pose]?.[dir];
+    const file = specific ?? filesByPose.parado[dir];
+    if (!file) return null;
+    const cacheKey = specific ? `${pose}:${dir}` : `parado:${dir}`;
+    let bitmap = bitmapCache.get(cacheKey);
+    if (!bitmap) {
+      bitmap = await createImageBitmap(file);
+      bitmapCache.set(cacheKey, bitmap);
+    }
+    return bitmap;
+  }
+
+  function placementFor(dir: DirectionKey, pose: PoseKey): DirectionPlacement {
+    const specific = filesByPose[pose]?.[dir];
+    return (specific ? placementsByPose[pose]?.[dir] : placementsByPose.parado[dir]) ?? DEFAULT_PLACEMENT;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = SKIN_SHEET_COLS * (FRAME_W + SKIN_SHEET_SPACING) - SKIN_SHEET_SPACING;
+  canvas.height = 2 * (FRAME_H + SKIN_SHEET_SPACING) - SKIN_SHEET_SPACING;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("navegador sem suporte a canvas 2D");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    if (slot === "blank") continue;
+    const dir = slot;
+    const pose = poses[i] ?? "parado";
+    const bitmap = await bitmapFor(dir, pose);
+    if (!bitmap) continue;
+    const placement = placementFor(dir, pose);
+    const col = i % SKIN_SHEET_COLS;
+    const row = Math.floor(i / SKIN_SHEET_COLS);
+    const cellX = col * (FRAME_W + SKIN_SHEET_SPACING);
+    const cellY = row * (FRAME_H + SKIN_SHEET_SPACING);
+    const baseScale = Math.min(FRAME_W / bitmap.width, FRAME_H / bitmap.height);
+    const scale = baseScale * placement.scale;
+    const drawW = bitmap.width * scale;
+    const drawH = bitmap.height * scale;
+    const centerX = cellX + FRAME_W / 2 + placement.offsetX;
+    const centerY = cellY + FRAME_H / 2 + placement.offsetY;
+    ctx.drawImage(bitmap, centerX - drawW / 2, centerY - drawH / 2, drawW, drawH);
+  }
+  for (const bitmap of bitmapCache.values()) bitmap.close?.();
+
+  const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("erro ao montar a folha de sprites");
+  return blob;
+}
+
+/**
  * Botão "Criar Avatar" do Editor de Itens (pedido do Douglas: "quero
  * subir os personagens DENTRO da plataforma"). Fluxo em 4 passos, tudo
  * em botões (pedido do Douglas: "ordem de seleção, tudo em botões"):
@@ -570,12 +678,41 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     masculino: null,
     feminino: null,
   });
+  // TRAJE com movimento de verdade (pedido do Douglas: "somente o traje
+  // vai ter o movimento de andar e sentar") -- "parado" continua usando
+  // rawFiles/rawPlacements de sempre (mesmo campo que toda categoria já
+  // usa, zero mudança pra quem só sobe 1 foto por direção); passoA/
+  // passoB/sentado são OPCIONAIS, cada um com seu próprio conjunto de
+  // fotos/posições por direção (mesma ideia de padraoHeadFiles/
+  // padraoBodyFiles acima, só que 3 baldes em vez de 2), escolhidos pelo
+  // toggle "activePose" (ver JSX). Só existe/aparece quando
+  // category === "traje" -- as outras categorias nunca tocam nisso.
+  const [trajePoseFiles, setTrajePoseFiles] = useState<Record<PosePart, Partial<Record<DirectionKey, File>>>>({
+    passoA: {},
+    passoB: {},
+    sentado: {},
+  });
+  const [trajePosePlacements, setTrajePosePlacements] = useState<
+    Record<PosePart, Partial<Record<DirectionKey, DirectionPlacement>>>
+  >({
+    passoA: {},
+    passoB: {},
+    sentado: {},
+  });
+  const [activePose, setActivePose] = useState<PoseKey>("parado");
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
   const isAvatarPadrao = category === "avatar_padrao";
+  const isTrajeExtraPose = category === "traje" && activePose !== "parado";
   const isThreePose = THREE_POSE_CATEGORIES.has(category);
-  const activeDirectionFields = isThreePose ? DIRECTION_FIELDS.filter((f) => f.key !== "up") : DIRECTION_FIELDS;
+  // "Sentado" do traje não tem quadro de "Costas" (ver comentário de
+  // SKIN_SHEET_SLOT_POSES acima) -- some a direção da lista igual
+  // barba/acessório já fazem por outro motivo.
+  const activeDirectionFields =
+    isThreePose || (category === "traje" && activePose === "sentado")
+      ? DIRECTION_FIELDS.filter((f) => f.key !== "up")
+      : DIRECTION_FIELDS;
   const activeSlots = isThreePose ? THREE_DIR_SHEET_SLOTS : FOUR_DIR_SHEET_SLOTS;
   const usesBySkin = BY_SKIN_CATEGORIES.has(category);
   // tons já cadastrados (pasta local + "Avatar" acima) do SEXO
@@ -583,22 +720,62 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // tom vale" (ver comentário no tipo AvatarCreatorCategory acima).
   const genderSkins = SKIN_CATALOG.filter((s) => (s.gender ?? "masculino") === gender);
 
+  function setTrajePoseFilesFor(pose: PosePart, updater: React.SetStateAction<Partial<Record<DirectionKey, File>>>) {
+    setTrajePoseFiles((prev) => ({
+      ...prev,
+      [pose]: typeof updater === "function" ? updater(prev[pose]) : updater,
+    }));
+  }
+  function setTrajePosePlacementsFor(
+    pose: PosePart,
+    updater: React.SetStateAction<Partial<Record<DirectionKey, DirectionPlacement>>>
+  ) {
+    setTrajePosePlacements((prev) => ({
+      ...prev,
+      [pose]: typeof updater === "function" ? updater(prev[pose]) : updater,
+    }));
+  }
+
   // "Avatar Padrão" usa os MESMOS campos de upload/prévia/arraste que
   // as outras categorias (files/placements), só que apontando pro par
   // certo (cabeça ou traje) em vez do estado único -- assim não precisa
   // duplicar toda a UI de baixo, só trocar pra onde ela lê/escreve.
-  const files = isAvatarPadrao ? (padraoPart === "cabeca" ? padraoHeadFiles : padraoBodyFiles) : rawFiles;
-  const setFiles = isAvatarPadrao ? (padraoPart === "cabeca" ? setPadraoHeadFiles : setPadraoBodyFiles) : setRawFiles;
+  // TRAJE com uma pose extra ativa (passoA/passoB/sentado, ver
+  // trajePoseFiles acima) segue a MESMA ideia, apontando pro balde
+  // daquela pose em vez do rawFiles de sempre. Isso é só pra alimentar a
+  // UI de upload/arraste/posição (abaixo) -- na hora de montar a folha
+  // de verdade (handleAvatarCreatorSubmit), o traje lê os 4 baldes
+  // direto (rawFiles + trajePoseFiles), não por essa indireção.
+  const files = isAvatarPadrao
+    ? padraoPart === "cabeca"
+      ? padraoHeadFiles
+      : padraoBodyFiles
+    : isTrajeExtraPose
+      ? trajePoseFiles[activePose as PosePart]
+      : rawFiles;
+  const setFiles = isAvatarPadrao
+    ? padraoPart === "cabeca"
+      ? setPadraoHeadFiles
+      : setPadraoBodyFiles
+    : isTrajeExtraPose
+      ? (updater: React.SetStateAction<Partial<Record<DirectionKey, File>>>) =>
+          setTrajePoseFilesFor(activePose as PosePart, updater)
+      : setRawFiles;
   const placements = isAvatarPadrao
     ? padraoPart === "cabeca"
       ? padraoHeadPlacements
       : padraoBodyPlacements
-    : rawPlacements;
+    : isTrajeExtraPose
+      ? trajePosePlacements[activePose as PosePart]
+      : rawPlacements;
   const setPlacements = isAvatarPadrao
     ? padraoPart === "cabeca"
       ? setPadraoHeadPlacements
       : setPadraoBodyPlacements
-    : setRawPlacements;
+    : isTrajeExtraPose
+      ? (updater: React.SetStateAction<Partial<Record<DirectionKey, DirectionPlacement>>>) =>
+          setTrajePosePlacementsFor(activePose as PosePart, updater)
+      : setRawPlacements;
 
   async function loadSkins() {
     const supabase = getSupabaseBrowserClient();
@@ -727,6 +904,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setPadraoBodyFiles({});
     setPadraoBodyPlacements({});
     setPadraoPart("cabeca");
+    setTrajePoseFiles({ passoA: {}, passoB: {}, sentado: {} });
+    setTrajePosePlacements({ passoA: {}, passoB: {}, sentado: {} });
+    setActivePose("parado");
     setActiveDirection("down");
     for (const key of Object.keys(fileInputRefs.current)) {
       const input = fileInputRefs.current[key];
@@ -897,8 +1077,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       setError(category === "avatar" ? "Escolha um tom (Branco/Pardo/Negro)." : "Dá um nome pro item.");
       return;
     }
-    if (!files.down) {
-      setError("A imagem de frente é obrigatória.");
+    // pedido "parado" continua vindo de rawFiles/rawPlacements SEMPRE
+    // (mesmo campo de sempre) -- valida contra ele direto (não contra o
+    // `files` computado acima, que no TRAJE pode estar apontando pra
+    // aba Passo A/Passo B/Sentado no momento do clique em Cadastrar; nas
+    // outras categorias `files === rawFiles` sempre, então não muda
+    // nada pra elas).
+    if (!rawFiles.down) {
+      setError("A imagem de frente (pose Parado) é obrigatória.");
       return;
     }
     if (usesBySkin && selectedSkinIds.length === 0) {
@@ -909,7 +1095,29 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     if (!supabase) return;
     setSubmitting(true);
     try {
-      const sheetBlob = await composeAvatarArtSheet(files, placements, activeSlots);
+      // TRAJE monta a folha combinando as 4 poses (parado + opcional
+      // passoA/passoB/sentado, ver composeAvatarArtSheetMultiPose e
+      // trajePoseFiles acima) -- as outras categorias continuam com 1
+      // foto por direção de sempre (composeAvatarArtSheet).
+      const sheetBlob =
+        category === "traje"
+          ? await composeAvatarArtSheetMultiPose(
+              {
+                parado: rawFiles,
+                passoA: trajePoseFiles.passoA,
+                passoB: trajePoseFiles.passoB,
+                sentado: trajePoseFiles.sentado,
+              },
+              {
+                parado: rawPlacements,
+                passoA: trajePosePlacements.passoA,
+                passoB: trajePosePlacements.passoB,
+                sentado: trajePosePlacements.sentado,
+              },
+              activeSlots,
+              SKIN_SHEET_SLOT_POSES
+            )
+          : await composeAvatarArtSheet(files, placements, activeSlots);
       const slug = slugify(trimmedLabel);
       const pathPrefix = category === "avatar" ? "avatar-skins" : "avatar-items";
       const path = `${pathPrefix}/${category}-${gender}-${slug}-${Date.now()}.png`;
@@ -1202,16 +1410,53 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
           </div>
         )}
 
+        {/* TRAJE com movimento (pedido do Douglas: "somente o traje vai
+            ter o movimento de andar e sentar") -- toggle Parado/Passo A/
+            Passo B/Sentado, mesma ideia visual do toggle Cabeça/Traje do
+            Avatar Padrão acima. Opcional: sem foto pra um passo/sentado,
+            a peça continua reaproveitando a foto "Parado" daquela
+            direção (comportamento de sempre). "Sentado" não tem "Costas"
+            (ver activeDirectionFields/comentário de SKIN_SHEET_SLOT_POSES). */}
+        {category === "traje" && (
+          <div className="items-panel-upload-field">
+            <span>Pose (movimento ao andar/sentar)</span>
+            <div className="gender-switch">
+              <button
+                type="button"
+                className={activePose === "parado" ? "gender-btn selected" : "gender-btn"}
+                onClick={() => setActivePose("parado")}
+              >
+                Parado *
+              </button>
+              {TRAJE_POSE_PARTS.map((part) => (
+                <button
+                  key={part.id}
+                  type="button"
+                  className={activePose === part.id ? "gender-btn selected" : "gender-btn"}
+                  onClick={() => setActivePose(part.id)}
+                >
+                  {part.label} {trajePoseFiles[part.id].down ? "✓" : ""}
+                </button>
+              ))}
+            </div>
+            <p className="settings-hint">
+              "Passo A"/"Passo B" alternam a cada passo dado (dá a sensação de andar); "Sentado" é a pose enquanto
+              sentado num móvel. Todas opcionais -- sem elas, reaproveita a foto "Parado" de cada direção, como
+              sempre.
+            </p>
+          </div>
+        )}
+
         <div className="items-panel-uploads">
           {activeDirectionFields.map((field) => (
-            <label key={field.key} className="items-panel-upload-field">
+            <label key={`${activePose}-${field.key}`} className="items-panel-upload-field">
               <span>
                 {field.label}
-                {field.key === "down" ? " *" : ""}
+                {field.key === "down" && activePose === "parado" ? " *" : ""}
               </span>
               <input
                 ref={(el) => {
-                  fileInputRefs.current[field.key] = el;
+                  fileInputRefs.current[`${activePose}-${field.key}`] = el;
                 }}
                 type="file"
                 accept="image/*"
