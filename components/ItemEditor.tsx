@@ -668,13 +668,21 @@ function ImageCropModal({
 }: {
   file: File;
   onConfirm: (cropped: File) => void;
-  onSkip: () => void;
+  onSkip: (file: File) => void;
   onCancel: () => void;
 }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [display, setDisplay] = useState<{ w: number; h: number } | null>(null);
   const [rect, setRect] = useState<CropRect | null>(null);
+  // espelhar (pedido do Douglas: "opcao de espelhar tambem, espelhar a
+  // imagem em editar mobis/avatar") -- flip HORIZONTAL, junto com o
+  // recorte nesse mesmo modal (não é um ajuste à parte no editor de
+  // posição). Só vira um `transform: scaleX(-1)` na PRÉVIA (ver <img>
+  // abaixo) -- o espelhamento de verdade, em pixel, só acontece na hora
+  // de gerar o resultado (ver produceResult), tanto cortando quanto
+  // "sem cortar".
+  const [flipped, setFlipped] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
@@ -683,6 +691,7 @@ function ImageCropModal({
     setNatural(null);
     setDisplay(null);
     setRect(null);
+    setFlipped(false);
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
@@ -744,40 +753,74 @@ function ImageCropModal({
     target.addEventListener("pointerup", onUp);
   }
 
-  async function handleConfirm() {
-    if (!rect || !display || !natural) {
-      onSkip();
-      return;
-    }
-    const scaleX = natural.w / display.w;
-    const scaleY = natural.h / display.h;
-    const sx = Math.round(rect.x * scaleX);
-    const sy = Math.round(rect.y * scaleY);
-    const sw = Math.max(1, Math.round(rect.w * scaleX));
-    const sh = Math.max(1, Math.round(rect.h * scaleY));
+  /**
+   * Gera o resultado final (recorte + espelhar, ver comentário de
+   * `flipped` acima) -- usada tanto por "Cortar" (useCrop=true) quanto
+   * por "Usar sem cortar" (useCrop=false, só aplica o espelhar se tiver
+   * -- pedido do Douglas: espelhar também vale sem cortar). Espelha
+   * PRIMEIRO (a imagem inteira, resolução nativa, numa tela separada) e
+   * SÓ DEPOIS recorta dessa versão já espelhada -- assim o retângulo
+   * (desenhado em cima da PRÉVIA, que já mostra a imagem espelhada, ver
+   * <img style={transform}>) bate certinho com o que sai, sem precisar
+   * espelhar a matemática do recorte também. `null` = deu erro (canvas
+   * sem suporte, etc) -- quem chama cai pra foto original sem processar
+   * nenhuma (nunca trava o upload por causa disso).
+   */
+  async function produceResult(useCrop: boolean): Promise<File | null> {
     try {
       const bitmap = await createImageBitmap(file);
+      let source: CanvasImageSource = bitmap;
+      if (flipped) {
+        const flipCanvas = document.createElement("canvas");
+        flipCanvas.width = bitmap.width;
+        flipCanvas.height = bitmap.height;
+        const fctx = flipCanvas.getContext("2d");
+        if (fctx) {
+          fctx.translate(bitmap.width, 0);
+          fctx.scale(-1, 1);
+          fctx.drawImage(bitmap, 0, 0);
+          source = flipCanvas;
+        }
+      }
+      let sx = 0;
+      let sy = 0;
+      let sw = bitmap.width;
+      let sh = bitmap.height;
+      if (useCrop && rect && display && natural) {
+        const scaleX = natural.w / display.w;
+        const scaleY = natural.h / display.h;
+        sx = Math.round(rect.x * scaleX);
+        sy = Math.round(rect.y * scaleY);
+        sw = Math.max(1, Math.round(rect.w * scaleX));
+        sh = Math.max(1, Math.round(rect.h * scaleY));
+      }
       const canvas = document.createElement("canvas");
       canvas.width = sw;
       canvas.height = sh;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         bitmap.close?.();
-        onSkip();
-        return;
+        return null;
       }
-      ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+      ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
       bitmap.close?.();
       const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-      if (!blob) {
-        onSkip();
-        return;
-      }
-      onConfirm(new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" }));
+      if (!blob) return null;
+      return new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" });
     } catch (e) {
-      console.warn("Não deu pra recortar a imagem, usando original", e);
-      onSkip();
+      console.warn("Não deu pra recortar/espelhar a imagem, usando original", e);
+      return null;
     }
+  }
+
+  async function handleConfirm() {
+    const result = await produceResult(true);
+    onConfirm(result ?? file);
+  }
+
+  async function handleSkip() {
+    const result = await produceResult(false);
+    onSkip(result ?? file);
   }
 
   return (
@@ -785,12 +828,28 @@ function ImageCropModal({
       <div className="crop-modal" onClick={(e) => e.stopPropagation()}>
         <p className="crop-modal-title">Recortar imagem</p>
         <p className="settings-hint">Arraste os cantos pra ajustar o recorte -- livre, sem proporção fixa.</p>
+        <div className="crop-modal-tools">
+          <button
+            type="button"
+            className={flipped ? "crop-modal-flip-btn selected" : "crop-modal-flip-btn"}
+            onClick={() => setFlipped((v) => !v)}
+          >
+            Espelhar
+          </button>
+        </div>
         {imgUrl && (
           <div
             className="crop-modal-stage"
             style={display ? { width: display.w, height: display.h } : undefined}
           >
-            <img ref={imgRef} src={imgUrl} alt="Foto pra recortar" onLoad={handleImgLoad} draggable={false} />
+            <img
+              ref={imgRef}
+              src={imgUrl}
+              alt="Foto pra recortar"
+              onLoad={handleImgLoad}
+              draggable={false}
+              style={flipped ? { transform: "scaleX(-1)" } : undefined}
+            />
             {rect && display && (
               <>
                 <div className="crop-modal-shade" style={{ left: 0, top: 0, right: 0, height: rect.y }} />
@@ -824,7 +883,7 @@ function ImageCropModal({
           <button type="button" className="clear-btn" onClick={onCancel}>
             Cancelar
           </button>
-          <button type="button" className="clear-btn" onClick={onSkip}>
+          <button type="button" className="clear-btn" onClick={handleSkip}>
             Usar sem cortar
           </button>
           <button type="button" className="items-panel-submit" onClick={handleConfirm} disabled={!rect}>
@@ -2151,8 +2210,8 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             pendingCrop.apply(result);
             setPendingCrop(null);
           }}
-          onSkip={() => {
-            pendingCrop.apply(pendingCrop.file);
+          onSkip={(result) => {
+            pendingCrop.apply(result);
             setPendingCrop(null);
           }}
           onCancel={() => {
@@ -3054,8 +3113,8 @@ export default function ItemEditor({
             pendingCrop.apply(result);
             setPendingCrop(null);
           }}
-          onSkip={() => {
-            pendingCrop.apply(pendingCrop.file);
+          onSkip={(result) => {
+            pendingCrop.apply(result);
             setPendingCrop(null);
           }}
           onCancel={() => {

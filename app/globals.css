@@ -4520,6 +4520,39 @@ body {
   align-self: flex-start;
 }
 
+/* Barra de ferramentas acima da prévia do recorte -- hoje só "Espelhar"
+   (pedido do Douglas: "opcao de espelhar tambem, espelhar a imagem em
+   editar mobis/avatar"), mas já separada da linha de ações (Cancelar/
+   Usar sem cortar/Cortar) pra caber mais ferramenta de ajuste no futuro
+   sem misturar com os botões de FECHAR o modal. */
+.crop-modal-tools {
+  align-self: flex-start;
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+}
+
+.crop-modal-flip-btn {
+  background: rgba(124, 92, 255, 0.12);
+  border: 1px solid rgba(124, 92, 255, 0.4);
+  border-radius: 999px;
+  color: #d9d0ff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.crop-modal-flip-btn:hover {
+  background: rgba(124, 92, 255, 0.2);
+}
+
+.crop-modal-flip-btn.selected {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #fff;
+}
+
 .crop-modal-stage {
   position: relative;
   margin-top: 10px;
