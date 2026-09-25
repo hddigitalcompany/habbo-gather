@@ -271,15 +271,37 @@ const SKIN_SHEET_SPACING = 2;
 // tabela avatar_skins (não avatar_items -- ver comentário na migration
 // 0006_avatar_items.sql) por ser a definição de um TOM, não algo que
 // "aplica pra" um tom.
-type AvatarCreatorCategory = "avatar" | "cabelo" | "acessorio" | "barba" | "traje";
+type AvatarCreatorCategory = "avatar" | "avatar_padrao" | "cabelo" | "acessorio" | "barba" | "traje";
 
 const AVATAR_CREATOR_CATEGORIES: { id: AvatarCreatorCategory; label: string }[] = [
   { id: "avatar", label: "Avatar" },
+  { id: "avatar_padrao", label: "Avatar Padrão" },
   { id: "cabelo", label: "Cabelo" },
   { id: "acessorio", label: "Acessório" },
   { id: "barba", label: "Barba" },
   { id: "traje", label: "Traje" },
 ];
+
+// "Avatar Padrão" (pedido do Douglas: "cria uma opcao ao lado de avatar,
+// que só pode ter UMA em cada um deles... esse avatar eu vou subir:
+// cabeca e traje apenas, o traje na vdd vai ser o corpo limpo... esse
+// padrao voce coloca ele inteiro montado no editor quando eu for criar
+// outros... ai eu uso ele exatamente de referencia sempre") -- ATÉ
+// AGORA o boneco de referência do editor (ver referenceSkin abaixo) era
+// só o tom de pele CRU, que por convenção é só a CABEÇA (ver comentário
+// em supabase/migrations/0005_avatar_skins.sql) -- então editar
+// cabelo/traje/etc contra ele mostrava uma cabeça flutuando, sem corpo
+// nenhum de referência. "Avatar Padrão" resolve isso: UM tom de pele
+// (cabeça) + UM traje (corpo limpo, sem roupa de verdade) marcados como
+// "o padrão" daquele sexo -- só 1 por sexo (upsert por gender na tabela
+// nova, ver app/api/avatar-default-reference), meio ortogonal ao
+// catálogo normal de tons/trajes (não aparece nos seletores de jogo,
+// serve só de referência fixa aqui no editor). Empilha os dois (traje
+// embaixo, base/cabeça em cima -- mesma ordem de LAYER_DRAW_ORDER em
+// MainScene.ts) no lugar do referenceSkin sozinho pras outras 4
+// categorias (cabelo/acessório/barba/traje), ver defaultReference mais
+// abaixo.
+type DefaultReferenceRow = { gender: AvatarGender; head_sheet_url: string; body_sheet_url: string };
 
 // barba/acessório só têm 3 poses de verdade (sem "costas" -- não dá pra
 // ver de trás da cabeça mesmo, ver scripts/syncBeardAssets.mjs/
@@ -440,16 +462,39 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   const [label, setLabel] = useState("");
   const [hex, setHex] = useState(AVATAR_TONE_NAMES[0].hex);
   const [selectedSkinIds, setSelectedSkinIds] = useState<string[]>([]);
-  const [files, setFiles] = useState<Partial<Record<DirectionKey, File>>>({});
-  const [placements, setPlacements] = useState<Partial<Record<DirectionKey, DirectionPlacement>>>({});
+  // nome "raw" de propósito -- ver files/setFiles computados mais abaixo
+  // (indireção pra "Avatar Padrão" reusar a mesma UI com 2 pares
+  // separados de arquivo/posição, um pra cabeça e outro pro traje).
+  const [rawFiles, setRawFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  const [rawPlacements, setRawPlacements] = useState<Partial<Record<DirectionKey, DirectionPlacement>>>({});
   const [activeDirection, setActiveDirection] = useState<DirectionKey>("down");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
   const [avatarItems, setAvatarItems] = useState<CustomAvatarItemRow[] | null>(null);
+  // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
+  // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
+  // com o próprio estado de arquivo/posição, chaveadas por
+  // padraoPart. defaultReference guarda o que JÁ está salvo (1 por
+  // sexo), buscado à parte de skins/avatarItems porque não é um item
+  // "normal" (não aparece em nenhum seletor de jogo).
+  const [padraoPart, setPadraoPart] = useState<"cabeca" | "traje">("cabeca");
+  const [padraoHeadFiles, setPadraoHeadFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  const [padraoHeadPlacements, setPadraoHeadPlacements] = useState<Partial<Record<DirectionKey, DirectionPlacement>>>(
+    {}
+  );
+  const [padraoBodyFiles, setPadraoBodyFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  const [padraoBodyPlacements, setPadraoBodyPlacements] = useState<Partial<Record<DirectionKey, DirectionPlacement>>>(
+    {}
+  );
+  const [defaultReference, setDefaultReference] = useState<Record<AvatarGender, DefaultReferenceRow | null>>({
+    masculino: null,
+    feminino: null,
+  });
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
+  const isAvatarPadrao = category === "avatar_padrao";
   const isThreePose = THREE_POSE_CATEGORIES.has(category);
   const activeDirectionFields = isThreePose ? DIRECTION_FIELDS.filter((f) => f.key !== "up") : DIRECTION_FIELDS;
   const activeSlots = isThreePose ? THREE_DIR_SHEET_SLOTS : FOUR_DIR_SHEET_SLOTS;
@@ -458,6 +503,23 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // escolhido -- é a partir daqui que barba/traje escolhem "pra qual
   // tom vale" (ver comentário no tipo AvatarCreatorCategory acima).
   const genderSkins = SKIN_CATALOG.filter((s) => (s.gender ?? "masculino") === gender);
+
+  // "Avatar Padrão" usa os MESMOS campos de upload/prévia/arraste que
+  // as outras categorias (files/placements), só que apontando pro par
+  // certo (cabeça ou traje) em vez do estado único -- assim não precisa
+  // duplicar toda a UI de baixo, só trocar pra onde ela lê/escreve.
+  const files = isAvatarPadrao ? (padraoPart === "cabeca" ? padraoHeadFiles : padraoBodyFiles) : rawFiles;
+  const setFiles = isAvatarPadrao ? (padraoPart === "cabeca" ? setPadraoHeadFiles : setPadraoBodyFiles) : setRawFiles;
+  const placements = isAvatarPadrao
+    ? padraoPart === "cabeca"
+      ? padraoHeadPlacements
+      : padraoBodyPlacements
+    : rawPlacements;
+  const setPlacements = isAvatarPadrao
+    ? padraoPart === "cabeca"
+      ? setPadraoHeadPlacements
+      : setPadraoBodyPlacements
+    : setRawPlacements;
 
   async function loadSkins() {
     const supabase = getSupabaseBrowserClient();
@@ -486,9 +548,27 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setAvatarItems((data ?? []) as CustomAvatarItemRow[]);
   }
 
+  // "Avatar Padrão" (ver DefaultReferenceRow acima) -- tabela própria,
+  // só 1 linha por sexo, sem PATCH/DELETE ainda (mesmo estágio de
+  // skins/avatarItems -- o POST já faz upsert por gender, ver
+  // app/api/avatar-default-reference). Ausente/tabela não criada ainda
+  // = fica null em silêncio (mesmo cuidado de loadAvatarItems acima),
+  // as outras categorias então caem no referenceSkin cru de sempre.
+  async function loadDefaultReference() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data } = await supabase.from("avatar_default_reference").select("gender, head_sheet_url, body_sheet_url");
+    const next: Record<AvatarGender, DefaultReferenceRow | null> = { masculino: null, feminino: null };
+    for (const row of (data ?? []) as DefaultReferenceRow[]) {
+      if (row.gender === "masculino" || row.gender === "feminino") next[row.gender] = row;
+    }
+    setDefaultReference(next);
+  }
+
   useEffect(() => {
     loadSkins();
     loadAvatarItems();
+    loadDefaultReference();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -523,8 +603,13 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setLabel("");
     setHex(AVATAR_TONE_NAMES[0].hex);
     setSelectedSkinIds([]);
-    setFiles({});
-    setPlacements({});
+    setRawFiles({});
+    setRawPlacements({});
+    setPadraoHeadFiles({});
+    setPadraoHeadPlacements({});
+    setPadraoBodyFiles({});
+    setPadraoBodyPlacements({});
+    setPadraoPart("cabeca");
     setActiveDirection("down");
     for (const key of Object.keys(fileInputRefs.current)) {
       const input = fileInputRefs.current[key];
@@ -577,9 +662,67 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     target.addEventListener("pointerup", onUp);
   }
 
+  // "Avatar Padrão" salva DIFERENTE do resto: 2 folhas (cabeça + traje,
+  // ver padraoHeadFiles/padraoBodyFiles acima) numa tabela própria com
+  // upsert por gender (só 1 por sexo, ver app/api/avatar-default-reference)
+  // -- sem nome/tom pra escolher, então nem usa trimmedLabel/usesBySkin
+  // do fluxo normal abaixo.
+  async function handleAvatarPadraoSubmit() {
+    if (!padraoHeadFiles.down) {
+      setError("A foto de frente da CABEÇA é obrigatória.");
+      return;
+    }
+    if (!padraoBodyFiles.down) {
+      setError("A foto de frente do TRAJE (corpo limpo) é obrigatória.");
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    setSubmitting(true);
+    try {
+      const headBlob = await composeAvatarArtSheet(padraoHeadFiles, padraoHeadPlacements, FOUR_DIR_SHEET_SLOTS);
+      const bodyBlob = await composeAvatarArtSheet(padraoBodyFiles, padraoBodyPlacements, FOUR_DIR_SHEET_SLOTS);
+      const stamp = Date.now();
+      const headPath = `avatar-default-reference/${gender}-cabeca-${stamp}.png`;
+      const bodyPath = `avatar-default-reference/${gender}-traje-${stamp}.png`;
+      const { error: headUploadError } = await supabase.storage
+        .from("room-items")
+        .upload(headPath, headBlob, { upsert: false, contentType: "image/png" });
+      if (headUploadError) throw headUploadError;
+      const { error: bodyUploadError } = await supabase.storage
+        .from("room-items")
+        .upload(bodyPath, bodyBlob, { upsert: false, contentType: "image/png" });
+      if (bodyUploadError) throw bodyUploadError;
+      const { data: headUrlData } = supabase.storage.from("room-items").getPublicUrl(headPath);
+      const { data: bodyUrlData } = supabase.storage.from("room-items").getPublicUrl(bodyPath);
+      const res = await fetch("/api/avatar-default-reference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({
+          gender,
+          headSheetUrl: headUrlData.publicUrl,
+          bodySheetUrl: bodyUrlData.publicUrl,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao salvar avatar padrão");
+      await loadDefaultReference();
+      resetCreatorForm();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro ao salvar");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleAvatarCreatorSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (isAvatarPadrao) {
+      await handleAvatarPadraoSubmit();
+      return;
+    }
     const trimmedLabel = label.trim();
     if (!trimmedLabel) {
       setError(category === "avatar" ? "Escolha um tom (Branco/Pardo/Negro)." : "Dá um nome pro item.");
@@ -675,8 +818,31 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // de tom pra começo de conversa).
   const selectedReferenceSkin =
     usesBySkin && selectedSkinIds.length > 0 ? SKIN_CATALOG.find((s) => s.id === selectedSkinIds[0]) : undefined;
+  // "Avatar Padrão" do sexo (ver DefaultReferenceRow acima) -- só entra
+  // pra categorias que NÃO são avatar/avatar_padrao (essas continuam
+  // cruas de propósito, ver comentário grande acima). Pedido do
+  // Douglas: "esse padrao voce coloca ele inteiro montado no editor
+  // quando eu for criar outros... eu uso ele exatamente de referencia
+  // sempre, pra tudo em avatares".
+  const genderDefaultReference = !isAvatarPadrao && category !== "avatar" ? defaultReference[gender] : null;
   const referenceSkin = selectedReferenceSkin ?? genderSkins[0] ?? SKIN_CATALOG[0];
-  const referenceSkinIsFallback = Boolean(referenceSkin) && !selectedReferenceSkin && genderSkins.length === 0;
+  const referenceSkinIsFallback =
+    Boolean(referenceSkin) && !selectedReferenceSkin && !genderDefaultReference && genderSkins.length === 0;
+  // URL da CABEÇA mostrada no boneco: tom explicitamente selecionado (ver
+  // selectedReferenceSkin acima) vence sempre que existir; senão, o
+  // Avatar Padrão do sexo (mais estável/consistente que "qualquer tom
+  // cadastrado"); senão cai no referenceSkin de sempre.
+  const referenceHeadUrl = selectedReferenceSkin
+    ? avatarAssetUrl(selectedReferenceSkin.file)
+    : genderDefaultReference
+      ? avatarAssetUrl(genderDefaultReference.head_sheet_url)
+      : referenceSkin
+        ? avatarAssetUrl(referenceSkin.file)
+        : undefined;
+  // corpo/traje "limpo" do Avatar Padrão, desenhado ATRÁS da cabeça
+  // (mesma ordem de LAYER_DRAW_ORDER em MainScene.ts: traje antes de
+  // base) -- independe de qual cabeça/tom tá sendo mostrada em cima.
+  const referenceBodyUrl = genderDefaultReference ? avatarAssetUrl(genderDefaultReference.body_sheet_url) : undefined;
   const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
   const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
   const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
@@ -724,7 +890,37 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       </p>
 
       <form className="items-panel-form" onSubmit={handleAvatarCreatorSubmit}>
-        {category === "avatar" ? (
+        {isAvatarPadrao ? (
+          <>
+            {/* "Avatar Padrão": sem nome/tom pra escolher (só 1 por
+                sexo, ver DefaultReferenceRow acima) -- em vez disso,
+                escolhe qual das 2 partes tá editando agora (cabeça ou
+                traje/corpo limpo), cada uma com seu próprio conjunto de
+                fotos por direção (ver padraoPart/files computado
+                acima). */}
+            <div className="gender-switch">
+              <button
+                type="button"
+                className={padraoPart === "cabeca" ? "gender-btn selected" : "gender-btn"}
+                onClick={() => setPadraoPart("cabeca")}
+              >
+                Cabeça {padraoHeadFiles.down ? "✓" : ""}
+              </button>
+              <button
+                type="button"
+                className={padraoPart === "traje" ? "gender-btn selected" : "gender-btn"}
+                onClick={() => setPadraoPart("traje")}
+              >
+                Traje (corpo limpo) {padraoBodyFiles.down ? "✓" : ""}
+              </button>
+            </div>
+            <p className="settings-hint">
+              Sobe as duas partes (cabeça e traje/corpo limpo) e clica em Cadastrar UMA vez só no final -- as fotos
+              ficam guardadas ao trocar de aba aqui em cima.
+              {defaultReference[gender] ? " Já existe um Avatar Padrão " + gender + "; cadastrar de novo substitui." : ""}
+            </p>
+          </>
+        ) : category === "avatar" ? (
           <div className="tone-select">
             {AVATAR_TONE_NAMES.map((tone) => (
               <button
@@ -867,6 +1063,18 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
           </p>
         )}
 
+        {/* Avatar Padrão do sexo entrando como referência (pedido do
+            Douglas: "esse padrao voce coloca ele inteiro montado no
+            editor quando eu for criar outros... uso ele exatamente de
+            referencia sempre, pra tudo em avatares"). Só avisa sobre o
+            CORPO aqui -- a cabeça já tem seu próprio aviso acima quando
+            vem de um tom selecionado. */}
+        {referenceBodyUrl && (
+          <p className="settings-hint">
+            Corpo/traje do boneco abaixo: <strong>Avatar Padrão {gender}</strong> (cadastrado em "Avatar Padrão").
+          </p>
+        )}
+
         <div className="item-size-card">
           <div className="item-stage" style={{ height: STAGE_HEIGHT }}>
             <div
@@ -884,8 +1092,16 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                   transform: `translate(-${frameOffsetXPx}px, -${frameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                 }}
               >
-                {referenceSkin && (
-                  <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceSkin.file)} alt="" />
+                {/* corpo/traje do Avatar Padrão primeiro (embaixo), depois
+                    a cabeça -- mesma ordem de LAYER_DRAW_ORDER em
+                    MainScene.ts ("traje" antes de "base"). Sem Avatar
+                    Padrão cadastrado ainda pro sexo, só mostra a cabeça
+                    crua de sempre (referenceHeadUrl cai pro referenceSkin). */}
+                {referenceBodyUrl && (
+                  <img className="item-stage-avatar-layer" src={referenceBodyUrl} alt="" />
+                )}
+                {referenceHeadUrl && (
+                  <img className="item-stage-avatar-layer" src={referenceHeadUrl} alt="" />
                 )}
               </div>
             </div>
