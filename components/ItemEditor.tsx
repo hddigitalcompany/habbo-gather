@@ -107,6 +107,64 @@ const TILE_SIZE_PX = TILE * PREVIEW_SCALE;
 const STAGE_BASELINE_PAD = 70;
 const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + 24);
 
+// Réguas de medida no preview (pedido do Douglas: "coloca umas linhas de
+// medida, a partir do tile, pra eu conseguir me posicionar melhor") --
+// mesma unidade "real" que os offsetX/offsetY mostrados no texto embaixo
+// do preview (ex: "x: 20px"), só multiplicada por PREVIEW_SCALE pra virar
+// posição de tela, igual todo o resto dos preview (item-stage-avatar,
+// avatar-art-drag-box etc). RULER_UNIT = espaçamento entre marcações;
+// RULER_X_RANGE/RULER_Y_RANGE = até onde iso (o excesso é cortado de
+// graça pelo overflow do .item-stage, não precisa ser exato).
+const RULER_UNIT = 20;
+const RULER_X_RANGE: [number, number] = [-100, 100];
+const RULER_Y_RANGE: [number, number] = [-180, 60];
+
+function rulerTicks(range: [number, number], unit: number): number[] {
+  const ticks: number[] = [];
+  for (let v = 0; v >= range[0]; v -= unit) ticks.push(v);
+  for (let v = unit; v <= range[1]; v += unit) ticks.push(v);
+  return ticks;
+}
+
+/**
+ * Cruz de referência (x=0/y=0 -- o mesmo ponto de ancoragem que
+ * offsetX/offsetY=0 usa em cada preview, "a partir do tile") + marcações
+ * a cada RULER_UNIT px reais, com o valor escrito do lado. Só leitura
+ * (pointer-events: none) -- não atrapalha o arraste de quem tá por
+ * baixo. `anchorBottomPx` é o "bottom" (em px de tela, já com
+ * PREVIEW_SCALE aplicado) onde y=0 cai nesse preview específico --
+ * cada chamador passa o seu (ver STAGE_BASELINE_PAD/
+ * AVATAR_FOOT_FROM_TILE_BOTTOM nos usos abaixo).
+ */
+function StageRuler({ anchorBottomPx }: { anchorBottomPx: number }) {
+  const xTicks = rulerTicks(RULER_X_RANGE, RULER_UNIT);
+  const yTicks = rulerTicks(RULER_Y_RANGE, RULER_UNIT);
+  return (
+    <div className="stage-ruler">
+      <div className="stage-ruler-line stage-ruler-line-v" />
+      <div className="stage-ruler-line stage-ruler-line-h" style={{ bottom: anchorBottomPx }} />
+      {xTicks.map((v) => (
+        <div
+          key={`rx${v}`}
+          className={v === 0 ? "stage-ruler-tick stage-ruler-tick-x stage-ruler-tick-zero" : "stage-ruler-tick stage-ruler-tick-x"}
+          style={{ left: `calc(50% + ${v * PREVIEW_SCALE}px)`, bottom: anchorBottomPx }}
+        >
+          <span className="stage-ruler-label stage-ruler-label-x">{v}</span>
+        </div>
+      ))}
+      {yTicks.map((v) => (
+        <div
+          key={`ry${v}`}
+          className={v === 0 ? "stage-ruler-tick stage-ruler-tick-y stage-ruler-tick-zero" : "stage-ruler-tick stage-ruler-tick-y"}
+          style={{ bottom: anchorBottomPx - v * PREVIEW_SCALE }}
+        >
+          <span className="stage-ruler-label stage-ruler-label-y">{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // "boneco de referência" pro preview -- SEMPRE o penteado/tom/traje
 // PADRÃO (não é o boneco de verdade de ninguém, é só uma régua visual),
 // igual o resto do editor já fazia com a silhueta antiga. Traje
@@ -1216,6 +1274,8 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 <img className="avatar-art-drag-img" src={otherPadraoArtUrl} alt="" />
               </div>
             )}
+
+            <StageRuler anchorBottomPx={STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM} />
           </div>
 
           <div className="settings-slider-row">
@@ -2052,6 +2112,8 @@ export default function ItemEditor({
                   Escolha a imagem de "{DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}" pra ver o preview aqui.
                 </p>
               )}
+
+              <StageRuler anchorBottomPx={STAGE_BASELINE_PAD} />
             </div>
 
             <div className="settings-slider-row">

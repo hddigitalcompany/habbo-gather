@@ -3466,6 +3466,83 @@ body {
   pointer-events: none;
 }
 
+/* Réguas de medida (ver StageRuler em ItemEditor.tsx -- pedido do
+   Douglas: "coloca umas linhas de medida, a partir do tile, pra eu
+   conseguir me posicionar melhor"). Cruz em x=0/y=0 (mesmo ponto que
+   offsetX/offsetY=0) + marcações a cada RULER_UNIT com o valor escrito
+   do lado -- cor ciano pra não confundir com o roxo do tile/avatar.
+   Sempre por cima (z-index alto) e pointer-events:none -- só leitura,
+   nunca atrapalha o arraste de quem tá embaixo. */
+.stage-ruler {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.stage-ruler-line {
+  position: absolute;
+  background: rgba(80, 220, 255, 0.3);
+}
+
+.stage-ruler-line-v {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.stage-ruler-line-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.stage-ruler-tick {
+  position: absolute;
+  background: rgba(80, 220, 255, 0.65);
+}
+
+.stage-ruler-tick-x {
+  width: 1px;
+  height: 9px;
+  transform: translate(-50%, 50%);
+}
+
+.stage-ruler-tick-y {
+  left: 50%;
+  width: 9px;
+  height: 1px;
+  transform: translate(-50%, 50%);
+}
+
+.stage-ruler-tick-zero {
+  background: rgba(255, 214, 90, 0.9);
+}
+
+.stage-ruler-label {
+  position: absolute;
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(190, 235, 255, 0.8);
+  user-select: none;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.stage-ruler-label-x {
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.stage-ruler-label-y {
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 /* Boneco de REFERÊNCIA (arte de verdade do jogo -- penteado/traje
    padrão, ver REFERENCE_HAIR/REFERENCE_SKIN/REFERENCE_OUTFIT_FILE em
    ItemEditor.tsx -- não é o boneco de ninguém em especial, só uma régua
