@@ -659,6 +659,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   const [error, setError] = useState<string | null>(null);
   const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
   const [avatarItems, setAvatarItems] = useState<CustomAvatarItemRow[] | null>(null);
+  // id do item custom sendo apagado agora (desabilita o botão dele
+  // enquanto a chamada roda) -- ver handleDeleteAvatarItem abaixo.
+  const [deletingAvatarItemId, setDeletingAvatarItemId] = useState<string | null>(null);
   // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
   // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
   // com o próprio estado de arquivo/posição, chaveadas por
@@ -802,6 +805,31 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       .from("avatar_items")
       .select("id, category, gender, label, skin_ids, sheet_url");
     setAvatarItems((data ?? []) as CustomAvatarItemRow[]);
+  }
+
+  // pedido do Douglas: "coloca la nos itens eles pra eu apagar por la" --
+  // apaga um item CUSTOM de cabelo/acessório/barba/traje (não mexe nos
+  // tons de pele/"Avatar", que não foi pedido). Mesmo padrão de confirm()
+  // do handleClearPadrao acima. NOTA: isso só tira da lista/tabela --
+  // quem já está numa sala com o navegador aberto só vê sumir do
+  // catálogo do jogo depois de um F5 (registerCustomHair/Beard/etc só
+  // ADICIONA no catálogo em memória, não existe "desregistrar" ainda).
+  async function handleDeleteAvatarItem(item: CustomAvatarItemRow) {
+    const ok = window.confirm(`Apagar "${item.label}" de vez? Não tem como desfazer.`);
+    if (!ok) return;
+    setDeletingAvatarItemId(item.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/avatar-items/${item.id}`, { method: "DELETE", headers: authHeaders });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "erro ao apagar item");
+      await loadAvatarItems();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro ao apagar item");
+    } finally {
+      setDeletingAvatarItemId(null);
+    }
   }
 
   // "Avatar Padrão" (ver DefaultReferenceRow acima) -- tabela própria,
@@ -1769,6 +1797,13 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                         <span className="items-panel-name">
                           {item.label} <span className="items-panel-category">({item.gender})</span>
                         </span>
+                        <button
+                          type="button"
+                          disabled={deletingAvatarItemId === item.id}
+                          onClick={() => handleDeleteAvatarItem(item)}
+                        >
+                          {deletingAvatarItemId === item.id ? "Apagando..." : "Excluir"}
+                        </button>
                       </li>
                     ))}
                   </ul>
