@@ -1384,8 +1384,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               de Cadastrar, mas encostado na borda lateral direita"
               (morava perto do toggle Cabeça/Traje antes, fácil de
               clicar sem querer). margin-left:auto empurra pra borda,
-              ver .items-panel-submit-row .clear-btn em globals.css. */}
-          {isAvatarPadrao && (Object.keys(padraoHeadFiles).length > 0 || Object.keys(padraoBodyFiles).length > 0) && (
+              ver .items-panel-submit-row .clear-btn em globals.css.
+              SEMPRE visível nessa aba (antes só aparecia com upload em
+              andamento -- Douglas: "cade o botao kkk", porque um dado
+              F recarregada da página some com os arquivos escolhidos
+              (File do navegador, não sobrevive reload) e o botão
+              sumia junto, parecendo bug. Clicar sem nada pra limpar é
+              inofensivo (handleClearPadrao só reseta pra vazio). */}
+          {isAvatarPadrao && (
             <button type="button" className="clear-btn" onClick={handleClearPadrao}>
               Começar do zero (trocar as fotos)
             </button>
