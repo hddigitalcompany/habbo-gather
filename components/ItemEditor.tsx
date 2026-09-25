@@ -141,21 +141,27 @@ function StageRuler({ anchorBottomPx }: { anchorBottomPx: number }) {
   const yTicks = rulerTicks(RULER_Y_RANGE, RULER_UNIT);
   return (
     <div className="stage-ruler">
-      <div className="stage-ruler-line stage-ruler-line-v" />
-      <div className="stage-ruler-line stage-ruler-line-h" style={{ bottom: anchorBottomPx }} />
+      {/* linhas VERTICAIS inteiras (uma por marcação de x) -- pedido do
+          Douglas: "faz elas em grade" (antes só tinha tracinho curto em
+          cada marcação, agora atravessa o preview inteiro, formando uma
+          grade de verdade). A de x=0 fica destacada (mesmo eixo
+          principal de antes). */}
       {xTicks.map((v) => (
         <div
           key={`rx${v}`}
-          className={v === 0 ? "stage-ruler-tick stage-ruler-tick-x stage-ruler-tick-zero" : "stage-ruler-tick stage-ruler-tick-x"}
-          style={{ left: `calc(50% + ${v * PREVIEW_SCALE}px)`, bottom: anchorBottomPx }}
+          className={v === 0 ? "stage-ruler-line stage-ruler-line-v stage-ruler-line-zero" : "stage-ruler-line stage-ruler-line-v"}
+          style={{ left: `calc(50% + ${v * PREVIEW_SCALE}px)` }}
         >
           <span className="stage-ruler-label stage-ruler-label-x">{v}</span>
         </div>
       ))}
+      {/* linhas HORIZONTAIS inteiras (uma por marcação de y), mesma
+          ideia. A de y=0 (anchorBottomPx -- o ponto que offsetY=0 usa,
+          "a partir do tile") fica destacada. */}
       {yTicks.map((v) => (
         <div
           key={`ry${v}`}
-          className={v === 0 ? "stage-ruler-tick stage-ruler-tick-y stage-ruler-tick-zero" : "stage-ruler-tick stage-ruler-tick-y"}
+          className={v === 0 ? "stage-ruler-line stage-ruler-line-h stage-ruler-line-zero" : "stage-ruler-line stage-ruler-line-h"}
           style={{ bottom: anchorBottomPx - v * PREVIEW_SCALE }}
         >
           <span className="stage-ruler-label stage-ruler-label-y">{v}</span>

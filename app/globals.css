@@ -3468,11 +3468,14 @@ body {
 
 /* Réguas de medida (ver StageRuler em ItemEditor.tsx -- pedido do
    Douglas: "coloca umas linhas de medida, a partir do tile, pra eu
-   conseguir me posicionar melhor"). Cruz em x=0/y=0 (mesmo ponto que
-   offsetX/offsetY=0) + marcações a cada RULER_UNIT com o valor escrito
-   do lado -- cor ciano pra não confundir com o roxo do tile/avatar.
-   Sempre por cima (z-index alto) e pointer-events:none -- só leitura,
-   nunca atrapalha o arraste de quem tá embaixo. */
+   conseguir me posicionar melhor", depois "faz elas em grade"). GRADE
+   completa: uma linha vertical inteira por marcação de x, uma linha
+   horizontal inteira por marcação de y (RULER_UNIT em RULER_UNIT), cor
+   ciano pra não confundir com o roxo do tile/avatar. Os dois eixos
+   principais (x=0/y=0 -- mesmo ponto que offsetX/offsetY=0, "a partir
+   do tile") ficam destacados (stage-ruler-line-zero). Sempre por cima
+   (z-index alto) e pointer-events:none -- só leitura, nunca atrapalha o
+   arraste de quem tá embaixo. */
 .stage-ruler {
   position: absolute;
   inset: 0;
@@ -3482,11 +3485,10 @@ body {
 
 .stage-ruler-line {
   position: absolute;
-  background: rgba(80, 220, 255, 0.3);
+  background: rgba(80, 220, 255, 0.22);
 }
 
 .stage-ruler-line-v {
-  left: 50%;
   top: 0;
   bottom: 0;
   width: 1px;
@@ -3499,26 +3501,8 @@ body {
   height: 1px;
 }
 
-.stage-ruler-tick {
-  position: absolute;
-  background: rgba(80, 220, 255, 0.65);
-}
-
-.stage-ruler-tick-x {
-  width: 1px;
-  height: 9px;
-  transform: translate(-50%, 50%);
-}
-
-.stage-ruler-tick-y {
-  left: 50%;
-  width: 9px;
-  height: 1px;
-  transform: translate(-50%, 50%);
-}
-
-.stage-ruler-tick-zero {
-  background: rgba(255, 214, 90, 0.9);
+.stage-ruler-line-zero {
+  background: rgba(255, 214, 90, 0.75);
 }
 
 .stage-ruler-label {
@@ -3531,8 +3515,12 @@ body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
+.stage-ruler-line-zero .stage-ruler-label {
+  color: rgba(255, 230, 150, 0.95);
+}
+
 .stage-ruler-label-x {
-  top: 3px;
+  bottom: 3px;
   left: 50%;
   transform: translateX(-50%);
 }
