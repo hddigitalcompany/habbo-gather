@@ -4050,9 +4050,9 @@ function EditPanel({
           <p className="edit-hint">
             Primeiro crie a área (nome + tipo) abaixo, depois selecione ela na
             lista pra pintar/arrastar os tiles dela -- áreas diferentes NÃO se
-            fundem mesmo encostadas. "Mesa privada" ganha um botão "Tomar
+            fundem mesmo encostadas. "Sala privada" ganha um botão "Tomar
             posse" na sala (só aparece enquanto ninguém for dono; áudio/vídeo
-            de quem tá dentro fica isolado). "Sala": mesma isolação de
+            de quem tá dentro fica isolado). "Sala aberta": mesma isolação de
             áudio/vídeo, sem dono. Salva sozinho.
           </p>
 

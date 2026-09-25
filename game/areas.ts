@@ -30,9 +30,14 @@ import { tileToWorld } from "./grid";
  */
 export type AreaType = "mesa-privada" | "sala";
 
+// pedido do Douglas: "os nomes renomeie, sala privada / sala aberta" --
+// só o TEXTO exibido mudou (label); o `id` de cada tipo continua
+// "mesa-privada"/"sala" por baixo (não mexe em nada salvo/persistido,
+// nem no resto do código que compara por id, ver comentário grande no
+// topo do arquivo).
 export const AREA_TYPES: { id: AreaType; label: string; color: number }[] = [
-  { id: "mesa-privada", label: "Mesa privada", color: 0xffb84d },
-  { id: "sala", label: "Sala", color: 0x4da6ff },
+  { id: "mesa-privada", label: "Sala privada", color: 0xffb84d },
+  { id: "sala", label: "Sala aberta", color: 0x4da6ff },
 ];
 
 export function areaTypeMeta(type: AreaType) {
