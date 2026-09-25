@@ -1243,6 +1243,12 @@ export default function GameRoom({
   // pintura, não mais um tipo fixo -- ou "erase"/null).
   const [selectedAreaToolId, setSelectedAreaToolId] = useState<string | "erase" | null>(null);
   const [draftAreaDefs, setDraftAreaDefs] = useState<AreaDef[]>([]);
+  // espelha draftAreaDefs pra poder ler o valor ATUAL de dentro de um
+  // callback assíncrono (ver merge no GET /room/areas mais abaixo, bug
+  // "as areas que eu crio nao tao salvando") -- mesmo padrão de
+  // accountAccessTokenRef acima, sempre em dia (reatribuído todo render).
+  const draftAreaDefsRef = useRef(draftAreaDefs);
+  draftAreaDefsRef.current = draftAreaDefs;
   const [draftAreaItems, setDraftAreaItems] = useState<AreaTileDef[]>([]);
   const [areaSaveStatus, setAreaSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const areaLoadedRef = useRef(false);
@@ -2073,8 +2079,37 @@ export default function GameRoom({
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
             if (data?.list) {
-              setDraftAreaDefs(data.list);
-              sceneRef.current?.setAreaDefs(data.list);
+              // MESCLA em vez de SOBRESCREVER -- bug encontrado
+              // investigando "as areas que eu crio nao tao salvando"
+              // (Douglas): diferente do piso/mobília (que só entram na
+              // cena, nunca pisam por cima do estado React direto, ver
+              // onDraftFloorChange/loadSavedFloor), a lista de áreas
+              // (nome+tipo) vivia SÓ no React (draftAreaDefs) e essa
+              // busca a SOBRESCREVIA inteira assim que respondia. Se o
+              // Douglas criasse uma área (createArea -> setDraftAreaDefs)
+              // ANTES dessa busca (disparada no mount) terminar, a
+              // resposta chegava com a lista ANTIGA do servidor (sem a
+              // área nova) e apagava ela da lista -- o que também torna
+              // "órfão" (e apaga) qualquer tile já pintado nela, ver
+              // pruning em setAreaDefs (MainScene.ts) -- daí o autosave
+              // seguinte persistia esse estado já sem a área, LEVANDO O
+              // TILE JUNTO. Agora mantém qualquer área criada localmente
+              // que ainda não apareceu na resposta do servidor (id que o
+              // servidor não conhece), só troca pelo valor do servidor as
+              // que já existiam nos dois lados. Usa draftAreaDefsRef (não
+              // o `draftAreaDefs` direto, que aqui dentro seria sempre o
+              // valor "congelado" do momento em que essa função foi
+              // criada) pra pegar o estado ATUAL, e chama
+              // sceneRef.setAreaDefs SÍNCRONO com o resultado já
+              // mesclado -- loadSavedAreas (linha logo abaixo) precisa da
+              // área já registrada na cena pra não jogar fora um tile
+              // dela como "órfão" (setState sozinho só reflete no
+              // próximo render, tarde demais pra essa ordem).
+              const serverIds = new Set(data.list.map((a: AreaDef) => a.id));
+              const localOnly = draftAreaDefsRef.current.filter((a) => !serverIds.has(a.id));
+              const merged = localOnly.length > 0 ? [...data.list, ...localOnly] : data.list;
+              setDraftAreaDefs(merged);
+              sceneRef.current?.setAreaDefs(merged);
             }
             if (data?.tiles) sceneRef.current?.loadSavedAreas(data.tiles);
           })
