@@ -4245,11 +4245,24 @@ body {
 /* Boneco de REFERÊNCIA (arte de verdade do jogo -- penteado/traje
    padrão, ver REFERENCE_HAIR/REFERENCE_SKIN/REFERENCE_OUTFIT_FILE em
    ItemEditor.tsx -- não é o boneco de ninguém em especial, só uma régua
-   visual na escala certa). O box externo tem o tamanho NATIVO do frame
-   (FRAME_W×FRAME_H) ancorado embaixo-centro (mesma âncora do jogo,
-   setOrigin(0.5,1)); o box interno escala (transform:scale, ver estilo
-   inline) com transformOrigin embaixo-centro, então o "pé" do boneco
-   fica fixo no lugar certo ao crescer. */
+   visual na escala certa). O box externo tem o tamanho de EXIBIÇÃO já
+   escalado (AVATAR_DISPLAY_W×H = FRAME_W/H × AVATAR_SCALE×PREVIEW_SCALE,
+   ver estilo inline) ancorado embaixo-centro (mesma âncora do jogo,
+   setOrigin(0.5,1)) -- bug encontrado pelo Douglas ("a cabeca ta
+   cortada, em todo o editor de itens"): esse box ficava do tamanho
+   NATIVO do frame (FRAME_W×FRAME_H, menor que o boneco de verdade
+   exibido, já que AVATAR_SCALE×PREVIEW_SCALE > 1), então o
+   overflow:hidden dele (necessário pra mostrar só 1 quadro da folha,
+   ver comentário abaixo) cortava a PARTE DE CIMA do boneco escalado
+   (a cabeça) por sobrar pra fora dessa caixa pequena demais -- o
+   STAGE_TOP_PAD (área de exibição em volta, ver ItemEditor.tsx) nunca
+   ia resolver isso, porque o corte acontecia bem AQUI dentro, numa
+   caixa de tamanho fixo que não cresce com o padding do card. Box
+   interno (item-stage-avatar-crop) continua do tamanho NATIVO do
+   frame e escala (transform:scale, ver estilo inline) com
+   transformOrigin embaixo-centro -- crescendo a partir do "pé"
+   (fixo), ele agora enche exatamente esse box maior, sem sobrar nada
+   pra cortar. */
 .item-stage-avatar {
   position: absolute;
   left: 50%;
@@ -4269,9 +4282,15 @@ body {
 }
 
 .item-stage-avatar-crop {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  /* largura/altura (FRAME_W/H) + marginLeft (-FRAME_W/2, centraliza)
+     vêm inline (ver ItemEditor.tsx) -- widht/height NATIVOS do frame,
+     de propósito MENOR que o pai (item-stage-avatar, já no tamanho de
+     EXIBIÇÃO) -- é o scale() inline que cresce esse box pequeno até
+     encher o pai certinho, ver comentário grande em item-stage-avatar
+     acima. */
   transform-origin: bottom center;
   image-rendering: pixelated;
 }

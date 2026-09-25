@@ -1924,14 +1924,17 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               className="item-stage-avatar"
               style={{
                 bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
-                width: FRAME_W,
-                height: FRAME_H,
+                width: AVATAR_DISPLAY_W,
+                height: AVATAR_DISPLAY_H,
               }}
               title="Boneco de referência -- pose da direção escolhida acima"
             >
               <div
                 className="item-stage-avatar-crop"
                 style={{
+                  width: FRAME_W,
+                  height: FRAME_H,
+                  marginLeft: -FRAME_W / 2,
                   transform: `translate(-${frameOffsetXPx}px, -${frameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                 }}
               >
@@ -2915,14 +2918,17 @@ export default function ItemEditor({
                 className="item-stage-avatar"
                 style={{
                   bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
-                  width: FRAME_W,
-                  height: FRAME_H,
+                  width: AVATAR_DISPLAY_W,
+                  height: AVATAR_DISPLAY_H,
                 }}
                 title="Boneco de referência (penteado/traje padrão) -- o TAMANHO/ÂNCORA é que batem com o jogo de verdade"
               >
                 <div
                   className="item-stage-avatar-crop"
                   style={{
+                    width: FRAME_W,
+                    height: FRAME_H,
+                    marginLeft: -FRAME_W / 2,
                     transform: `translate(-${mobiFrameOffsetXPx}px, -${mobiFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                   }}
                 >
@@ -2953,8 +2959,8 @@ export default function ItemEditor({
                   className="item-stage-seat-avatar"
                   style={{
                     bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM - seatOffsetY * PREVIEW_SCALE,
-                    width: FRAME_W,
-                    height: FRAME_H,
+                    width: AVATAR_DISPLAY_W,
+                    height: AVATAR_DISPLAY_H,
                     transform: `translate(calc(-50% + ${seatOffsetX * PREVIEW_SCALE}px), 0)`,
                   }}
                   onPointerDown={handleSeatMarkerPointerDown}
@@ -2963,6 +2969,9 @@ export default function ItemEditor({
                   <div
                     className="item-stage-avatar-crop"
                     style={{
+                      width: FRAME_W,
+                      height: FRAME_H,
+                      marginLeft: -FRAME_W / 2,
                       transform: `translate(-${seatFrameOffsetXPx}px, -${seatFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                     }}
                   >
