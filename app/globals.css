@@ -3504,6 +3504,249 @@ body {
   cursor: default;
 }
 
+.items-panel-row-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* "Gerador de cor" (ColorZoneTool.tsx) -- pedido do Douglas: "cria
+   essa ferramenta por seleção". Abre embaixo da linha do item na lista
+   "cadastrados" do Editor de Itens (ver items-panel-row-wrap acima). */
+.color-zone-tool {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.color-zone-tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.color-zone-tool-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #f5f0ff;
+}
+
+.color-zone-tool-help {
+  margin: 0;
+  font-size: 12px;
+  color: #cfc4e6;
+  line-height: 1.5;
+}
+
+.color-zone-tool-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff9b9b;
+}
+
+.color-zone-tool-body {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.color-zone-tool-paint-col {
+  flex-shrink: 0;
+}
+
+.color-zone-tool-canvas-stack {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: repeating-conic-gradient(#2a2438 0% 25%, #241f30 0% 50%) 50% / 16px 16px;
+}
+
+.color-zone-tool-bg-canvas,
+.color-zone-tool-overlay-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.color-zone-tool-overlay-canvas {
+  touch-action: none;
+}
+
+.color-zone-tool-loading {
+  color: #cfc4e6;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.color-zone-tool-zones-col {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.color-zone-tool-zones-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.color-zone-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.color-zone-row-active {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.color-zone-brush-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.color-zone-label-input {
+  flex: 1;
+  min-width: 60px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  color: #f5f0ff;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.color-zone-sample-count {
+  font-size: 11px;
+  color: #9d90bb;
+  white-space: nowrap;
+}
+
+.color-zone-row button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.color-zone-add-btn {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.color-zone-add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.color-zone-tool-actions button {
+  background: #6c4fe0;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 13px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+
+.color-zone-tool-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.color-zone-tool-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.color-zone-tool-preview-canvas {
+  border-radius: 6px;
+  background: repeating-conic-gradient(#2a2438 0% 25%, #241f30 0% 50%) 50% / 16px 16px;
+  flex-shrink: 0;
+}
+
+.color-zone-tool-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  color: #cfc4e6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.color-zone-tool-save {
+  display: flex;
+  gap: 8px;
+}
+
+.color-zone-tool-save input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  color: #f5f0ff;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.color-zone-tool-save button {
+  background: #3fb27f;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 13px;
+  padding: 7px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.color-zone-tool-save button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.color-zone-tool-existing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #9d90bb;
+  flex-wrap: wrap;
+}
+
 /* Editor de Itens (ver ItemEditor.tsx) -- mais LARGO que os 400px
    padrão pra caber o preview grande de tamanho (.item-size-card
    abaixo), que pode passar de 600px de largura num item grande (ex:

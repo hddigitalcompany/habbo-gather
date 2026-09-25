@@ -77,6 +77,7 @@ import {
   AccessoryOption,
   BeardOption,
   OutfitOption,
+  ColorOption,
   registerCustomHair,
   registerCustomAccessories,
   registerCustomBeards,
@@ -1025,7 +1026,7 @@ export default function GameRoom({
     try {
       const { data, error } = await supabase
         .from("avatar_items")
-        .select("id, category, gender, label, skin_ids, sheet_url");
+        .select("id, category, gender, label, skin_ids, sheet_url, colors");
       if (error || !data || data.length === 0) return;
 
       type AvatarItemRow = {
@@ -1035,6 +1036,11 @@ export default function GameRoom({
         label: string;
         skin_ids: string[] | null;
         sheet_url: string;
+        // variantes de cor GERADAS pelo ColorZoneTool.tsx (Editor de
+        // Itens, botão "Gerar cor") -- ausente/null em quem ainda não
+        // rodou supabase/migrations/0009_avatar_items_colors.sql, ou em
+        // quem nunca gerou nenhuma cor pro item.
+        colors: ColorOption[] | null;
       };
       const rows = data as AvatarItemRow[];
       const textureEntries: { key: string; url: string }[] = [];
@@ -1050,9 +1056,18 @@ export default function GameRoom({
           label: r.label,
           file: r.sheet_url,
           gender: r.gender === "feminino" ? "feminino" : "masculino",
+          colors: r.colors ?? undefined,
         }));
         registerCustomHair(items);
-        for (const item of items) textureEntries.push({ key: hairTextureKey(item.id), url: item.file });
+        for (const item of items) {
+          textureEntries.push({ key: hairTextureKey(item.id), url: item.file });
+          // cada cor gerada É UMA FOLHA PRÓPRIA (ver ColorZoneTool.tsx) --
+          // precisa da sua própria textura registrada, igual ao item
+          // "base": selecionar uma cor troca pro id DELA (ver
+          // selectedHairColorId/setLocalHairId em GameRoom.tsx), não do
+          // item pai.
+          for (const c of item.colors ?? []) textureEntries.push({ key: hairTextureKey(c.id), url: c.file });
+        }
       }
 
       const accessoryRows = rows.filter((r) => r.category === "acessorio");
@@ -1062,9 +1077,13 @@ export default function GameRoom({
           label: r.label,
           file: r.sheet_url,
           gender: r.gender === "feminino" ? "feminino" : "masculino",
+          colors: r.colors ?? undefined,
         }));
         registerCustomAccessories(items);
-        for (const item of items) textureEntries.push({ key: accessoryTextureKey(item.id), url: item.file });
+        for (const item of items) {
+          textureEntries.push({ key: accessoryTextureKey(item.id), url: item.file });
+          for (const c of item.colors ?? []) textureEntries.push({ key: accessoryTextureKey(c.id), url: c.file });
+        }
       }
 
       const beardRows = rows.filter((r) => r.category === "barba");

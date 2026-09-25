@@ -28,7 +28,9 @@ import {
   DEFAULT_OUTFIT_ID,
   outfitFileForSkin,
   AvatarGender,
+  ColorOption,
 } from "@/game/customization";
+import ColorZoneTool from "@/components/ColorZoneTool";
 
 type CategoryId = "poltrona" | "divisoria" | "sofa" | "mesa" | "planta" | "computador";
 type DirectionKey = "down" | "left" | "right" | "up";
@@ -313,6 +315,10 @@ type CustomAvatarItemRow = {
   label: string;
   skin_ids: string[] | null;
   sheet_url: string;
+  // variantes de cor GERADAS pelo ColorZoneTool.tsx (ver comentário lá
+  // e supabase/migrations/0009_avatar_items_colors.sql) -- mesmo
+  // formato de ColorOption em game/customization.ts.
+  colors: ColorOption[] | null;
 };
 
 // qual direção (ver DIRECTION_FIELDS acima) cada um dos 15 quadros da
@@ -665,6 +671,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // mesma ideia, só que pro tom de pele ("Tons cadastrados") -- ver
   // handleDeleteSkin abaixo.
   const [deletingSkinId, setDeletingSkinId] = useState<string | null>(null);
+  // id do item (cabelo/acessório) com o ColorZoneTool.tsx aberto embaixo
+  // da linha dele agora -- só 1 por vez (ver "Gerar cor" no JSX abaixo).
+  const [colorToolItemId, setColorToolItemId] = useState<string | null>(null);
   // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
   // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
   // com o próprio estado de arquivo/posição, chaveadas por
@@ -828,7 +837,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     // GameRoom.tsx).
     const { data } = await supabase
       .from("avatar_items")
-      .select("id, category, gender, label, skin_ids, sheet_url");
+      .select("id, category, gender, label, skin_ids, sheet_url, colors");
     setAvatarItems((data ?? []) as CustomAvatarItemRow[]);
   }
 
@@ -1841,17 +1850,50 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 ) : (
                   <ul className="items-panel-list">
                     {rows.map((item) => (
-                      <li key={item.id} className="items-panel-row">
-                        <span className="items-panel-name">
-                          {item.label} <span className="items-panel-category">({item.gender})</span>
-                        </span>
-                        <button
-                          type="button"
-                          disabled={deletingAvatarItemId === item.id}
-                          onClick={() => handleDeleteAvatarItem(item)}
-                        >
-                          {deletingAvatarItemId === item.id ? "Apagando..." : "Excluir"}
-                        </button>
+                      <li key={item.id} className="items-panel-row-wrap">
+                        <div className="items-panel-row">
+                          <span className="items-panel-name">
+                            {item.label} <span className="items-panel-category">({item.gender})</span>
+                            {item.colors && item.colors.length > 0 && (
+                              <span className="items-panel-category"> -- {item.colors.length} cor(es)</span>
+                            )}
+                          </span>
+                          {/* "Gerar cor" (ColorZoneTool.tsx) -- só cabelo/acessório por
+                              enquanto: são os únicos que já leem `colors` no jogo (ver
+                              swatch "Cores de {item}" no ProfileCard, GameRoom.tsx).
+                              Traje usa `bySkin` (arte diferente por TOM de pele, ver
+                              OutfitOption em game/customization.ts) -- dar cor por
+                              tom exigiria um formato de `colors` diferente (com
+                              bySkin dentro de cada cor) e uma UI de troca de cor
+                              própria na aba Traje, que ainda não existe -- fica pra
+                              quando o Douglas pedir. */}
+                          {(category === "cabelo" || category === "acessorio") && (
+                            <button
+                              type="button"
+                              onClick={() => setColorToolItemId((prev) => (prev === item.id ? null : item.id))}
+                            >
+                              {colorToolItemId === item.id ? "Fechar cor" : "Gerar cor"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={deletingAvatarItemId === item.id}
+                            onClick={() => handleDeleteAvatarItem(item)}
+                          >
+                            {deletingAvatarItemId === item.id ? "Apagando..." : "Excluir"}
+                          </button>
+                        </div>
+                        {colorToolItemId === item.id && (
+                          <ColorZoneTool
+                            item={item}
+                            accessToken={accessToken}
+                            onClose={() => setColorToolItemId(null)}
+                            onSaved={() => {
+                              loadAvatarItems();
+                              onChanged();
+                            }}
+                          />
+                        )}
                       </li>
                     ))}
                   </ul>
