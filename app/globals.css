@@ -2543,6 +2543,25 @@ body {
   flex-shrink: 0;
 }
 
+/* pedido do Douglas: "quero esse masculino e feminino fixo lá encima,
+   e não mexendo assim conforme ocupam o espaço ou não" -- linha PRÓPRIA
+   de largura total do card (mesmo padding horizontal do título acima),
+   fixa (flex-shrink:0, mesma família de .profile-edit-title) e ANTES
+   do boneco -- antes vivia dentro de .skin-picker, que é flex:1 e
+   encolhe/cresce disputando espaço com o boneco+setas ao lado, o que
+   fazia o botão "Feminino" mudar de largura e às vezes passar da borda
+   arredondada do card ("comendo beirada"). max-width no .gender-switch
+   evita esticar os botões a largura toda do card à toa. */
+.profile-edit-gender-row {
+  flex-shrink: 0;
+  padding: 0 18px 10px;
+}
+
+.profile-edit-gender-row .gender-switch {
+  max-width: 220px;
+  margin-bottom: 0;
+}
+
 /* boneco fixo no topo do editor, mostrando ao vivo cada escolha (ver
    avatar-preview-layer, um recorte do frame 0 igual ao dos thumbnails
    de cabelo -- background-image + position + size, sem canvas nem

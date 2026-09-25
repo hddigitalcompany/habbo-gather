@@ -4691,6 +4691,35 @@ function ProfileCard({
         >
           <h3 className="profile-edit-title">Editar meu personagem</h3>
 
+          {/* Sexo (ver AvatarGender) -- pedido do Douglas: "quero esse
+              masculino e feminino fixo lá encima, e não mexendo assim
+              conforme ocupam o espaço ou não" -- antes vivia DENTRO de
+              .skin-picker (coluna ao lado do boneco, ver mais abaixo),
+              que é flex:1 e encolhe/cresce junto com o espaço que sobra
+              do boneco+setas -- isso fazia o botão "Feminino" mudar de
+              largura de sexo pra sexo e às vezes comer a borda
+              arredondada do card. Linha PRÓPRIA, LARGURA TOTAL do card,
+              fixa antes do resto -- nunca disputa espaço com o boneco. */}
+          <div className="profile-edit-gender-row">
+            <span className="skin-picker-label">Sexo</span>
+            <div className="gender-switch">
+              <button
+                type="button"
+                className={selectedGender === "masculino" ? "gender-btn selected" : "gender-btn"}
+                onClick={() => onSelectGender("masculino")}
+              >
+                Masculino
+              </button>
+              <button
+                type="button"
+                className={selectedGender === "feminino" ? "gender-btn selected" : "gender-btn"}
+                onClick={() => onSelectGender("feminino")}
+              >
+                Feminino
+              </button>
+            </div>
+          </div>
+
           {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
               traje + cabelo/barba/acessório selecionados empilhados,
               mesmo recorte de frame 0 dos thumbnails), ver
@@ -4811,28 +4840,12 @@ function ProfileCard({
             {/* tons de pele (ver SKIN_CATALOG) -- selecionáveis aqui do
                 lado do boneco, não dentro da grade de categorias (pedido
                 do Douglas). Troca ao vivo (ver selectSkin), sem precisar
-                estar na aba "cabelo". Sexo (ver AvatarGender) fica ACIMA
-                do tom de pele (pedido do Douglas) e só filtra a grade de
-                baixo -- tom sem `gender` no catálogo (gerado antes dessa
-                mudança) conta como "masculino". */}
+                estar na aba "cabelo". Sexo (ver AvatarGender) agora é a
+                linha PRÓPRIA acima (.profile-edit-gender-row, pedido do
+                Douglas) -- aqui só filtra a grade abaixo pelo sexo já
+                escolhido lá em cima -- tom sem `gender` no catálogo
+                (gerado antes dessa mudança) conta como "masculino". */}
             <div className="skin-picker">
-              <span className="skin-picker-label">Sexo</span>
-              <div className="gender-switch">
-                <button
-                  type="button"
-                  className={selectedGender === "masculino" ? "gender-btn selected" : "gender-btn"}
-                  onClick={() => onSelectGender("masculino")}
-                >
-                  Masculino
-                </button>
-                <button
-                  type="button"
-                  className={selectedGender === "feminino" ? "gender-btn selected" : "gender-btn"}
-                  onClick={() => onSelectGender("feminino")}
-                >
-                  Feminino
-                </button>
-              </div>
               <span className="skin-picker-label">Tom de pele</span>
               <div className="skin-swatches">
                 {SKIN_CATALOG.filter((skin) => (skin.gender ?? "masculino") === selectedGender).map((skin) => (
