@@ -115,7 +115,7 @@ const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM
 // avatar-art-drag-box etc). RULER_UNIT = espaçamento entre marcações;
 // RULER_X_RANGE/RULER_Y_RANGE = até onde iso (o excesso é cortado de
 // graça pelo overflow do .item-stage, não precisa ser exato).
-const RULER_UNIT = 20;
+const RULER_UNIT = 10;
 const RULER_X_RANGE: [number, number] = [-100, 100];
 const RULER_Y_RANGE: [number, number] = [-180, 60];
 
