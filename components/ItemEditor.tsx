@@ -662,6 +662,9 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // id do item custom sendo apagado agora (desabilita o botão dele
   // enquanto a chamada roda) -- ver handleDeleteAvatarItem abaixo.
   const [deletingAvatarItemId, setDeletingAvatarItemId] = useState<string | null>(null);
+  // mesma ideia, só que pro tom de pele ("Tons cadastrados") -- ver
+  // handleDeleteSkin abaixo.
+  const [deletingSkinId, setDeletingSkinId] = useState<string | null>(null);
   // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
   // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
   // com o próprio estado de arquivo/posição, chaveadas por
@@ -791,6 +794,28 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       return;
     }
     setSkins((data ?? []) as CustomSkinRow[]);
+  }
+
+  // pedido do Douglas: "deixar apenas branco/pardo/negro" -- apaga um
+  // TOM DE PELE custom da lista "Tons cadastrados" (tinha lixo de teste,
+  // nome errado "Ela" e "Pardo" duplicado por sexo). Mesmo padrão de
+  // handleDeleteAvatarItem acima.
+  async function handleDeleteSkin(skin: CustomSkinRow) {
+    const ok = window.confirm(`Apagar o tom "${skin.label}" (${skin.gender}) de vez? Não tem como desfazer.`);
+    if (!ok) return;
+    setDeletingSkinId(skin.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/avatar-skins/${skin.id}`, { method: "DELETE", headers: authHeaders });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "erro ao apagar tom");
+      await loadSkins();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro ao apagar tom");
+    } finally {
+      setDeletingSkinId(null);
+    }
   }
 
   async function loadAvatarItems() {
@@ -1770,6 +1795,13 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                     <span className="items-panel-name">
                       {skin.label} <span className="items-panel-category">({skin.gender})</span>
                     </span>
+                    <button
+                      type="button"
+                      disabled={deletingSkinId === skin.id}
+                      onClick={() => handleDeleteSkin(skin)}
+                    >
+                      {deletingSkinId === skin.id ? "Apagando..." : "Excluir"}
+                    </button>
                   </li>
                 ))}
               </ul>
