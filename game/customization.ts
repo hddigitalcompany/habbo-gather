@@ -29,6 +29,13 @@ export interface HairOption {
   label: string;
   file: string;
   colors?: ColorOption[];
+  /** Sexo escolhido no Editor de Itens ao cadastrar (mesmo campo
+   * `gender` da tabela avatar_items, já existia mas era ignorado aqui --
+   * bug reportado pelo Douglas: "cabelo e itens masculinos não vão pro
+   * feminino se não seta, e estão indo"). Ausente = item de fábrica
+   * (ex: "Nenhum"), aparece pros dois sexos -- ver filtro em
+   * editorCategory === "cabelo" no ProfileCard, GameRoom.tsx. */
+  gender?: AvatarGender;
 }
 
 // pedido do Douglas: "rapa tudo que tem de item, vou subir tudo pela
@@ -68,11 +75,16 @@ export const DEFAULT_HAIR_ID = HAIR_CATALOG[0].id;
  * abaixo) -- não depende da ordem em que a pasta de origem foi lida.
  */
 /** "Sexo" do avatar (pedido do Douglas: botão Masculino/Feminino acima
- * do seletor de tom de pele, ver ProfileCard em GameRoom.tsx) -- hoje só
- * separa qual PASTA de origem cada tom de pele veio (ver
+ * do seletor de tom de pele, ver ProfileCard em GameRoom.tsx) -- separa
+ * qual PASTA de origem cada tom de pele "de fábrica" veio (ver
  * AVATAR_SKIN_SRC_ROOT/AVATAR_SKIN_SRC_ROOT_FEMININO em
- * scripts/avatarAssetsConfig.mjs), não afeta cabelo/barba/acessório/
- * traje -- esses continuam com o catálogo único de sempre. */
+ * scripts/avatarAssetsConfig.mjs) E filtra cabelo/acessório CUSTOM pelo
+ * `gender` marcado no cadastro (ver HairOption/AccessoryOption acima e
+ * o filtro em editorCategory === "cabelo"/"acessorio" no ProfileCard,
+ * GameRoom.tsx -- bug reportado pelo Douglas: "cabelo e itens
+ * masculinos não vão pro feminino se não seta, e estão indo"). Barba/
+ * traje já tinham esse filtro (via bySkin/tom de pele, ver
+ * resolveBeardSkinId/resolveOutfitSkinId). */
 export type AvatarGender = "masculino" | "feminino";
 
 export interface SkinOption {
@@ -225,6 +237,8 @@ export interface AccessoryOption {
   label: string;
   file: string;
   colors?: ColorOption[];
+  /** Ver comentário do mesmo campo em HairOption acima. */
+  gender?: AvatarGender;
 }
 
 // pedido do Douglas: "rapa tudo que tem de item, vou subir tudo pela

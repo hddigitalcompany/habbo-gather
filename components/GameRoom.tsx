@@ -1041,14 +1041,28 @@ export default function GameRoom({
 
       const hairRows = rows.filter((r) => r.category === "cabelo");
       if (hairRows.length > 0) {
-        const items: HairOption[] = hairRows.map((r) => ({ id: r.id, label: r.label, file: r.sheet_url }));
+        // `gender` já vinha salvo na linha (cadastrado no Editor de
+        // Itens) mas ficava sem uso aqui -- bug reportado pelo Douglas:
+        // "cabelo e itens masculinos não vão pro feminino se não seta, e
+        // estão indo" (o seletor mostrava TODO mundo pros dois sexos).
+        const items: HairOption[] = hairRows.map((r) => ({
+          id: r.id,
+          label: r.label,
+          file: r.sheet_url,
+          gender: r.gender === "feminino" ? "feminino" : "masculino",
+        }));
         registerCustomHair(items);
         for (const item of items) textureEntries.push({ key: hairTextureKey(item.id), url: item.file });
       }
 
       const accessoryRows = rows.filter((r) => r.category === "acessorio");
       if (accessoryRows.length > 0) {
-        const items: AccessoryOption[] = accessoryRows.map((r) => ({ id: r.id, label: r.label, file: r.sheet_url }));
+        const items: AccessoryOption[] = accessoryRows.map((r) => ({
+          id: r.id,
+          label: r.label,
+          file: r.sheet_url,
+          gender: r.gender === "feminino" ? "feminino" : "masculino",
+        }));
         registerCustomAccessories(items);
         for (const item of items) textureEntries.push({ key: accessoryTextureKey(item.id), url: item.file });
       }
@@ -4882,7 +4896,11 @@ function ProfileCard({
             {editorCategory === "cabelo" ? (
               <>
                 <div className="hair-picker">
-                  {HAIR_CATALOG.map((opt) => (
+                  {/* filtra pelo sexo escolhido acima -- item sem `gender`
+                      (ex: "Nenhum", de fábrica) aparece pros dois; bug
+                      reportado pelo Douglas: "cabelo e itens masculinos
+                      não vão pro feminino se não seta, e estão indo". */}
+                  {HAIR_CATALOG.filter((opt) => !opt.gender || opt.gender === selectedGender).map((opt) => (
                     <button
                       key={opt.id}
                       className={selectedHairId === opt.id ? "hair-option selected" : "hair-option"}
@@ -4973,7 +4991,8 @@ function ProfileCard({
             ) : editorCategory === "acessorio" ? (
               <>
                 <div className="hair-picker">
-                  {ACCESSORY_CATALOG.map((opt) => (
+                  {/* mesmo filtro por sexo do cabelo acima. */}
+                  {ACCESSORY_CATALOG.filter((opt) => !opt.gender || opt.gender === selectedGender).map((opt) => (
                     <button
                       key={opt.id}
                       className={selectedAccessoryId === opt.id ? "hair-option selected" : "hair-option"}
