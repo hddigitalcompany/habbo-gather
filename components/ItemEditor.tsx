@@ -1387,22 +1387,36 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             </p>
           </>
         ) : category === "avatar" ? (
-          <div className="tone-select">
-            {AVATAR_TONE_NAMES.map((tone) => (
-              <button
-                key={tone.label}
-                type="button"
-                className={label === tone.label ? "tone-chip selected" : "tone-chip"}
-                onClick={() => {
-                  setLabel(tone.label);
-                  setHex(tone.hex);
-                }}
-              >
-                <span className="tone-chip-swatch" style={{ background: tone.hex }} />
-                {tone.label}
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="tone-select">
+              {AVATAR_TONE_NAMES.map((tone) => (
+                <button
+                  key={tone.label}
+                  type="button"
+                  className={label === tone.label ? "tone-chip selected" : "tone-chip"}
+                  onClick={() => {
+                    setLabel(tone.label);
+                    setHex(tone.hex);
+                  }}
+                >
+                  <span className="tone-chip-swatch" style={{ background: tone.hex }} />
+                  {tone.label}
+                </button>
+              ))}
+            </div>
+            {/* pedido do Douglas: "com corpo inteiro" -- bug real que
+                aconteceu ("Pardo" ficou só com a cabeça, ver conversa no
+                chat): tom de pele é o CORPO TODO do jogo (essa foto vira
+                literalmente o boneco andando na sala, ver SKIN_CATALOG/
+                MainScene.ts "base"), diferente do "Avatar Padrão" (esse
+                sim separa cabeça e traje/corpo em duas fotos). Sem esse
+                aviso não tinha nada deixando claro a diferença aqui. */}
+            <p className="settings-hint">
+              Cada foto de direção precisa mostrar o personagem INTEIRO, da cabeça até os pés -- esse tom vira o
+              corpo todo do jogo (diferente do "Avatar Padrão", que separa cabeça e traje em duas fotos). Uma foto só
+              da cabeça deixa o boneco decapitado no jogo.
+            </p>
+          </>
         ) : (
           <input
             className="items-panel-input"
