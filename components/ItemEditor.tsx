@@ -1858,16 +1858,18 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                               <span className="items-panel-category"> -- {item.colors.length} cor(es)</span>
                             )}
                           </span>
-                          {/* "Gerar cor" (ColorZoneTool.tsx) -- só cabelo/acessório por
-                              enquanto: são os únicos que já leem `colors` no jogo (ver
-                              swatch "Cores de {item}" no ProfileCard, GameRoom.tsx).
-                              Traje usa `bySkin` (arte diferente por TOM de pele, ver
-                              OutfitOption em game/customization.ts) -- dar cor por
-                              tom exigiria um formato de `colors` diferente (com
-                              bySkin dentro de cada cor) e uma UI de troca de cor
-                              própria na aba Traje, que ainda não existe -- fica pra
-                              quando o Douglas pedir. */}
-                          {(category === "cabelo" || category === "acessorio") && (
+                          {/* "Gerar cor" (ColorZoneTool.tsx) -- cabelo/acessório/traje
+                              (pedido do Douglas: "trajes eu edito tbm? adiciona").
+                              Barba fica de fora: sem swatch "Cores de..." no
+                              ProfileCard pra ela ainda (a arte já muda sozinha com o
+                              tom de pele, nunca teve seletor de cor manual, ver
+                              comentário em selectedBeardId, GameRoom.tsx) -- fica pra
+                              quando o Douglas pedir. Traje usa a MESMA arte gerada (1
+                              folha só) em todos os tons que o item cobre, igual o
+                              traje base -- ver OutfitOption.colors em
+                              game/customization.ts e fetchAndRegisterCustomAvatarItems
+                              em GameRoom.tsx. */}
+                          {(category === "cabelo" || category === "acessorio" || category === "traje") && (
                             <button
                               type="button"
                               onClick={() => setColorToolItemId((prev) => (prev === item.id ? null : item.id))}

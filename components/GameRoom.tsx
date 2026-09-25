@@ -344,6 +344,7 @@ type SavedAvatar = {
   accessoryId?: string;
   accessoryColorId?: string | null;
   outfitId?: string;
+  outfitColorId?: string | null;
 };
 
 // arte de item custom (móvel OU tom de pele -- ver `custom` em
@@ -1107,11 +1108,35 @@ export default function GameRoom({
           id: r.id,
           label: r.label,
           bySkin: Object.fromEntries((r.skin_ids ?? []).map((skinId) => [skinId, r.sheet_url])),
+          colors: r.colors ?? undefined,
         }));
-        registerCustomOutfits(items);
+        // cada cor gerada (ColorZoneTool.tsx, botão "Gerar cor" -- pedido
+        // do Douglas: "trajes eu edito tbm? adiciona") vira uma entrada
+        // PRÓPRIA no catálogo, com o MESMO esquema de bySkin do traje
+        // pai (reaproveitando a MESMA arte gerada -- 1 folha só -- pros
+        // mesmos tons que o traje pai cobre, ver comentário de
+        // OutfitOption.colors em game/customization.ts). É assim que
+        // setLocalOutfitId/resolveOutfitSkinId acham a cor pelo id dela,
+        // igual acham qualquer outro traje.
+        const colorItems: OutfitOption[] = [];
+        for (const item of items) {
+          for (const c of item.colors ?? []) {
+            colorItems.push({
+              id: c.id,
+              label: `${item.label} -- ${c.label}`,
+              bySkin: Object.fromEntries(Object.keys(item.bySkin).map((skinId) => [skinId, c.file])),
+            });
+          }
+        }
+        registerCustomOutfits([...items, ...colorItems]);
         for (const item of items) {
           for (const skinId of Object.keys(item.bySkin)) {
             textureEntries.push({ key: outfitTextureKey(item.id, skinId), url: item.bySkin[skinId]! });
+          }
+        }
+        for (const colorItem of colorItems) {
+          for (const skinId of Object.keys(colorItem.bySkin)) {
+            textureEntries.push({ key: outfitTextureKey(colorItem.id, skinId), url: colorItem.bySkin[skinId]! });
           }
         }
       }
@@ -1342,6 +1367,13 @@ export default function GameRoom({
   // escolhível à mão no editor, só não é mais o padrão do primeiro
   // spawn. Lazy initializer pelo mesmo motivo dos campos acima.
   const [selectedOutfitId, setSelectedOutfitId] = useState(() => loadSavedAvatar().outfitId ?? pickRandomOutfitId());
+  // cor escolhida DENTRO do traje atual -- mesmo esquema de
+  // selectedHairColorId acima (pedido do Douglas: "trajes eu edito
+  // tbm? adiciona", depois do Gerador de cor já funcionar pra cabelo/
+  // acessório). Reseta pra null ao trocar de TRAJE (ver selectOutfit).
+  const [selectedOutfitColorId, setSelectedOutfitColorId] = useState<string | null>(
+    () => loadSavedAvatar().outfitColorId ?? null
+  );
   // categoria ativa dentro do editor (Cabelo/Acessório/Barba/...) -- só
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
@@ -1920,7 +1952,7 @@ export default function GameRoom({
         scene.setLocalSkinId(selectedSkinId);
         scene.setLocalBeardId(selectedBeardId);
         scene.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
-        scene.setLocalOutfitId(selectedOutfitId);
+        scene.setLocalOutfitId(selectedOutfitColorId ?? selectedOutfitId);
         scene.onLocalMove = (x, y) => {
           socketRef.current?.send(JSON.stringify({ type: "move", x, y }));
           checkProximity();
@@ -3070,10 +3102,18 @@ export default function GameRoom({
     setSelectedAccessoryColorId(colorId);
   }
 
-  // traje: sem variação de cor manual (a mão já combina sozinha com o
-  // tom de pele escolhido acima, ver outfitFileForSkin/resolveOutfitSkinId).
+  // traje: mesmo par de funções do cabelo/acessório (troca de traje
+  // reseta a cor escolhida; trocar só a cor mantém o traje atual). A
+  // arte BASE (sem cor) continua combinando sozinha com o tom de pele
+  // escolhido acima (outfitFileForSkin/resolveOutfitSkinId) -- uma cor
+  // escolhida também, já que cada cor vira sua própria entrada com
+  // bySkin (ver fetchAndRegisterCustomAvatarItems).
   function selectOutfit(outfitId: string) {
     setSelectedOutfitId(outfitId);
+    setSelectedOutfitColorId(null);
+  }
+  function selectOutfitColor(colorId: string) {
+    setSelectedOutfitColorId(colorId);
   }
 
   // "Editar meu personagem" agora toma o card INTEIRO (nada de ficar
@@ -3093,6 +3133,7 @@ export default function GameRoom({
   const accessoryBeforeEditRef = useRef(selectedAccessoryId);
   const accessoryColorBeforeEditRef = useRef(selectedAccessoryColorId);
   const outfitBeforeEditRef = useRef(selectedOutfitId);
+  const outfitColorBeforeEditRef = useRef(selectedOutfitColorId);
   function startEditingCharacter() {
     hairBeforeEditRef.current = selectedHairId;
     hairColorBeforeEditRef.current = selectedHairColorId;
@@ -3102,6 +3143,7 @@ export default function GameRoom({
     accessoryBeforeEditRef.current = selectedAccessoryId;
     accessoryColorBeforeEditRef.current = selectedAccessoryColorId;
     outfitBeforeEditRef.current = selectedOutfitId;
+    outfitColorBeforeEditRef.current = selectedOutfitColorId;
     setEditorCategory("cabelo");
     setEditingCharacter(true);
   }
@@ -3116,6 +3158,7 @@ export default function GameRoom({
     setSelectedAccessoryId(accessoryBeforeEditRef.current);
     setSelectedAccessoryColorId(accessoryColorBeforeEditRef.current);
     setSelectedOutfitId(outfitBeforeEditRef.current);
+    setSelectedOutfitColorId(outfitColorBeforeEditRef.current);
     setEditingCharacter(false);
   }
   function saveEditingCharacter() {
@@ -3132,7 +3175,7 @@ export default function GameRoom({
     sceneRef.current?.setLocalSkinId(selectedSkinId);
     sceneRef.current?.setLocalBeardId(selectedBeardId);
     sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
-    sceneRef.current?.setLocalOutfitId(selectedOutfitId);
+    sceneRef.current?.setLocalOutfitId(selectedOutfitColorId ?? selectedOutfitId);
 
     // persiste no localStorage (ver AVATAR_STORAGE_KEY acima) -- é isso
     // que faltava pra sobreviver a um F5 (bug reportado pelo Douglas).
@@ -3151,6 +3194,7 @@ export default function GameRoom({
           accessoryId: selectedAccessoryId,
           accessoryColorId: selectedAccessoryColorId,
           outfitId: selectedOutfitId,
+          outfitColorId: selectedOutfitColorId,
         } satisfies SavedAvatar)
       );
     } catch {
@@ -3367,6 +3411,8 @@ export default function GameRoom({
             onSelectAccessoryColor={selectAccessoryColor}
             selectedOutfitId={selectedOutfitId}
             onSelectOutfit={selectOutfit}
+            selectedOutfitColorId={selectedOutfitColorId}
+            onSelectOutfitColor={selectOutfitColor}
             editorCategory={editorCategory}
             onSelectCategory={setEditorCategory}
             measuredHeight={profileCardHeight}
@@ -4555,6 +4601,8 @@ function ProfileCard({
   onSelectAccessoryColor,
   selectedOutfitId,
   onSelectOutfit,
+  selectedOutfitColorId,
+  onSelectOutfitColor,
   editorCategory,
   onSelectCategory,
   measuredHeight,
@@ -4598,6 +4646,8 @@ function ProfileCard({
   onSelectAccessoryColor: (id: string) => void;
   selectedOutfitId: string;
   onSelectOutfit: (id: string) => void;
+  selectedOutfitColorId: string | null;
+  onSelectOutfitColor: (id: string) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
   measuredHeight: number | null;
@@ -4684,14 +4734,20 @@ function ProfileCard({
       ? selectedAccessoryOption?.colors?.find((c) => c.id === selectedAccessoryColorId)
       : undefined;
     const effectiveAccessoryFile = selectedAccessoryColorOption?.file ?? selectedAccessoryOption?.file;
-    // traje: sem cor manual -- o arquivo efetivo já é resolvido pelo tom
-    // de pele ATUAL (ver outfitFileForSkin/resolveOutfitSkinId), então a
-    // prévia troca sozinha ao trocar o tom, sem precisar reselecionar o
-    // traje.
+    // traje: arquivo efetivo já é resolvido pelo tom de pele ATUAL (ver
+    // outfitFileForSkin/resolveOutfitSkinId), então a prévia troca
+    // sozinha ao trocar o tom, sem precisar reselecionar o traje. Cor
+    // escolhida (se houver, ver selectedOutfitColorId acima) manda mais
+    // -- mesmo esquema de cabelo/acessório -- só que a cor de traje não
+    // é por tom (é 1 arquivo só, ver comentário de OutfitOption.colors
+    // em game/customization.ts), então usa DIRETO sem outfitFileForSkin.
     const selectedOutfitOption = OUTFIT_CATALOG.find((opt) => opt.id === selectedOutfitId);
-    const effectiveOutfitFile = selectedOutfitOption
-      ? outfitFileForSkin(selectedOutfitOption, selectedSkinId)
+    const selectedOutfitColorOption = selectedOutfitColorId
+      ? selectedOutfitOption?.colors?.find((c) => c.id === selectedOutfitColorId)
       : undefined;
+    const effectiveOutfitFile =
+      selectedOutfitColorOption?.file ??
+      (selectedOutfitOption ? outfitFileForSkin(selectedOutfitOption, selectedSkinId) : undefined);
     // posição do frame PARADO da direção escolhida (ver
     // PREVIEW_DIRECTION_FRAME acima) dentro da folha 8x2 -- mesma conta
     // de frameOffsetXPx/frameOffsetYPx em ItemEditor.tsx, só que em
@@ -4812,6 +4868,22 @@ function ProfileCard({
                 </div>
               </div>
             )}
+          {editorCategory === "traje" && selectedOutfitOption?.colors && selectedOutfitOption.colors.length > 0 && (
+            <div className="skin-picker">
+              <span className="skin-picker-label">Cores de &quot;{selectedOutfitOption.label}&quot;</span>
+              <div className="skin-swatches">
+                {selectedOutfitOption.colors.map((c) => (
+                  <button
+                    key={c.id}
+                    className={selectedOutfitColorId === c.id ? "skin-swatch selected" : "skin-swatch"}
+                    style={{ background: c.hex ?? "#8a7ca8" }}
+                    onClick={() => onSelectOutfitColor(c.id)}
+                    title={c.label}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
               traje + cabelo/barba/acessório selecionados empilhados,

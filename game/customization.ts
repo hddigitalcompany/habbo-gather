@@ -279,6 +279,19 @@ export interface OutfitOption {
   id: string;
   label: string;
   bySkin: Partial<Record<string, string>>;
+  /** Variação de COR gerada pelo ColorZoneTool.tsx (mesmo formato de
+   * HairOption.colors -- 1 arquivo só, ColorOption comum). Diferente do
+   * traje BASE (que já nasce com bySkin porque o item pode cobrir mais
+   * de um tom, ver skin_ids na migration 0006), a arte gerada por uma
+   * cor é sempre 1 folha só (o traje custom do Editor de Itens só tem 1
+   * sheet_url, os skin_ids dele são só "pra quais tons vale", não arte
+   * diferente por tom -- ver comentário em 0006_avatar_items.sql) --
+   * por isso aqui é `file` normal, não `bySkin`. Quem consome isso (ver
+   * fetchAndRegisterCustomAvatarItems em GameRoom.tsx) monta um bySkin
+   * PRÓPRIO reaproveitando essa mesma arte pros mesmos tons do traje
+   * pai, na hora de registrar a cor como uma entrada própria no
+   * catálogo (pra setLocalOutfitId achar ela pelo id dela). */
+  colors?: ColorOption[];
 }
 
 // gerado automaticamente -- ver scripts/syncOutfitAssets.mjs, NÃO editar
