@@ -4743,6 +4743,26 @@ function ProfileCard({
                 ‹
               </button>
               <div className="avatar-preview" style={{ width: AVATAR_PREVIEW_W, height: AVATAR_PREVIEW_H }}>
+                {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
+                    traje ATRÁS da base -- "base" (tom de pele) é só a
+                    cabeça/busto, "traje" é quem dá o corpo inteiro (pedido
+                    do Douglas: "a gente criou pro jogo cabeça e traje, o
+                    corpo padrão não vai pro jogo" / "coloca a cabeça acima
+                    do traje"); cabelo ATRÁS da barba (barba não pode ficar
+                    escondida atrás do cabelo); óculos na frente de tudo --
+                    "nenhuma(o)"/"Nenhum" é um arquivo transparente, então
+                    sempre renderiza (sem condicional), só não aparece
+                    nada. */}
+                {effectiveOutfitFile && (
+                  <span
+                    className="avatar-preview-layer"
+                    style={{
+                      backgroundImage: `url(${furnitureAssetUrl(effectiveOutfitFile)})`,
+                      backgroundPosition: previewBgPos,
+                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
+                    }}
+                  />
+                )}
                 {selectedSkinOption ? (
                   <span
                     className="avatar-preview-layer"
@@ -4779,16 +4799,11 @@ function ProfileCard({
                     </>
                   )
                 )}
-                {/* ordem das camadas segue LAYER_DRAW_ORDER (MainScene.ts):
-                    traje fica sobre a base, barba fica ATRÁS do cabelo,
-                    óculos fica NA FRENTE de tudo -- "nenhuma(o)"/"Nenhum"
-                    é um arquivo transparente, então sempre renderiza (sem
-                    condicional), só não aparece nada. */}
-                {effectiveOutfitFile && (
+                {effectiveHairFile && (
                   <span
                     className="avatar-preview-layer"
                     style={{
-                      backgroundImage: `url(${furnitureAssetUrl(effectiveOutfitFile)})`,
+                      backgroundImage: `url(${furnitureAssetUrl(effectiveHairFile)})`,
                       backgroundPosition: previewBgPos,
                       backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                     }}
@@ -4799,16 +4814,6 @@ function ProfileCard({
                     className="avatar-preview-layer"
                     style={{
                       backgroundImage: `url(${furnitureAssetUrl(effectiveBeardFile)})`,
-                      backgroundPosition: previewBgPos,
-                      backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
-                    }}
-                  />
-                )}
-                {effectiveHairFile && (
-                  <span
-                    className="avatar-preview-layer"
-                    style={{
-                      backgroundImage: `url(${furnitureAssetUrl(effectiveHairFile)})`,
                       backgroundPosition: previewBgPos,
                       backgroundSize: `${HAIR_SHEET_W * (AVATAR_PREVIEW_W / 200)}px ${HAIR_SHEET_H * (AVATAR_PREVIEW_W / 200)}px`,
                     }}

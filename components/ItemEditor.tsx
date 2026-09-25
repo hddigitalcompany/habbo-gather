@@ -1404,17 +1404,19 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 </button>
               ))}
             </div>
-            {/* pedido do Douglas: "com corpo inteiro" -- bug real que
-                aconteceu ("Pardo" ficou só com a cabeça, ver conversa no
-                chat): tom de pele é o CORPO TODO do jogo (essa foto vira
-                literalmente o boneco andando na sala, ver SKIN_CATALOG/
-                MainScene.ts "base"), diferente do "Avatar Padrão" (esse
-                sim separa cabeça e traje/corpo em duas fotos). Sem esse
-                aviso não tinha nada deixando claro a diferença aqui. */}
+            {/* CORRIGIDO (era "com corpo inteiro", pedido antigo errado --
+                ver conversa no chat: "a gente criou pro jogo cabeça e
+                traje, o corpo padrão não vai pro jogo"). Tom de pele é só
+                a CABEÇA/busto (ver SKIN_CATALOG/MainScene.ts "base") --
+                quem dá o corpo inteiro (tronco/braços/pernas) é o
+                "Traje", desenhado ATRÁS da cabeça (ver LAYER_DRAW_ORDER em
+                MainScene.ts). Mesmo enquadramento das fotos de cabeça do
+                "Avatar Padrão". */}
             <p className="settings-hint">
-              Cada foto de direção precisa mostrar o personagem INTEIRO, da cabeça até os pés -- esse tom vira o
-              corpo todo do jogo (diferente do "Avatar Padrão", que separa cabeça e traje em duas fotos). Uma foto só
-              da cabeça deixa o boneco decapitado no jogo.
+              Cada foto de direção mostra só a CABEÇA/busto do personagem -- esse tom vira a cabeça do boneco no
+              jogo (mesmo enquadramento da cabeça do "Avatar Padrão"). Quem dá o corpo inteiro (tronco, braços,
+              pernas) é o "Traje", cadastrado à parte -- uma foto de corpo inteiro aqui vai ficar com o corpo
+              errado, sobreposto pelo traje.
             </p>
           </>
         ) : (

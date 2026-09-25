@@ -157,16 +157,21 @@ const SENTADO_FRAMES: Record<Direction, number> = {
 
 /**
  * Camadas de customização, na ordem em que são desenhadas (primeiro =
- * mais atrás, último = mais na frente). É um palpite inicial razoável
- * pra roupa/corpo -- fácil de reordenar aqui quando a arte de verdade
- * chegar (ex: se o cabelo tiver franja que devia cobrir os óculos, é só
- * trocar a ordem das duas linhas).
+ * mais atrás, último = mais na frente).
+ *
+ * "traje" fica ATRÁS de "base": "base" (tom de pele) é só a
+ * cabeça/busto (mesmo enquadramento do Avatar Padrão), e "traje" é
+ * quem dá o corpo inteiro (tronco/braços/pernas) -- pedido do
+ * Douglas: "a gente criou pro jogo cabeça e traje, o corpo padrão não
+ * vai pro jogo" / "coloca a cabeça acima do traje e pronto". "barba"
+ * fica NA FRENTE de "cabelo" (barba não pode ficar escondida atrás do
+ * cabelo); "oculos" fica na frente de tudo.
  */
 const LAYER_DRAW_ORDER = [
   "traje",
   "base",
-  "barba",
   "cabelo",
+  "barba",
   "oculos",
 ] as const;
 type LayerKey = (typeof LAYER_DRAW_ORDER)[number];
