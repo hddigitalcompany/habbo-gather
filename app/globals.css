@@ -4113,11 +4113,20 @@ body {
    AVATAR_FOOT_FROM_TILE_BOTTOM/STAGE_BASELINE_PAD em ItemEditor.tsx),
    não mais lado a lado -- é isso que deixa comparar tamanho E posição
    de verdade, na mesma perspectiva do jogo. */
+/* pedido do Douglas: "muda o fundo pra branco do editor, tanto aqui
+   quando nos mobis" -- fundo do "chão" onde o item/boneco fica (esse
+   card é reaproveitado tanto no editor de item de avatar quanto no de
+   mobi/móvel, mesma classe pros dois, ver .item-stage no JSX de
+   ItemEditor.tsx) vira branco sólido (era um preto translúcido em cima
+   do painel roxo escuro, ver .items-panel). Borda escura fraca em vez
+   da branca fraca de antes (branco em branco ficava invisível). As
+   cores da régua/grade logo abaixo (.stage-ruler-*) foram escurecidas
+   junto, senão ficavam claras demais pra ler em cima de fundo branco. */
 .item-size-card {
   margin-top: 4px;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 10px;
 }
 
@@ -4171,7 +4180,10 @@ body {
 
 .stage-ruler-line {
   position: absolute;
-  background: rgba(80, 220, 255, 0.22);
+  /* era rgba(80, 220, 255, 0.22) (ciano bem fraco, pensado pra fundo
+     escuro) -- ciano mais escuro/opaco pra continuar visível em cima
+     do fundo branco novo (ver .item-size-card). */
+  background: rgba(0, 140, 170, 0.35);
 }
 
 .stage-ruler-line-v {
@@ -4195,14 +4207,19 @@ body {
   position: absolute;
   font-size: 9px;
   line-height: 1;
-  color: rgba(190, 235, 255, 0.8);
+  /* era rgba(190, 235, 255, 0.8) (ciano clarinho) + sombra escura --
+     as duas coisas eram pensadas pra "pular" em cima de fundo escuro;
+     em cima do fundo branco novo (ver .item-size-card) o texto vira
+     escuro e a sombra clara (só um leve halo, não precisa mais
+     "escurecer" nada por baixo). */
+  color: rgba(0, 90, 115, 0.9);
   user-select: none;
   white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.9);
 }
 
 .stage-ruler-line-zero .stage-ruler-label {
-  color: rgba(255, 230, 150, 0.95);
+  color: rgba(150, 105, 0, 0.95);
 }
 
 .stage-ruler-label-x {
