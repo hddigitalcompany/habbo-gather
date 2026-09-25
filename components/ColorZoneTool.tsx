@@ -79,6 +79,19 @@ const PALETTE_SWATCHES: string[] = [
   "#3e2723", "#4e342e", "#5d4037", "#6d4c41", "#795548", "#8d6e63", "#a1887f", "#d7ccc8",
   "#8a5a3c", "#a9714a", "#c48a5c", "#d1a276", "#e0b48a", "#f0c9a0", "#fde6b5", "#ffe0bd",
   "#0d1b2a", "#1b263b", "#415a77", "#6b705c", "#a5a58d", "#b7b7a4",
+
+  // pedido do Douglas: "bota mais cores" -- mais faixas pra cobrir o que
+  // as 12 linhas de cima ainda deixavam faltando (tom de pele mais
+  // variado pra pele/cabelo, ciano/índigo entre o azul e o roxo,
+  // vivo/neon pra acessório, pastel bem claro, oliva/caqui entre
+  // amarelo e verde, e vinho/jóia bem escuro).
+  "#ffe0bd", "#ffcd94", "#f1c27d", "#e0ac69", "#c68642", "#a0522d", "#8d5524", "#6f4423", "#5c3317", "#4a2c17", "#3b1f0f", "#ae7242",
+  "#006064", "#00838f", "#0097a7", "#00acc1", "#00bcd4", "#26c6da", "#4dd0e1", "#80deea",
+  "#1a237e", "#283593", "#303f9f", "#3949ab", "#3f51b5", "#5c6bc0", "#7986cb", "#9fa8da",
+  "#827717", "#9e9d24", "#afb42b", "#c0ca33", "#cddc39", "#d4e157", "#dce775", "#e6ee9c",
+  "#ff006e", "#fb5607", "#ffbe0b", "#8338ec", "#3a86ff", "#06ffa5", "#00f5d4", "#ff4365", "#39ff14", "#ff10f0",
+  "#ffd1dc", "#ffe4e1", "#e0bbff", "#c7ceea", "#b5ead7", "#c9f7f5", "#fff5ba", "#ffdac1", "#e2f0cb", "#d4a5a5", "#a2d2ff", "#bde0fe",
+  "#4a0e0e", "#5c1a1a", "#800000", "#2c003e", "#3d0066", "#0f3d3e", "#013220", "#1a0f0f",
 ];
 
 function avatarAssetUrl(file: string): string {
