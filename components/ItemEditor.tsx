@@ -869,6 +869,25 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               style={{ bottom: STAGE_BASELINE_PAD, width: TILE_SIZE_PX, height: TILE_SIZE_PX }}
             />
 
+            {/* boneco de referência TEMPORÁRIO, fixo ao lado do tile, na
+                proporção real do jogo (mesma altura que o boneco de
+                verdade acima, AVATAR_DISPLAY_H) -- pedido do Douglas:
+                "enquanto eu nao tenho um padrao pronto" (ainda não
+                cadastrou nenhum tom de pele "de fábrica"/padrão), pra
+                ter uma referência de tamanho/proporção decente. Foto que
+                ele mesmo mandou (só cortei a barra roxa/triângulo verde
+                que eram parte do print, não do boneco em si -- ver
+                public/assets/boneco_referencia_temp.png). Tirar isso
+                quando ele tiver um tom de pele padrão de verdade
+                cadastrado. */}
+            <img
+              className="item-stage-temp-reference"
+              src="/assets/boneco_referencia_temp.png"
+              alt=""
+              style={{ bottom: STAGE_BASELINE_PAD, height: AVATAR_DISPLAY_H }}
+              title="Referência temporária (proporção real do jogo) -- some quando você cadastrar um tom de pele padrão de verdade"
+            />
+
             {activeArtUrl ? (
               <div
                 className={hasOwnFile ? "avatar-art-drag-box" : "avatar-art-drag-box avatar-art-drag-box-ghost"}

@@ -3512,6 +3512,24 @@ body {
   max-width: none;
 }
 
+/* boneco de referência TEMPORÁRIO do "Criar Avatar" (pedido do Douglas:
+   "enquanto eu nao tenho um padrao pronto, deixe ele fixado ao lado do
+   tile, na proporcao real do jogo") -- fixo, não arrastável, só um
+   guia visual de tamanho (ver item-stage-temp-reference em
+   ItemEditor.tsx, altura = AVATAR_DISPLAY_H, mesma da pose real). */
+.item-stage-temp-reference {
+  position: absolute;
+  right: 16px;
+  width: auto;
+  max-width: none;
+  object-fit: contain;
+  pointer-events: none;
+  image-rendering: pixelated;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  opacity: 0.92;
+}
+
 .item-stage-item-img {
   position: absolute;
   left: 50%;
