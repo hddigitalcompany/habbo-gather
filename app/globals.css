@@ -3304,6 +3304,14 @@ body {
   flex-shrink: 0;
 }
 
+/* "Começar do zero" do Avatar Padrão (ver ItemEditor.tsx) -- pedido do
+   Douglas: "encostado na borda lateral direita", do lado do Cadastrar
+   sem colar nele (empurra pro fim da linha, Cadastrar fica onde sempre
+   esteve à esquerda). */
+.items-panel-submit-row .clear-btn {
+  margin-left: auto;
+}
+
 .items-panel-error {
   color: #ff8a8a;
   font-size: 12px;

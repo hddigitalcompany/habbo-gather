@@ -1082,13 +1082,6 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               seguir ajustando a posição e clicar em Cadastrar de novo quantas vezes quiser (substitui o anterior).
               {defaultReference[gender] ? " Já existe um Avatar Padrão " + gender + " salvo." : ""}
             </p>
-            {(Object.keys(padraoHeadFiles).length > 0 || Object.keys(padraoBodyFiles).length > 0) && (
-              <div className="items-panel-submit-row">
-                <button type="button" className="clear-btn" onClick={handleClearPadrao}>
-                  Começar do zero (trocar as fotos)
-                </button>
-              </div>
-            )}
           </>
         ) : category === "avatar" ? (
           <div className="tone-select">
@@ -1386,6 +1379,17 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
           <button type="submit" className="items-panel-submit" disabled={submitting}>
             {submitting ? "Enviando..." : "Cadastrar"}
           </button>
+          {/* "Começar do zero" (Avatar Padrão) -- pedido do Douglas: "pore
+              ele la embaixo, pra eu nao clicar errado, do lado direito
+              de Cadastrar, mas encostado na borda lateral direita"
+              (morava perto do toggle Cabeça/Traje antes, fácil de
+              clicar sem querer). margin-left:auto empurra pra borda,
+              ver .items-panel-submit-row .clear-btn em globals.css. */}
+          {isAvatarPadrao && (Object.keys(padraoHeadFiles).length > 0 || Object.keys(padraoBodyFiles).length > 0) && (
+            <button type="button" className="clear-btn" onClick={handleClearPadrao}>
+              Começar do zero (trocar as fotos)
+            </button>
+          )}
         </div>
       </form>
 
