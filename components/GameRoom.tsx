@@ -4534,6 +4534,12 @@ const HAIR_SHEET_H = 522;
 const AVATAR_PREVIEW_W = 135.2;
 const AVATAR_PREVIEW_H = 175.76; // mantém a proporção 200:260 do frame
 
+// altura mínima da tela "Editar meu personagem" -- ver comentário no
+// style inline dela (profile-card.editing) mais abaixo. Cabe: título +
+// sexo (~70px) + as duas colunas (tom de pele/cores à esquerda, boneco +
+// abas + grade de 2 linhas de item à direita, ~560px) + ações (~60px).
+const EDITING_MIN_HEIGHT = 720;
+
 // pedido do Douglas: "pra todos os itens eu tenho que subir os 4 lados
 // [...] o cara tem que poder ver o boneco dele em 4 lados também em
 // personalizar, apenas as posições paradas" -- deixa o boneco fixo do
@@ -4768,7 +4774,16 @@ function ProfileCard({
       <div className="profile-backdrop" onClick={onClose}>
         <div
           className="profile-card editing"
-          style={{ height: measuredHeight ?? 560 }}
+          // pedido do Douglas: "Aumenta ele na altura pra caber os itens
+          // embaixo com espaco bom" -- antes essa tela seguia CEGAMENTE a
+          // altura medida do card de perfil normal (measuredHeight, ver
+          // comentário grande mais abaixo em "Editar meu personagem toma
+          // o card INTEIRO"), que é bem mais baixo (só foto+nome+bio). A
+          // tela de edição agora tem sua PRÓPRIA altura mínima -- ainda
+          // respeita measuredHeight quando ele for MAIOR que isso (telas
+          // grandes, card de perfil mais alto), só nunca fica menor que
+          // EDITING_MIN_HEIGHT.
+          style={{ height: Math.max(measuredHeight ?? 0, EDITING_MIN_HEIGHT) }}
           onClick={(e) => e.stopPropagation()}
         >
           <h3 className="profile-edit-title">Editar meu personagem</h3>
@@ -4802,38 +4817,50 @@ function ProfileCard({
             </div>
           </div>
 
-          {/* tons de pele (ver SKIN_CATALOG) -- linha PRÓPRIA, largura
-              total do card, logo abaixo de "Sexo" (pedido do Douglas:
-              "os tons de pele devem subir até embaixo dos sexos" --
-              antes vivia do lado do boneco, dentro de
-              .avatar-preview-wrap). Troca ao vivo (ver selectSkin), sem
-              precisar estar na aba "cabelo" -- aqui só filtra a grade
-              pelo sexo já escolhido acima; tom sem `gender` no catálogo
-              (gerado antes dessa mudança) conta como "masculino". */}
-          <div className="skin-picker">
-            <span className="skin-picker-label">Tom de pele</span>
-            <div className="skin-swatches">
-              {SKIN_CATALOG.filter((skin) => (skin.gender ?? "masculino") === selectedGender).map((skin) => (
-                <button
-                  key={skin.id}
-                  className={selectedSkinId === skin.id ? "skin-swatch selected" : "skin-swatch"}
-                  style={{ background: skin.hex ?? "#8a7ca8" }}
-                  onClick={() => onSelectSkin(skin.id)}
-                  title={skin.label}
-                />
-              ))}
-            </div>
-          </div>
+          {/* pedido do Douglas: "fim das cores em tom de pele, uma
+              traço vertical, linha cinza igual nos outros limites / pra
+              direita posicionar o avatar / embaixo do tom vai vir as
+              cores do item selecionado, hoje o traje vai pra baixo mexe
+              no card, nao quero isso, card travado / aumenta ele na
+              altura pra caber os itens embaixo com espaco bom, na
+              posicao igual do habbo fica legal, aoinves de embaixo do
+              lado direito os itens". Reorganiza o corpo do editor em
+              DUAS colunas lado a lado (mesma ideia do editor de verdade
+              do Habbo que ele mandou de referência: grade de item +
+              boneco + cores em colunas, não tudo empilhado): coluna
+              ESTREITA (tom de pele + cores do item, scroll próprio,
+              borda cinza à direita -- ver .profile-edit-side) e coluna
+              PRINCIPAL (boneco + abas + grade de itens, ver
+              .profile-edit-main) à direita dela. A coluna estreita tem
+              overflow-y:auto e altura travada pelo flex de
+              .profile-edit-body -- crescer com "Cores de X" agora rola
+              POR DENTRO da própria coluna, não empurra mais o card
+              inteiro (era o "trocar de traje mexe no card" reclamado). */}
+          <div className="profile-edit-body">
+            <div className="profile-edit-side">
+              <div className="skin-picker">
+                <span className="skin-picker-label">Tom de pele</span>
+                <div className="skin-swatches">
+                  {SKIN_CATALOG.filter((skin) => (skin.gender ?? "masculino") === selectedGender).map((skin) => (
+                    <button
+                      key={skin.id}
+                      className={selectedSkinId === skin.id ? "skin-swatch selected" : "skin-swatch"}
+                      style={{ background: skin.hex ?? "#8a7ca8" }}
+                      onClick={() => onSelectSkin(skin.id)}
+                      title={skin.label}
+                    />
+                  ))}
+                </div>
+              </div>
 
-          {/* cores da variante do item selecionado (cabelo/acessório,
-              ver ColorOption em game/customization.ts) -- logo abaixo do
-              tom de pele, MESMO estilo de círculo de cor cheia (pedido
-              do Douglas: "o card das cores do item fique embaixo dos
-              tons de pele" / "só vai aparecer a cor do gbr igual dos
-              tons de pele"). Só renderiza quando o item atual (da aba
-              aberta) tem variante de cor cadastrada -- sem placeholder
-              "Em breve" aqui (fica só a grade de itens embaixo, ver
-              "enquanto embaixo fica somente o item"). */}
+              {/* cores da variante do item selecionado (cabelo/acessório,
+                  ver ColorOption em game/customization.ts) -- logo abaixo
+                  do tom de pele, na MESMA coluna, MESMO estilo de círculo
+                  de cor cheia (pedido do Douglas: "o card das cores do
+                  item fique embaixo dos tons de pele" / "só vai aparecer
+                  a cor do gbr igual dos tons de pele"). Só renderiza
+                  quando o item atual (da aba aberta) tem variante de cor
+                  cadastrada -- sem placeholder "Em breve" aqui. */}
           {editorCategory === "cabelo" && selectedHairOption?.colors && selectedHairOption.colors.length > 0 && (
             <div className="skin-picker">
               <span className="skin-picker-label">Cores de &quot;{selectedHairOption.label}&quot;</span>
@@ -4884,7 +4911,9 @@ function ProfileCard({
               </div>
             </div>
           )}
+            </div>
 
+            <div className="profile-edit-main">
           {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
               traje + cabelo/barba/acessório selecionados empilhados,
               mesmo recorte de frame 0 dos thumbnails), ver
@@ -5138,6 +5167,8 @@ function ProfileCard({
             ) : (
               <div className="edit-category-empty">Em breve</div>
             )}
+          </div>
+            </div>
           </div>
 
           <div className="profile-edit-actions">

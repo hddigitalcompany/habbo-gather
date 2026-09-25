@@ -2522,13 +2522,70 @@ body {
 .profile-card.editing {
   display: flex;
   flex-direction: column;
-  max-height: 640px;
+  /* pedido do Douglas: "Aumenta ele na altura pra caber os itens embaixo
+     com espaco bom" -- ver EDITING_MIN_HEIGHT/style inline em
+     GameRoom.tsx (a altura de VERDADE vem de lá; max-height aqui só
+     precisa dar folga suficiente pra não cortar esse valor). */
+  max-height: 780px;
   /* pedido do Douglas: "aumentar o card de personalização na largura,
-     30%" -- só a tela de EDIÇÃO cresce (290px * 1.3 = 377px); o card de
-     perfil normal (.profile-card sem .editing) continua 290px de
-     sempre. max-width:85% (herdado de .profile-card) continua valendo,
-     então em tela pequena ainda encolhe igual antes. */
-  width: 377px;
+     30%" e, depois, o layout em colunas (tom de pele | boneco+itens,
+     ver .profile-edit-body) pedindo mais espaço lateral -- só a tela de
+     EDIÇÃO cresce; o card de perfil normal (.profile-card sem .editing)
+     continua 290px de sempre. max-width:85% (herdado de .profile-card)
+     continua valendo, então em tela pequena ainda encolhe igual antes. */
+  width: 460px;
+}
+
+/* corpo da tela de edição, DUAS colunas lado a lado (ver comentário
+   grande no JSX, pedido do Douglas citando o editor do Habbo de
+   referência) -- flex:1 pra ocupar a altura que sobra dentro do card
+   (que agora tem altura FIXA, ver .profile-card.editing acima),
+   min-height:0 pra deixar os filhos (.profile-edit-side com scroll
+   próprio) se conterem em vez de espremer o flex row pra fora do card. */
+.profile-edit-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* coluna estreita: tom de pele + cores do item selecionado, com
+   ROLAGEM PRÓPRIA (overflow-y:auto) -- crescer aqui (ex: item com
+   muitas cores geradas) nunca mais empurra o card inteiro ou o boneco
+   pro lado (era o "trocar de traje mexe no card, nao quero isso, card
+   travado" reclamado). Borda cinza à direita = o "traço vertical, linha
+   cinza igual nos outros limites" pedido (mesmo tom #2f2245 usado em
+   todo canto do app pra separar seções, ver .edit-category-tabs/
+   .profile-edit-actions). */
+.profile-edit-side {
+  flex-shrink: 0;
+  width: 132px;
+  padding: 0 10px 12px 18px;
+  border-right: 1px solid #2f2245;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+/* dentro da coluna estreita, o .skin-picker (compartilhado com o resto
+   do app, ver regra original mais abaixo) já ganhou o padding lateral
+   da COLUNA -- sem isso ficaria com padding duplicado (18px do
+   .skin-picker + 18px do .profile-edit-side). */
+.profile-edit-side .skin-picker {
+  padding: 0;
+}
+
+/* coluna principal: boneco + abas + grade de itens -- "do lado direito"
+   do tom de pele/cores agora (pedido do Douglas: "aoinves de embaixo do
+   lado direito os itens"), no lugar de ficar tudo empilhado em largura
+   total como antes. flex-direction:column porque o boneco/abas/grade
+   continuam empilhados ENTRE si, só a coluna toda que mudou de lugar. */
+.profile-edit-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* título e abas de categoria ficam FIXOS (fora da área que rola) --
@@ -3558,6 +3615,51 @@ body {
   flex-shrink: 0;
 }
 
+/* controles de zoom -- pedido do Douglas: "quero dar zoom" (o pincel de
+   BRUSH_RADIUS fixo era difícil de acertar em detalhe pequeno só no
+   PAINT_SCALE de sempre). */
+.color-zone-tool-zoom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.color-zone-tool-zoom-row button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f0ff;
+  font-size: 13px;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.color-zone-tool-zoom-row button:last-child {
+  width: auto;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.color-zone-tool-zoom-label {
+  font-size: 11px;
+  color: #9d90bb;
+  min-width: 34px;
+  text-align: center;
+}
+
+/* moldura com scroll pra quando o zoom deixa o desenho maior que a
+   área visível -- dá pra "andar" pelo desenho ampliado (ver
+   color-zone-tool-canvas-stack, que cresce/encolhe com o zoom). */
+.color-zone-tool-canvas-scroll {
+  max-width: 490px;
+  max-height: 480px;
+  overflow: auto;
+  border-radius: 8px;
+}
+
 .color-zone-tool-canvas-stack {
   position: relative;
   border-radius: 8px;
@@ -3841,6 +3943,38 @@ body {
   font-size: 11px;
   color: #9d90bb;
   flex-wrap: wrap;
+}
+
+/* botãozinho de apagar em cima do quadradinho de cor já cadastrada --
+   pedido do Douglas: "Quero apagar as cores ja adicionadas". */
+.color-zone-existing-item {
+  position: relative;
+  display: inline-flex;
+  margin: 2px;
+}
+
+.color-zone-existing-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #c2185b;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.color-zone-existing-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Editor de Itens (ver ItemEditor.tsx) -- mais LARGO que os 400px

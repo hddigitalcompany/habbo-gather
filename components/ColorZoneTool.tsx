@@ -16,7 +16,7 @@
 // entrada em `colors` do item (mesmo formato de ColorOption em
 // game/customization.ts) via PATCH /api/avatar-items/[id].
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { FRAME_W, FRAME_H } from "@/game/MainScene";
 import { applyZoneTint, luminance, OUTLINE_LUMINANCE_CUTOFF, type RGB, type ZoneDef } from "@/game/colorTint";
@@ -129,6 +129,28 @@ export default function ColorZoneTool({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  // zoom da área de pintura -- pedido do Douglas: "quero dar zoom"
+  // (ficava difícil acertar o pincel em detalhe pequeno só no
+  // PAINT_SCALE fixo de 2.4x). Multiplica em cima do PAINT_SCALE de
+  // sempre -- ver .color-zone-tool-canvas-stack no JSX (só muda o
+  // TAMANHO EXIBIDO via style inline; o canvas de baixo continua com a
+  // MESMA resolução interna de sempre, ver bg/overlay canvas em
+  // color-zone-tool-bg-canvas/overlay-canvas que já são width:100%/
+  // height:100% do pai no CSS -- crescem/encolhem sozinhos). Não precisa
+  // mexer em pointerToImageXY/paintAt: eles já leem o tamanho de TELA
+  // via getBoundingClientRect(), então convertem certo pra qualquer
+  // zoom sem trocar nada na conta.
+  const [zoom, setZoom] = useState(1);
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 4;
+  function clampZoom(z: number) {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  }
+  function handleCanvasWheel(e: ReactWheelEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setZoom((z) => clampZoom(z - e.deltaY * 0.0015));
+  }
+
   const [zones, setZones] = useState<Zone[]>([]);
   // texto DIGITADO no campo de hex de cada zona (ver zone-hex-input no
   // JSX) -- separado de zone.targetHex de propósito: o Douglas reclamou
@@ -148,6 +170,10 @@ export default function ColorZoneTool({
   const [saveLabel, setSaveLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // id da cor JÁ CADASTRADA sendo apagada agora (ver handleDeleteColor)
+  // -- só pra desabilitar o botãozinho de "x" dela enquanto a chamada
+  // não volta, sem travar o resto da ferramenta.
+  const [deletingColorId, setDeletingColorId] = useState<string | null>(null);
 
   // canvas ESCONDIDO com a folha inteira original, em resolução real --
   // é daqui que lê tanto as amostras do pincel (recorte do quadro 0)
@@ -499,6 +525,46 @@ export default function ColorZoneTool({
     }
   }
 
+  // apagar uma cor JÁ CADASTRADA -- pedido do Douglas: "Quero apagar as
+  // cores ja adicionadas". Mesmo PATCH /api/avatar-items/[id] que
+  // handleSave usa pra ADICIONAR uma cor (ele substitui o array
+  // `colors` inteiro), só que mandando o array SEM essa entrada. Também
+  // tenta apagar o PNG correspondente do Storage (melhor esforço -- se
+  // falhar, ignora e segue: o registro em `colors` já foi removido de
+  // qualquer forma, só sobraria um arquivo órfão no bucket).
+  async function handleDeleteColor(color: ColorOption) {
+    const ok = window.confirm(`Apagar a cor "${color.label}" de vez? Não dá pra desfazer.`);
+    if (!ok) return;
+    setDeletingColorId(color.id);
+    setSaveError(null);
+    try {
+      const nextColors = (item.colors ?? []).filter((c) => c.id !== color.id);
+      const res = await fetch(`/api/avatar-items/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ colors: nextColors }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "erro ao apagar cor");
+
+      const supabase = getSupabaseBrowserClient();
+      const marker = "/room-items/";
+      const markerIdx = color.file.indexOf(marker);
+      if (supabase && markerIdx >= 0) {
+        const storagePath = color.file.slice(markerIdx + marker.length);
+        supabase.storage
+          .from("room-items")
+          .remove([storagePath])
+          .catch(() => {}); // melhor esforço, não bloqueia a UI
+      }
+      onSaved();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "erro ao apagar cor");
+    } finally {
+      setDeletingColorId(null);
+    }
+  }
+
   return (
     <div className="color-zone-tool">
       <div className="color-zone-tool-header">
@@ -516,19 +582,39 @@ export default function ColorZoneTool({
 
       <div className="color-zone-tool-body">
         <div className="color-zone-tool-paint-col">
-          <div
-            className="color-zone-tool-canvas-stack"
-            style={{ width: FRAME_W * PAINT_SCALE, height: FRAME_H * PAINT_SCALE }}
-          >
-            <canvas ref={paintBgCanvasRef} className="color-zone-tool-bg-canvas" />
-            <canvas
-              ref={overlayCanvasRef}
-              className="color-zone-tool-overlay-canvas"
-              style={{ cursor: activeZone ? "crosshair" : "not-allowed" }}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-            />
+          {/* zoom -- pedido do Douglas: "quero dar zoom". Scroll do mouse
+              em cima do desenho zoom in/out (ver handleCanvasWheel); os
+              botões embaixo são o mesmo controle pra quem usa trackpad/
+              touch sem scroll vertical fácil. */}
+          <div className="color-zone-tool-zoom-row">
+            <button type="button" onClick={() => setZoom((z) => clampZoom(z - 0.25))} title="Menos zoom">
+              −
+            </button>
+            <span className="color-zone-tool-zoom-label">{Math.round(zoom * 100)}%</span>
+            <button type="button" onClick={() => setZoom((z) => clampZoom(z + 0.25))} title="Mais zoom">
+              +
+            </button>
+            {zoom !== 1 && (
+              <button type="button" onClick={() => setZoom(1)} title="Restaurar zoom">
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="color-zone-tool-canvas-scroll" onWheel={handleCanvasWheel}>
+            <div
+              className="color-zone-tool-canvas-stack"
+              style={{ width: FRAME_W * PAINT_SCALE * zoom, height: FRAME_H * PAINT_SCALE * zoom }}
+            >
+              <canvas ref={paintBgCanvasRef} className="color-zone-tool-bg-canvas" />
+              <canvas
+                ref={overlayCanvasRef}
+                className="color-zone-tool-overlay-canvas"
+                style={{ cursor: activeZone ? "crosshair" : "not-allowed" }}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+              />
+            </div>
           </div>
           {!ready && !loadError && <p className="color-zone-tool-loading">Carregando arte...</p>}
         </div>
@@ -691,7 +777,20 @@ export default function ColorZoneTool({
             <div className="color-zone-tool-existing">
               <span>Já cadastradas:</span>
               {item.colors.map((c) => (
-                <span key={c.id} className="skin-swatch" style={{ background: c.hex ?? "#8a7ca8" }} title={c.label} />
+                // botão de apagar -- pedido do Douglas: "Quero apagar as
+                // cores ja adicionadas" (ver handleDeleteColor acima).
+                <div key={c.id} className="color-zone-existing-item">
+                  <span className="skin-swatch" style={{ background: c.hex ?? "#8a7ca8" }} title={c.label} />
+                  <button
+                    type="button"
+                    className="color-zone-existing-delete"
+                    onClick={() => handleDeleteColor(c)}
+                    disabled={deletingColorId === c.id}
+                    title={`Apagar "${c.label}"`}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
             </div>
           )}
