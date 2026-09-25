@@ -506,6 +506,26 @@ function avatarAssetUrl(file: string): string {
   return file.startsWith("http") ? file : `/assets/${file}`;
 }
 
+/** Carrega uma URL (folha já composta de um item existente) como
+ * ImageBitmap -- usado só como `fallback` de composeAvatarArtSheet/
+ * composeAvatarArtSheetMultiPose ao EDITAR (ver comentário grande lá).
+ * `fetch` + Blob em vez de `new Image()`/canvas (mesma ideia de
+ * ColorZoneTool.tsx, só que sem precisar de crossOrigin: createImageBitmap
+ * a partir de um Blob nunca "tainta" o canvas, o bucket já é público de
+ * qualquer forma). null se a folha antiga não carregar por qualquer
+ * motivo -- editar continua funcionando, só sem o fallback (quadro sem
+ * foto nova fica em branco, mesmo comportamento de criar um item novo). */
+async function loadImageBitmapFromUrl(url: string): Promise<ImageBitmap | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await createImageBitmap(blob);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Monta a folha de sprites (8x2, 200x260 por quadro -- mesmo formato de
  * public/assets/avatar_<tom>.png, ver scripts/syncSkinAssets.mjs) DIRETO
@@ -518,11 +538,24 @@ function avatarAssetUrl(file: string): string {
  * `slots` decide o layout das 15 posições (ver FOUR_DIR_SHEET_SLOTS/
  * THREE_DIR_SHEET_SLOTS acima) -- "blank" fica transparente (barba/
  * acessório não têm arte de costas).
+ *
+ * `fallback` (opcional) -- pedido do Douglas: "quero editar as coisas
+ * ja criadas, fotos etc". A folha de um item já cadastrado é só o PNG
+ * final composto (nunca guardamos as fotos cruas por direção/pose
+ * separadas), então "editar só a foto que trocou" não dá pra fazer
+ * recompondo do zero -- em vez disso, quando um quadro não tem foto
+ * NOVA nenhuma (nem no fallback do multi-pose, ver
+ * composeAvatarArtSheetMultiPose abaixo), copia o quadro JÁ PRONTO
+ * direto da folha antiga (mesma célula x/y, sem reaplicar
+ * posicionamento -- já está com o posicionamento certo, seja lá qual
+ * foi, queimado nos pixels). Resultado: só quem reenviou foto nova
+ * muda, o resto continua pixel-a-pixel igual ao que já estava salvo.
  */
 async function composeAvatarArtSheet(
   filesByDirection: Partial<Record<DirectionKey, File>>,
   placements: Partial<Record<DirectionKey, DirectionPlacement>>,
-  slots: SheetSlot[]
+  slots: SheetSlot[],
+  fallback?: ImageBitmap | null
 ): Promise<Blob> {
   const neededDirs = Array.from(new Set(slots.filter((s): s is DirectionKey => s !== "blank")));
   const bitmaps: Partial<Record<DirectionKey, ImageBitmap>> = {};
@@ -541,13 +574,19 @@ async function composeAvatarArtSheet(
 
   slots.forEach((slot, i) => {
     if (slot === "blank") return;
-    const bitmap = bitmaps[slot];
-    if (!bitmap) return;
-    const placement = placements[slot] ?? DEFAULT_PLACEMENT;
     const col = i % SKIN_SHEET_COLS;
     const row = Math.floor(i / SKIN_SHEET_COLS);
     const cellX = col * (FRAME_W + SKIN_SHEET_SPACING);
     const cellY = row * (FRAME_H + SKIN_SHEET_SPACING);
+    const bitmap = bitmaps[slot];
+    if (!bitmap) {
+      // sem foto nova pra esse quadro -- copia o que já tinha (ver
+      // comentário de `fallback` acima), ou deixa em branco (criação
+      // nova, sem fallback nenhum -- comportamento de sempre).
+      if (fallback) ctx.drawImage(fallback, cellX, cellY, FRAME_W, FRAME_H, cellX, cellY, FRAME_W, FRAME_H);
+      return;
+    }
+    const placement = placements[slot] ?? DEFAULT_PLACEMENT;
     const baseScale = Math.min(FRAME_W / bitmap.width, FRAME_H / bitmap.height);
     const scale = baseScale * placement.scale;
     const drawW = bitmap.width * scale;
@@ -581,7 +620,8 @@ async function composeAvatarArtSheetMultiPose(
   filesByPose: Record<PoseKey, Partial<Record<DirectionKey, File>>>,
   placementsByPose: Record<PoseKey, Partial<Record<DirectionKey, DirectionPlacement>>>,
   slots: SheetSlot[],
-  poses: PoseKey[]
+  poses: PoseKey[],
+  fallback?: ImageBitmap | null
 ): Promise<Blob> {
   const bitmapCache = new Map<string, ImageBitmap>();
 
@@ -616,13 +656,20 @@ async function composeAvatarArtSheetMultiPose(
     if (slot === "blank") continue;
     const dir = slot;
     const pose = poses[i] ?? "parado";
-    const bitmap = await bitmapFor(dir, pose);
-    if (!bitmap) continue;
-    const placement = placementFor(dir, pose);
     const col = i % SKIN_SHEET_COLS;
     const row = Math.floor(i / SKIN_SHEET_COLS);
     const cellX = col * (FRAME_W + SKIN_SHEET_SPACING);
     const cellY = row * (FRAME_H + SKIN_SHEET_SPACING);
+    const bitmap = await bitmapFor(dir, pose);
+    if (!bitmap) {
+      // nem foto nova PRA ESSA pose nem pro "parado" da mesma direção
+      // (ver bitmapFor acima) -- mesma ideia de composeAvatarArtSheet:
+      // copia o quadro já pronto da folha antiga em vez de deixar em
+      // branco, ver comentário de `fallback` lá.
+      if (fallback) ctx.drawImage(fallback, cellX, cellY, FRAME_W, FRAME_H, cellX, cellY, FRAME_W, FRAME_H);
+      continue;
+    }
+    const placement = placementFor(dir, pose);
     const baseScale = Math.min(FRAME_W / bitmap.width, FRAME_H / bitmap.height);
     const scale = baseScale * placement.scale;
     const drawW = bitmap.width * scale;
@@ -962,6 +1009,20 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // ids vêm de tabelas diferentes (avatar_items/avatar_skins, sempre
   // uuid), então nunca colidem -- abrir um fecha o outro sozinho.
   const [colorToolItemId, setColorToolItemId] = useState<string | null>(null);
+  // "Editar" pro item de avatar CUSTOM (cabelo/acessório/barba/traje --
+  // NÃO tom de pele, esse continua só criar/apagar) -- pedido do
+  // Douglas: "quero editar as coisas ja criadas, fotos etc". null =
+  // formulário em modo "cadastrar item novo" (de sempre), igual
+  // editingId do ItemEditor de Mobi mais abaixo -- reusa o MESMO
+  // formulário (label/gender/category/selectedSkinIds/rawFiles/etc já
+  // existentes), só troca o botão final e o destino do submit (PATCH em
+  // vez de POST, ver handleAvatarCreatorSubmit). editingAvatarItemSheetUrl
+  // guarda a folha JÁ salva desse item -- usada como `fallback` na hora
+  // de recompor (ver comentário grande em composeAvatarArtSheet), pra
+  // reenviar só a(s) foto(s) da direção/pose que quiser trocar e manter
+  // o resto igual, mesma ideia do "Editar" de Mobi.
+  const [editingAvatarItemId, setEditingAvatarItemId] = useState<string | null>(null);
+  const [editingAvatarItemSheetUrl, setEditingAvatarItemSheetUrl] = useState<string | null>(null);
   // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
   // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
   // com o próprio estado de arquivo/posição, chaveadas por
@@ -1267,6 +1328,8 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     setTrajePosePlacements({ passoA: {}, passoB: {}, sentado: {} });
     setActivePose("parado");
     setActiveDirection("down");
+    setEditingAvatarItemId(null);
+    setEditingAvatarItemSheetUrl(null);
     for (const key of Object.keys(fileInputRefs.current)) {
       const input = fileInputRefs.current[key];
       if (input) input.value = "";
@@ -1275,6 +1338,42 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
 
   function handleCategoryChange(next: AvatarCreatorCategory) {
     setCategory(next);
+    resetCreatorForm();
+  }
+
+  /** Botão "Editar" na lista "X cadastrados" -- carrega o item CUSTOM
+   * inteiro (cabelo/acessório/barba/traje, nunca tom de pele, ver
+   * comentário em editingAvatarItemId acima) de volta pro formulário
+   * (mesmos campos de sempre) e liga o modo "editando" (troca o botão
+   * final e o destino do submit pra PATCH, ver handleAvatarCreatorSubmit).
+   * setCategory DIRETO (não handleCategoryChange) de propósito -- esse
+   * já dispara resetCreatorForm, que ia apagar o editingAvatarItemId que
+   * a gente TÁ tentando ligar agora. rawFiles/rawPlacements/
+   * trajePoseFiles/etc ficam VAZIOS -- a pessoa só re-envia a(s) foto(s)
+   * que quiser trocar, o resto vem da folha já salva (ver
+   * editingAvatarItemSheetUrl, usado como fallback no submit). */
+  function startEditAvatarItem(item: CustomAvatarItemRow) {
+    setCategory(item.category);
+    setGender(item.gender);
+    setLabel(item.label);
+    setSelectedSkinIds(item.skin_ids ?? []);
+    setRawFiles({});
+    setRawPlacements({});
+    setTrajePoseFiles({ passoA: {}, passoB: {}, sentado: {} });
+    setTrajePosePlacements({ passoA: {}, passoB: {}, sentado: {} });
+    setActivePose("parado");
+    setActiveDirection("down");
+    setEditingAvatarItemId(item.id);
+    setEditingAvatarItemSheetUrl(item.sheet_url);
+    setColorToolItemId(null);
+    setError(null);
+    for (const key of Object.keys(fileInputRefs.current)) {
+      const input = fileInputRefs.current[key];
+      if (input) input.value = "";
+    }
+  }
+
+  function cancelEditAvatarItem() {
     resetCreatorForm();
   }
 
@@ -1441,8 +1540,11 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     // `files` computado acima, que no TRAJE pode estar apontando pra
     // aba Passo A/Passo B/Sentado no momento do clique em Cadastrar; nas
     // outras categorias `files === rawFiles` sempre, então não muda
-    // nada pra elas).
-    if (!rawFiles.down) {
+    // nada pra elas). EDITANDO (editingAvatarItemId) isso deixa de ser
+    // obrigatório -- sem foto nova de frente, o fallback (folha já
+    // salva, ver composeAvatarArtSheet) cobre esse quadro igual aos
+    // outros, mesma ideia do Mobi ("Editar" não exige reenviar tudo).
+    if (!editingAvatarItemId && !rawFiles.down) {
       setError("A imagem de frente (pose Parado) é obrigatória.");
       return;
     }
@@ -1453,7 +1555,17 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     setSubmitting(true);
+    let fallbackBitmap: ImageBitmap | null = null;
     try {
+      // EDITANDO -- carrega a folha JÁ salva desse item como fallback
+      // (ver comentário grande em composeAvatarArtSheet): qualquer
+      // quadro sem foto nova reaproveita o pixel já salvo em vez de
+      // ficar em branco. Não bloqueia o save se não conseguir carregar
+      // (fica null -- editingAvatarItemSheetUrl só existe em modo
+      // edição, então isso nunca roda numa criação nova).
+      if (editingAvatarItemId && editingAvatarItemSheetUrl) {
+        fallbackBitmap = await loadImageBitmapFromUrl(avatarAssetUrl(editingAvatarItemSheetUrl));
+      }
       // TRAJE monta a folha combinando as 4 poses (parado + opcional
       // passoA/passoB/sentado, ver composeAvatarArtSheetMultiPose e
       // trajePoseFiles acima) -- as outras categorias continuam com 1
@@ -1474,9 +1586,11 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 sentado: trajePosePlacements.sentado,
               },
               activeSlots,
-              SKIN_SHEET_SLOT_POSES
+              SKIN_SHEET_SLOT_POSES,
+              fallbackBitmap
             )
-          : await composeAvatarArtSheet(files, placements, activeSlots);
+          : await composeAvatarArtSheet(files, placements, activeSlots, fallbackBitmap);
+      fallbackBitmap?.close?.();
       const slug = slugify(trimmedLabel);
       const pathPrefix = category === "avatar" ? "avatar-skins" : "avatar-items";
       const path = `${pathPrefix}/${category}-${gender}-${slug}-${Date.now()}.png`;
@@ -1496,6 +1610,26 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "erro ao salvar tom de pele");
         await loadSkins();
+      } else if (editingAvatarItemId) {
+        // "Editar" (pedido do Douglas: "quero editar as coisas ja
+        // criadas, fotos etc") -- PATCH no lugar de POST, mesmo item
+        // (não cria uma linha nova). O PATCH também apaga a folha
+        // ANTIGA no Storage por melhor esforço (ver app/api/avatar-items/
+        // [id]/route.ts) -- não precisa fazer isso aqui.
+        const res = await fetch(`/api/avatar-items/${editingAvatarItemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({
+            category,
+            gender,
+            label: trimmedLabel,
+            skinIds: selectedSkinIds,
+            sheetUrl: publicUrlData.publicUrl,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "erro ao salvar alterações");
+        await loadAvatarItems();
       } else {
         const res = await fetch("/api/avatar-items", {
           method: "POST",
@@ -1516,6 +1650,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       resetCreatorForm();
       onChanged();
     } catch (err) {
+      fallbackBitmap?.close?.();
       setError(err instanceof Error ? err.message : "erro ao salvar");
     } finally {
       setSubmitting(false);
@@ -1654,10 +1789,19 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         ))}
       </div>
 
+      {/* nota de "editando" -- pedido do Douglas: "quero editar as
+          coisas ja criadas, fotos etc". Mesmo padrão do "Editar" de
+          Mobi (texto extra encostado no hint de sempre, ver
+          "Só reenvie a foto..." mais abaixo no form de Mobi) -- só
+          aparece pro item de avatar CUSTOM (cabelo/acessório/barba/
+          traje, ver editingAvatarItemId acima), tom de pele continua só
+          criar/apagar. */}
       <p className="settings-hint">
-        Só a foto de "Frente" é obrigatória -- sem as outras, o jogo reaproveita a de frente virada nas outras
-        direções (prévia rápida até você subir o resto). Arraste a foto em cima do boneco pra posicionar, e use o
-        slider pra ajustar o tamanho -- cada direção guarda o próprio ajuste.
+        {editingAvatarItemId
+          ? "Editando -- nenhuma foto é obrigatória aqui, reenvie só a(s) direção/pose que quiser TROCAR, o resto continua com a arte já salva."
+          : 'Só a foto de "Frente" é obrigatória -- sem as outras, o jogo reaproveita a de frente virada nas outras direções (prévia rápida até você subir o resto).'}{" "}
+        Arraste a foto em cima do boneco pra posicionar, e use o slider pra ajustar o tamanho -- cada direção guarda o
+        próprio ajuste.
       </p>
 
       <form className="items-panel-form" onSubmit={handleAvatarCreatorSubmit}>
@@ -2092,8 +2236,13 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
 
         <div className="items-panel-submit-row">
           <button type="submit" className="items-panel-submit" disabled={submitting}>
-            {submitting ? "Enviando..." : "Cadastrar"}
+            {submitting ? "Enviando..." : editingAvatarItemId ? "Salvar alterações" : "Cadastrar"}
           </button>
+          {editingAvatarItemId && (
+            <button type="button" className="clear-btn" onClick={cancelEditAvatarItem} disabled={submitting}>
+              Cancelar edição
+            </button>
+          )}
           {/* "Começar do zero" (Avatar Padrão) -- pedido do Douglas: "pore
               ele la embaixo, pra eu nao clicar errado, do lado direito
               de Cadastrar, mas encostado na borda lateral direita"
@@ -2199,6 +2348,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                               <span className="items-panel-category"> -- {item.colors.length} cor(es)</span>
                             )}
                           </span>
+                          {/* "Editar" -- pedido do Douglas: "quero editar as coisas ja
+                              criadas, fotos etc". Mesmo padrão do "Editar" de Mobi (ver
+                              startEditItem mais abaixo): reabre o formulário inteiro
+                              preenchido, reenviar foto é OPCIONAL (fallback pra folha já
+                              salva, ver composeAvatarArtSheet). */}
+                          <button type="button" onClick={() => startEditAvatarItem(item)}>
+                            Editar
+                          </button>
                           {/* "Gerar cor" (ColorZoneTool.tsx) -- cabelo/acessório/traje
                               (pedido do Douglas: "trajes eu edito tbm? adiciona").
                               Barba fica de fora: sem swatch "Cores de..." no

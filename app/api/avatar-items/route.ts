@@ -8,11 +8,8 @@
 // em ItemEditor.tsx -- já foi enviada direto do navegador pro Supabase
 // Storage, bucket "room-items", path "avatar-items/...", REUSA o
 // bucket que 0002_room_items.sql já criou, ver 0006_avatar_items.sql --
-// ANTES dessa chamada, aqui só grava os metadados).
-//
-// Sem PATCH/DELETE por enquanto (mesma decisão de avatar-skins/route.ts
-// -- editar/apagar item custom ainda não tem UI, fica pra depois se o
-// Douglas pedir).
+// ANTES dessa chamada, aqui só grava os metadados). PATCH (editar/
+// gerar cor) e DELETE (apagar) ficam em app/api/avatar-items/[id]/route.ts.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
