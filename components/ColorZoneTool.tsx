@@ -64,7 +64,12 @@ const PALETTE_SWATCHES: string[] = [
   "#000000", "#1a1a1a", "#333333", "#4d4d4d", "#666666", "#808080", "#999999", "#b3b3b3", "#cccccc", "#e6e6e6", "#f5f5f5", "#ffffff",
   "#7f0000", "#a30000", "#c62828", "#e53935", "#ef5350", "#ff8a80", "#ff5252", "#d32f2f", "#b71c1c", "#8e0000",
   "#7f3f00", "#a35c00", "#e65100", "#f57c00", "#fb8c00", "#ffa726", "#ffb74d", "#ffcc80", "#ff9800", "#e67e22",
+  // pedido do Douglas: "libera aqui mais amarelo, uns mais acizentado"
+  // -- 6 tons novos no fim da faixa de amarelo, dessaturados/puxando
+  // pro cáqui (mostarda acinzentada), além dos amarelos vivos que já
+  // tinham.
   "#7f6f00", "#a38b00", "#f9a825", "#fbc02d", "#fdd835", "#ffeb3b", "#fff176", "#fff9c4", "#c9a227", "#d4af37",
+  "#8f8a5c", "#9c9464", "#bdb76b", "#a9a482", "#c9c299", "#d6cfa1",
   "#0b3d0b", "#1b5e20", "#2e7d32", "#388e3c", "#43a047", "#66bb6a", "#81c784", "#a5d6a7", "#33691e", "#558b2f",
   "#004d40", "#00695c", "#00796b", "#00897b", "#26a69a", "#4db6ac", "#80cbc4", "#b2dfdb",
   "#0d47a1", "#1565c0", "#1976d2", "#1e88e5", "#2196f3", "#42a5f5", "#64b5f6", "#90caf9", "#0b2545", "#274690",
