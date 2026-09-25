@@ -4780,8 +4780,8 @@ function ProfileCard({
     // esse cálculo -- se esses paddings/gaps mudarem de novo no CSS,
     // atualizar aqui também.
     const PROFILE_EDIT_SIDE_WIDTH = 132 + 1; // .profile-edit-side width + border-right
-    const AVATAR_WRAP_SIDE_PADDING = 10; // .avatar-preview-wrap padding lateral
-    const AVATAR_ROTATE_GAP = 4; // .avatar-preview-rotate-wrap gap
+    const AVATAR_WRAP_SIDE_PADDING = 4; // .avatar-preview-wrap padding lateral
+    const AVATAR_ROTATE_GAP = 2; // .avatar-preview-rotate-wrap gap
     const AVATAR_ROTATE_BTN = 39; // .avatar-preview-rotate-btn width
     const AVATAR_COL_WIDTH =
       AVATAR_ROTATE_BTN * 2 + AVATAR_ROTATE_GAP * 2 + AVATAR_WRAP_SIDE_PADDING * 2 + AVATAR_PREVIEW_W;
@@ -5074,7 +5074,6 @@ function ProfileCard({
                 ›
               </button>
             </div>
-            <span className="avatar-preview-direction-label">{FACING_LABEL[previewDirection]}</span>
             </div>
           </div>
               </div>

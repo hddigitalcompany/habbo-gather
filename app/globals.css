@@ -2694,11 +2694,14 @@ body {
      (1/3 a menos), sobra mais largura pra coluna de itens do lado
      (largura TOTAL do card fica travada, ver .profile-card.editing --
      "fixa a largura total do card como esta agora, nao mexe"). Depois,
-     "diminua o espaco do avatar em mais 15%": 12px -> 10px (mais uns
-     15% a menos). Valor duplicado em AVATAR_WRAP_SIDE_PADDING
-     (GameRoom.tsx) pro cálculo de centralização do título -- mudar os
-     dois juntos. */
-  padding: 2px 10px 6px;
+     "diminua o espaco do avatar em mais 15%": 12px -> 10px. Depois,
+     "diminua o espaco do avatar na largura pra caber os itens um do
+     lado do outro": 10px -> 4px (quase no limite), pra coluna de itens
+     do lado ganhar largura suficiente pras 4 abas (Cabelo/Acessório/
+     Barba/Traje) caberem numa linha só, sem quebrar. Valor duplicado
+     em AVATAR_WRAP_SIDE_PADDING (GameRoom.tsx) pro cálculo de
+     centralização do título -- mudar os dois juntos. */
+  padding: 2px 4px 6px;
   flex-shrink: 0;
 }
 
@@ -2733,10 +2736,11 @@ body {
   align-items: center;
   /* mesmo pedido acima -- gap de 8 pra ~5px (1/3 a menos), as setas
      ficam mais coladas no boneco. Depois, "diminua o espaco do avatar
-     em mais 15%": 5px -> 4px. Valor duplicado em AVATAR_ROTATE_GAP
-     (GameRoom.tsx) pro cálculo de centralização do título -- mudar os
-     dois juntos. */
-  gap: 4px;
+     em mais 15%": 5px -> 4px. Depois, "diminua o espaco do avatar na
+     largura pra caber os itens um do lado do outro": 4px -> 2px. Valor
+     duplicado em AVATAR_ROTATE_GAP (GameRoom.tsx) pro cálculo de
+     centralização do título -- mudar os dois juntos. */
+  gap: 2px;
 }
 
 /* pedido do Douglas: "ai vc aumenta as setas 50%" -- 26px -> 39px
@@ -2761,12 +2765,10 @@ body {
   background: rgba(255, 255, 255, 0.16);
 }
 
-.avatar-preview-direction-label {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
+/* .avatar-preview-direction-label removida -- pedido do Douglas: "tire
+   esses nomes das posicoes embaixo" (o texto "Frente"/"Verso"/etc que
+   aparecia embaixo do boneco fixo, ver FACING_LABEL em GameRoom.tsx --
+   girar com as setas continua funcionando igual, só sem o rótulo). */
 
 /* pedido do Douglas: "alinhe os itens verticalmente com os icones do
    sexo" -- padding-top zerado (era 10px) pra essa primeira linha da
