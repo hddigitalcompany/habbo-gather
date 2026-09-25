@@ -631,6 +631,211 @@ async function composeAvatarArtSheetMultiPose(
   return blob;
 }
 
+// tamanho MÁXIMO (em px de TELA) do preview dentro do modal de recorte
+// (ver ImageCropModal abaixo) -- a foto só é EXIBIDA reduzida a esse
+// teto (nunca ampliada -- min(..., 1)), o corte de verdade sempre usa a
+// imagem em resolução NATIVA (naturalWidth/Height), convertendo o
+// retângulo arrastado na tela pra essa escala (ver handleConfirm).
+const CROP_MODAL_MAX_W = 520;
+const CROP_MODAL_MAX_H = 520;
+const CROP_MIN_SIZE = 24;
+type CropRect = { x: number; y: number; w: number; h: number };
+type CropCorner = "nw" | "ne" | "sw" | "se";
+
+/**
+ * Modal de recorte LIVRE (sem proporção fixa -- pedido do Douglas:
+ * "Adicione uma opcao de recorte da imagem ali dentro, o pixelart me
+ * gera varios cabelos na mesma foto se eu cortar em outra plataforma
+ * ele vai perder qualidade, entao quero cortar ali dentro do editor
+ * mesmo" + depois, confirmando o escopo: "cortar em mobis tambem,
+ * livre"). Abre em cima de QUALQUER foto recém-escolhida num <input
+ * type="file"> do editor (avatar/item E mobi, ver os 3 usos: upload de
+ * direção do AvatarCreatorPanel, upload de direção do mobi, ícone do
+ * catálogo do mobi) -- ANTES dela virar o File "de verdade" que o
+ * resto do formulário usa, pra não perder qualidade cortando fora
+ * daqui (Canva/etc) e subindo nas duas etapas. O retângulo é
+ * arrastado/redimensionado numa PRÉVIA reduzida (CROP_MODAL_MAX_W/H),
+ * mas o corte em si sempre lê a imagem na resolução NATIVA (ver
+ * handleConfirm) -- não perde nenhuma qualidade por causa da prévia
+ * menor. "Usar sem cortar" segue com a foto original, sem nenhum
+ * corte -- é OPÇÃO, não obrigatório.
+ */
+function ImageCropModal({
+  file,
+  onConfirm,
+  onSkip,
+  onCancel,
+}: {
+  file: File;
+  onConfirm: (cropped: File) => void;
+  onSkip: () => void;
+  onCancel: () => void;
+}) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [display, setDisplay] = useState<{ w: number; h: number } | null>(null);
+  const [rect, setRect] = useState<CropRect | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setImgUrl(url);
+    setNatural(null);
+    setDisplay(null);
+    setRect(null);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  function handleImgLoad() {
+    const img = imgRef.current;
+    if (!img) return;
+    const nw = img.naturalWidth || 1;
+    const nh = img.naturalHeight || 1;
+    const scale = Math.min(CROP_MODAL_MAX_W / nw, CROP_MODAL_MAX_H / nh, 1);
+    const dw = Math.max(1, Math.round(nw * scale));
+    const dh = Math.max(1, Math.round(nh * scale));
+    setNatural({ w: nw, h: nh });
+    setDisplay({ w: dw, h: dh });
+    // começa cobrindo a imagem INTEIRA -- pedido "livre", a pessoa
+    // ajusta a partir daí arrastando os 4 cantos (ou move arrastando o
+    // miolo do retângulo).
+    setRect({ x: 0, y: 0, w: dw, h: dh });
+  }
+
+  function startDrag(e: ReactPointerEvent<HTMLDivElement>, mode: "move" | CropCorner) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!rect || !display) return;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const start = rect;
+    const bounds = display;
+
+    function onMove(ev: PointerEvent) {
+      const dx = ev.clientX - startClientX;
+      const dy = ev.clientY - startClientY;
+      if (mode === "move") {
+        setRect({
+          x: clamp(start.x + dx, 0, bounds.w - start.w),
+          y: clamp(start.y + dy, 0, bounds.h - start.h),
+          w: start.w,
+          h: start.h,
+        });
+        return;
+      }
+      let x1 = start.x;
+      let y1 = start.y;
+      let x2 = start.x + start.w;
+      let y2 = start.y + start.h;
+      if (mode.includes("w")) x1 = clamp(start.x + dx, 0, x2 - CROP_MIN_SIZE);
+      if (mode.includes("e")) x2 = clamp(x2 + dx, x1 + CROP_MIN_SIZE, bounds.w);
+      if (mode.includes("n")) y1 = clamp(start.y + dy, 0, y2 - CROP_MIN_SIZE);
+      if (mode.includes("s")) y2 = clamp(y2 + dy, y1 + CROP_MIN_SIZE, bounds.h);
+      setRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+    }
+    function onUp(ev: PointerEvent) {
+      target.releasePointerCapture(ev.pointerId);
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+    }
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+  }
+
+  async function handleConfirm() {
+    if (!rect || !display || !natural) {
+      onSkip();
+      return;
+    }
+    const scaleX = natural.w / display.w;
+    const scaleY = natural.h / display.h;
+    const sx = Math.round(rect.x * scaleX);
+    const sy = Math.round(rect.y * scaleY);
+    const sw = Math.max(1, Math.round(rect.w * scaleX));
+    const sh = Math.max(1, Math.round(rect.h * scaleY));
+    try {
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement("canvas");
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        bitmap.close?.();
+        onSkip();
+        return;
+      }
+      ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+      bitmap.close?.();
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) {
+        onSkip();
+        return;
+      }
+      onConfirm(new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" }));
+    } catch (e) {
+      console.warn("Não deu pra recortar a imagem, usando original", e);
+      onSkip();
+    }
+  }
+
+  return (
+    <div className="crop-modal-backdrop" onClick={onCancel}>
+      <div className="crop-modal" onClick={(e) => e.stopPropagation()}>
+        <p className="crop-modal-title">Recortar imagem</p>
+        <p className="settings-hint">Arraste os cantos pra ajustar o recorte -- livre, sem proporção fixa.</p>
+        {imgUrl && (
+          <div
+            className="crop-modal-stage"
+            style={display ? { width: display.w, height: display.h } : undefined}
+          >
+            <img ref={imgRef} src={imgUrl} alt="Foto pra recortar" onLoad={handleImgLoad} draggable={false} />
+            {rect && display && (
+              <>
+                <div className="crop-modal-shade" style={{ left: 0, top: 0, right: 0, height: rect.y }} />
+                <div
+                  className="crop-modal-shade"
+                  style={{ left: 0, top: rect.y + rect.h, right: 0, bottom: 0 }}
+                />
+                <div className="crop-modal-shade" style={{ left: 0, top: rect.y, width: rect.x, height: rect.h }} />
+                <div
+                  className="crop-modal-shade"
+                  style={{ left: rect.x + rect.w, top: rect.y, right: 0, height: rect.h }}
+                />
+                <div
+                  className="crop-modal-rect"
+                  style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
+                  onPointerDown={(e) => startDrag(e, "move")}
+                >
+                  {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                    <div
+                      key={corner}
+                      className={`crop-modal-handle crop-modal-handle-${corner}`}
+                      onPointerDown={(e) => startDrag(e, corner)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <div className="crop-modal-actions">
+          <button type="button" className="clear-btn" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button type="button" className="clear-btn" onClick={onSkip}>
+            Usar sem cortar
+          </button>
+          <button type="button" className="items-panel-submit" onClick={handleConfirm} disabled={!rect}>
+            Cortar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Botão "Criar Avatar" do Editor de Itens (pedido do Douglas: "quero
  * subir os personagens DENTRO da plataforma"). Fluxo em 4 passos, tudo
@@ -730,6 +935,15 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   });
   const [activePose, setActivePose] = useState<PoseKey>("parado");
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
+  // foto recém-escolhida esperando passar pelo modal de recorte (ver
+  // ImageCropModal acima) antes de virar o File de verdade -- `apply`
+  // guarda o que fazer com o resultado (sempre o MESMO setFiles/
+  // setActiveDirection que rodava direto no onChange antes disso
+  // existir), `inputKey` é a chave em fileInputRefs pra limpar o
+  // <input> se a pessoa cancelar.
+  const [pendingCrop, setPendingCrop] = useState<{ file: File; inputKey: string; apply: (f: File) => void } | null>(
+    null
+  );
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
   const isAvatarPadrao = category === "avatar_padrao";
@@ -1554,8 +1768,19 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 accept="image/*"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  setFiles((prev) => ({ ...prev, [field.key]: file }));
-                  if (file) setActiveDirection(field.key);
+                  if (!file) return;
+                  // recorte é OPCIONAL (ver ImageCropModal acima,
+                  // "Usar sem cortar" mantém o mesmo comportamento de
+                  // antes) -- só decide o File final depois que a
+                  // pessoa fechar o modal, não aqui.
+                  setPendingCrop({
+                    file,
+                    inputKey: `${activePose}-${field.key}`,
+                    apply: (result) => {
+                      setFiles((prev) => ({ ...prev, [field.key]: result }));
+                      setActiveDirection(field.key);
+                    },
+                  });
                 }}
               />
             </label>
@@ -1919,6 +2144,24 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
           })()
         )}
       </section>
+      {pendingCrop && (
+        <ImageCropModal
+          file={pendingCrop.file}
+          onConfirm={(result) => {
+            pendingCrop.apply(result);
+            setPendingCrop(null);
+          }}
+          onSkip={() => {
+            pendingCrop.apply(pendingCrop.file);
+            setPendingCrop(null);
+          }}
+          onCancel={() => {
+            const input = fileInputRefs.current[pendingCrop.inputKey];
+            if (input) input.value = "";
+            setPendingCrop(null);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1953,6 +2196,12 @@ export default function ItemEditor({
   const [error, setError] = useState<string | null>(null);
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
   const iconInputRef = useRef<HTMLInputElement | null>(null);
+  // mesma indireção de AvatarCreatorPanel acima -- ver ImageCropModal e
+  // pendingCrop lá pro comentário completo. "" como inputKey é o ícone
+  // (usa iconInputRef, não fileInputRefs).
+  const [pendingCrop, setPendingCrop] = useState<{ file: File; inputKey: string; apply: (f: File) => void } | null>(
+    null
+  );
 
   // "Editar" (pedido do Douglas: "quero editar os já cadastrados") --
   // null = formulário em modo "cadastrar item novo" (de sempre). Um id
@@ -2480,14 +2729,24 @@ export default function ItemEditor({
                     type="file"
                     accept="image/png,image/webp,image/jpeg"
                     onChange={(e) => {
-                      const file = e.target.files?.[0] ?? undefined;
-                      if (field.key === "down") handleDownFileChange(file);
-                      else setFiles((prev) => ({ ...prev, [field.key]: file }));
-                      // pula o preview pra direção que acabou de
-                      // receber arquivo -- assim dá pra ajustar a
-                      // posição dela na hora, sem precisar clicar na
-                      // aba manualmente.
-                      if (file) setActiveMobiDirection(field.key);
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      // recorte OPCIONAL (ver ImageCropModal acima) --
+                      // "Usar sem cortar" faz exatamente o que esse
+                      // onChange fazia antes de existir.
+                      setPendingCrop({
+                        file,
+                        inputKey: field.key,
+                        apply: (result) => {
+                          if (field.key === "down") handleDownFileChange(result);
+                          else setFiles((prev) => ({ ...prev, [field.key]: result }));
+                          // pula o preview pra direção que acabou de
+                          // receber arquivo -- assim dá pra ajustar a
+                          // posição dela na hora, sem precisar clicar na
+                          // aba manualmente.
+                          setActiveMobiDirection(field.key);
+                        },
+                      });
                     }}
                   />
                 </label>
@@ -2507,7 +2766,11 @@ export default function ItemEditor({
               ref={iconInputRef}
               type="file"
               accept="image/png,image/webp,image/jpeg"
-              onChange={(e) => handleIconFileChange(e.target.files?.[0] ?? undefined)}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setPendingCrop({ file, inputKey: "__icon__", apply: (result) => handleIconFileChange(result) });
+              }}
             />
           </label>
           {stageIconSrc && (
@@ -2784,6 +3047,25 @@ export default function ItemEditor({
         </>
         )}
       </div>
+      {pendingCrop && (
+        <ImageCropModal
+          file={pendingCrop.file}
+          onConfirm={(result) => {
+            pendingCrop.apply(result);
+            setPendingCrop(null);
+          }}
+          onSkip={() => {
+            pendingCrop.apply(pendingCrop.file);
+            setPendingCrop(null);
+          }}
+          onCancel={() => {
+            const input =
+              pendingCrop.inputKey === "__icon__" ? iconInputRef.current : fileInputRefs.current[pendingCrop.inputKey];
+            if (input) input.value = "";
+            setPendingCrop(null);
+          }}
+        />
+      )}
     </div>
   );
 }

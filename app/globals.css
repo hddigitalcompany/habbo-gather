@@ -4481,3 +4481,129 @@ body {
   color: #cfc4e6;
   white-space: nowrap;
 }
+
+/* Modal de recorte de imagem (components/ItemEditor.tsx, ImageCropModal)
+   -- pedido do Douglas: "quero cortar ali dentro do editor mesmo...
+   cortar em mobis tambem, livre". Fica ACIMA de tudo (inclusive do
+   .items-panel-backdrop do próprio Editor de Itens, z-index:400, ver
+   acima), mesma paleta roxo-escura do resto da UI. */
+.crop-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 450;
+  background: rgba(5, 3, 10, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.crop-modal {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: rgba(28, 22, 42, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.crop-modal-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #f5f0ff;
+  align-self: flex-start;
+}
+
+.crop-modal-stage {
+  position: relative;
+  margin-top: 10px;
+  max-width: calc(100vw - 64px);
+  max-height: calc(100vh - 220px);
+  background: repeating-conic-gradient(#2a2238 0% 25%, #221b30 0% 50%) 0 0 / 20px 20px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.crop-modal-stage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* as 4 faixas escuras FORA do retângulo escolhido -- mesma sensação do
+   véu de escurecer de área do jogo (game/MainScene.ts, DEPTH_AREA_DIM),
+   só que aqui é só um recorte visual dentro do modal. */
+.crop-modal-shade {
+  position: absolute;
+  background: rgba(5, 3, 10, 0.65);
+  pointer-events: none;
+}
+
+.crop-modal-rect {
+  position: absolute;
+  border: 2px solid #0a84ff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+  cursor: move;
+  touch-action: none;
+}
+
+.crop-modal-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #0a84ff;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  touch-action: none;
+}
+
+.crop-modal-handle-nw {
+  left: -8px;
+  top: -8px;
+  cursor: nwse-resize;
+}
+
+.crop-modal-handle-ne {
+  right: -8px;
+  top: -8px;
+  cursor: nesw-resize;
+}
+
+.crop-modal-handle-sw {
+  left: -8px;
+  bottom: -8px;
+  cursor: nesw-resize;
+}
+
+.crop-modal-handle-se {
+  right: -8px;
+  bottom: -8px;
+  cursor: nwse-resize;
+}
+
+.crop-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  align-self: flex-end;
+}
+
+/* .clear-btn (regra geral em Editor de Itens) nasce largura 100% -- aqui
+   entra ao lado de outros botões numa linha só, igual .items-panel-submit-row
+   já faz noutro lugar. */
+.crop-modal-actions .clear-btn {
+  width: auto;
+  margin-top: 0;
+}
+
+.crop-modal-actions .items-panel-submit {
+  margin-top: 0;
+}
