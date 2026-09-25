@@ -538,6 +538,15 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   const [rawFiles, setRawFiles] = useState<Partial<Record<DirectionKey, File>>>({});
   const [rawPlacements, setRawPlacements] = useState<Partial<Record<DirectionKey, DirectionPlacement>>>({});
   const [activeDirection, setActiveDirection] = useState<DirectionKey>("down");
+  // zoom do preview (ver .item-stage no JSX) -- pedido do Douglas: "tem
+  // como eu dar zoom nesse editor? ta mt longe". Usa a propriedade CSS
+  // `zoom` (não `transform: scale`) de propósito: `zoom` reflui o
+  // layout (o card cresce de verdade, empurra o slider/texto/botões
+  // pra baixo, sem cortar nem sobrepor nada) -- `transform` só
+  // redesenha por cima sem mudar o espaço ocupado, e ia exigir um
+  // wrapper com overflow pra não cortar o preview ampliado. Suportado
+  // no Chrome (que é o que o Douglas usa, ver screenshots).
+  const [zoom, setZoom] = useState(1.5);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
@@ -833,11 +842,38 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     }
   }
 
-  // "Começar do zero" (ver JSX abaixo) -- limpa só as fotos/posições do
-  // Avatar Padrão (as duas partes), sem mexer no resto do formulário
-  // (label/categoria/etc de outras abas). Separado do resetCreatorForm
-  // de sempre porque aqui é uma limpeza PEDIDA, não automática pós-save.
-  function handleClearPadrao() {
+  // "Começar do zero" (ver JSX abaixo) -- limpa as fotos/posições do
+  // Avatar Padrão (as duas partes) E, se já existir um salvo pro sexo
+  // atual, apaga ele de vez (DELETE /api/avatar-default-reference) --
+  // pedido do Douglas: "o botao comecar do zero nao apaga o avatar
+  // antigo" (antes só limpava o upload em andamento; o registro salvo
+  // continuava valendo como fallback -- ver avatarPadraoSaved acima --
+  // então na prática nada parecia mudar). Confirma antes de apagar
+  // porque não tem como desfazer (sem soft-delete/lixeira ainda). Não
+  // mexe no resto do formulário (label/categoria/etc de outras abas) --
+  // por isso separado do resetCreatorForm de sempre.
+  async function handleClearPadrao() {
+    const hadSaved = defaultReference[gender];
+    if (hadSaved) {
+      const ok = window.confirm(`Apagar de vez o Avatar Padrão ${gender} salvo? Não tem como desfazer.`);
+      if (!ok) return;
+      setSubmitting(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/avatar-default-reference?gender=${gender}`, {
+          method: "DELETE",
+          headers: authHeaders,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "erro ao apagar avatar padrão");
+        await loadDefaultReference();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "erro ao apagar");
+        setSubmitting(false);
+        return;
+      }
+      setSubmitting(false);
+    }
     setPadraoHeadFiles({});
     setPadraoHeadPlacements({});
     setPadraoBodyFiles({});
@@ -1244,8 +1280,25 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
           </p>
         )}
 
+        {/* zoom do preview -- pedido do Douglas: "tem como eu dar zoom
+            nesse editor? ta mt longe". Mesmo padrão visual do slider de
+            Tamanho mais abaixo, só que controla o preview inteiro (não
+            entra no que é salvo -- é só visualização). */}
+        <div className="settings-slider-row">
+          <span className="settings-slider-name">Zoom do preview</span>
+          <input
+            type="range"
+            min={0.75}
+            max={3}
+            step={0.25}
+            value={zoom}
+            onChange={(e) => setZoom(Number(e.target.value))}
+          />
+          <span className="settings-slider-value">{Math.round(zoom * 100)}%</span>
+        </div>
+
         <div className="item-size-card">
-          <div className="item-stage" style={{ height: STAGE_HEIGHT }}>
+          <div className="item-stage" style={{ height: STAGE_HEIGHT, zoom }}>
             <div
               className="item-stage-avatar"
               style={{
@@ -1414,13 +1467,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               clicar sem querer). margin-left:auto empurra pra borda,
               ver .items-panel-submit-row .clear-btn em globals.css.
               SEMPRE visível nessa aba (antes só aparecia com upload em
-              andamento -- Douglas: "cade o botao kkk", porque um dado
-              F recarregada da página some com os arquivos escolhidos
-              (File do navegador, não sobrevive reload) e o botão
-              sumia junto, parecendo bug. Clicar sem nada pra limpar é
-              inofensivo (handleClearPadrao só reseta pra vazio). */}
+              andamento -- Douglas: "cade o botao kkk", porque um
+              reload da página some com os arquivos escolhidos (File do
+              navegador, não sobrevive reload) e o botão sumia junto,
+              parecendo bug). E de verdade apaga o Avatar Padrão salvo
+              agora (com confirmação) -- Douglas: "o botao comecar do
+              zero nao apaga o avatar antigo", ver handleClearPadrao. */}
           {isAvatarPadrao && (
-            <button type="button" className="clear-btn" onClick={handleClearPadrao}>
+            <button type="button" className="clear-btn" onClick={handleClearPadrao} disabled={submitting}>
               Começar do zero (trocar as fotos)
             </button>
           )}
@@ -1503,6 +1557,11 @@ export default function ItemEditor({
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<CategoryId>("poltrona");
   const [files, setFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  // zoom do preview -- mesma ideia do zoom em AvatarCreatorPanel acima
+  // (pedido do Douglas: "tem como eu dar zoom nesse editor? ta mt
+  // longe"), estado próprio aqui porque "Criar Mobi" é um componente
+  // diferente (não reaproveita o de lá).
+  const [zoom, setZoom] = useState(1.5);
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2128,8 +2187,22 @@ export default function ItemEditor({
             ))}
           </div>
 
+          {/* zoom do preview -- ver comentário em AvatarCreatorPanel. */}
+          <div className="settings-slider-row">
+            <span className="settings-slider-name">Zoom do preview</span>
+            <input
+              type="range"
+              min={0.75}
+              max={3}
+              step={0.25}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+            />
+            <span className="settings-slider-value">{Math.round(zoom * 100)}%</span>
+          </div>
+
           <div className="item-size-card">
-            <div className="item-stage" style={{ height: STAGE_HEIGHT }}>
+            <div className="item-stage" style={{ height: STAGE_HEIGHT, zoom }}>
               <div
                 className="item-stage-avatar"
                 style={{
