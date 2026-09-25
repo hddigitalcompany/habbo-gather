@@ -2777,11 +2777,20 @@ body {
    .profile-edit-side (padding-top:0 lá também). Fica só de pé; não
    mexe em largura/posição horizontal (correção: "verticalmente nao
    horizontalmente"). */
+/* pedido do Douglas: "coloca traje na lateral nao embaixo" -- "Traje"
+   (a última aba) tava quebrando pra uma segunda linha (flex-wrap) por
+   pouco -- a coluna de itens (do lado do boneco) não tinha largura
+   suficiente pras 4 abas numa linha só. Em vez de espremer o boneco de
+   novo, aperta o padding lateral do CONTAINER das abas (18px -> 12px)
+   e o padding interno de cada aba (13px -> 10px) e o gap entre elas
+   (6px -> 4px) -- economia suficiente pras 4 (Cabelo/Acessório/Barba/
+   Traje) caberem lado a lado. flex-wrap continua de fallback (se um
+   dia entrar uma 5ª categoria, por exemplo). */
 .edit-category-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 18px 10px;
+  gap: 4px;
+  padding: 0 12px 10px;
   flex-shrink: 0;
   border-bottom: 1px solid #2f2245;
 }
@@ -2794,7 +2803,7 @@ body {
   color: #cfc4e6;
   font-size: 12px;
   font-weight: 600;
-  padding: 7px 13px;
+  padding: 7px 10px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -2820,7 +2829,10 @@ body {
 .profile-edit-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 18px 8px;
+  /* padding lateral igual ao de .edit-category-tabs (18px -> 12px, ver
+     comentário lá em cima) -- mantém as bordas da grade de itens
+     alinhadas com as abas logo acima dela. */
+  padding: 16px 12px 8px;
 }
 
 .color-picker {
