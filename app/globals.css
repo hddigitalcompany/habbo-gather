@@ -2677,7 +2677,12 @@ body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  padding: 2px 18px 6px;
+  /* pedido do Douglas: "diminui 1/3 do espaco do avatar na laargura,
+     sem mudar o tamanho dela" -- padding lateral cai de 18 pra 12px
+     (1/3 a menos), sobra mais largura pra coluna de itens do lado
+     (largura TOTAL do card fica travada, ver .profile-card.editing --
+     "fixa a largura total do card como esta agora, nao mexe"). */
+  padding: 2px 12px 6px;
   flex-shrink: 0;
 }
 
@@ -2710,18 +2715,22 @@ body {
 .avatar-preview-rotate-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* mesmo pedido acima -- gap de 8 pra ~5px (1/3 a menos), as setas
+     ficam mais coladas no boneco. */
+  gap: 5px;
 }
 
+/* pedido do Douglas: "ai vc aumenta as setas 50%" -- 26px -> 39px
+   (compensa ficarem mais coladas no boneco depois do gap encolher). */
 .avatar-preview-rotate-btn {
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 39px;
+  height: 39px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
-  font-size: 15px;
+  font-size: 23px;
   line-height: 1;
   cursor: pointer;
 }

@@ -4938,7 +4938,13 @@ function ProfileCard({
                 agora todo item cadastrado tem arte nas 4 direções.
                 Coluna própria (setas+boneco em cima, legenda do lado
                 embaixo). */}
-            <div className="avatar-preview-column">
+            {/* pedido do Douglas: "sobe o avatar em 20%" -- desloca o
+                bloco inteiro (setas+boneco+legenda) 20% da altura do
+                boneco (AVATAR_PREVIEW_H) pra CIMA da posição
+                centralizada de sempre, calculado em cima da constante
+                (não um px fixo no CSS) pra acompanhar se o tamanho do
+                boneco mudar de novo no futuro. */}
+            <div className="avatar-preview-column" style={{ marginTop: -(AVATAR_PREVIEW_H * 0.2) }}>
             <div className="avatar-preview-rotate-wrap">
               <button
                 type="button"
