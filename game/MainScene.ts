@@ -2708,32 +2708,30 @@ export default class MainScene extends Phaser.Scene {
     const tiles = this.tilesByAreaId().get(areaId);
     if (!tiles || tiles.length === 0) return; // área sem tile pintado (não deveria acontecer aqui, defensivo)
 
-    const { minCol, maxCol, minRow, maxRow } = areaTileBounds(tiles);
-    const topLeft = tileToWorld(minCol, minRow);
-    const bottomRight = tileToWorld(maxCol, maxRow);
-    // mesmo retângulo do contorno (ver redrawAreaBorders) -- meio tile de
-    // folga em volta, área "acesa" cobre o quadrado INTEIRO de cada tile
-    // pintado, não só o centro dele.
-    const litLeft = topLeft.x - TILE / 2;
-    const litTop = topLeft.y - TILE / 2;
-    const litRight = bottomRight.x + TILE / 2;
-    const litBottom = bottomRight.y + TILE / 2;
-
     // véu ÚNICO cobrindo o mapa inteiro, recortado por uma MÁSCARA
-    // (Graphics + GeometryMask invertida) em vez dos 4 retângulos de
-    // antes -- o "buraco" da máscara é o retângulo aceso ACIMA + a
-    // silhueta de tela (getBounds()) de cada móvel de pé num tile dessa
-    // área. Corrige o bug reportado pelo Douglas ("o escurecer não tá
-    // pegando certo todos os quadrados da área"): um móvel desenhado
-    // maior que 1 tile (ex: poltrona gamer, CUSTOM_ITEM_TARGET_WIDTH em
-    // furniture.ts pode passar de 2 tiles de largura/altura) tinha o
-    // topo "cortado" pelo véu bem na borda do retângulo aceso, mesmo
-    // estando DENTRO da área -- agora o móvel inteiro entra no recorte,
-    // não só o quadradinho de 1 tile onde ele está ancorado.
+    // (Graphics + GeometryMask invertida) -- o "buraco" da máscara é
+    // CADA tile pintado da área (um quadrado por tile, não mais um
+    // retângulo de bounding-box) + a silhueta de tela (getBounds()) de
+    // cada móvel de pé num tile dela. Passou por 2 rodadas com o
+    // Douglas: primeiro corrigiu o móvel maior que 1 tile (ex: poltrona
+    // gamer) tendo o topo cortado na borda do bounding-box mesmo estando
+    // DENTRO da área; agora ("tem que ser todos os tiles que eu
+    // seleciono na criacao") corrige o bounding-box em si -- numa área
+    // de formato IRREGULAR (não um retângulo sólido preenchido, ex: só
+    // as casinhas junto de cada cadeira, com buracos entre elas) o
+    // bounding-box acendia até tile que nunca foi pintado (over-lit) MAS
+    // continuava apagando tile pintado que ficasse fora do retângulo
+    // (ex: uma cadeira mais afastada, numa "aba" da área que o
+    // bounding-box não cobre) -- por isso "nem todos os tiles
+    // selecionados" ficavam acesos. Desenhando tile por tile, só o que
+    // foi PINTADO de verdade acende, não importa o formato.
     const tileKeys = new Set(tiles.map((t) => `${t.col},${t.row}`));
     const maskGfx = this.add.graphics();
     maskGfx.fillStyle(0xffffff);
-    maskGfx.fillRect(litLeft, litTop, litRight - litLeft, litBottom - litTop);
+    for (const t of tiles) {
+      const { x, y } = tileToWorld(t.col, t.row);
+      maskGfx.fillRect(x - TILE / 2, y - TILE / 2, TILE, TILE);
+    }
     const addFurnitureHole = (f: FurnitureDef, sprite: Phaser.GameObjects.Image | undefined) => {
       if (!sprite || !tileKeys.has(`${f.col},${f.row}`)) return;
       const b = sprite.getBounds();
