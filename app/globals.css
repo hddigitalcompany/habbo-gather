@@ -2565,21 +2565,18 @@ body {
 /* boneco fixo no topo do editor, mostrando ao vivo cada escolha (ver
    avatar-preview-layer, um recorte do frame 0 igual ao dos thumbnails
    de cabelo -- background-image + position + size, sem canvas nem
-   Phaser aqui). */
+   Phaser aqui). O tom de pele/cores de item não ficam mais do lado
+   (ver .skin-picker acima) -- centralizado, já que agora é o único
+   filho da linha. */
 .avatar-preview-wrap {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 14px;
   padding: 2px 18px 6px;
   flex-shrink: 0;
 }
 
-/* flex-shrink:0 é o que importa aqui -- sem isso, com o seletor de tom
-   de pele do lado (flex:1) disputando espaço na mesma linha, o
-   flexbox comprimia o boneco pra caber (tamanho errado, ver
-   AVATAR_PREVIEW_W/H em GameRoom.tsx -- o boneco tem que ficar SEMPRE
-   nesse tamanho, quem sobra/falta espaço é o seletor de tom de pele). */
 .avatar-preview {
   position: relative;
   flex-shrink: 0;
@@ -2791,13 +2788,19 @@ body {
   opacity: 0.85;
 }
 
-/* tons de pele (ver SKIN_CATALOG) -- ficam do LADO do boneco no topo
-   do editor (dentro de .avatar-preview-wrap), não dentro da grade de
-   categorias -- pedido explícito do Douglas. flex:1 pra ocupar o
-   espaço vazio à direita do boneco até a borda do card. */
+/* tons de pele (ver SKIN_CATALOG) -- linha PRÓPRIA, largura total do
+   card, logo abaixo de "Sexo" e ACIMA do boneco (pedido do Douglas:
+   "os tons de pele devem subir até embaixo dos sexos" -- antes vivia
+   do lado do boneco, dentro de .avatar-preview-wrap). Reaproveitada
+   também pelas "Cores de <item>" (cabelo/acessório, ver ColorOption em
+   game/customization.ts) -- mesmo componente visual, só muda o
+   conteúdo (pedido: "card das cores do item fique embaixo dos tons de
+   pele" / "mantendo o mesmo rumo vertical que está"). flex-shrink:0
+   igual ao .profile-edit-gender-row -- é uma linha do empilhamento
+   vertical do card, não disputa espaço com mais nada na mesma linha. */
 .skin-picker {
-  flex: 1;
-  min-width: 0;
+  flex-shrink: 0;
+  padding: 0 18px 10px;
 }
 
 .skin-picker-label {

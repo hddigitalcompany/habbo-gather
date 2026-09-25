@@ -22,6 +22,14 @@ export interface ColorOption {
   id: string;
   label: string;
   file: string;
+  /** Cor plana (hex) só pra desenhar o SWATCH do seletor -- mesma ideia
+   * do `hex` de SkinOption (não é tirada da imagem, é a cor que a
+   * pessoa escolheu ao cadastrar a variante). Pedido do Douglas: "só
+   * vai aparecer a cor do gbr igual dos tons de pele" -- sem esse hex o
+   * swatch de cor de item mostrava um recorte da própria arte (ver
+   * histórico de .color-swatch em globals.css); agora usa um círculo de
+   * cor cheia, igual ao de SKIN_CATALOG. */
+  hex?: string;
 }
 
 export interface HairOption {

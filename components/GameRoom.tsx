@@ -4483,12 +4483,6 @@ const PREVIEW_DIRECTION_FRAME: Record<Direction, number> = { down: 0, left: 3, r
 // esquerdo -> frente nesse ciclo (a seta ‹ anda o ciclo ao contrário).
 const PREVIEW_DIRECTION_ORDER: Direction[] = ["down", "right", "up", "left"];
 
-// miniatura de uma COR de cabelo (dentro de "Cores de ..."): mesmo
-// recorte de frame 0 que hair-thumb/avatar-preview, só que BEM menor --
-// é um seletor de variação, não a grade principal de penteados.
-const COLOR_SWATCH_W = 32;
-const COLOR_SWATCH_H = 41.6; // mantém a proporção 200:260 do frame
-
 const STATUS_OPTIONS: { id: ProfileStatus; label: string; dot: string }[] = [
   { id: "online", label: "Online", dot: STATUS_DOT_COLORS.online },
   { id: "away", label: "Ausente", dot: STATUS_DOT_COLORS.away },
@@ -4679,7 +4673,6 @@ function ProfileCard({
     const effectiveOutfitFile = selectedOutfitOption
       ? outfitFileForSkin(selectedOutfitOption, selectedSkinId)
       : undefined;
-    const colorSwatchScale = COLOR_SWATCH_W / 200;
     // posição do frame PARADO da direção escolhida (ver
     // PREVIEW_DIRECTION_FRAME acima) dentro da folha 8x2 -- mesma conta
     // de frameOffsetXPx/frameOffsetYPx em ItemEditor.tsx, só que em
@@ -4734,6 +4727,73 @@ function ProfileCard({
             </div>
           </div>
 
+          {/* tons de pele (ver SKIN_CATALOG) -- linha PRÓPRIA, largura
+              total do card, logo abaixo de "Sexo" (pedido do Douglas:
+              "os tons de pele devem subir até embaixo dos sexos" --
+              antes vivia do lado do boneco, dentro de
+              .avatar-preview-wrap). Troca ao vivo (ver selectSkin), sem
+              precisar estar na aba "cabelo" -- aqui só filtra a grade
+              pelo sexo já escolhido acima; tom sem `gender` no catálogo
+              (gerado antes dessa mudança) conta como "masculino". */}
+          <div className="skin-picker">
+            <span className="skin-picker-label">Tom de pele</span>
+            <div className="skin-swatches">
+              {SKIN_CATALOG.filter((skin) => (skin.gender ?? "masculino") === selectedGender).map((skin) => (
+                <button
+                  key={skin.id}
+                  className={selectedSkinId === skin.id ? "skin-swatch selected" : "skin-swatch"}
+                  style={{ background: skin.hex ?? "#8a7ca8" }}
+                  onClick={() => onSelectSkin(skin.id)}
+                  title={skin.label}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* cores da variante do item selecionado (cabelo/acessório,
+              ver ColorOption em game/customization.ts) -- logo abaixo do
+              tom de pele, MESMO estilo de círculo de cor cheia (pedido
+              do Douglas: "o card das cores do item fique embaixo dos
+              tons de pele" / "só vai aparecer a cor do gbr igual dos
+              tons de pele"). Só renderiza quando o item atual (da aba
+              aberta) tem variante de cor cadastrada -- sem placeholder
+              "Em breve" aqui (fica só a grade de itens embaixo, ver
+              "enquanto embaixo fica somente o item"). */}
+          {editorCategory === "cabelo" && selectedHairOption?.colors && selectedHairOption.colors.length > 0 && (
+            <div className="skin-picker">
+              <span className="skin-picker-label">Cores de &quot;{selectedHairOption.label}&quot;</span>
+              <div className="skin-swatches">
+                {selectedHairOption.colors.map((c) => (
+                  <button
+                    key={c.id}
+                    className={selectedHairColorId === c.id ? "skin-swatch selected" : "skin-swatch"}
+                    style={{ background: c.hex ?? "#8a7ca8" }}
+                    onClick={() => onSelectHairColor(c.id)}
+                    title={c.label}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {editorCategory === "acessorio" &&
+            selectedAccessoryOption?.colors &&
+            selectedAccessoryOption.colors.length > 0 && (
+              <div className="skin-picker">
+                <span className="skin-picker-label">Cores de &quot;{selectedAccessoryOption.label}&quot;</span>
+                <div className="skin-swatches">
+                  {selectedAccessoryOption.colors.map((c) => (
+                    <button
+                      key={c.id}
+                      className={selectedAccessoryColorId === c.id ? "skin-swatch selected" : "skin-swatch"}
+                      style={{ background: c.hex ?? "#8a7ca8" }}
+                      onClick={() => onSelectAccessoryColor(c.id)}
+                      title={c.label}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
           {/* boneco fixo no topo -- mostra AO VIVO cada escolha (base +
               traje + cabelo/barba/acessório selecionados empilhados,
               mesmo recorte de frame 0 dos thumbnails), ver
@@ -4744,8 +4804,7 @@ function ProfileCard({
                 ver PREVIEW_DIRECTION_FRAME/rotatePreview acima), já que
                 agora todo item cadastrado tem arte nas 4 direções.
                 Coluna própria (setas+boneco em cima, legenda do lado
-                embaixo) pra não brigar de layout com o skin-picker ao
-                lado (ver .avatar-preview-wrap, flex-direction:row). */}
+                embaixo). */}
             <div className="avatar-preview-column">
             <div className="avatar-preview-rotate-wrap">
               <button
@@ -4855,29 +4914,6 @@ function ProfileCard({
             </div>
             <span className="avatar-preview-direction-label">{FACING_LABEL[previewDirection]}</span>
             </div>
-
-            {/* tons de pele (ver SKIN_CATALOG) -- selecionáveis aqui do
-                lado do boneco, não dentro da grade de categorias (pedido
-                do Douglas). Troca ao vivo (ver selectSkin), sem precisar
-                estar na aba "cabelo". Sexo (ver AvatarGender) agora é a
-                linha PRÓPRIA acima (.profile-edit-gender-row, pedido do
-                Douglas) -- aqui só filtra a grade abaixo pelo sexo já
-                escolhido lá em cima -- tom sem `gender` no catálogo
-                (gerado antes dessa mudança) conta como "masculino". */}
-            <div className="skin-picker">
-              <span className="skin-picker-label">Tom de pele</span>
-              <div className="skin-swatches">
-                {SKIN_CATALOG.filter((skin) => (skin.gender ?? "masculino") === selectedGender).map((skin) => (
-                  <button
-                    key={skin.id}
-                    className={selectedSkinId === skin.id ? "skin-swatch selected" : "skin-swatch"}
-                    style={{ background: skin.hex ?? "#8a7ca8" }}
-                    onClick={() => onSelectSkin(skin.id)}
-                    title={skin.label}
-                  />
-                ))}
-              </div>
-            </div>
           </div>
 
           <div className="edit-category-tabs">
@@ -4921,42 +4957,6 @@ function ProfileCard({
                     </button>
                   ))}
                 </div>
-
-                {/* cores do penteado selecionado (ver ColorOption em
-                    game/customization.ts) -- NÃO é um penteado novo,
-                    é uma variação de arte do mesmo item (ex: "Castanho"/
-                    "Loiro" de "Cabelinho pra trás"); cada miniatura é um
-                    recorte do próprio spritesheet da cor (igual ao
-                    hair-thumb da grade acima, só que menor), gerado
-                    automaticamente a partir da pasta de origem -- ver
-                    scripts/syncAvatarAssets.mjs. Sem cores geradas
-                    ainda pra esse item, mostra "Em breve". */}
-                {selectedHairOption && (
-                  <div className="color-picker">
-                    <span className="color-picker-label">Cores de &quot;{selectedHairOption.label}&quot;</span>
-                    {selectedHairOption.colors && selectedHairOption.colors.length > 0 ? (
-                      <div className="color-swatches">
-                        {selectedHairOption.colors.map((c) => (
-                          <button
-                            key={c.id}
-                            className={selectedHairColorId === c.id ? "color-swatch selected" : "color-swatch"}
-                            style={{
-                              width: COLOR_SWATCH_W,
-                              height: COLOR_SWATCH_H,
-                              backgroundImage: `url(${furnitureAssetUrl(c.file)})`,
-                              backgroundPosition: "0 0",
-                              backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
-                            }}
-                            onClick={() => onSelectHairColor(c.id)}
-                            title={c.label}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="color-picker-empty">Em breve</span>
-                    )}
-                  </div>
-                )}
               </>
             ) : editorCategory === "barba" ? (
               // barba: sem seletor de cor (a arte já combina sozinha com
@@ -5013,33 +5013,6 @@ function ProfileCard({
                     </button>
                   ))}
                 </div>
-
-                {selectedAccessoryOption && selectedAccessoryOption.id !== "nenhum" && (
-                  <div className="color-picker">
-                    <span className="color-picker-label">Cores de &quot;{selectedAccessoryOption.label}&quot;</span>
-                    {selectedAccessoryOption.colors && selectedAccessoryOption.colors.length > 0 ? (
-                      <div className="color-swatches">
-                        {selectedAccessoryOption.colors.map((c) => (
-                          <button
-                            key={c.id}
-                            className={selectedAccessoryColorId === c.id ? "color-swatch selected" : "color-swatch"}
-                            style={{
-                              width: COLOR_SWATCH_W,
-                              height: COLOR_SWATCH_H,
-                              backgroundImage: `url(${furnitureAssetUrl(c.file)})`,
-                              backgroundPosition: "0 0",
-                              backgroundSize: `${HAIR_SHEET_W * colorSwatchScale}px ${HAIR_SHEET_H * colorSwatchScale}px`,
-                            }}
-                            onClick={() => onSelectAccessoryColor(c.id)}
-                            title={c.label}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="color-picker-empty">Em breve</span>
-                    )}
-                  </div>
-                )}
               </>
             ) : editorCategory === "traje" ? (
               // traje: sem seletor de cor (a mão já combina sozinha com o
