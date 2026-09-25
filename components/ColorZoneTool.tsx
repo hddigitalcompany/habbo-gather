@@ -7,14 +7,15 @@
 // algoritmo (colorize com deslocamento de luminância, zona escolhida
 // por AMOSTRA DE COR pintada, não por coordenada fixa).
 //
-// Fluxo: abre em cima de um item JÁ cadastrado (cabelo/acessório/traje,
-// ver ColorZoneToolButton mais abaixo, usado dentro do
-// AvatarCreatorPanel em ItemEditor.tsx) -- pinta zonas em cima do
-// quadro de FRENTE/PARADO (quadro 0 da folha 8x2), escolhe o hex alvo
-// de cada zona, gera uma prévia, e ao salvar sobe uma folha NOVA
-// (recolorida inteira, todos os 15 quadros) pro Storage, virando uma
-// entrada em `colors` do item (mesmo formato de ColorOption em
-// game/customization.ts) via PATCH /api/avatar-items/[id].
+// Fluxo: abre em cima de um item JÁ cadastrado (cabelo/acessório/traje
+// OU tom de pele -- ver prop apiBase abaixo, pedido do Douglas
+// "adicionar cores pra avatar tambem" / "edicao encima do ja subido" --
+// usado dentro do AvatarCreatorPanel em ItemEditor.tsx) -- pinta zonas
+// em cima do quadro de FRENTE/PARADO (quadro 0 da folha 8x2), escolhe o
+// hex alvo de cada zona, gera uma prévia, e ao salvar sobe uma folha
+// NOVA (recolorida inteira, todos os 15 quadros) pro Storage, virando
+// uma entrada em `colors` do registro original (mesmo formato de
+// ColorOption em game/customization.ts) via PATCH /api/<apiBase>/[id].
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -128,11 +129,20 @@ export default function ColorZoneTool({
   accessToken,
   onClose,
   onSaved,
+  // "avatar-items" (cabelo/acessório/traje, de sempre) ou "avatar-skins"
+  // (tom de pele -- pedido do Douglas: "adicionar cores pra avatar
+  // tambem") -- decide tanto o endpoint do PATCH (/api/<apiBase>/[id])
+  // quanto a pastinha dentro do bucket "room-items" onde a folha
+  // recolorida é salva (mesma convenção de path por tipo que
+  // avatar_skins/avatar_items já usam, ver 0005_avatar_skins.sql).
+  // Default "avatar-items" -- não quebra quem já chamava sem essa prop.
+  apiBase = "avatar-items",
 }: {
   item: AvatarItemForColorTool;
   accessToken: string;
   onClose: () => void;
   onSaved: () => void;
+  apiBase?: "avatar-items" | "avatar-skins";
 }) {
   // zoom da área de pintura -- pedido do Douglas: "quero dar zoom"
   // (ficava difícil acertar o pincel em detalhe pequeno só no
@@ -497,7 +507,7 @@ export default function ColorZoneTool({
       if (!blob) throw new Error("erro ao gerar PNG");
 
       const stamp = Date.now();
-      const path = `avatar-items/colors/${item.id}-${slugify(label)}-${stamp}.png`;
+      const path = `${apiBase}/colors/${item.id}-${slugify(label)}-${stamp}.png`;
       const { error: uploadError } = await supabase.storage
         .from("room-items")
         .upload(path, blob, { upsert: false, contentType: "image/png" });
@@ -513,7 +523,7 @@ export default function ColorZoneTool({
       };
       const nextColors = [...(item.colors ?? []), newColor];
 
-      const res = await fetch(`/api/avatar-items/${item.id}`, {
+      const res = await fetch(`/api/${apiBase}/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ colors: nextColors }),
@@ -544,7 +554,7 @@ export default function ColorZoneTool({
     setSaveError(null);
     try {
       const nextColors = (item.colors ?? []).filter((c) => c.id !== color.id);
-      const res = await fetch(`/api/avatar-items/${item.id}`, {
+      const res = await fetch(`/api/${apiBase}/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ colors: nextColors }),

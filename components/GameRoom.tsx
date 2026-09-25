@@ -942,20 +942,55 @@ export default function GameRoom({
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     try {
-      const { data, error } = await supabase.from("avatar_skins").select("id, label, gender, sheet_url, hex");
+      const { data, error } = await supabase
+        .from("avatar_skins")
+        .select("id, label, gender, sheet_url, hex, colors");
       if (error || !data || data.length === 0) return;
-      const skins: SkinOption[] = data.map(
-        (row: { id: string; label: string; gender: string; sheet_url: string; hex: string | null }) => ({
-          id: row.id,
-          label: row.label,
-          file: row.sheet_url,
-          gender: row.gender === "feminino" ? "feminino" : "masculino",
-          hex: row.hex ?? undefined,
-        })
-      );
-      registerCustomSkins(skins);
+      type SkinRow = {
+        id: string;
+        label: string;
+        gender: string;
+        sheet_url: string;
+        hex: string | null;
+        // variantes de cor GERADAS pelo ColorZoneTool.tsx (Editor de
+        // Itens > Criar Avatar > Avatar, botão "Gerar cor" -- pedido do
+        // Douglas: "adicionar cores pra avatar tambem" / "edicao encima
+        // do ja subido") -- ausente/null em quem ainda não rodou
+        // supabase/migrations/0010_avatar_skins_colors.sql, ou em quem
+        // nunca gerou nenhuma cor pro tom. Mesmo formato de ColorOption
+        // (avatar_items.colors, ver fetchAndRegisterCustomAvatarItems).
+        colors: ColorOption[] | null;
+      };
+      const rows = data as SkinRow[];
+      const skins: SkinOption[] = rows.map((row) => ({
+        id: row.id,
+        label: row.label,
+        file: row.sheet_url,
+        gender: row.gender === "feminino" ? "feminino" : "masculino",
+        hex: row.hex ?? undefined,
+      }));
+      // cada cor gerada é UM TOM A MAIS no catálogo (mesmo esquema de
+      // "traje" em fetchAndRegisterCustomAvatarItems -- tom de pele já é
+      // uma entrada FLAT, sem bySkin/nesting, então aqui é só um push a
+      // mais) -- reaproveita a MESMA folha gerada (sheet_url = c.file) e
+      // o sexo do tom pai, pra aparecer certo no seletor "Tom de pele"
+      // (filtro por gender, ver SKIN_CATALOG.filter no ProfileCard).
+      const colorSkins: SkinOption[] = [];
+      for (const row of rows) {
+        for (const c of row.colors ?? []) {
+          colorSkins.push({
+            id: c.id,
+            label: `${row.label} -- ${c.label}`,
+            file: c.file,
+            gender: row.gender === "feminino" ? "feminino" : "masculino",
+            hex: c.hex,
+          });
+        }
+      }
+      const allSkins = [...skins, ...colorSkins];
+      registerCustomSkins(allSkins);
       setCustomSkinsVersion((v) => v + 1);
-      const textureEntries = skins.map((skin) => ({ key: skinTextureKey(skin.id), url: skin.file }));
+      const textureEntries = allSkins.map((skin) => ({ key: skinTextureKey(skin.id), url: skin.file }));
       await new Promise<void>((resolve) => {
         if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
         else resolve();

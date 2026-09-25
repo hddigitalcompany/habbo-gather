@@ -1,0 +1,22 @@
+-- Variantes de COR de um TOM DE PELE (avatar_skins) -- pedido do
+-- Douglas: "adicionar cores pra avatar tambem" / "edicao encima do ja
+-- subido" (mesma ferramenta -- ColorZoneTool.tsx -- que já existia pra
+-- cabelo/acessório/traje, ver 0009_avatar_items_colors.sql, agora
+-- reaproveitada aqui). Continuação de 0005_avatar_skins.sql.
+--
+-- Cada variante é GERADA pelo ColorZoneTool.tsx (Editor de Itens >
+-- Criar Avatar > Avatar) sem foto nova: o Douglas pinta por cima do
+-- tom já cadastrado marcando "isso é zona X", escolhe o hex alvo de
+-- cada zona, e o sistema recolore a folha inteira (todos os 15
+-- quadros) sozinho -- ver game/colorTint.ts pro algoritmo. O resultado
+-- é uma folha PRONTA (PNG, mesmo formato 8x2/200x260 de sempre) igual
+-- a qualquer outro tom de pele -- `colors` só guarda a LISTA dessas
+-- folhas geradas, cada uma com id/label/hex (pro swatch)/file (URL no
+-- Storage), MESMO formato de ColorOption em game/customization.ts.
+-- Cada cor vira um TOM A MAIS no seletor "Tom de pele" do jogo (ver
+-- fetchAndRegisterCustomSkins em GameRoom.tsx).
+--
+-- Rode isso no SQL Editor do Supabase DEPOIS de já ter rodado
+-- 0005_avatar_skins.sql.
+alter table public.avatar_skins
+  add column if not exists colors jsonb not null default '[]'::jsonb;

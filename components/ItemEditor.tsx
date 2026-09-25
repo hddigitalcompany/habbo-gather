@@ -320,6 +320,13 @@ type CustomSkinRow = {
   gender: AvatarGender;
   sheet_url: string;
   hex: string | null;
+  // variantes de cor GERADAS pelo ColorZoneTool.tsx (botão "Gerar cor" na
+  // lista de "Tons cadastrados" abaixo -- pedido do Douglas: "adicionar
+  // cores pra avatar tambem" / "edicao encima do ja subido"). Ausente/
+  // null em quem ainda não rodou
+  // supabase/migrations/0010_avatar_skins_colors.sql. Mesmo formato de
+  // ColorOption usado em CustomAvatarItemRow.colors abaixo.
+  colors?: ColorOption[] | null;
 };
 
 type CustomAvatarItemRow = {
@@ -949,8 +956,11 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // mesma ideia, só que pro tom de pele ("Tons cadastrados") -- ver
   // handleDeleteSkin abaixo.
   const [deletingSkinId, setDeletingSkinId] = useState<string | null>(null);
-  // id do item (cabelo/acessório) com o ColorZoneTool.tsx aberto embaixo
-  // da linha dele agora -- só 1 por vez (ver "Gerar cor" no JSX abaixo).
+  // id do item (cabelo/acessório/traje) OU tom de pele com o
+  // ColorZoneTool.tsx aberto embaixo da linha dele agora -- só 1 por vez
+  // (ver "Gerar cor" no JSX abaixo). Um estado só pros dois tipos: os
+  // ids vêm de tabelas diferentes (avatar_items/avatar_skins, sempre
+  // uuid), então nunca colidem -- abrir um fecha o outro sozinho.
   const [colorToolItemId, setColorToolItemId] = useState<string | null>(null);
   // "Avatar Padrão" (ver DefaultReferenceRow/comentário acima) -- duas
   // fotos por direção SEPARADAS (cabeça e traje/corpo limpo), cada uma
@@ -1084,7 +1094,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("avatar_skins")
-      .select("id, label, gender, sheet_url, hex");
+      .select("id, label, gender, sheet_url, hex, colors");
     if (fetchError) {
       setError(fetchError.message);
       return;
@@ -2116,18 +2126,48 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             ) : (
               <ul className="items-panel-list">
                 {skins.map((skin) => (
-                  <li key={skin.id} className="items-panel-row">
-                    <span className="skin-swatch" style={{ background: skin.hex ?? "#8a7ca8" }} />
-                    <span className="items-panel-name">
-                      {skin.label} <span className="items-panel-category">({skin.gender})</span>
-                    </span>
-                    <button
-                      type="button"
-                      disabled={deletingSkinId === skin.id}
-                      onClick={() => handleDeleteSkin(skin)}
-                    >
-                      {deletingSkinId === skin.id ? "Apagando..." : "Excluir"}
-                    </button>
+                  <li key={skin.id} className="items-panel-row-wrap">
+                    <div className="items-panel-row">
+                      <span className="skin-swatch" style={{ background: skin.hex ?? "#8a7ca8" }} />
+                      <span className="items-panel-name">
+                        {skin.label} <span className="items-panel-category">({skin.gender})</span>
+                        {skin.colors && skin.colors.length > 0 && (
+                          <span className="items-panel-category"> -- {skin.colors.length} cor(es)</span>
+                        )}
+                      </span>
+                      {/* "Gerar cor" pro TOM DE PELE, mesma ferramenta de
+                          cabelo/acessório/traje (ver comentário grande em
+                          ColorZoneTool.tsx) -- pedido do Douglas:
+                          "adicionar cores pra avatar tambem" / "edicao
+                          encima do ja subido". apiBase="avatar-skins"
+                          troca o endpoint/pasta de Storage (ver prop
+                          apiBase lá), resto do fluxo idêntico. */}
+                      <button
+                        type="button"
+                        onClick={() => setColorToolItemId((prev) => (prev === skin.id ? null : skin.id))}
+                      >
+                        {colorToolItemId === skin.id ? "Fechar cor" : "Gerar cor"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletingSkinId === skin.id}
+                        onClick={() => handleDeleteSkin(skin)}
+                      >
+                        {deletingSkinId === skin.id ? "Apagando..." : "Excluir"}
+                      </button>
+                    </div>
+                    {colorToolItemId === skin.id && (
+                      <ColorZoneTool
+                        item={skin}
+                        apiBase="avatar-skins"
+                        accessToken={accessToken}
+                        onClose={() => setColorToolItemId(null)}
+                        onSaved={() => {
+                          loadSkins();
+                          onChanged();
+                        }}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
