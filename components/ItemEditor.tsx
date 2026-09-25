@@ -136,7 +136,7 @@ function rulerTicks(range: [number, number], unit: number): number[] {
  * cada chamador passa o seu (ver STAGE_BASELINE_PAD/
  * AVATAR_FOOT_FROM_TILE_BOTTOM nos usos abaixo).
  */
-function StageRuler({ anchorBottomPx }: { anchorBottomPx: number }) {
+function StageRuler({ anchorBottomPx, pxPerUnit = PREVIEW_SCALE }: { anchorBottomPx: number; pxPerUnit?: number }) {
   const xTicks = rulerTicks(RULER_X_RANGE, RULER_UNIT);
   const yTicks = rulerTicks(RULER_Y_RANGE, RULER_UNIT);
   return (
@@ -145,12 +145,18 @@ function StageRuler({ anchorBottomPx }: { anchorBottomPx: number }) {
           Douglas: "faz elas em grade" (antes só tinha tracinho curto em
           cada marcação, agora atravessa o preview inteiro, formando uma
           grade de verdade). A de x=0 fica destacada (mesmo eixo
-          principal de antes). */}
+          principal de antes). pxPerUnit converte "px reais" (mesma
+          unidade de offsetX/offsetY) pra "px de tela" -- PREVIEW_SCALE
+          sozinho pro móvel (sem fator de escala próprio), mas
+          AVATAR_SCALE*PREVIEW_SCALE pro avatar (ver comentário grande
+          sobre avatar-art-drag-box logo abaixo -- tem que bater com a
+          MESMA conversão que a caixa de arrastar usa, senão a régua
+          mente sobre onde as coisas vão parar). */}
       {xTicks.map((v) => (
         <div
           key={`rx${v}`}
           className={v === 0 ? "stage-ruler-line stage-ruler-line-v stage-ruler-line-zero" : "stage-ruler-line stage-ruler-line-v"}
-          style={{ left: `calc(50% + ${v * PREVIEW_SCALE}px)` }}
+          style={{ left: `calc(50% + ${v * pxPerUnit}px)` }}
         >
           <span className="stage-ruler-label stage-ruler-label-x">{v}</span>
         </div>
@@ -162,7 +168,7 @@ function StageRuler({ anchorBottomPx }: { anchorBottomPx: number }) {
         <div
           key={`ry${v}`}
           className={v === 0 ? "stage-ruler-line stage-ruler-line-h stage-ruler-line-zero" : "stage-ruler-line stage-ruler-line-h"}
-          style={{ bottom: anchorBottomPx - v * PREVIEW_SCALE }}
+          style={{ bottom: anchorBottomPx - v * pxPerUnit }}
         >
           <span className="stage-ruler-label stage-ruler-label-y">{v}</span>
         </div>
@@ -1278,19 +1284,38 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               style={{ bottom: STAGE_BASELINE_PAD, width: TILE_SIZE_PX, height: TILE_SIZE_PX }}
             />
 
-            {/* "Avatar Padrão" editando a CABEÇA: mostra o TRAJE já upado
-                (se tiver) por baixo, fixo -- pra alinhar a cabeça contra
-                o corpo. Vem ANTES do boneco ativo no DOM de propósito
-                (traje embaixo, cabeça em cima, mesma ordem de
+            {/* pedido do Douglas: "eu salvei ela, e depois ela diminuiu
+                bastante em relacao ao tile" -- a caixa que você arrasta
+                aqui (foto CRUA, ainda sem compor) tava do tamanho
+                FRAME_W*PREVIEW_SCALE (500x650px de tela), maior que o
+                boneco de referência atrás dela (que já mostra o tamanho
+                REAL do jogo, FRAME_W*AVATAR_SCALE*PREVIEW_SCALE =
+                AVATAR_DISPLAY_W/H, ~322x419px -- AVATAR_SCALE=0.645 é o
+                fator que o jogo usa pra desenhar o boneco, ver
+                MainScene.ts). composeAvatarArtSheet queima a posição/
+                escala que você ajusta aqui DENTRO da folha 200x260 (em
+                pixels do frame, não de tela), e essa folha É desenhada
+                depois no tamanho real (boneco de jogo/preview do
+                editor) -- então alinhar contra uma caixa ~55% maior
+                fazia o resultado final vir sistematicamente menor do
+                que parecia no editor. Fix: caixa e translate (offsetX/
+                offsetY) agora usam AVATAR_DISPLAY_W/H e
+                AVATAR_SCALE*PREVIEW_SCALE, igual o boneco de referência
+                -- WYSIWYG de verdade agora.
+
+                "Avatar Padrão" editando a CABEÇA: mostra o TRAJE já
+                upado (se tiver) por baixo, fixo -- pra alinhar a cabeça
+                contra o corpo. Vem ANTES do boneco ativo no DOM de
+                propósito (traje embaixo, cabeça em cima, mesma ordem de
                 LAYER_DRAW_ORDER). */}
             {isAvatarPadrao && padraoPart === "cabeca" && otherPadraoArtUrl && (
               <div
                 className="avatar-art-drag-box avatar-art-drag-box-other-part"
                 style={{
-                  width: FRAME_W * PREVIEW_SCALE,
-                  height: FRAME_H * PREVIEW_SCALE,
+                  width: AVATAR_DISPLAY_W,
+                  height: AVATAR_DISPLAY_H,
                   bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
-                  transform: `translate(calc(-50% + ${otherPadraoPlacement.offsetX * PREVIEW_SCALE}px), ${otherPadraoPlacement.offsetY * PREVIEW_SCALE}px) scale(${otherPadraoPlacement.scale})`,
+                  transform: `translate(calc(-50% + ${otherPadraoPlacement.offsetX * AVATAR_SCALE * PREVIEW_SCALE}px), ${otherPadraoPlacement.offsetY * AVATAR_SCALE * PREVIEW_SCALE}px) scale(${otherPadraoPlacement.scale})`,
                 }}
                 title="Traje (corpo limpo) já upado -- só referência aqui, pra ajustar troque pra aba Traje"
               >
@@ -1302,10 +1327,10 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               <div
                 className={hasOwnFile ? "avatar-art-drag-box" : "avatar-art-drag-box avatar-art-drag-box-ghost"}
                 style={{
-                  width: FRAME_W * PREVIEW_SCALE,
-                  height: FRAME_H * PREVIEW_SCALE,
+                  width: AVATAR_DISPLAY_W,
+                  height: AVATAR_DISPLAY_H,
                   bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
-                  transform: `translate(calc(-50% + ${activePlacement.offsetX * PREVIEW_SCALE}px), ${activePlacement.offsetY * PREVIEW_SCALE}px) scale(${activePlacement.scale})`,
+                  transform: `translate(calc(-50% + ${activePlacement.offsetX * AVATAR_SCALE * PREVIEW_SCALE}px), ${activePlacement.offsetY * AVATAR_SCALE * PREVIEW_SCALE}px) scale(${activePlacement.scale})`,
                 }}
                 onPointerDown={hasOwnFile ? handleArtPointerDown : undefined}
                 title={hasOwnFile ? "Arraste pra posicionar" : "Foto de frente reaproveitada -- suba a foto própria pra ajustar"}
@@ -1324,10 +1349,10 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               <div
                 className="avatar-art-drag-box avatar-art-drag-box-other-part"
                 style={{
-                  width: FRAME_W * PREVIEW_SCALE,
-                  height: FRAME_H * PREVIEW_SCALE,
+                  width: AVATAR_DISPLAY_W,
+                  height: AVATAR_DISPLAY_H,
                   bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
-                  transform: `translate(calc(-50% + ${otherPadraoPlacement.offsetX * PREVIEW_SCALE}px), ${otherPadraoPlacement.offsetY * PREVIEW_SCALE}px) scale(${otherPadraoPlacement.scale})`,
+                  transform: `translate(calc(-50% + ${otherPadraoPlacement.offsetX * AVATAR_SCALE * PREVIEW_SCALE}px), ${otherPadraoPlacement.offsetY * AVATAR_SCALE * PREVIEW_SCALE}px) scale(${otherPadraoPlacement.scale})`,
                 }}
                 title="Cabeça já upada -- só referência aqui, pra ajustar troque pra aba Cabeça"
               >
@@ -1335,7 +1360,10 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
               </div>
             )}
 
-            <StageRuler anchorBottomPx={STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM} />
+            <StageRuler
+              anchorBottomPx={STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM}
+              pxPerUnit={AVATAR_SCALE * PREVIEW_SCALE}
+            />
           </div>
 
           <div className="settings-slider-row">
