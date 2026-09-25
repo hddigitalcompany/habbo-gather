@@ -4807,32 +4807,6 @@ function ProfileCard({
             Editar meu personagem
           </h3>
 
-          {/* pedido do Douglas: "alinhe os itens verticalmente com os
-              icones do sexo" -- as abas de categoria SAÍRAM de dentro da
-              coluna de itens (.profile-edit-items-col) e viraram uma
-              linha de LARGURA TOTAL aqui em cima, entre o título e
-              .profile-edit-body. Assim o primeiro filho de CADA coluna
-              (ícones de sexo em .profile-edit-side, boneco em
-              .profile-edit-avatar-col, grade em .profile-edit-items-col
-              via .profile-edit-scroll) começa todo na MESMA altura --
-              antes as abas ficavam empilhadas só do lado do boneco,
-              empurrando a grade pra baixo dos ícones de sexo. Também
-              resolve de graça o "diminua o espaco do avatar em mais 15%
-              pra caber as categorias de itens tudo na mesma altura": as
-              abas agora têm a largura do card inteiro pra se espalhar,
-              não só a sobra ao lado do boneco. */}
-          <div className="edit-category-tabs">
-            {CUSTOMIZATION_CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                className={editorCategory === cat.id ? "edit-category-tab selected" : "edit-category-tab"}
-                onClick={() => onSelectCategory(cat.id)}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-
           {/* pedido do Douglas: "fim das cores em tom de pele, uma
               traço vertical, linha cinza igual nos outros limites / pra
               direita posicionar o avatar / embaixo do tom vai vir as
@@ -5106,6 +5080,30 @@ function ProfileCard({
               </div>
 
               <div className="profile-edit-items-col">
+          {/* pedido do Douglas: "alinhe os itens verticalmente com os
+              icones do sexo, e copie as bordas dos baloes do sexo" ->
+              depois corrigido: "verticalmente nao horizontalmente /
+              volte eles pro card dos itens" -- as abas voltam pra
+              DENTRO da coluna de itens (não mais linha de largura
+              total do card, era horizontal demais); o alinhamento com
+              os ícones de sexo agora é só de ALTURA (padding-top
+              zerado aqui embaixo, ver .edit-category-tabs), pra essa
+              primeira linha da coluna de itens começar bem na mesma
+              altura que os ícones no topo da coluna estreita
+              (.profile-edit-side), sem mexer na largura/posição
+              horizontal de nada. */}
+          <div className="edit-category-tabs">
+            {CUSTOMIZATION_CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                className={editorCategory === cat.id ? "edit-category-tab selected" : "edit-category-tab"}
+                onClick={() => onSelectCategory(cat.id)}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
           <div className="profile-edit-scroll">
             {editorCategory === "cabelo" ? (
               <>
