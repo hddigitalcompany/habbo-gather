@@ -53,6 +53,28 @@ const MAX_SAMPLES_PER_ZONE = 80;
 const ZONE_BRUSH_COLORS = ["#ff4d6d", "#3fa9f5", "#ffd23f", "#6bcf63"];
 const DEFAULT_TARGET_HEXES = ["#2f6fe0", "#1a1a1a", "#c94f4f", "#2f8f5b"];
 
+// paleta de quadradinhos pra escolher a cor alvo -- pedido do Douglas
+// depois do hex manual ("muito dificil acertar nesse rgb"): "quero
+// todas elas em quadradinho, faca na largura toda da janela e deixe
+// um scrol pra rolar dentro das cores, mostres 3 linhas de cor / ao
+// inves do rgb". Substitui de vez o <input type="color"> nativo (a
+// roda de cor do sistema) -- clica no quadradinho e pronto, o campo de
+// hex continua do lado pra digitar um valor exato se precisar.
+const PALETTE_SWATCHES: string[] = [
+  "#000000", "#1a1a1a", "#333333", "#4d4d4d", "#666666", "#808080", "#999999", "#b3b3b3", "#cccccc", "#e6e6e6", "#f5f5f5", "#ffffff",
+  "#7f0000", "#a30000", "#c62828", "#e53935", "#ef5350", "#ff8a80", "#ff5252", "#d32f2f", "#b71c1c", "#8e0000",
+  "#7f3f00", "#a35c00", "#e65100", "#f57c00", "#fb8c00", "#ffa726", "#ffb74d", "#ffcc80", "#ff9800", "#e67e22",
+  "#7f6f00", "#a38b00", "#f9a825", "#fbc02d", "#fdd835", "#ffeb3b", "#fff176", "#fff9c4", "#c9a227", "#d4af37",
+  "#0b3d0b", "#1b5e20", "#2e7d32", "#388e3c", "#43a047", "#66bb6a", "#81c784", "#a5d6a7", "#33691e", "#558b2f",
+  "#004d40", "#00695c", "#00796b", "#00897b", "#26a69a", "#4db6ac", "#80cbc4", "#b2dfdb",
+  "#0d47a1", "#1565c0", "#1976d2", "#1e88e5", "#2196f3", "#42a5f5", "#64b5f6", "#90caf9", "#0b2545", "#274690",
+  "#4a148c", "#6a1b9a", "#7b1fa2", "#8e24aa", "#9c27b0", "#ab47bc", "#ba68c8", "#ce93d8",
+  "#880e4f", "#ad1457", "#c2185b", "#d81b60", "#e91e63", "#ec407a", "#f06292", "#f8bbd0",
+  "#3e2723", "#4e342e", "#5d4037", "#6d4c41", "#795548", "#8d6e63", "#a1887f", "#d7ccc8",
+  "#8a5a3c", "#a9714a", "#c48a5c", "#d1a276", "#e0b48a", "#f0c9a0", "#fde6b5", "#ffe0bd",
+  "#0d1b2a", "#1b263b", "#415a77", "#6b705c", "#a5a58d", "#b7b7a4",
+];
+
 function avatarAssetUrl(file: string): string {
   return file.startsWith("http") ? file : `/assets/${file}`;
 }
@@ -526,19 +548,13 @@ export default function ColorZoneTool({
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => updateZone(zone.key, { label: e.target.value })}
                 />
-                <input
-                  type="color"
-                  value={zone.targetHex}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    updateZone(zone.key, { targetHex: e.target.value });
-                    setHexDrafts((prev) => {
-                      const next = { ...prev };
-                      delete next[zone.key];
-                      return next;
-                    });
-                  }}
-                  title="Cor alvo dessa zona (roda de cor)"
+                {/* mostra a cor alvo atual -- a ESCOLHA em si agora é
+                    feita na paleta de quadradinhos logo abaixo (ver
+                    color-zone-palette), não mais na roda de cor nativa. */}
+                <span
+                  className="color-zone-target-swatch"
+                  style={{ background: zone.targetHex }}
+                  title={`Cor alvo dessa zona: ${zone.targetHex}`}
                 />
                 {/* campo de hex digitado -- ver comentário de hexDrafts
                     acima ("muito difícil acertar nesse rgb" com só a roda
@@ -579,7 +595,49 @@ export default function ColorZoneTool({
           <button type="button" className="color-zone-add-btn" onClick={addZone} disabled={zones.length >= 4}>
             + Nova zona
           </button>
+        </div>
+      </div>
 
+      {/* paleta de quadradinhos -- pedido do Douglas: "quero todas elas
+          em quadradinho, faca na largura toda da janela e deixe um
+          scrol pra rolar dentro das cores, mostres 3 linhas de cor / ao
+          inves do rgb". Fica FORA de color-zone-tool-body de propósito
+          (não dentro da coluna estreita de zonas) pra ocupar a largura
+          inteira da janela da ferramenta. Clicar num quadradinho seta o
+          targetHex da zona ATIVA (a mesma que já fica marcada pra
+          pintar no canvas). */}
+      <div className="color-zone-palette-wrap">
+        <span className="color-zone-palette-label">
+          {activeZone ? `Cor de "${activeZone.label}"` : "Selecione uma zona pra escolher a cor"}
+        </span>
+        <div className="color-zone-palette">
+          {PALETTE_SWATCHES.map((hex) => (
+            <button
+              key={hex}
+              type="button"
+              className={
+                activeZone && activeZone.targetHex.toLowerCase() === hex.toLowerCase()
+                  ? "color-zone-palette-swatch color-zone-palette-swatch-selected"
+                  : "color-zone-palette-swatch"
+              }
+              style={{ background: hex }}
+              disabled={!activeZone}
+              title={hex}
+              onClick={() => {
+                if (!activeZone) return;
+                updateZone(activeZone.key, { targetHex: hex });
+                setHexDrafts((prev) => {
+                  const next = { ...prev };
+                  delete next[activeZone.key];
+                  return next;
+                });
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="color-zone-tool-below">
           <div className="color-zone-tool-actions">
             <button type="button" onClick={generatePreview} disabled={!ready || generating}>
               {generating ? "Gerando..." : "Gerar prévia"}
@@ -637,7 +695,6 @@ export default function ColorZoneTool({
               ))}
             </div>
           )}
-        </div>
       </div>
 
       {/* fora de tela -- só pra manipular pixels, nunca aparece direto. */}
