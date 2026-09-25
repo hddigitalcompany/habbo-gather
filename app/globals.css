@@ -3690,6 +3690,18 @@ body {
   padding: 8px;
 }
 
+/* antes da primeira prévia -- o canvas fica sempre montado (ver
+   comentário em ColorZoneTool.tsx sobre o bug do ref nulo), só
+   esmaecido aqui pra não parecer resultado de verdade. */
+.color-zone-tool-preview-empty {
+  opacity: 0.5;
+}
+
+.color-zone-tool-preview-empty .color-zone-tool-counts {
+  font-size: 12px;
+  color: #9d90bb;
+}
+
 .color-zone-tool-preview-canvas {
   border-radius: 6px;
   background: repeating-conic-gradient(#2a2438 0% 25%, #241f30 0% 50%) 50% / 16px 16px;

@@ -520,13 +520,23 @@ export default function ColorZoneTool({
             </button>
           </div>
 
-          {previewCounts && (
-            <div className="color-zone-tool-preview">
-              <canvas
-                ref={previewCanvasRef}
-                className="color-zone-tool-preview-canvas"
-                style={{ width: FRAME_W * PAINT_SCALE * 0.6, height: FRAME_H * PAINT_SCALE * 0.6 }}
-              />
+          {/* SEM `{previewCounts && (...)}` em volta do canvas de propósito
+              -- bug reportado pelo Douglas: "cliquei em gerar e nada
+              aconteceu". O canvas só existia DEPOIS de previewCounts virar
+              não-nulo, mas previewCounts só vira não-nulo DEPOIS de
+              generatePreview conseguir escrever nesse mesmo canvas (via
+              previewCanvasRef.current) -- ou seja, o ref vinha sempre nulo
+              no primeiro clique (elemento nem montado ainda) e a função
+              retornava sem fazer nada, sempre. Agora o canvas fica sempre
+              montado (escondido via CSS até ter prévia), então o ref
+              sempre existe quando o botão é clicado. */}
+          <div className={previewCounts ? "color-zone-tool-preview" : "color-zone-tool-preview color-zone-tool-preview-empty"}>
+            <canvas
+              ref={previewCanvasRef}
+              className="color-zone-tool-preview-canvas"
+              style={{ width: FRAME_W * PAINT_SCALE * 0.6, height: FRAME_H * PAINT_SCALE * 0.6 }}
+            />
+            {previewCounts ? (
               <ul className="color-zone-tool-counts">
                 {zones
                   .filter((z) => z.samples.length > 0)
@@ -536,8 +546,10 @@ export default function ColorZoneTool({
                     </li>
                   ))}
               </ul>
-            </div>
-          )}
+            ) : (
+              <p className="color-zone-tool-counts">Clique em "Gerar prévia" pra ver o resultado aqui.</p>
+            )}
+          </div>
 
           <div className="color-zone-tool-save">
             <input
