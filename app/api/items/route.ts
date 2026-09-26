@@ -41,11 +41,14 @@ export async function POST(req: NextRequest) {
   // supabase/migrations/0003_room_items_display_width.sql) -- opcional
   // (undefined/inválido cai no fallback por categoria, ver
   // CUSTOM_ITEM_TARGET_WIDTH/addFurnitureSprite em MainScene.ts), por
-  // isso não entra na validação obrigatória acima. Mesma faixa 20-600
-  // da constraint no banco.
+  // isso não entra na validação obrigatória acima. Mesma faixa 20-1200
+  // da constraint no banco (teto subido de 600 pra 1200 em
+  // supabase/migrations/0020_room_items_display_width_max.sql, pedido
+  // do Douglas trabalhando nas paredes -- ver DISPLAY_WIDTH_MAX em
+  // ItemEditor.tsx).
   const rawDisplayWidth = body?.display_width;
   const displayWidth =
-    typeof rawDisplayWidth === "number" && Number.isFinite(rawDisplayWidth) && rawDisplayWidth >= 20 && rawDisplayWidth <= 600
+    typeof rawDisplayWidth === "number" && Number.isFinite(rawDisplayWidth) && rawDisplayWidth >= 20 && rawDisplayWidth <= 1200
       ? Math.round(rawDisplayWidth)
       : null;
   // ícone próprio do catálogo (pedido do Douglas: "escolher o favicon

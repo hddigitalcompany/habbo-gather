@@ -97,9 +97,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   if ("display_width" in body) {
+    // teto 20-1200 (subido de 600, ver supabase/migrations/
+    // 0020_room_items_display_width_max.sql e DISPLAY_WIDTH_MAX em
+    // ItemEditor.tsx).
     const raw = body.display_width;
     update.display_width =
-      typeof raw === "number" && Number.isFinite(raw) && raw >= 20 && raw <= 600 ? Math.round(raw) : null;
+      typeof raw === "number" && Number.isFinite(raw) && raw >= 20 && raw <= 1200 ? Math.round(raw) : null;
   }
 
   // ícone próprio do catálogo -- "icon_url" no corpo (mesmo ausente que

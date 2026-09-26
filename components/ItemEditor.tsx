@@ -69,8 +69,14 @@ const UPLOAD_SUPERSAMPLE = 3;
 // display_width em supabase/migrations/0003_room_items_display_width.sql
 // e o uso em addFurnitureSprite, MainScene.ts). Min/max/step escalados
 // 1.5x junto com a resolução interna do jogo (mesma proporção de antes).
+// Teto subido de 600 pra 1200 (ver supabase/migrations/
+// 0020_room_items_display_width_max.sql) -- pedido do Douglas
+// trabalhando nas paredes ("Criar Parede"): "vou precisar de mais
+// opcoes de escala no redimensionamento ali dentro do editar, mais uma
+// linha ja bate" -- uma parede cobrindo boa parte do fundo da sala
+// precisa de bem mais que qualquer móvel, e 600px já batia no teto.
 const DISPLAY_WIDTH_MIN = 60;
-const DISPLAY_WIDTH_MAX = 600;
+const DISPLAY_WIDTH_MAX = 1200;
 const DISPLAY_WIDTH_STEP = 8;
 
 // mesmo teto -300..300 da constraint no banco (ver
