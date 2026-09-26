@@ -1181,6 +1181,22 @@ export default function GameRoom({
         if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
         else resolve();
       });
+      // MESMA corrida de fetchAndRegisterCustomSkins acima (ver comentário
+      // grande lá, perto de setLocalSkinId) -- só que essa reaplicação
+      // tava faltando AQUI: a primeira chamada de setLocalHairId/
+      // setLocalBeardId/setLocalAccessoryId/setLocalOutfitId (init() no
+      // useEffect do Phaser.Game) roda antes da textura custom (cabelo/
+      // acessório/barba/traje) terminar de chegar do Supabase, e sem
+      // reaplicar depois, a camada fica escondida pro resto da sessão
+      // (createAvatar só desenha camada com textura já carregada). Bug
+      // reportado pelo Douglas: "editar traje e nao puxa as fotos" / "nem
+      // editar avatar tb nao puxa" -- tom de pele (setLocalSkinId) já
+      // tinha esse reforço, cabelo/traje/etc nunca tiveram. Reaplicar com
+      // o mesmo id de sempre é inofensivo quando já estava tudo certo.
+      sceneRef.current?.setLocalHairId(selectedHairColorId ?? selectedHairId);
+      sceneRef.current?.setLocalBeardId(selectedBeardId);
+      sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);
+      sceneRef.current?.setLocalOutfitId(selectedOutfitColorId ?? selectedOutfitId);
     } catch {
       // Supabase fora do ar/não configurado (ou migration 0006 ainda não
       // rodada) -- segue sem esses itens custom, sala funciona igual
