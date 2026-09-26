@@ -1430,7 +1430,11 @@ export default class MainScene extends Phaser.Scene {
           ];
           gfx.fillStyle(this.pickPlankColor(pattern, i, j), 1);
           gfx.fillPoints(points, true);
-          gfx.lineStyle(1.5, lineColor, 1);
+          // linha mais fina (era 1.5) -- pedido do Douglas: "so quero que
+          // afine a linha ficando o mais parecido possivel da imagem
+          // anexada" (referência: tábuas de madeira com junta bem fina,
+          // quase um fio, não uma borda grossa).
+          gfx.lineStyle(0.75, lineColor, 1);
           gfx.strokePoints(points, true, true);
         }
       }
