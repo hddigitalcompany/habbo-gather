@@ -1040,10 +1040,11 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // e o espaço vazio acima do boneco encolhem juntos, na mesma
   // proporção), então a folga pra arrastar continua exatamente do
   // mesmo TAMANHO RELATIVO de antes -- nada fica cortado, só menor na
-  // tela. Só o valor INICIAL mudou (100% em vez de 150%); o slider "Zoom
-  // do preview" continua indo até 300% pra quem quiser ampliar nessa
-  // sessão.
-  const [zoom, setZoom] = useState(1);
+  // tela. 100% ainda deixava a régua/preview passando do topo da janela
+  // (pedido de novo: "MUITO grande, corta a exibicao na linha 240") --
+  // valor INICIAL agora é o MÍNIMO do slider (75%); quem quiser ampliar
+  // ainda tem o slider "Zoom do preview", vai até 300%.
+  const [zoom, setZoom] = useState(0.75);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
