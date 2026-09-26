@@ -4613,8 +4613,11 @@ const HAIR_SHEET_H = 522;
 // exibicao" -- 176x228.8 -> 352x457.6, o DOBRO (mesma proporção
 // 200:260 de sempre). Cabe na coluna do boneco (.profile-edit-avatar-col
 // -- flex-shrink:0, só encolhe o que sobra pras abas+grade do lado).
-const AVATAR_PREVIEW_W = 352;
-const AVATAR_PREVIEW_H = 457.6; // mantém a proporção 200:260 do frame
+// Depois ficou grande demais de novo (pedido do Douglas: "esse e o
+// editar ele ta na proporcao errada la, diminui" / "diminui 10% dele")
+// -- 352x457.6 -> 316.8x411.84, 10% menor, mesma proporção 200:260.
+const AVATAR_PREVIEW_W = 316.8;
+const AVATAR_PREVIEW_H = 411.84; // mantém a proporção 200:260 do frame
 
 
 // pedido do Douglas: "pra todos os itens eu tenho que subir os 4 lados
@@ -5075,12 +5078,16 @@ function ProfileCard({
                 Coluna própria (setas+boneco em cima, legenda do lado
                 embaixo). */}
             {/* pedido do Douglas: "sobe o avatar em 20%" -- desloca o
-                bloco inteiro (setas+boneco+legenda) 20% da altura do
-                boneco (AVATAR_PREVIEW_H) pra CIMA da posição
+                bloco inteiro (setas+boneco+legenda) da posição
                 centralizada de sempre, calculado em cima da constante
                 (não um px fixo no CSS) pra acompanhar se o tamanho do
-                boneco mudar de novo no futuro. */}
-            <div className="avatar-preview-column" style={{ marginTop: -(AVATAR_PREVIEW_H * 0.2) }}>
+                boneco mudar de novo no futuro. Depois de encolher 10%
+                (ver AVATAR_PREVIEW_W/H acima) ainda ficou perto demais
+                do topo/título -- pedido do Douglas: "esse e o editar
+                ele ta na proporcao errada la, diminui" / "ou baixa
+                ele" -- reduzido de -20% (bem pra cima) pra -5% (só uma
+                leve subida, o resto do espaço agora sobra embaixo). */}
+            <div className="avatar-preview-column" style={{ marginTop: -(AVATAR_PREVIEW_H * 0.05) }}>
             <div className="avatar-preview-rotate-wrap">
               <button
                 type="button"
