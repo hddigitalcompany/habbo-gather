@@ -358,6 +358,31 @@ function avatarDepthForY(y: number): number {
   return y;
 }
 
+/**
+ * Profundidade de quem está SENTADO num móvel -- baseada no TILE LÓGICO
+ * do móvel (mesma ideia de furnitureDepthForTile, ver comentário dela),
+ * NÃO na posição visual já deslocada pelo ajuste de assento
+ * (resolveSeatOffset).
+ *
+ * ACHADO (Douglas: "quando sento na cadeira e tem uma mesa na frente,
+ * fico por cima da mesa, sem estar sentado fico atrás -- o que é o
+ * certo"): usar avatarDepthForY(y) com o Y JÁ deslocado empilhava
+ * certo contra a PRÓPRIA cadeira (ajuste pequeno, mesma fileira dela),
+ * mas não contra um móvel de OUTRA fileira -- a fronteira de
+ * profundidade por fileira (DEPTH_FURNITURE_ROW_HEIGHT =
+ * ISO_TILE_HEIGHT, pensada pra passos de uma fileira INTEIRA, 64px) é
+ * grande demais pro nudge pequeno do assento (10-40px) sozinho
+ * derrubar o boneco pra fileira anterior -- por isso às vezes ficava
+ * na frente de um móvel que devia tampar. Sentado nunca "sai" da
+ * fileira lógica do móvel (só se desloca visualmente uns pixels por
+ * cima dele) -- por isso usa o MESMO Y que usaria em pé nesse tile
+ * (tileToWorld), igual a exceção que já existia só pro "up".
+ */
+function seatDepth(furniture: FurnitureDef): number {
+  if (furniture.facing === "up") return furnitureDepthForTile(furniture.col, furniture.row) - 1;
+  return avatarDepthForY(tileToWorld(furniture.col, furniture.row).y);
+}
+
 // grade e highlight do editor de espaço (ver setEditMode) sempre por
 // CIMA de tudo (móvel, boneco) -- é UI de edição, não faz parte da
 // cena "de verdade".
@@ -1911,6 +1936,11 @@ export default class MainScene extends Phaser.Scene {
     const pos = furnitureWorldPos(furniture);
     const offset = resolveSeatOffset(furniture, this.seatOffsets);
     this.localContainer.setPosition(pos.x + offset.x, pos.y + offset.y);
+    // profundidade junto (ver seatDepth) -- reaplicada toda vez que a
+    // posição muda (nudge/reset/troca de modelo), não só ao sentar de
+    // verdade (sitAt), já que ela usa o TILE, não o Y, então nunca fica
+    // desatualizada por um ajuste de assento novo.
+    this.localContainer.setDepth(seatDepth(furniture));
   }
 
   /** Senta automaticamente no móvel passado (chamado ao PARAR no tile dele). */
@@ -1922,18 +1952,9 @@ export default class MainScene extends Phaser.Scene {
     // direção que o jogador estava andando antes de sentar
     this.localContainer.setData("dir", furniture.facing);
     this.setPoseFrame(this.localContainer, SENTADO_FRAMES[furniture.facing]);
-    // virado "up" (de costas pra câmera): o móvel fica NA FRENTE do
-    // boneco, então só a cabeça aparece por cima do encosto -- isso é
-    // uma EXCEÇÃO deliberada à regra geral de profundidade por fileira
-    // (força o boneco pra 1px atrás desse móvel específico, não importa
-    // o Y dele). Nas outras direções, usa a regra geral (avatarDepthForY)
-    // -- como o assento fica dentro da própria fileira do móvel, ele já
-    // sai na frente naturalmente, sentado "visível" sobre o móvel.
-    this.localContainer.setDepth(
-      furniture.facing === "up"
-        ? furnitureDepthForTile(furniture.col, furniture.row) - 1
-        : avatarDepthForY(this.localContainer.y)
-    );
+    // profundidade já aplicada por applySeatVisualPosition acima (ver
+    // seatDepth) -- inclui a exceção do "up" (móvel NA FRENTE do
+    // boneco, só a cabeça aparece por cima do encosto).
     // avisa o servidor que sentou (ver protocolo "seat" em
     // server/index.js) -- puramente pose-sync agora, NÃO toma posse de
     // mesa nenhuma (posse só muda via botão "Tomar posse", ver
@@ -2689,11 +2710,10 @@ export default class MainScene extends Phaser.Scene {
       if (furniture && container) {
         container.setData("dir", furniture.facing);
         this.setPoseFrame(container, SENTADO_FRAMES[furniture.facing]);
-        container.setDepth(
-          furniture.facing === "up"
-            ? furnitureDepthForTile(furniture.col, furniture.row) - 1
-            : avatarDepthForY(container.y)
-        );
+        // mesma correção de seatDepth (ver comentário grande dela) --
+        // baseada no tile do móvel, não no Y (já deslocado pelo assento)
+        // da posição que chegou pelo "move".
+        container.setDepth(seatDepth(furniture));
       }
     }
   }
