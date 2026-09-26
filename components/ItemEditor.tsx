@@ -2294,12 +2294,22 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 <img className="avatar-art-drag-img" src={activeArtUrl} alt="Preview" />
               </div>
             ) : existingFrameUrl ? (
+              // "item-stage-avatar" (NÃO "avatar-art-drag-box") de
+              // propósito -- é essa classe que tem o overflow:hidden que
+              // corta a folha inteira num quadro só (ver comentário
+              // grande dela em globals.css: o corte tem que ficar no
+              // container SEM transform, com o translate/scale no FILHO
+              // -- "avatar-art-drag-box" não corta nada, por isso a
+              // folha inteira aparecia enorme/torta ao editar uma pose
+              // que não fosse a primeira do quadro (bug reportado pelo
+              // Douglas: "estranho" com Frente direita aberta).
               <div
-                className="avatar-art-drag-box avatar-art-drag-box-ghost"
+                className="item-stage-avatar"
                 style={{
                   width: AVATAR_DISPLAY_W,
                   height: AVATAR_DISPLAY_H,
                   bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                  opacity: 0.55,
                 }}
                 title="Foto já salva -- suba um arquivo novo pra trocar essa direção"
               >
