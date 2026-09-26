@@ -1844,6 +1844,26 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
 
   const activeDirectionLabel = activeDirectionFields.find((f) => f.key === activeDirection)?.label ?? activeDirection;
 
+  // pedido do Douglas: "editar traje"/"editar avatar" não tava
+  // mostrando a foto já salva daquele item -- activeArtUrl (acima) só
+  // existe pra arquivo NOVO escolhido nesta sessão (blob local), então
+  // abrir "Editar" num traje/tom já cadastrado, sem reenviar nada, caía
+  // direto no hint "Escolha a foto..." mesmo já tendo arte cadastrada
+  // (a folha inteira, sheet_url, continua salva no servidor -- só não
+  // tinha nenhum <img> mostrando ela aqui). Fallback: sem foto nova pra
+  // NENHUMA direção (mesmo "sem própria" do activeFile acima, que já
+  // cai em files.down) E editando um item existente, recorta a folha
+  // JÁ SALVA no frame da direção ativa -- mesmo recorte de
+  // referenceHeadUrl/referenceBodyUrl acima (activeFrameIndex/
+  // frameOffsetXPx/frameOffsetYPx), só que aplicado na folha do
+  // PRÓPRIO item em edição em vez da referência fixa.
+  const editingArtSheetUrl = editingAvatarItemId
+    ? editingAvatarItemSheetUrl
+    : editingSkinId
+      ? editingSkinSheetUrl
+      : null;
+  const existingFrameUrl = !activeFile && editingArtSheetUrl ? avatarAssetUrl(editingArtSheetUrl) : null;
+
   return (
     <>
       <div className="gender-switch">
@@ -2254,6 +2274,28 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 title={hasOwnFile ? "Arraste pra posicionar" : "Foto de frente reaproveitada -- suba a foto própria pra ajustar"}
               >
                 <img className="avatar-art-drag-img" src={activeArtUrl} alt="Preview" />
+              </div>
+            ) : existingFrameUrl ? (
+              <div
+                className="avatar-art-drag-box avatar-art-drag-box-ghost"
+                style={{
+                  width: AVATAR_DISPLAY_W,
+                  height: AVATAR_DISPLAY_H,
+                  bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                }}
+                title="Foto já salva -- suba um arquivo novo pra trocar essa direção"
+              >
+                <div
+                  className="item-stage-avatar-crop"
+                  style={{
+                    width: FRAME_W,
+                    height: FRAME_H,
+                    marginLeft: -FRAME_W / 2,
+                    transform: `translate(-${frameOffsetXPx}px, -${frameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
+                  }}
+                >
+                  <img className="item-stage-avatar-layer" src={existingFrameUrl} alt="Foto já salva" />
+                </div>
               </div>
             ) : (
               <p className="edit-hint item-size-empty">Escolha a foto de "{activeDirectionLabel}" pra ver o preview aqui.</p>
