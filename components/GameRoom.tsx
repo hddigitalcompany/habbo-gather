@@ -1595,6 +1595,29 @@ export default function GameRoom({
 
   useEffect(() => {
     let destroyed = false;
+    // ACHADO investigando "eu atualizo e na primeira aparece assim,
+    // atualizo de novo e fica certo" (Douglas, sala com mais de uma
+    // pessoa/aba aberta): a MESMA corrida que já foi corrigida pro
+    // jogador LOCAL (ver "ACHADO investigando o quadrado de erro" mais
+    // abaixo, em runWhenSceneReady) nunca foi coberta pros jogadores
+    // REMOTOS. O WebSocket conecta e já começa a receber mensagens
+    // (handlePartyMessage) assim que o socket abre -- em paralelo com o
+    // Phaser subindo, sem esperar scene.sceneReady nenhum. Como o
+    // servidor de tempo real é local (bem mais rápido que o Loader do
+    // Phaser terminando preload()+create()), a mensagem "init" (lista de
+    // quem já tá na sala) quase sempre chegava ANTES da cena terminar de
+    // carregar o catálogo -- upsertRemotePlayer (MainScene.ts) cria o
+    // boneco na hora (createAvatar), usando texturas de cabelo/base/
+    // traje/barba que ainda podem nem existir nesse instante, e o Phaser
+    // desenha o quadriculado de "textura faltando" no lugar. Pior: como o
+    // container do jogador remoto já foi criado (mesmo quebrado), a
+    // PRÓXIMA mensagem pra ele (ex: "move") só atualiza posição -- nunca
+    // recria o boneco -- então ele fica quebrado o resto da sessão, só
+    // corrigindo num F5 que, por sorte, perca essa corrida. Fix: enfileira
+    // toda mensagem que chegar antes de scene.sceneReady, e processa a
+    // fila inteira (na ordem) assim que a cena avisar que tá pronta (ver
+    // flush logo no fim de runWhenSceneReady, abaixo).
+    const pendingPartyMessages: unknown[] = [];
 
     function sendSignal(to: string, data: unknown) {
       socketRef.current?.send(JSON.stringify({ type: "signal", to, data }));
@@ -2373,6 +2396,17 @@ export default function GameRoom({
           setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
           setEditingCharacter(false);
         };
+        // ver comentário grande no início do efeito (pendingPartyMessages)
+        // -- só agora, com a cena garantidamente pronta (textura padrão de
+        // cabelo/base/traje/barba já carregada), processa qualquer
+        // "init"/"join"/"move"/etc. de jogador remoto que chegou cedo
+        // demais e ficou esperando na fila. Ordem preservada (splice tira
+        // tudo de uma vez, antes de processar, pra nenhuma mensagem NOVA
+        // que chegue durante esse loop furar a fila).
+        if (pendingPartyMessages.length > 0) {
+          const queued = pendingPartyMessages.splice(0, pendingPartyMessages.length);
+          for (const queuedMessage of queued) handlePartyMessage(queuedMessage);
+        }
         };
         // ver comentário grande logo acima (runWhenSceneReady) -- cobre as
         // duas ordens possíveis entre o "ready" do jogo e o create() da
@@ -2403,7 +2437,16 @@ export default function GameRoom({
       socket.addEventListener("error", () => setStatus("Erro de conexão"));
       socket.addEventListener("message", (evt) => {
         try {
-          handlePartyMessage(JSON.parse(evt.data));
+          const data = JSON.parse(evt.data);
+          // ver comentário grande no início do efeito (pendingPartyMessages)
+          // -- sem isso, um "init"/"join"/"move" que chegasse rápido demais
+          // criava o boneco do jogador remoto com textura ainda faltando,
+          // quebrado até o próximo F5 (às vezes).
+          if (!sceneRef.current?.sceneReady) {
+            pendingPartyMessages.push(data);
+            return;
+          }
+          handlePartyMessage(data);
         } catch (e) {
           console.warn("Mensagem inválida do servidor", e);
         }
