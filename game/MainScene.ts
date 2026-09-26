@@ -1442,20 +1442,76 @@ export default class MainScene extends Phaser.Scene {
           const plankColor = this.pickPlankColor(pattern, i, j);
           gfx.fillStyle(plankColor, 1);
           gfx.fillPoints(points, true);
-          // linha fina, mas NÃO sub-pixel -- pedido do Douglas: "afine a
-          // linha", depois "afine ainda mais as linhas" (foi de 1.5 até
-          // 0.4px de espessura), só que 0.4px é fino DEMAIS pro WebGL
-          // desenhar limpo numa diagonal (a linha do losango nunca é
-          // reta na tela) -- sai picotada/pixelizada em vez de contínua
-          // (reportado pelo Douglas: "as linhas das reguas no piso tao
-          // pixelizada... nao da pr ser continua??"). JOINT_LINE_WIDTH
-          // (game/floor.ts) volta pra 0.75px -- valor onde ainda ficava
-          // contínua antes de afinar de mais -- e o efeito "fio fino"
-          // agora vem da OPACIDADE reduzida (JOINT_LINE_ALPHA), não da
-          // espessura sub-pixel. Mesmas 2 constantes usadas no preview
-          // (FloorPatternSwatch.tsx), pra nunca dessincronizar.
-          gfx.lineStyle(JOINT_LINE_WIDTH, lineColor, JOINT_LINE_ALPHA);
-          gfx.strokePoints(points, true, true);
+          // linha de junta -- ACHADO depois que só afinar a espessura
+          // (1.5 -> 0.75 -> 0.4px) e depois reduzir a opacidade AINDA
+          // ficou picotada numa diagonal (screenshot do Douglas: "quero
+          // linha continua nas emendas igual a dos icones do site
+          // assim, sem ser pixelizada" -- comparando com os ícones da
+          // barra, que são DOM/vetor, sempre nítidos): o problema nunca
+          // foi a espessura, é que gfx.lineStyle+strokePoints (traçado
+          // de LINHA do Phaser em WebGL) usa uma tesselação própria,
+          // SEM o mesmo anti-serrilhado do PREENCHIMENTO -- fica sempre
+          // com esse aspecto picotado numa diagonal, não importa a
+          // espessura/opacidade. gfx.fillPoints (PREENCHIMENTO), por
+          // outro lado, passa pelo pipeline normal de triângulos do
+          // WebGL (o mesmo que já deixa o resto da cena liso com
+          // antialias:true) -- por isso a borda agora é desenhada como
+          // 4 retângulos FINOS PREENCHIDOS (um por aresta da tábua,
+          // levemente esticados nas pontas pra fechar o canto sem
+          // buraco), a MESMA técnica que os veios de madeira abaixo já
+          // usavam (nunca tiveram esse problema). JOINT_LINE_WIDTH/ALPHA
+          // (game/floor.ts) continuam sendo a espessura/opacidade da
+          // linha, só que aplicadas como preenchimento, não mais como
+          // "stroke" de verdade.
+          {
+            const bt = JOINT_LINE_WIDTH / 2;
+            const toWorld = (along: number, across: number) => ({
+              x: cx + rowAxis.x * along + colAxis.x * across,
+              y: cy + rowAxis.y * along + colAxis.y * across,
+            });
+            gfx.fillStyle(lineColor, JOINT_LINE_ALPHA);
+            // as 2 bordas LONGAS (paralelas ao comprimento -- a junta
+            // entre COLUNAS de tábuas, a que corre no mesmo sentido do
+            // veio de madeira).
+            gfx.fillPoints(
+              [
+                toWorld(-halfLength - bt, -halfWidth - bt),
+                toWorld(halfLength + bt, -halfWidth - bt),
+                toWorld(halfLength + bt, -halfWidth + bt),
+                toWorld(-halfLength - bt, -halfWidth + bt),
+              ],
+              true
+            );
+            gfx.fillPoints(
+              [
+                toWorld(-halfLength - bt, halfWidth - bt),
+                toWorld(halfLength + bt, halfWidth - bt),
+                toWorld(halfLength + bt, halfWidth + bt),
+                toWorld(-halfLength - bt, halfWidth + bt),
+              ],
+              true
+            );
+            // as 2 bordas CURTAS (as pontas da tábua -- a emenda entre
+            // tábuas EMENDADAS da mesma coluna).
+            gfx.fillPoints(
+              [
+                toWorld(-halfLength - bt, -halfWidth - bt),
+                toWorld(-halfLength + bt, -halfWidth - bt),
+                toWorld(-halfLength + bt, halfWidth + bt),
+                toWorld(-halfLength - bt, halfWidth + bt),
+              ],
+              true
+            );
+            gfx.fillPoints(
+              [
+                toWorld(halfLength - bt, -halfWidth - bt),
+                toWorld(halfLength + bt, -halfWidth - bt),
+                toWorld(halfLength + bt, halfWidth + bt),
+                toWorld(halfLength - bt, halfWidth + bt),
+              ],
+              true
+            );
+          }
           // veios de madeira (pedido do Douglas: "agora eu quero esse
           // efeito laminado... de veios de madeira", depois "no sentido
           // das linhas também") -- riscos POR CIMA da tábua que acabou
