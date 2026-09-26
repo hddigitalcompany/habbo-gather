@@ -3848,13 +3848,24 @@ export default function ItemEditor({
                     </label>
                   </div>
 
-                  <div
-                    className="items-panel-upload-existing"
-                    style={{
-                      height: 48,
-                      backgroundImage: `repeating-linear-gradient(63deg, ${floorColorA} 0, ${floorColorA} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth * 2}px)`,
-                    }}
-                  />
+                  {/* pedido do Douglas: "da pra poe essa exibicao no
+                      formato do tile?" -- preview no formato de LOSANGO
+                      (2:1, igual ISO_TILE_WIDTH/ISO_TILE_HEIGHT), não
+                      mais uma barra retangular -- mostra como o padrão
+                      fica de verdade encaixado num quadrado da grade,
+                      antes de cadastrar. Mesmo clip-path de .floor-swatch
+                      em globals.css (o botão que ele clica pra ESCOLHER
+                      o piso na paleta da sala), só que centralizado e
+                      maior aqui, por ser o preview em destaque do
+                      formulário, não um botão pequeno numa grade. */}
+                  <div className="floor-pattern-preview-wrap">
+                    <div
+                      className="floor-pattern-preview-tile"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(63deg, ${floorColorA} 0, ${floorColorA} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth * 2}px)`,
+                      }}
+                    />
+                  </div>
                 </>
               )}
 

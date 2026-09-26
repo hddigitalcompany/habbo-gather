@@ -1729,16 +1729,25 @@ body {
   gap: 8px;
 }
 
+/* Formato de LOSANGO (proporção 2:1, igual ISO_TILE_WIDTH/ISO_TILE_HEIGHT
+   em game/grid.ts) em vez de quadrado -- pedido do Douglas: "da pra poe
+   essa exibicao no formato do tile? pra eu escolher clicando nele" --
+   agora o botão que ele clica pra ESCOLHER o piso já parece o próprio
+   formato do quadrado isométrico da sala, não um quadrado qualquer.
+   clip-path corta a borda JUNTO (não dá pra usar border-radius num
+   polígono), por isso sem border-radius aqui -- as pontas do losango
+   ficam retas de propósito, igual um tile de verdade. */
 .floor-swatch {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
+  width: 64px;
+  height: 32px;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
   border: 2px solid #2f2245;
   background-color: #0d0715;
   background-size: cover;
   background-position: center;
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .floor-swatch:hover {
@@ -3553,6 +3562,26 @@ body {
   object-fit: contain;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.06);
+}
+
+/* preview do piso "padrão" (aba "Criar Piso" -> "Padrão") no formato de
+   LOSANGO em vez de barra retangular -- pedido do Douglas: "da pra poe
+   essa exibicao no formato do tile?" -- ver comentário grande no JSX
+   (ItemEditor.tsx) e o mesmo clip-path em .floor-swatch acima. O "wrap"
+   só centraliza o losango (que tem largura fixa, menor que o formulário
+   inteiro) dentro da largura total do formulário. */
+.floor-pattern-preview-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.floor-pattern-preview-tile {
+  width: 160px;
+  height: 80px;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  border: 2px solid #2f2245;
+  background-color: #0d0715;
 }
 
 .items-panel-submit-row {
