@@ -4548,6 +4548,40 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Variante digitável do slider (ver "Tamanho no jogo" em ItemEditor.tsx,
+   pedido do Douglas: "deixa essa linha dimensao de pixel aqui
+   digitalvel") -- mesma linha do slider comum, só que a 3ª coluna vira
+   um <input type="number"> + "px" em vez de um <span> só de leitura,
+   por isso precisa de mais espaço que os 40px padrão. */
+.settings-slider-row-editable {
+  grid-template-columns: 1fr minmax(90px, 2fr) 64px;
+}
+
+.settings-slider-value-field {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  color: #9d90bb;
+}
+
+.settings-slider-value-input {
+  width: 48px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(124, 92, 255, 0.4);
+  background: rgba(124, 92, 255, 0.08);
+  color: #ece7fb;
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-slider-value-input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
 .settings-shortcut-list {
   list-style: none;
   margin: 0;

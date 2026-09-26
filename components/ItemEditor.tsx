@@ -4792,7 +4792,7 @@ export default function ItemEditor({
               <StageRuler anchorBottomPx={STAGE_BASELINE_PAD} />
             </div>
 
-            <div className="settings-slider-row">
+            <div className="settings-slider-row settings-slider-row-editable">
               <span className="settings-slider-name">Tamanho no jogo</span>
               <input
                 type="range"
@@ -4802,7 +4802,29 @@ export default function ItemEditor({
                 value={displayWidth}
                 onChange={(e) => setDisplayWidth(Number(e.target.value))}
               />
-              <span className="settings-slider-value">{displayWidth}px</span>
+              {/* valor digitável (pedido do Douglas: "deixa essa linha
+                  dimensao de pixel aqui digitalvel") -- NÃO trava
+                  (clamp) a cada tecla, só no blur: como o mínimo (60) é
+                  bem maior que zero, travar em cada onChange impediria
+                  digitar qualquer número de 2-3 dígitos que comece
+                  "baixo" (ex.: tentar digitar "750" começa em "7",
+                  que já seria empurrado pra 60 antes do resto entrar).
+                  Enquanto digita aceita qualquer número (até vazio =
+                  0), só arruma (clamp + arredonda pro step) quando o
+                  campo perde o foco. */}
+              <span className="settings-slider-value-field">
+                <input
+                  type="number"
+                  className="settings-slider-value-input"
+                  min={DISPLAY_WIDTH_MIN}
+                  max={DISPLAY_WIDTH_MAX}
+                  step={DISPLAY_WIDTH_STEP}
+                  value={displayWidth}
+                  onChange={(e) => setDisplayWidth(Number(e.target.value) || 0)}
+                  onBlur={() => setDisplayWidth((prev) => clamp(Math.round(prev), DISPLAY_WIDTH_MIN, DISPLAY_WIDTH_MAX))}
+                />
+                <span>px</span>
+              </span>
             </div>
 
             {/* footprint (pedido do Douglas: "tenho mobis que ocupam mais
