@@ -4079,6 +4079,14 @@ export default function ItemEditor({
             onClick={() => {
               setMode("parede");
               handleCategoryChange("divisoria");
+              // parede só tem "Frente esquerda"/"Frente direita" (ver
+              // comentário grande nos uploads de direção mais abaixo) --
+              // sem isso, se a pessoa tivesse acabado de olhar a aba
+              // "Costas esquerda"/"Costas direita" de um mobi comum antes
+              // de clicar aqui, nenhuma aba ficava marcada como
+              // selecionada (nenhuma das 2 visíveis bate com o valor
+              // antigo).
+              setActiveMobiDirection("down");
             }}
           >
             Criar Parede
@@ -4476,7 +4484,20 @@ export default function ItemEditor({
           </label>
 
           <div className="items-panel-uploads">
-            {DIRECTION_FIELDS.map((field) => {
+            {/* parede só tem 2 lados -- pedido do Douglas: "parede so
+                tem dois lados, lado direita e lado esquerda", "frente
+                direita, frente esquerda" (os nomes já existentes de
+                "down"/"right" em DIRECTION_FIELDS acima -- ver comentário
+                grande lá). Diferente de móvel de verdade (que a pessoa
+                pode circular e ver de trás), parede é um painel FIXO na
+                borda de trás da sala -- nunca tem "costas" pra ver, por
+                isso "left"/"up" ("Costas esquerda"/"Costas direita")
+                somem do formulário só pra essa categoria; o resto do
+                sistema (rotação com as setinhas, canRotate etc. em
+                GameRoom.tsx) já se adapta sozinho a quantas direções
+                tiverem arte cadastrada, sem precisar de nenhuma mudança
+                lá. */}
+            {(mode === "parede" ? DIRECTION_FIELDS.filter((f) => f.key === "down" || f.key === "right") : DIRECTION_FIELDS).map((field) => {
               const existingSrc = existingArt[field.key];
               return (
                 <label key={field.key} className="items-panel-upload-field">
@@ -4595,7 +4616,12 @@ export default function ItemEditor({
               ajuste, reaproveitam a mesma posição de "baixo" (mesmo
               fallback que addFurnitureSprite usa no jogo). */}
           <div className="edit-section-tabs">
-            {DIRECTION_FIELDS.map((field) => (
+            {/* mesma restrição de 2 lados pra parede (ver comentário
+                grande nos uploads de direção mais acima) -- sem isso,
+                dava pra clicar na aba "Costas esquerda"/"Costas direita"
+                mesmo sem nenhum campo de upload pra elas, um beco sem
+                saída na tela. */}
+            {(mode === "parede" ? DIRECTION_FIELDS.filter((f) => f.key === "down" || f.key === "right") : DIRECTION_FIELDS).map((field) => (
               <button
                 key={field.key}
                 type="button"
