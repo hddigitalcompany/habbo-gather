@@ -337,6 +337,25 @@ const DIRECTION_FIELDS: { key: DirectionKey; label: string; required: boolean }[
   { key: "up", label: "Costas direita", required: false },
 ];
 
+// parede (mode "parede", categoria "divisoria") NÃO usa "Costas
+// esquerda/direita" -- painel fixo na borda de trás da sala, ninguém
+// nunca vê o "de trás" dele. Primeiro pedido do Douglas foi só 2 lados
+// ("parede so tem dois lados, lado direita e lado esquerda"), mas ele
+// corrigiu na sequência: "na vdd, parede tem Quina, adiciona quina
+// esquerda, quina direita" -- a peça de CANTO (onde as duas paredes se
+// encontram no fundo da sala) é uma 3ª/4ª peça, não uma direção comum.
+// Reaproveita os MESMOS 2 slots que sobrariam sem uso pra parede
+// (left/up -- ver DIRECTION_FIELDS acima) só trocando o RÓTULO, em vez
+// de esconder ou criar uma chave nova: down/right continuam "Frente
+// esquerda/direita" (peça reta), left/up viram "Quina esquerda/direita"
+// (peça de canto) -- mesmo mecanismo de sempre (rotação com as setinhas
+// na sala, canRotate etc. em GameRoom.tsx) continua funcionando sem
+// nenhuma mudança lá, já que pra ele é só mais uma "direção" com arte
+// cadastrada.
+const WALL_DIRECTION_FIELDS: typeof DIRECTION_FIELDS = DIRECTION_FIELDS.map((f) =>
+  f.key === "left" ? { ...f, label: "Quina esquerda" } : f.key === "up" ? { ...f, label: "Quina direita" } : f
+);
+
 type CustomItemRow = {
   id: string;
   label: string;
@@ -4484,20 +4503,12 @@ export default function ItemEditor({
           </label>
 
           <div className="items-panel-uploads">
-            {/* parede só tem 2 lados -- pedido do Douglas: "parede so
-                tem dois lados, lado direita e lado esquerda", "frente
-                direita, frente esquerda" (os nomes já existentes de
-                "down"/"right" em DIRECTION_FIELDS acima -- ver comentário
-                grande lá). Diferente de móvel de verdade (que a pessoa
-                pode circular e ver de trás), parede é um painel FIXO na
-                borda de trás da sala -- nunca tem "costas" pra ver, por
-                isso "left"/"up" ("Costas esquerda"/"Costas direita")
-                somem do formulário só pra essa categoria; o resto do
-                sistema (rotação com as setinhas, canRotate etc. em
-                GameRoom.tsx) já se adapta sozinho a quantas direções
-                tiverem arte cadastrada, sem precisar de nenhuma mudança
-                lá. */}
-            {(mode === "parede" ? DIRECTION_FIELDS.filter((f) => f.key === "down" || f.key === "right") : DIRECTION_FIELDS).map((field) => {
+            {/* parede usa WALL_DIRECTION_FIELDS (mesmas 4 chaves de
+                sempre, só com "left"/"up" relabeladas pra "Quina
+                esquerda/direita" -- ver comentário grande onde
+                WALL_DIRECTION_FIELDS é definida, perto de
+                DIRECTION_FIELDS). */}
+            {(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).map((field) => {
               const existingSrc = existingArt[field.key];
               return (
                 <label key={field.key} className="items-panel-upload-field">
@@ -4616,12 +4627,9 @@ export default function ItemEditor({
               ajuste, reaproveitam a mesma posição de "baixo" (mesmo
               fallback que addFurnitureSprite usa no jogo). */}
           <div className="edit-section-tabs">
-            {/* mesma restrição de 2 lados pra parede (ver comentário
-                grande nos uploads de direção mais acima) -- sem isso,
-                dava pra clicar na aba "Costas esquerda"/"Costas direita"
-                mesmo sem nenhum campo de upload pra elas, um beco sem
-                saída na tela. */}
-            {(mode === "parede" ? DIRECTION_FIELDS.filter((f) => f.key === "down" || f.key === "right") : DIRECTION_FIELDS).map((field) => (
+            {/* mesmos rótulos de parede das abas de upload acima (ver
+                WALL_DIRECTION_FIELDS). */}
+            {(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).map((field) => (
               <button
                 key={field.key}
                 type="button"
@@ -4771,7 +4779,7 @@ export default function ItemEditor({
                 />
               ) : (
                 <p className="edit-hint item-size-empty">
-                  Escolha a imagem de "{DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}" pra ver o preview aqui.
+                  Escolha a imagem de "{(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).find((f) => f.key === activeMobiDirection)?.label}" pra ver o preview aqui.
                 </p>
               )}
 
@@ -4906,7 +4914,7 @@ export default function ItemEditor({
 
             <div className="item-stage-offset-row">
               <span>
-                posição no tile ({DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}) -- x: {activeMobiOffset.x}px · y: {activeMobiOffset.y}px
+                posição no tile ({(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).find((f) => f.key === activeMobiDirection)?.label}) -- x: {activeMobiOffset.x}px · y: {activeMobiOffset.y}px
               </span>
               {(activeMobiOffset.x !== 0 || activeMobiOffset.y !== 0) && (
                 <button
@@ -4933,7 +4941,7 @@ export default function ItemEditor({
             {sittable && (
               <div className="item-stage-offset-row">
                 <span>
-                  posição sentado ({DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}) -- x: {activeSeatOffset.x}px · y: {activeSeatOffset.y}px
+                  posição sentado ({(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).find((f) => f.key === activeMobiDirection)?.label}) -- x: {activeSeatOffset.x}px · y: {activeSeatOffset.y}px
                 </span>
                 {(isActiveSeatSide ? activeMobiDirection in seatDirectionOffsets : seatOffsetX !== 0 || seatOffsetY !== 0) && (
                   <button
