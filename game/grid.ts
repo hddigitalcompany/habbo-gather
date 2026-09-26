@@ -52,15 +52,24 @@ export const GAME_HEIGHT = 900;
 
 // Tamanho do LOSANGO de 1 tile, ponta a ponta -- proporção 2:1 fixada
 // com o Douglas (largura = 2x altura, ângulo ~26.57°, igual ao Habbo
-// clássico). 96x48 escolhido por ser múltiplo redondo de 16 (facilita
-// desenhar em cima -- 6 "blocos" de 16px de largura por 3 de altura) e
-// por caber com folga nos 12x7 tiles da grade dentro dos 1200x900 de
-// resolução interna (ver GRID_ORIGIN_X/Y abaixo, calculados em cima
-// desse tamanho). Esses dois números são a REFERÊNCIA que a arte nova
-// (piso, móvel, o gabarito que o Douglas vai pixelar por cima) precisa
-// respeitar -- mudar aqui descola tile da arte já desenhada.
-export const ISO_TILE_WIDTH = 96;
-export const ISO_TILE_HEIGHT = 48;
+// clássico). Era 96x48 -- pedido do Douglas depois de ver o jogo
+// rodando: "parece que ficou menor os quadrados" -- subiu pra 128x64
+// (o tamanho "clássico" de tile isométrico, usado em praticamente todo
+// jogo do gênero). Continua múltiplo redondo de 16 (facilita desenhar
+// em cima -- 8 "blocos" de 16px de largura por 4 de altura -- só W
+// múltiplo de 32 mantém W e W/2 os dois múltiplos de 16 ao mesmo tempo,
+// então os únicos tamanhos "limpos" vizinhos eram 96 e 128; 96 foi o
+// que pareceu pequeno). Com esse tamanho maior, a grade 12x7 INTEIRA já
+// não cabe mais sozinha dentro dos 1200x900 no zoom padrão (1x) -- os 4
+// cantos da grade ficam ~72px pra fora de cada lado (ver GRID_ORIGIN_X/Y
+// abaixo) -- um zoom out (já existe, botão "-"/roda do mouse, ver
+// MIN_ZOOM_LEVEL em MainScene.ts, chega a 0.25x) resolve isso na hora;
+// não precisou encolher a resolução nem a grade lógica por causa disso.
+// Esses dois números são a REFERÊNCIA que a arte nova (piso, móvel, o
+// gabarito que o Douglas vai pixelar por cima) precisa respeitar --
+// mudar aqui descola tile da arte já desenhada.
+export const ISO_TILE_WIDTH = 128;
+export const ISO_TILE_HEIGHT = 64;
 
 // TILE antigo (quadrado, 90px) fica só de referência histórica nos
 // comentários de quem ainda cita "1 tile" como unidade de deslocamento
@@ -68,16 +77,17 @@ export const ISO_TILE_HEIGHT = 48;
 // é mais usado pra desenhar formato de tile nenhum (isso agora é
 // ISO_TILE_WIDTH/HEIGHT + tileDiamondCorners em game/iso.ts).
 
-// Origem (pixel do CENTRO do tile col=0,row=0) escolhida pra grade
-// 12x7 inteira caber nos 1200x900 com folga: sobra ~144px de cada lado
-// (esquerda/direita) e ~220px em cima (espaço pra parede, que no
-// isométrico "sobe" a partir do fundo da sala) / ~224px embaixo
-// (espaço pra UI/primeiro plano) -- ver a conta completa no comentário
-// do commit. São só constantes -- o Douglas pode reajustar ao vivo
-// depois de ver a arte nova de verdade, sem precisar mexer em mais
-// nada (tudo deriva daqui).
-export const GRID_ORIGIN_X = 480;
-export const GRID_ORIGIN_Y = 220;
+// Origem (pixel do CENTRO do tile col=0,row=0) -- centralizada pra
+// grade 12x7 inteira (128x64 por tile, ver acima): sobra ~138px em cima
+// (espaço pra parede) / ~90px embaixo (espaço pra UI/primeiro plano) --
+// menos folga que antes, mas ainda positivo dos dois lados. Na
+// LARGURA os 4 cantos da grade passam ~72px de cada lado dos 1200px
+// (zoom out resolve, ver comentário de ISO_TILE_WIDTH acima) -- ver a
+// conta completa no comentário do commit. São só constantes -- o
+// Douglas pode reajustar ao vivo depois de ver a arte nova de verdade,
+// sem precisar mexer em mais nada (tudo deriva daqui).
+export const GRID_ORIGIN_X = 440;
+export const GRID_ORIGIN_Y = 170;
 export const GRID_COLS = 12; // colunas 0..12 (13 posições)
 export const GRID_ROWS = 7; // linhas 0..7 (8 posições)
 
