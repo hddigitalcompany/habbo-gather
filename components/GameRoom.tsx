@@ -3589,7 +3589,7 @@ export default function GameRoom({
             accessToken={accountAccessToken}
             onClose={() => setItemEditorOpen(false)}
             onItemsChanged={(seatModelIdToClear) => {
-              fetchAndRegisterCustomFurniture();
+              const furnitureRefreshed = fetchAndRegisterCustomFurniture();
               fetchAndRegisterCustomSkins();
               fetchAndRegisterCustomAvatarItems();
               fetchDefaultReferences();
@@ -3605,13 +3605,24 @@ export default function GameRoom({
               // que já autosalva sozinho (ver useEffect combinado de
               // mobília+assento mais abaixo, depende de [draftItems,
               // seatOffsets]).
+              //
+              // "continua torto" (2ª rodada): esse bloco rodava ANTES
+              // de fetchAndRegisterCustomFurniture() terminar (chamada
+              // sem await, só disparada) -- clearSeatOffsetsForModel já
+              // reposicionava quem tava sentado, só que com o MODELO
+              // AINDA velho em FURNITURE_MODELS (seat_offset_x/y novo
+              // só chega depois do fetch+registerCustomFurnitureModels
+              // resolver). Agora espera essa promise terminar antes de
+              // reposicionar, pra pegar o valor fresco de verdade.
               if (seatModelIdToClear) {
-                sceneRef.current?.clearSeatOffsetsForModel(seatModelIdToClear);
-                setSeatOffsetsState((prev) => {
-                  if (!(seatModelIdToClear in prev)) return prev;
-                  const next = { ...prev };
-                  delete next[seatModelIdToClear];
-                  return next;
+                furnitureRefreshed.finally(() => {
+                  sceneRef.current?.clearSeatOffsetsForModel(seatModelIdToClear);
+                  setSeatOffsetsState((prev) => {
+                    if (!(seatModelIdToClear in prev)) return prev;
+                    const next = { ...prev };
+                    delete next[seatModelIdToClear];
+                    return next;
+                  });
                 });
               }
             }}

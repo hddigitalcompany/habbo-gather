@@ -1859,12 +1859,29 @@ export default class MainScene extends Phaser.Scene {
    * abrir "Assento" de novo só pra destravar. Reposiciona quem estiver
    * sentado nesse modelo agora, se houver (não precisa estar sentado
    * pra chamar -- ao contrário de resetSeatOffset/nudgeSeatOffset).
+   *
+   * BUG achado no teste do Douglas ("continua torto"): o `return` cedo
+   * de baixo (nada pra limpar -> nem reposiciona) tava pulando o
+   * reposicionamento sempre que o item NUNCA tinha um ajuste "Assento"
+   * salvo com essa MESMA chave -- que é o caso mais comum, já que o
+   * ajuste antigo (de antes dos modelos custom terem UUID) tava salvo
+   * numa chave-lixo qualquer (ex: "gamer", o rótulo do item, não o id
+   * de verdade) que nunca bateu com seatOffsetGroupKey(f) (sempre
+   * f.modelId, o UUID) -- ou seja, na prática QUASE NUNCA existia
+   * mesmo uma entrada pra apagar aqui, e o boneco já sentado ficava
+   * pra sempre com a posição de ANTES da edição, só porque não tinha
+   * "nada pra limpar". Reposicionar não pode depender de ter achado
+   * algo pra apagar -- o padrão do MODELO mudou de qualquer jeito
+   * (resolveSeatOffset prioridade #3), então quem já tá sentado nesse
+   * modelo sempre precisa recalcular, com ou sem ajuste "Assento"
+   * salvo por cima.
    */
   clearSeatOffsetsForModel(groupKey: string) {
-    if (!(groupKey in this.seatOffsets)) return;
-    const next = { ...this.seatOffsets };
-    delete next[groupKey];
-    this.seatOffsets = next;
+    if (groupKey in this.seatOffsets) {
+      const next = { ...this.seatOffsets };
+      delete next[groupKey];
+      this.seatOffsets = next;
+    }
     if (this.seatedAt && seatOffsetGroupKey(this.seatedAt) === groupKey) {
       this.applySeatVisualPosition(this.seatedAt);
       this.emitSeatTuningState();
