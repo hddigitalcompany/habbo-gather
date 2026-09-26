@@ -4147,6 +4147,19 @@ body {
   padding-bottom: 10px;
 }
 
+/* Card menor só na aba Avatar (ver AVATAR_STAGE_HEIGHT em
+   ItemEditor.tsx) -- overflow-y:hidden do .item-stage normal corta
+   fora qualquer coisa arrastada mais pra cima do que a folga NOVA
+   (menor) permite, mesmo um cabelo/traje ajustado antes com a folga
+   ANTIGA (maior) -- ficava invisível/impossível de arrastar (pedido do
+   Douglas depois de uma tentativa anterior: "ta bugado"). "visible" em
+   vez de "hidden" -- um item com offset extremo só espirra pra fora do
+   card por cima em vez de sumir; a maioria (dentro da folga nova) nem
+   nota diferença. */
+.item-stage-compact {
+  overflow-y: visible;
+}
+
 .item-size-empty {
   margin: 0;
   position: absolute;

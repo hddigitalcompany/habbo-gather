@@ -125,6 +125,24 @@ const STAGE_BASELINE_PAD = 70;
 // exatamente onde estava, só sobra mais espaço vazio acima dele agora.
 const STAGE_TOP_PAD = 160;
 const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + STAGE_TOP_PAD);
+// card menor só na aba Avatar (pedido do Douglas: "esse espaco do
+// editor em avatar ta mt grande" -- e depois "você não consegue cortar
+// a janela ao invés de tirar zoom?", recusando a ideia de encolher via
+// zoom, ver comentário grande onde `zoom` é declarado). Primeira
+// tentativa (60px de folga) tinha voltado o STAGE_TOP_PAD cheio porque
+// ".item-stage" tem overflow-y:hidden -- cabelo/traje que já tivesse
+// sido arrastado pra cima contando com os 160px originais sumia,
+// cortado pelo overflow (ver revert no commit 08cc428). Dessa vez o
+// overflow-y vira "visible" (ver .item-stage em globals.css) junto com
+// esse pad menor: um item com offset extremo (de antes de existir essa
+// folga menor, ou arrastado além dela) passa a só ESPIRRAR pra fora do
+// card por cima em vez de desaparecer -- nunca mais fica invisível/
+// impossível de arrastar, só eventualmente maior que a moldura branca
+// num caso extremo (raro -- a maioria fica bem dentro dos 60px).
+const AVATAR_STAGE_TOP_PAD = 60;
+const AVATAR_STAGE_HEIGHT = Math.ceil(
+  STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + AVATAR_STAGE_TOP_PAD
+);
 // TENTATIVA REVERTIDA: pedido do Douglas ("esse espaco do editor em
 // avatar ta mt grande") levou a um AVATAR_STAGE_HEIGHT menor (só a aba
 // Avatar), mas isso quebrou de verdade: ".item-stage" tem
@@ -1032,19 +1050,14 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // redesenha por cima sem mudar o espaço ocupado, e ia exigir um
   // wrapper com overflow pra não cortar o preview ampliado. Suportado
   // no Chrome (que é o que o Douglas usa, ver screenshots).
-  // Diminuir o card sem quebrar arrastar/posição já salva (pedido:
-  // "pode diminuir ainda mais essa janela de avatar [de edição]", DEPOIS
-  // de reduzir STAGE_HEIGHT ter quebrado tudo -- ver revert no commit
-  // 08cc428) usa esse MESMO zoom em vez de mexer no tamanho da folha --
-  // `zoom` encolhe TUDO proporcionalmente de uma vez (o "canvas" lógico
-  // e o espaço vazio acima do boneco encolhem juntos, na mesma
-  // proporção), então a folga pra arrastar continua exatamente do
-  // mesmo TAMANHO RELATIVO de antes -- nada fica cortado, só menor na
-  // tela. 100% ainda deixava a régua/preview passando do topo da janela
-  // (pedido de novo: "MUITO grande, corta a exibicao na linha 240") --
-  // valor INICIAL agora é o MÍNIMO do slider (75%); quem quiser ampliar
-  // ainda tem o slider "Zoom do preview", vai até 300%.
-  const [zoom, setZoom] = useState(0.75);
+  // Tentativa de diminuir o card via `zoom` (achava mais seguro que
+  // mexer em STAGE_HEIGHT, ver AVATAR_STAGE_TOP_PAD/AVATAR_STAGE_HEIGHT
+  // abaixo pro motivo de terem sido abandonados uma vez) foi revertida a
+  // pedido do Douglas: "você não consegue cortar a janela ao invés de
+  // tirar zoom?" -- zoom encolhe o BONECO junto com o espaço vazio, o
+  // Douglas quer o espaço vazio cortado, boneco do tamanho normal. Zoom
+  // volta pro padrão de sempre (150%).
+  const [zoom, setZoom] = useState(1.5);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
@@ -2222,7 +2235,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         </div>
 
         <div className="item-size-card">
-          <div className="item-stage" style={{ height: STAGE_HEIGHT, zoom }}>
+          <div className="item-stage item-stage-compact" style={{ height: AVATAR_STAGE_HEIGHT, zoom }}>
             <div
               className="item-stage-avatar"
               style={{
