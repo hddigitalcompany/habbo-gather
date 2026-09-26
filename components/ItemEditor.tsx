@@ -3541,21 +3541,36 @@ export default function ItemEditor({
                   activeSeatOffset/handleSeatMarkerPointerDown e o
                   comentário grande em
                   FurnitureModelDef.seatDirectionOffsets,
-                  game/furniture.ts). Mesmo referencial de
-                  item-stage-item-img logo abaixo -- ancorado no mesmo
-                  "bottom" que os pés do boneco em pé (STAGE_BASELINE_PAD
-                  + AVATAR_FOOT_FROM_TILE_BOTTOM), só deslocado pelo
-                  activeSeatOffset.x/y atual (mesma conta que a bolinha
-                  antiga fazia). Pedido do Douglas: trocar a bolinha
-                  abstrata por um boneco de verdade, bem mais intuitivo
-                  de posicionar -- e, depois, deixar ajustar por direção
-                  (achado: um valor só pras 4 direções sentava torto de
-                  lado). */}
+                  game/furniture.ts).
+                  ACHADO (Douglas: "nao e essa posicao qie eu salvei" --
+                  ao vivo saía diferente do preview mesmo com o número
+                  batendo): esse boneco ancorava no MESMO "bottom" do
+                  boneco em PÉ (STAGE_BASELINE_PAD +
+                  AVATAR_FOOT_FROM_TILE_BOTTOM, ponto que só existe pra
+                  reproduzir onde o boneco anda ancorado -- ver
+                  comentário dele acima). Só que ao vivo
+                  (applySeatVisualPosition, MainScene.ts) o ajuste de
+                  assento é somado direto em cima da posição do MÓVEL
+                  (furnitureWorldPos, game/furniture.ts -- ancora no
+                  VÉRTICE de baixo do tile, não no centro onde o boneco
+                  de pé ancora, ver o comentário grande lá), sem passar
+                  pela âncora "de pé" nenhuma vez. Faltava esse termo
+                  aqui pra bater com o de lá -- por isso o preview
+                  sempre mostrava a posição uns pixels mais alta/atrás
+                  do que saía na sala de verdade, mesmo com o x/y salvo
+                  idêntico. Mesmo referencial de item-stage-item-img
+                  logo abaixo (o PRÓPRIO móvel, que já ancora certinho
+                  no vértice) -- só deslocado pelo activeSeatOffset.x/y
+                  atual (mesma conta que a bolinha antiga fazia).
+                  Pedido do Douglas: trocar a bolinha abstrata por um
+                  boneco de verdade, bem mais intuitivo de posicionar --
+                  e, depois, deixar ajustar por direção (achado: um
+                  valor só pras 4 direções sentava torto de lado). */}
               {sittable && (
                 <div
                   className="item-stage-seat-avatar"
                   style={{
-                    bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM - activeSeatOffset.y * PREVIEW_SCALE,
+                    bottom: STAGE_BASELINE_PAD - activeSeatOffset.y * PREVIEW_SCALE,
                     width: AVATAR_DISPLAY_W,
                     height: AVATAR_DISPLAY_H,
                     transform: `translate(calc(-50% + ${activeSeatOffset.x * PREVIEW_SCALE}px), 0)`,
