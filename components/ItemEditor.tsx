@@ -1836,7 +1836,25 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
     : genderDefaultReference
       ? avatarAssetUrl(genderDefaultReference.body_sheet_url)
       : undefined;
-  const activeFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeDirection];
+  // pose-aware (pedido do Douglas: "sentou torto ai eu fui arrumar e
+  // nao aparecia em editar") -- esse índice recortava SEMPRE o quadro
+  // de "Parado" (DIRECTION_FIRST_FRAME_INDEX), mesmo com a aba
+  // "Sentado"/"Passo A"/"Passo B" ativa (activePose) -- então abrir
+  // "Editar" num traje, trocar pra "Sentado" pra ajustar a posição,
+  // mostrava o quadro de PARADO daquela direção (às vezes vazio) em
+  // vez do quadro sentado que realmente tinha a foto. Dentro de cada
+  // direção a folha guarda parado/passoA/passoB em sequência (offset
+  // 0/1/2, ver SKIN_SHEET_SLOT_POSES acima); sentado é um bloco à
+  // parte (SEAT_FRAME_INDEX, "up" reaproveita o quadro de parado --
+  // mesma observação de sempre, sem sentado-de-costas próprio).
+  const activeFrameIndex =
+    activePose === "sentado"
+      ? SEAT_FRAME_INDEX[activeDirection]
+      : activePose === "passoA"
+        ? DIRECTION_FIRST_FRAME_INDEX[activeDirection] + 1
+        : activePose === "passoB"
+          ? DIRECTION_FIRST_FRAME_INDEX[activeDirection] + 2
+          : DIRECTION_FIRST_FRAME_INDEX[activeDirection];
   const frameCol = activeFrameIndex % SKIN_SHEET_COLS;
   const frameRow = Math.floor(activeFrameIndex / SKIN_SHEET_COLS);
   const frameOffsetXPx = frameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
