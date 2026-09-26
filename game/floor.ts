@@ -460,10 +460,33 @@ export function marbleVeinShapesForSlab(
   baseColor: number
 ): FloorPatternPolygon[] {
   const shapes: FloorPatternPolygon[] = [];
-  const toWorld = (along: number, across: number): Point => ({
-    x: cx + rowAxis.x * along + colAxis.x * across,
-    y: cy + rowAxis.y * along + colAxis.y * across,
-  });
+  // MARGEM de segurança da borda da placa -- trava toda mancha/veio pra
+  // NUNCA passar da própria placa (correção do Douglas testando ao
+  // vivo: "esses veios nao podem 'vazar' a linha do porcelanato,
+  // inclusive, trava a linha do porcelanato pra ficar exatamente
+  // posicionada na divisa do tile"). A junta em si já cai EXATA na
+  // borda do tile por conta da matemática (com FloorPatternConfig.
+  // tileAligned + TILE_SIZED_PLANK_PX, halfLength/halfWidth aqui SÃO os
+  // 4 cantos do losango do tile, ver comentário grande da função acima)
+  // -- o "vazamento" era o veio (que de propósito ultrapassava a
+  // própria placa, contando com o recorte de losango do CANVAS do jogo
+  // pra cortar o resto) sendo desenhado de novo, sem corte nenhum,
+  // quando a placa VIZINHA é quem está sendo pintada (o loop de
+  // createFloorPatternGraphics cobre uma área de alcance ao redor do
+  // tile, não só ele -- ver `reach` lá -- então o veio de uma placa
+  // aparecia "invadindo" a textura da placa vizinha). Fixado aqui:
+  // clampLocal trava CADA ponto (mancha ou veio) dentro do retângulo da
+  // PRÓPRIA placa (com uma margem pra sobrar a linha de junta por cima,
+  // nítida) -- garante nunca vazar, não importa o parâmetro sorteado.
+  const MARGIN = 1.2;
+  const clampLocal = (along: number, across: number): [number, number] => [
+    Math.max(-halfLength + MARGIN, Math.min(halfLength - MARGIN, along)),
+    Math.max(-halfWidth + MARGIN, Math.min(halfWidth - MARGIN, across)),
+  ];
+  const toWorld = (along: number, across: number): Point => {
+    const [a, c] = clampLocal(along, across);
+    return { x: cx + rowAxis.x * a + colAxis.x * c, y: cy + rowAxis.y * a + colAxis.y * c };
+  };
   const minHalf = Math.min(halfLength, halfWidth);
 
   // 1) manchas largas e bem suaves por baixo dos veios (ver comentário
