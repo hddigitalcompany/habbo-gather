@@ -443,7 +443,15 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    // "Content-Type" só não bastava -- o front manda "Authorization"
+    // (login/dono, ver callerIsOwner acima) em GET/POST /room/floor,
+    // /room/areas e /room/furniture, e o preflight OPTIONS (handler lá
+    // embaixo, mesma corsHeaders()) rejeitava esse header (Douglas:
+    // "adicionei uma cadeira e ela sumiu" -- o POST /room/furniture
+    // nunca chegava a rodar, ficava bloqueado no preflight do próprio
+    // navegador -- console mostrava "Request header field authorization
+    // is not allowed by Access-Control-Allow-Headers").
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 }
 

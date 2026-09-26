@@ -3239,11 +3239,24 @@ export default function ItemEditor({
                     transform: `translate(-${mobiFrameOffsetXPx}px, -${mobiFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                   }}
                 >
+                  {/* avatarAssetUrl (não só `/assets/${file}` cru) --
+                      item de cabelo/pele/traje CUSTOM (subido pelo
+                      Douglas) tem `.file` com a URL COMPLETA do Supabase
+                      Storage, não um nome de arquivo local -- prefixar
+                      "/assets/" na frente dessa URL gera um caminho
+                      quebrado (`/assets/https://...png`, 404, ver
+                      DIRECTION_FIELDS acima e o comentário grande antes
+                      de referenceHair/referenceSkin/referenceOutfit mais
+                      acima nesse arquivo). Passou despercebido enquanto
+                      REFERENCE_OUTFIT só apontava pro traje padrão
+                      (arquivo local, sem "http"), e só apareceu quando o
+                      fallback passou a preferir o traje custom mais
+                      recente. */}
                   {referenceOutfitFile && (
-                    <img className="item-stage-avatar-layer" src={`/assets/${referenceOutfitFile}`} alt="" />
+                    <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceOutfitFile)} alt="" />
                   )}
-                  {referenceSkin && <img className="item-stage-avatar-layer" src={`/assets/${referenceSkin.file}`} alt="" />}
-                  {referenceHair && <img className="item-stage-avatar-layer" src={`/assets/${referenceHair.file}`} alt="" />}
+                  {referenceSkin && <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceSkin.file)} alt="" />}
+                  {referenceHair && <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceHair.file)} alt="" />}
                 </div>
               </div>
 
@@ -3283,10 +3296,10 @@ export default function ItemEditor({
                     }}
                   >
                     {referenceOutfitFile && (
-                      <img className="item-stage-avatar-layer" src={`/assets/${referenceOutfitFile}`} alt="" />
+                      <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceOutfitFile)} alt="" />
                     )}
-                    {referenceSkin && <img className="item-stage-avatar-layer" src={`/assets/${referenceSkin.file}`} alt="" />}
-                    {referenceHair && <img className="item-stage-avatar-layer" src={`/assets/${referenceHair.file}`} alt="" />}
+                    {referenceSkin && <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceSkin.file)} alt="" />}
+                    {referenceHair && <img className="item-stage-avatar-layer" src={avatarAssetUrl(referenceHair.file)} alt="" />}
                   </div>
                 </div>
               )}
