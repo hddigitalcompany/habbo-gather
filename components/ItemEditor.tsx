@@ -903,17 +903,85 @@ function ImageCropModal({
   // de gerar o resultado (ver produceResult), tanto cortando quanto
   // "sem cortar".
   const [flipped, setFlipped] = useState(false);
+  // ajuste fino de rotação (graus, -10 a +10) -- pedido do Douglas depois
+  // que a correção automática de ângulo (fixPixellabIsometricAngle,
+  // esticar só na VERTICAL, ver mais acima) não bastou pra uma poltrona
+  // específica ("ta deixando torto ainda", com print mostrando a perna
+  // fora do centro da régua/losango de referência): esse esticamento só
+  // corrige o ACHATAMENTO da câmera do PixelLab (inclinação), não uma
+  // eventual leve ROTAÇÃO/torção da peça em si, que varia de geração pra
+  // geração (a calibração original já mediu 1.435 e 1.472 em só 2 peças
+  // -- um desvio a mais nessa direção não tem como "consertar" esticando
+  // mais ou menos). Em vez de tentar medir uma constante nova toda vez
+  // que uma peça sair torta de um jeito diferente, dá pra corrigir na
+  // hora, olhando, direto aqui.
+  const [rotationDeg, setRotationDeg] = useState(0);
+  // versão ROTACIONADA do arquivo original (null = sem ajuste, usa `file`
+  // direto) -- gerada pelo useEffect logo abaixo sempre que rotationDeg
+  // muda. O recorte (rect/display/natural) e a prévia sempre operam em
+  // cima de `effectiveFile` (rotacionado ou não), nunca do `file`
+  // original direto, pra prévia e resultado final baterem sempre.
+  const [rotatedSource, setRotatedSource] = useState<File | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
-    const url = URL.createObjectURL(file);
+    setFlipped(false);
+    setRotationDeg(0);
+    setRotatedSource(null);
+  }, [file]);
+
+  // canvas NOVO, maior que o original (cabe a imagem inteira rotacionada
+  // sem cortar os cantos -- fórmula padrão de bounding box de retângulo
+  // rotacionado), vira um File novo. Roda de novo toda vez que
+  // rotationDeg muda (inclusive voltando pra 0, aí só limpa
+  // rotatedSource e volta a usar `file` original sem gerar canvas à
+  // toa).
+  useEffect(() => {
+    if (rotationDeg === 0) {
+      setRotatedSource(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const bitmap = await createImageBitmap(file);
+        const rad = (rotationDeg * Math.PI) / 180;
+        const newW = Math.ceil(Math.abs(bitmap.width * Math.cos(rad)) + Math.abs(bitmap.height * Math.sin(rad)));
+        const newH = Math.ceil(Math.abs(bitmap.width * Math.sin(rad)) + Math.abs(bitmap.height * Math.cos(rad)));
+        const canvas = document.createElement("canvas");
+        canvas.width = newW;
+        canvas.height = newH;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          bitmap.close?.();
+          return;
+        }
+        ctx.translate(newW / 2, newH / 2);
+        ctx.rotate(rad);
+        ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+        bitmap.close?.();
+        const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!blob || cancelled) return;
+        setRotatedSource(new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" }));
+      } catch (e) {
+        console.warn("Não deu pra girar a imagem pro ajuste fino, mantendo sem rotação", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file, rotationDeg]);
+
+  const effectiveFile = rotatedSource ?? file;
+
+  useEffect(() => {
+    const url = URL.createObjectURL(effectiveFile);
     setImgUrl(url);
     setNatural(null);
     setDisplay(null);
     setRect(null);
-    setFlipped(false);
     return () => URL.revokeObjectURL(url);
-  }, [file]);
+  }, [effectiveFile]);
 
   function handleImgLoad() {
     const img = imgRef.current;
@@ -988,7 +1056,7 @@ function ImageCropModal({
    */
   async function produceResult(useCrop: boolean): Promise<File | null> {
     try {
-      const bitmap = await createImageBitmap(file);
+      const bitmap = await createImageBitmap(effectiveFile);
       let source: CanvasImageSource = bitmap;
       if (flipped) {
         const flipCanvas = document.createElement("canvas");
@@ -1056,6 +1124,25 @@ function ImageCropModal({
           >
             Espelhar
           </button>
+          {/* ajuste fino de rotação -- ver comentário grande no state
+              rotationDeg acima (peça saindo torta mesmo depois da
+              correção automática de ângulo do PixelLab). */}
+          <label className="crop-modal-rotate">
+            <span>Ajuste fino de ângulo: {rotationDeg}°</span>
+            <input
+              type="range"
+              min={-10}
+              max={10}
+              step={0.5}
+              value={rotationDeg}
+              onChange={(e) => setRotationDeg(Number(e.target.value))}
+            />
+            {rotationDeg !== 0 && (
+              <button type="button" className="crop-modal-rotate-reset" onClick={() => setRotationDeg(0)}>
+                Resetar
+              </button>
+            )}
+          </label>
         </div>
         {imgUrl && (
           <div

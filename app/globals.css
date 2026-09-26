@@ -4647,6 +4647,39 @@ body {
   color: #fff;
 }
 
+/* ajuste fino de rotação (ImageCropModal, ver rotationDeg em
+   ItemEditor.tsx) -- pedido do Douglas: uma peça de mobília ("Poltrona
+   Plush Tabaco") ainda saía torta mesmo com "Corrigir ângulo isométrico
+   (PixelLab)" marcado ("ta deixando torto ainda") -- esse esticamento
+   automático só corrige o ACHATAMENTO da câmera do PixelLab, não uma
+   eventual rotação/torção que varia peça a peça. Esse slider deixa
+   corrigir na hora, olhando, sem precisar remedir uma constante nova. */
+.crop-modal-rotate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #cfc4e6;
+}
+
+.crop-modal-rotate input[type="range"] {
+  width: 140px;
+}
+
+.crop-modal-rotate-reset {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #cfc4e6;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.crop-modal-rotate-reset:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .crop-modal-stage {
   position: relative;
   margin-top: 10px;
