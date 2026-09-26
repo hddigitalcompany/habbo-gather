@@ -178,6 +178,29 @@ const RULER_X_RANGE: [number, number] = [-100, 100];
 // branco sem régua ali).
 const RULER_Y_RANGE: [number, number] = [-240, 60];
 
+// ACHADO no print do Douglas ("continua ocupando toda a tela, corta essa
+// janela"): o card tinha MESMO encolhido (AVATAR_STAGE_TOP_PAD 60->24,
+// ver acima), só que a RÉGUA continuava desenhando o RULER_Y_RANGE
+// inteiro de cima (-240 até 60), dimensionado pro STAGE_TOP_PAD GRANDE
+// de antes (160px -- é literalmente o que o comentário ali em cima já
+// avisava: "o excesso é cortado de graça pelo overflow do .item-stage").
+// Isso só funcionava de graça enquanto ".item-stage"/".item-stage-compact"
+// tinha overflow-y:hidden -- na rodada anterior esse overflow virou
+// "visible" (pra parar de sumir traje arrastado pro alto), e sem aquele
+// corte de graça a régua passou a esticar o card de VERDADE pra fora dos
+// 24px novos, voltando a ocupar quase a régua TODA de novo -- por isso
+// encolher só o pad não bastou, o print do Douglas ainda mostrava -240
+// até 60 do mesmo jeito de antes. Esse range compacto acompanha o
+// AVATAR_STAGE_TOP_PAD de verdade (deriva dele em vez de número fixo
+// escolhido à mão, pra nunca mais desalinhar se o pad mudar de novo) --
+// só usado na aba Avatar (ver AVATAR_STAGE_HEIGHT); a aba Mobi continua
+// com o RULER_Y_RANGE grande de cima, que combina com o STAGE_HEIGHT
+// grande dela (não encolhida).
+const AVATAR_RULER_Y_RANGE: [number, number] = [
+  -Math.ceil((AVATAR_DISPLAY_H + AVATAR_STAGE_TOP_PAD) / (AVATAR_SCALE * PREVIEW_SCALE) / RULER_UNIT) * RULER_UNIT,
+  60,
+];
+
 function rulerTicks(range: [number, number], unit: number): number[] {
   const ticks: number[] = [];
   for (let v = 0; v >= range[0]; v -= unit) ticks.push(v);
@@ -195,9 +218,17 @@ function rulerTicks(range: [number, number], unit: number): number[] {
  * cada chamador passa o seu (ver STAGE_BASELINE_PAD/
  * AVATAR_FOOT_FROM_TILE_BOTTOM nos usos abaixo).
  */
-function StageRuler({ anchorBottomPx, pxPerUnit = PREVIEW_SCALE }: { anchorBottomPx: number; pxPerUnit?: number }) {
+function StageRuler({
+  anchorBottomPx,
+  pxPerUnit = PREVIEW_SCALE,
+  yRange = RULER_Y_RANGE,
+}: {
+  anchorBottomPx: number;
+  pxPerUnit?: number;
+  yRange?: [number, number];
+}) {
   const xTicks = rulerTicks(RULER_X_RANGE, RULER_UNIT);
-  const yTicks = rulerTicks(RULER_Y_RANGE, RULER_UNIT);
+  const yTicks = rulerTicks(yRange, RULER_UNIT);
   return (
     <div className="stage-ruler">
       {/* linhas VERTICAIS inteiras (uma por marcação de x) -- pedido do
@@ -2395,6 +2426,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
             <StageRuler
               anchorBottomPx={STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM}
               pxPerUnit={AVATAR_SCALE * PREVIEW_SCALE}
+              yRange={AVATAR_RULER_Y_RANGE}
             />
           </div>
 
