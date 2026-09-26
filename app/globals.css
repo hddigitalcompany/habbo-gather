@@ -4103,6 +4103,21 @@ body {
   cursor: default;
 }
 
+/* miniatura da cor já cadastrada de MÓVEL (FurnitureColorZoneTool.tsx) --
+   diferente do avatar (.skin-swatch, um círculo de cor CHEIA a partir de
+   hex): móvel não guarda hex, a "amostra" é a própria foto de frente
+   recolorida (art.down), então é uma imagem de verdade, não uma cor de
+   fundo. Mesmo tamanho/formato de .skin-swatch pra ficar visualmente
+   consistente na listinha "Já cadastradas". */
+.color-zone-existing-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid #2f2245;
+  object-fit: contain;
+  background: rgba(20, 16, 32, 0.4);
+}
+
 /* Editor de Itens (ver ItemEditor.tsx) -- pedido do Douglas: "seria
    mais interessante essa aba de criar mobis/avatar, ser maior, ocupar
    a tela toda quando abre ela, porque vao ter muitas opcoes ali

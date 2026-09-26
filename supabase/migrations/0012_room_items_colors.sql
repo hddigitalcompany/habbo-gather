@@ -1,0 +1,23 @@
+-- "adiciona a edicao de cores nos mobis tambe, quero testar" -- MESMO
+-- esquema de variantes de cor que avatar_items/avatar_skins já têm
+-- (0009_avatar_items_colors.sql / 0010_avatar_skins_colors.sql), agora
+-- pra móvel custom (Editor de Itens).
+--
+-- Formato de cada entrada em `colors` é DIFERENTE do avatar (que guarda
+-- 1 arquivo só, `file`, por ser uma folha/spritesheet única): móvel tem
+-- até 4 FOTOS separadas, uma por direção -- então cada cor guarda um
+-- `art` (down/left/right/up, mesmo formato da coluna `art` principal
+-- dessa tabela), não um `file` -- ver FurnitureModelColorOption em
+-- game/furniture.ts e FurnitureColorZoneTool.tsx (a ferramenta que
+-- gera essas cores, pintando zona por AMOSTRA DE COR, mesmo algoritmo
+-- de game/colorTint.ts usado pro avatar).
+--
+-- A infraestrutura de SELECIONAR/RENDERIZAR uma cor de móvel (colorId,
+-- furnitureVariantTextureKey, o seletor "Cores" na paleta -- ver
+-- entryWithColor/selectFurnitureColor em GameRoom.tsx) já existia
+-- genericamente antes dessa coluna -- só faltava um jeito de gerar
+-- cores novas pra item CUSTOM e guardar elas no banco.
+--
+-- Rode isso no SQL Editor do Supabase.
+alter table public.room_items
+  add column if not exists colors jsonb not null default '[]'::jsonb;

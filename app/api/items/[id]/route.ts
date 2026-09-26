@@ -125,6 +125,36 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // motivo de direction_offsets acima.
   if ("seat_direction_offsets" in body) update.seat_direction_offsets = cleanSeatDirectionOffsets(body.seat_direction_offsets);
 
+  // `colors` -- ver FurnitureColorZoneTool.tsx, formato de
+  // FurnitureModelColorOption em game/furniture.ts (id/label/art
+  // obrigatórios, art.down obrigatório dentro de art -- mesmo esquema
+  // de validação usado em avatar-items/avatar-skins pra `colors`, só
+  // que `art` no lugar de `file` único). O cliente manda o array INTEIRO
+  // (adicionar/apagar uma cor é sempre reenviar a lista completa, ver
+  // handleSave/handleDeleteColor em FurnitureColorZoneTool.tsx).
+  if ("colors" in body) {
+    const colors = Array.isArray(body.colors) ? body.colors : null;
+    if (!colors) return NextResponse.json({ error: "colors precisa ser um array" }, { status: 400 });
+    for (const c of colors) {
+      if (typeof c?.id !== "string" || !c.id) {
+        return NextResponse.json({ error: "cada cor precisa de id" }, { status: 400 });
+      }
+      if (typeof c?.label !== "string" || !c.label) {
+        return NextResponse.json({ error: "cada cor precisa de label" }, { status: 400 });
+      }
+      if (!c?.art || typeof c.art !== "object" || typeof c.art.down !== "string" || !c.art.down) {
+        return NextResponse.json({ error: "cada cor precisa de art.down (URL)" }, { status: 400 });
+      }
+      for (const dir of ALLOWED_DIRECTIONS) {
+        if (dir === "down") continue;
+        if (c.art[dir] !== undefined && typeof c.art[dir] !== "string") {
+          return NextResponse.json({ error: `art.${dir} precisa ser string` }, { status: 400 });
+        }
+      }
+    }
+    update.colors = colors;
+  }
+
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });
   }

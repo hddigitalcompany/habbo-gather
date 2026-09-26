@@ -859,7 +859,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_items")
         .select(
-          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets"
+          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors"
         );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
@@ -877,11 +877,19 @@ export default function GameRoom({
           seat_offset_x: number | null;
           seat_offset_y: number | null;
           seat_direction_offsets: Partial<Record<Direction, { x: number; y: number }>> | null;
+          colors: { id: string; label: string; art: Partial<Record<Direction, string>> }[] | null;
         }) => ({
           id: row.id,
           type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
           label: row.label,
-          colors: [{ id: "default", label: "Padrão", art: row.art }],
+          // "default" (a arte principal, coluna `art`) + as variantes
+          // geradas pelo FurnitureColorZoneTool.tsx (pedido do Douglas:
+          // "adiciona a edicao de cores nos mobis tambe") -- ver
+          // supabase/migrations/0012_room_items_colors.sql. Sem isso, a
+          // paleta "Cores" (entryWithColor/selectFurnitureColor acima)
+          // sempre mostrava "Em breve" pra item custom, mesmo depois de
+          // gerar uma cor nova -- só existia a entrada única "Padrão".
+          colors: [{ id: "default", label: "Padrão", art: row.art }, ...(row.colors ?? [])],
           // ajustado à mão no preview do Editor de Itens (ver
           // ItemEditor.tsx) -- null pra item cadastrado antes dessa
           // opção existir, cai no fallback por categoria (ver
@@ -907,17 +915,26 @@ export default function GameRoom({
       setCustomItemsVersion((v) => v + 1);
       const textureEntries: { key: string; url: string }[] = [];
       for (const model of models) {
-        const color = model.colors[0];
-        for (const facing of FURNITURE_ROTATE_ORDER) {
-          const url = color.art[facing];
-          if (!url) continue;
-          const key = furnitureVariantTextureKey(model.id, color.id, facing);
-          // item que já existia e mudou (ver "Editar" no Editor de
-          // Itens) -- limpa a textura ANTIGA da cena antes de recarregar
-          // com essa MESMA chave, senão loadCustomFurnitureTextures acha
-          // que já tá carregada e ignora a arte nova.
-          if (updatedIds.includes(model.id)) sceneRef.current?.removeFurnitureTextures([key]);
-          textureEntries.push({ key, url });
+        // TODAS as cores do modelo (não só a "default") -- ver comentário
+        // em `colors` acima (fetchAndRegisterCustomFurniture). Cada cor
+        // tem sua PRÓPRIA chave de textura (furnitureVariantTextureKey
+        // já inclui colorId), então sem esse loop as variantes geradas
+        // pelo FurnitureColorZoneTool.tsx nunca chegavam a carregar --
+        // o seletor "Cores" mudava o colorId escolhido, mas a peça
+        // continuava mostrando a arte "Padrão" (textura da cor nova
+        // nunca tinha sido registrada na cena).
+        for (const color of model.colors) {
+          for (const facing of FURNITURE_ROTATE_ORDER) {
+            const url = color.art[facing];
+            if (!url) continue;
+            const key = furnitureVariantTextureKey(model.id, color.id, facing);
+            // item que já existia e mudou (ver "Editar" no Editor de
+            // Itens) -- limpa a textura ANTIGA da cena antes de recarregar
+            // com essa MESMA chave, senão loadCustomFurnitureTextures acha
+            // que já tá carregada e ignora a arte nova.
+            if (updatedIds.includes(model.id)) sceneRef.current?.removeFurnitureTextures([key]);
+            textureEntries.push({ key, url });
+          }
         }
       }
       await new Promise<void>((resolve) => {

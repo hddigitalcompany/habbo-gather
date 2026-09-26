@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH, SEAT_X_LADO, SEAT_Y_LADO } from "@/game/furniture";
+import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
@@ -31,6 +32,7 @@ import {
   ColorOption,
 } from "@/game/customization";
 import ColorZoneTool from "@/components/ColorZoneTool";
+import FurnitureColorZoneTool from "@/components/FurnitureColorZoneTool";
 
 type CategoryId = "poltrona" | "divisoria" | "sofa" | "mesa" | "planta" | "computador";
 type DirectionKey = "down" | "left" | "right" | "up";
@@ -346,6 +348,7 @@ type CustomItemRow = {
   seat_offset_x: number | null;
   seat_offset_y: number | null;
   seat_direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
+  colors: FurnitureModelColorOption[] | null;
 };
 
 // mesma faixa -100..100 da constraint em supabase/migrations/
@@ -2737,6 +2740,11 @@ export default function ItemEditor({
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // qual item de mobi tem o FurnitureColorZoneTool.tsx aberto embaixo da
+  // linha dele agora -- estado PRÓPRIO daqui (não o colorToolItemId de
+  // AvatarCreatorPanel acima, que é de outro componente/escopo, só cobre
+  // avatar/tom de pele) -- só 1 aberto por vez, mesmo esquema.
+  const [furnitureColorToolItemId, setFurnitureColorToolItemId] = useState<string | null>(null);
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
   const iconInputRef = useRef<HTMLInputElement | null>(null);
   // mesma indireção de AvatarCreatorPanel acima -- ver ImageCropModal e
@@ -2887,7 +2895,7 @@ export default function ItemEditor({
     const { data, error: fetchError } = await supabase
       .from("room_items")
       .select(
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets"
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -3714,19 +3722,51 @@ export default function ItemEditor({
           ) : (
             <ul className="items-panel-list">
               {items.map((item) => (
-                <li key={item.id} className="items-panel-row">
-                  {(item.icon_url ?? item.art.down) && (
-                    <img className="items-panel-thumb" src={item.icon_url ?? item.art.down} alt={item.label} />
+                <li key={item.id} className="items-panel-row-wrap">
+                  <div className="items-panel-row">
+                    {(item.icon_url ?? item.art.down) && (
+                      <img className="items-panel-thumb" src={item.icon_url ?? item.art.down} alt={item.label} />
+                    )}
+                    <span className="items-panel-name">
+                      {item.label} <span className="items-panel-category">({CATEGORIES.find((c) => c.id === item.category)?.label ?? item.category})</span>
+                      {item.colors && item.colors.length > 0 && (
+                        <span className="items-panel-category"> -- {item.colors.length} cor(es)</span>
+                      )}
+                    </span>
+                    <button type="button" disabled={busyId === item.id} onClick={() => startEditItem(item)}>
+                      Editar
+                    </button>
+                    {/* "Gerar cor" (FurnitureColorZoneTool.tsx) -- pedido do
+                        Douglas: "adiciona a edicao de cores nos mobis
+                        tambe, quero testar". Mesma ferramenta/algoritmo do
+                        avatar (ColorZoneTool.tsx), adaptada pro formato de
+                        móvel (até 4 fotos por direção em vez de 1 folha só,
+                        ver comentário grande no topo daquele arquivo).
+                        Estado próprio (furnitureColorToolItemId, ver
+                        acima) -- "Criar Mobi" é um componente diferente
+                        de AvatarCreatorPanel, não reaproveita o
+                        colorToolItemId de lá. */}
+                    <button
+                      type="button"
+                      onClick={() => setFurnitureColorToolItemId((prev) => (prev === item.id ? null : item.id))}
+                    >
+                      {furnitureColorToolItemId === item.id ? "Fechar cor" : "Gerar cor"}
+                    </button>
+                    <button type="button" disabled={busyId === item.id} onClick={() => handleDelete(item.id)}>
+                      Excluir
+                    </button>
+                  </div>
+                  {furnitureColorToolItemId === item.id && (
+                    <FurnitureColorZoneTool
+                      item={item}
+                      accessToken={accessToken}
+                      onClose={() => setFurnitureColorToolItemId(null)}
+                      onSaved={() => {
+                        loadItems();
+                        onItemsChanged();
+                      }}
+                    />
                   )}
-                  <span className="items-panel-name">
-                    {item.label} <span className="items-panel-category">({CATEGORIES.find((c) => c.id === item.category)?.label ?? item.category})</span>
-                  </span>
-                  <button type="button" disabled={busyId === item.id} onClick={() => startEditItem(item)}>
-                    Editar
-                  </button>
-                  <button type="button" disabled={busyId === item.id} onClick={() => handleDelete(item.id)}>
-                    Excluir
-                  </button>
                 </li>
               ))}
             </ul>
