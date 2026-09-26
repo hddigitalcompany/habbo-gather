@@ -42,6 +42,36 @@ export interface FloorPatternConfig {
   /** cor da ripa alternada (a "sombra" fixa que dá profundidade, ex:
    * um pouco mais escura que colorA) */
   colorB: number;
+  /**
+   * Comprimento de cada TÁBUA, em px -- OPCIONAL. Sem isso, a ripa é
+   * CONTÍNUA (infinita, atravessa a sala inteira sem emenda nenhuma --
+   * comportamento original). Com isso, cada ripa vira uma sequência de
+   * tábuas EMENDADAS (com linha de junta visível, ver lineColor), e cada
+   * coluna de tábuas fica desalinhada da vizinha por meio comprimento
+   * (padrão "amarração"/running bond de assoalho de verdade -- evita
+   * que as juntas de todas as colunas caiam alinhadas na mesma linha,
+   * o que ficaria com cara de grade/ladrilho em vez de piso de madeira).
+   * Pedido do Douglas junto com uma foto de referência de tábua corrida:
+   * "vamos criar padroes aqui, e depois subir lá".
+   */
+  plankLengthPx?: number;
+  /** Cor da linha de junta entre tábuas (hex Phaser) -- só desenhada
+   * quando plankLengthPx está definido. Se omitida, usa uma variação
+   * mais escura de colorA calculada automaticamente. */
+  lineColor?: number;
+  /**
+   * Paleta de cores (hex Phaser) pra pintar cada TÁBUA de uma cor
+   * "aleatória" (na verdade determinística -- mesma tábua sempre cai na
+   * mesma cor, calculada a partir da posição dela na grade, ver
+   * plankColorIndex em MainScene.ts -- sem precisar guardar em lugar
+   * nenhum QUAL cor cada tábua usa). OPCIONAL -- quando definida,
+   * IGNORA colorA/colorB (que viram só o fallback de quando `colors`
+   * não está presente) e sorteia entre essas cores tábua por tábua, em
+   * vez de alternar só 2 cores por coluna. Pedido do Douglas junto com
+   * uma 3ª foto de referência (piso com várias tonalidades por tábua):
+   * "e o mesmo do outro mas opcao de pintar diferente".
+   */
+  colors?: number[];
 }
 
 export interface FloorCatalogEntry {
@@ -81,7 +111,60 @@ export interface FloorCatalogEntry {
 // com `npm run dev`). NÃO editar esse import nem o arquivo dele à mão.
 import { GENERATED_FLOOR_CATALOG } from "./floorCatalog.generated";
 
-export const FLOOR_CATALOG: FloorCatalogEntry[] = [...GENERATED_FLOOR_CATALOG];
+/**
+ * Pisos "padrão" DE FÁBRICA -- ao contrário dos pisos de IMAGEM (que
+ * vêm sozinhos do scanner da pasta de assets, ver GENERATED_FLOOR_CATALOG
+ * acima) e dos pisos "padrão" CUSTOM (cadastrados pelo dono na aba
+ * "Criar Piso" -> "Padrão", guardados no Supabase, ver
+ * registerCustomFloorModels abaixo), um piso "padrão" não tem arquivo
+ * nenhum pra escanear -- por isso essa lista é escrita À MÃO aqui, e
+ * não pelo scanner. Pedido do Douglas (mandou fotos de referência de
+ * pisos de tábua/parquet): "vamos criar padroes aqui, e depois subir
+ * lá" -- cada entrada abaixo é um desses padrões, prontos de fábrica
+ * pra qualquer sala, sem precisar cadastrar nada no editor.
+ */
+const FACTORY_FLOOR_PATTERNS: FloorCatalogEntry[] = [
+  {
+    id: "laminado-tabua-corrida-castanho",
+    category: "laminado",
+    label: "Tábua Corrida Castanho",
+    file: "",
+    pattern: {
+      plankWidthPx: 24,
+      plankLengthPx: 108,
+      // uma cor só (colorA === colorB) -- a textura de "tábuas" vem
+      // inteira da linha de junta (lineColor), igual na foto de
+      // referência que o Douglas mandou (tábuas de tom uniforme,
+      // separadas só por uma linha escura, sem ripa "zebrada").
+      colorA: 0x6f5a42,
+      colorB: 0x6f5a42,
+      lineColor: 0x2c2115,
+    },
+  },
+  {
+    // 3ª foto de referência do Douglas: "e o mesmo do outro mas opcao
+    // de pintar diferente" -- mesma mecânica de tábua emendada/
+    // desalinhada da entrada acima, só que cada tábua sorteia (de
+    // forma determinística, ver plankColorIndex em MainScene.ts) uma
+    // cor de uma PALETA em vez de alternar só 2 cores por coluna --
+    // fica com tábuas de tonalidades variadas, tipo piso de madeira de
+    // reaproveitamento/demolição.
+    id: "laminado-tabua-mesclada",
+    category: "laminado",
+    label: "Tábua Mesclada",
+    file: "",
+    pattern: {
+      plankWidthPx: 24,
+      plankLengthPx: 108,
+      colorA: 0x6f5a42,
+      colorB: 0x6f5a42,
+      lineColor: 0x211a12,
+      colors: [0x8a8079, 0xcda274, 0x6b5842, 0x7d7268],
+    },
+  },
+];
+
+export const FLOOR_CATALOG: FloorCatalogEntry[] = [...GENERATED_FLOOR_CATALOG, ...FACTORY_FLOOR_PATTERNS];
 
 export function floorEntryById(id: string): FloorCatalogEntry | undefined {
   return FLOOR_CATALOG.find((e) => e.id === id);

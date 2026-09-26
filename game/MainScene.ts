@@ -1292,6 +1292,44 @@ export default class MainScene extends Phaser.Scene {
    * exatamente de um tile pro vizinho -- é isso que faz a sala inteira
    * parecer um piso corrido, em vez de um carimbo repetido.
    */
+  /** Escurece uma cor hex Phaser (ex: 0xa9835f) multiplicando cada canal
+   * RGB por `factor` -- usado como linha de junta AUTOMÁTICA das tábuas
+   * quando FloorPatternConfig.lineColor não é definido (ver
+   * createFloorPatternGraphics abaixo). */
+  private darkenColor(hex: number, factor = 0.55): number {
+    const r = Math.round(((hex >> 16) & 0xff) * factor);
+    const g = Math.round(((hex >> 8) & 0xff) * factor);
+    const b = Math.round((hex & 0xff) * factor);
+    return (r << 16) | (g << 8) | b;
+  }
+
+  /**
+   * Índice determinístico (0..len-1) pra escolher a cor de UMA tábua
+   * específica (coluna `i`, posição `j` dentro da coluna) dentro de
+   * FloorPatternConfig.colors -- "sorteia" sem sortear de verdade: mesma
+   * (i,j) sempre cai no mesmo índice, então a tábua não muda de cor
+   * sozinha ao redesenhar (refreshFloorModel, reconexão, etc.) sem
+   * precisar guardar em lugar nenhum qual cor cada tábua usa. Mistura de
+   * bits comum (tipo hash de posição de grade em shader/procgen), não
+   * precisa ser criptográfico, só bem distribuído. */
+  private plankColorIndex(i: number, j: number, len: number): number {
+    let h = (i * 374761393 + j * 668265263) ^ (i << 13);
+    h = Math.imul(h ^ (h >>> 15), 1274126177);
+    h = h ^ (h >>> 16);
+    return Math.abs(h) % len;
+  }
+
+  /** Cor de uma tábua (coluna `i`, posição `j`): sorteia de
+   * pattern.colors (ver plankColorIndex acima) quando essa paleta está
+   * definida, senão cai no comportamento antigo de alternar só
+   * colorA/colorB por coluna. */
+  private pickPlankColor(pattern: FloorPatternConfig, i: number, j: number): number {
+    if (pattern.colors && pattern.colors.length > 0) {
+      return pattern.colors[this.plankColorIndex(i, j, pattern.colors.length)];
+    }
+    return ((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB;
+  }
+
   private createFloorPatternGraphics(f: FloorTileDef, pattern: FloorPatternConfig): Phaser.GameObjects.Graphics {
     const pos = floorWorldPos(f);
     const gfx = this.add.graphics().setDepth(DEPTH_FLOOR);
@@ -1300,37 +1338,95 @@ export default class MainScene extends Phaser.Scene {
     // vetores UNITÁRIOS fixos (não dependem do tile): comprimento da
     // ripa na direção "col fixo, row variando" (-2,1) normalizada, e
     // perpendicular a ela (1,2) normalizada -- ver comentário grande
-    // acima.
+    // acima. Juntos formam uma base ORTONORMAL (dirWid . dirLen = 0),
+    // então qualquer ponto do mundo pode ser escrito como
+    // across*dirWid + along*dirLen, com across/along calculados abaixo.
     const dirLen = { x: -2 / sqrt5, y: 1 / sqrt5 };
     const dirWid = { x: 1 / sqrt5, y: 2 / sqrt5 };
-    const halfLength = ISO_TILE_WIDTH; // bem mais que suficiente pra cobrir 1 tile (128x64) inteiro, sobra de propósito
-    const p0 = pos.x + 2 * pos.y;
+    const p0 = pos.x + 2 * pos.y; // "across" do centro do tile (escala p, ver comentário grande acima)
     // alcance de faixas que podem tocar o tile -- folga de +-(hw+hh) em
     // p (a maior distância possível do centro até qualquer canto do
-    // losango, com folga) garante que nenhuma faixa borda fique de fora.
+    // losango, com folga) garante que nenhuma faixa/tábua borda fique de
+    // fora, nos dois eixos (across E along -- o losango do tile cabe
+    // inteiro num raio bem menor que isso nos dois sentidos).
     const reach = ISO_TILE_WIDTH / 2 + ISO_TILE_HEIGHT;
     const minIndex = Math.floor((p0 - reach) / step) - 1;
     const maxIndex = Math.ceil((p0 + reach) / step) + 1;
-    for (let i = minIndex; i <= maxIndex; i++) {
-      const pTarget = (i + 0.5) * step;
-      const dist = (pTarget - p0) / sqrt5;
-      const cx = pos.x + dirWid.x * dist;
-      const cy = pos.y + dirWid.y * dist;
-      const halfWidth = step / (2 * sqrt5);
-      const lx = dirLen.x * halfLength;
-      const ly = dirLen.y * halfLength;
-      const wx = dirWid.x * halfWidth;
-      const wy = dirWid.y * halfWidth;
-      gfx.fillStyle(((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB, 1);
-      gfx.fillPoints(
-        [
-          { x: cx - lx - wx, y: cy - ly - wy },
-          { x: cx + lx - wx, y: cy + ly - wy },
-          { x: cx + lx + wx, y: cy + ly + wy },
-          { x: cx - lx + wx, y: cy - ly + wy },
-        ],
-        true
-      );
+
+    if (pattern.plankLengthPx) {
+      // --- Tábuas EMENDADAS, com linha de junta e desalinhamento entre
+      // colunas ("amarração" de assoalho de verdade -- ver comentário
+      // grande de FloorPatternConfig.plankLengthPx em game/floor.ts).
+      // Pedido do Douglas junto com foto de referência de piso de
+      // tábua corrida: "vamos criar padroes aqui, e depois subir lá". ---
+      const lenStep = Math.max(4, pattern.plankLengthPx);
+      const q0 = -2 * pos.x + pos.y; // "along" do centro do tile (escala q, mesmo raciocínio de p0)
+      const lineColor = pattern.lineColor ?? this.darkenColor(pattern.colorA);
+      for (let i = minIndex; i <= maxIndex; i++) {
+        // colunas pares ficam alinhadas em j=0, colunas ímpares
+        // deslocadas meio comprimento -- é isso que faz as juntas de
+        // colunas vizinhas NÃO caírem todas na mesma linha (senão
+        // pareceria ladrilho/grade, não piso de tábua de verdade).
+        const colOffset = ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
+        const minJ = Math.floor((q0 - reach - colOffset) / lenStep) - 1;
+        const maxJ = Math.ceil((q0 + reach - colOffset) / lenStep) + 1;
+        for (let j = minJ; j <= maxJ; j++) {
+          const pTarget = (i + 0.5) * step;
+          const qTarget = j * lenStep + colOffset + lenStep / 2;
+          // ponto (cx,cy) = across*dirWid + along*dirLen, com
+          // across=pTarget/sqrt5 e along=qTarget/sqrt5 -- coordenadas
+          // ABSOLUTAS na base ortonormal (dirWid,dirLen), por isso a
+          // mesma grade de tábuas cai exatamente igual em tiles
+          // vizinhos, sem precisar de nenhum estado compartilhado entre
+          // eles (mesmo truque do resto do arquivo).
+          const across = pTarget / sqrt5;
+          const along = qTarget / sqrt5;
+          const cx = across * dirWid.x + along * dirLen.x;
+          const cy = across * dirWid.y + along * dirLen.y;
+          const halfWidth = step / (2 * sqrt5);
+          const halfLength = lenStep / (2 * sqrt5);
+          const lx = dirLen.x * halfLength;
+          const ly = dirLen.y * halfLength;
+          const wx = dirWid.x * halfWidth;
+          const wy = dirWid.y * halfWidth;
+          const points = [
+            { x: cx - lx - wx, y: cy - ly - wy },
+            { x: cx + lx - wx, y: cy + ly - wy },
+            { x: cx + lx + wx, y: cy + ly + wy },
+            { x: cx - lx + wx, y: cy - ly + wy },
+          ];
+          gfx.fillStyle(this.pickPlankColor(pattern, i, j), 1);
+          gfx.fillPoints(points, true);
+          gfx.lineStyle(1.5, lineColor, 1);
+          gfx.strokePoints(points, true, true);
+        }
+      }
+    } else {
+      // --- ripa CONTÍNUA (sem emenda/junta), comportamento original --
+      // mantido pra não mudar a aparência de nenhum piso "padrão" já
+      // cadastrado por alguém sem plankLengthPx definido. ---
+      const halfLength = ISO_TILE_WIDTH; // bem mais que suficiente pra cobrir 1 tile (128x64) inteiro, sobra de propósito
+      for (let i = minIndex; i <= maxIndex; i++) {
+        const pTarget = (i + 0.5) * step;
+        const dist = (pTarget - p0) / sqrt5;
+        const cx = pos.x + dirWid.x * dist;
+        const cy = pos.y + dirWid.y * dist;
+        const halfWidth = step / (2 * sqrt5);
+        const lx = dirLen.x * halfLength;
+        const ly = dirLen.y * halfLength;
+        const wx = dirWid.x * halfWidth;
+        const wy = dirWid.y * halfWidth;
+        gfx.fillStyle(((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB, 1);
+        gfx.fillPoints(
+          [
+            { x: cx - lx - wx, y: cy - ly - wy },
+            { x: cx + lx - wx, y: cy + ly - wy },
+            { x: cx + lx + wx, y: cy + ly + wy },
+            { x: cx - lx + wx, y: cy - ly + wy },
+          ],
+          true
+        );
+      }
     }
     // máscara: só o losango do tile fica visível -- mesmo padrão de
     // updateAreaDim (maskGfx "escondido", nunca desenhado na cena de
