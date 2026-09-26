@@ -138,8 +138,15 @@ const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM
 // folga menor, ou arrastado além dela) passa a só ESPIRRAR pra fora do
 // card por cima em vez de desaparecer -- nunca mais fica invisível/
 // impossível de arrastar, só eventualmente maior que a moldura branca
-// num caso extremo (raro -- a maioria fica bem dentro dos 60px).
-const AVATAR_STAGE_TOP_PAD = 60;
+// num caso extremo (raro -- a maioria fica bem dentro do pad).
+// Segunda rodada ("ta dificil ein kkkk corta logo essa janela, eu
+// quero ela menor em relacao ao meu monitor"): 60px ainda não bastava
+// -- com overflow já seguro (visible), dá pra cortar mais ainda, volta
+// pro valor mínimo original de antes do Douglas pedir mais espaço em
+// cima ("aumente essa area de exibicao eu preciso ver a cabeca toda
+// dele"). .items-panel também ganhou max-height menor (ver globals.css)
+// pra janela toda ficar menor em relação ao monitor, não só esse card.
+const AVATAR_STAGE_TOP_PAD = 24;
 const AVATAR_STAGE_HEIGHT = Math.ceil(
   STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + AVATAR_STAGE_TOP_PAD
 );
