@@ -916,12 +916,29 @@ function ImageCropModal({
   // que uma peça sair torta de um jeito diferente, dá pra corrigir na
   // hora, olhando, direto aqui.
   const [rotationDeg, setRotationDeg] = useState(0);
-  // versão ROTACIONADA do arquivo original (null = sem ajuste, usa `file`
-  // direto) -- gerada pelo useEffect logo abaixo sempre que rotationDeg
-  // muda. O recorte (rect/display/natural) e a prévia sempre operam em
-  // cima de `effectiveFile` (rotacionado ou não), nunca do `file`
-  // original direto, pra prévia e resultado final baterem sempre.
-  const [rotatedSource, setRotatedSource] = useState<File | null>(null);
+  // cisalhamento (graus, -30 a +30) -- pedido do Douglas depois de testar
+  // só a rotação acima: "ele so gira a imagem, nao faz aquela torcao...
+  // eu vi voce identificando as linhas e meio que torcendo a imagem ate
+  // ela bater as linhas". ROTAÇÃO sozinha só corrige um desalinhamento
+  // de ângulo UNIFORME (a peça inteira girada); quando o problema é a
+  // câmera do PixelLab olhando de uma ROTAÇÃO (azimute) levemente
+  // diferente da do jogo -- não só uma inclinação (elevação) diferente,
+  // que é o que PIXELLAB_VERTICAL_FIX já corrige -- o resultado é mais
+  // parecido com um efeito "keystone"/paralelogramo (um lado da peça
+  // "puxado" em relação ao outro), que rotação NENHUMA consegue desfazer
+  // (rotacionar só muda a ORIENTAÇÃO do erro, nunca o formato dele).
+  // Cisalhamento (shear) é a ferramenta certa pra isso -- inclina linhas
+  // verticais em diagonais sem mexer nas horizontais, exatamente a
+  // "torção" que dá pra fazer uma perna que tá saindo pro lado errado
+  // bater na linha-guia.
+  const [shearDeg, setShearDeg] = useState(0);
+  // versão TRANSFORMADA (rotação + cisalhamento) do arquivo original
+  // (null = sem ajuste nenhum, usa `file` direto) -- gerada pelo
+  // useEffect logo abaixo sempre que rotationDeg/shearDeg mudam. O
+  // recorte (rect/display/natural) e a prévia sempre operam em cima de
+  // `effectiveFile` (transformado ou não), nunca do `file` original
+  // direto, pra prévia e resultado final baterem sempre.
+  const [transformedSource, setTransformedSource] = useState<File | null>(null);
   // guia visual do losango do tile (pedido do Douglas: "mas sem o tile
   // ali como eu vou saber kkkkk" -- o ajuste fino de rotação acima é
   // inútil sem uma referência do ângulo/formato do tile pra comparar
@@ -941,27 +958,62 @@ function ImageCropModal({
   useEffect(() => {
     setFlipped(false);
     setRotationDeg(0);
-    setRotatedSource(null);
+    setShearDeg(0);
+    setTransformedSource(null);
   }, [file]);
 
   // canvas NOVO, maior que o original (cabe a imagem inteira rotacionada
-  // sem cortar os cantos -- fórmula padrão de bounding box de retângulo
-  // rotacionado), vira um File novo. Roda de novo toda vez que
-  // rotationDeg muda (inclusive voltando pra 0, aí só limpa
-  // rotatedSource e volta a usar `file` original sem gerar canvas à
-  // toa).
+  // E cisalhada sem cortar os cantos -- calcula a bounding box de
+  // verdade transformando os 4 cantos originais, não só a fórmula de
+  // rotação pura), vira um File novo. Roda de novo toda vez que
+  // rotationDeg/shearDeg mudam (inclusive voltando os dois pra 0, aí só
+  // limpa transformedSource e volta a usar `file` original sem gerar
+  // canvas à toa). Ordem da transformação (cisalha primeiro, gira
+  // depois -- ver comentário grande em shearDeg acima) é a MESMA nos
+  // cantos (pra calcular o tamanho do canvas) e no desenho de verdade
+  // logo abaixo, senão a bounding box calculada não bate com o
+  // resultado.
   useEffect(() => {
-    if (rotationDeg === 0) {
-      setRotatedSource(null);
+    if (rotationDeg === 0 && shearDeg === 0) {
+      setTransformedSource(null);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
         const bitmap = await createImageBitmap(file);
+        const w = bitmap.width;
+        const h = bitmap.height;
         const rad = (rotationDeg * Math.PI) / 180;
-        const newW = Math.ceil(Math.abs(bitmap.width * Math.cos(rad)) + Math.abs(bitmap.height * Math.sin(rad)));
-        const newH = Math.ceil(Math.abs(bitmap.width * Math.sin(rad)) + Math.abs(bitmap.height * Math.cos(rad)));
+        const shear = Math.tan((shearDeg * Math.PI) / 180);
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        function transformPoint(x: number, y: number): [number, number] {
+          // cisalha (x' = x + y*shear, y'=y) e DEPOIS gira -- mesma ordem
+          // das chamadas ctx.rotate/ctx.transform no desenho abaixo (uma
+          // chamada de canvas afeta o desenho seguinte, então a ÚLTIMA
+          // chamada antes do drawImage é a transformação mais "interna",
+          // aplicada primeiro ao ponto -- por isso ctx.rotate vem ANTES
+          // de ctx.transform(shear) no código: cisalha primeiro, gira
+          // depois, igual aqui).
+          const sx = x + y * shear;
+          const sy = y;
+          return [sx * cos - sy * sin, sx * sin + sy * cos];
+        }
+        const corners = [
+          transformPoint(-w / 2, -h / 2),
+          transformPoint(w / 2, -h / 2),
+          transformPoint(-w / 2, h / 2),
+          transformPoint(w / 2, h / 2),
+        ];
+        const xs = corners.map((p) => p[0]);
+        const ys = corners.map((p) => p[1]);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const newW = Math.max(1, Math.ceil(maxX - minX));
+        const newH = Math.max(1, Math.ceil(maxY - minY));
         const canvas = document.createElement("canvas");
         canvas.width = newW;
         canvas.height = newH;
@@ -970,23 +1022,24 @@ function ImageCropModal({
           bitmap.close?.();
           return;
         }
-        ctx.translate(newW / 2, newH / 2);
+        ctx.translate(-minX, -minY);
         ctx.rotate(rad);
-        ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+        ctx.transform(1, 0, shear, 1, 0, 0);
+        ctx.drawImage(bitmap, -w / 2, -h / 2, w, h);
         bitmap.close?.();
         const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
         if (!blob || cancelled) return;
-        setRotatedSource(new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" }));
+        setTransformedSource(new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" }));
       } catch (e) {
-        console.warn("Não deu pra girar a imagem pro ajuste fino, mantendo sem rotação", e);
+        console.warn("Não deu pra girar/cisalhar a imagem pro ajuste fino, mantendo sem ajuste", e);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [file, rotationDeg]);
+  }, [file, rotationDeg, shearDeg]);
 
-  const effectiveFile = rotatedSource ?? file;
+  const effectiveFile = transformedSource ?? file;
 
   useEffect(() => {
     const url = URL.createObjectURL(effectiveFile);
@@ -1153,6 +1206,25 @@ function ImageCropModal({
             />
             {rotationDeg !== 0 && (
               <button type="button" className="crop-modal-rotate-reset" onClick={() => setRotationDeg(0)}>
+                Resetar
+              </button>
+            )}
+          </label>
+          {/* cisalhamento ("torção") -- ver comentário grande no state
+              shearDeg acima (rotação sozinha não resolve um
+              desalinhamento tipo keystone/paralelogramo). */}
+          <label className="crop-modal-rotate">
+            <span>Torção: {shearDeg}°</span>
+            <input
+              type="range"
+              min={-30}
+              max={30}
+              step={0.5}
+              value={shearDeg}
+              onChange={(e) => setShearDeg(Number(e.target.value))}
+            />
+            {shearDeg !== 0 && (
+              <button type="button" className="crop-modal-rotate-reset" onClick={() => setShearDeg(0)}>
                 Resetar
               </button>
             )}
