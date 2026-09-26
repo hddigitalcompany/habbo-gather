@@ -235,11 +235,22 @@ const DEFAULT_SITTABLE_BY_CATEGORY: Record<CategoryId, boolean> = {
 
 // "down/left/right/up" = mesma convenção de direção do resto do jogo
 // (ver game/grid.ts) -- rótulo em português só pro formulário.
+// Rótulos "Frente esquerda/direita" e "Costas esquerda/direita" (pedido
+// do Douglas: "muda os nomes pra isso pra mim") em vez de "Frente/Lado
+// esquerdo/Lado direito/Costas" -- na grade ISOMÉTRICA (ver game/grid.ts),
+// cada uma das 4 direções lógicas (down/left/right/up, que NÃO mudaram --
+// só o texto exibido) sai numa diagonal da tela, não num lado reto: down
+// anda pra baixo-ESQUERDA da tela (frente esquerda), right anda pra
+// baixo-DIREITA (frente direita), up anda pra cima-DIREITA (costas
+// direita), left anda pra cima-ESQUERDA (costas esquerda) -- conta feita
+// em cima do delta de col/row de cada direção (ver startStep em
+// MainScene.ts) contra tileToWorld. Os nomes antigos (retos) não
+// combinavam mais com o ângulo de verdade da arte isométrica.
 const DIRECTION_FIELDS: { key: DirectionKey; label: string; required: boolean }[] = [
-  { key: "down", label: "Frente", required: true },
-  { key: "left", label: "Lado esquerdo", required: false },
-  { key: "right", label: "Lado direito", required: false },
-  { key: "up", label: "Costas", required: false },
+  { key: "down", label: "Frente esquerda", required: true },
+  { key: "left", label: "Costas esquerda", required: false },
+  { key: "right", label: "Frente direita", required: false },
+  { key: "up", label: "Costas direita", required: false },
 ];
 
 type CustomItemRow = {
@@ -1864,7 +1875,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       <p className="settings-hint">
         {editingAvatarItemId || editingSkinId
           ? "Editando -- nenhuma foto é obrigatória aqui, reenvie só a(s) direção/pose que quiser TROCAR, o resto continua com a arte já salva."
-          : 'Só a foto de "Frente" é obrigatória -- sem as outras, o jogo reaproveita a de frente virada nas outras direções (prévia rápida até você subir o resto).'}{" "}
+          : 'Só a foto de "Frente esquerda" é obrigatória -- sem as outras, o jogo reaproveita a de frente virada nas outras direções (prévia rápida até você subir o resto).'}{" "}
         Arraste a foto em cima do boneco pra posicionar, e use o slider pra ajustar o tamanho -- cada direção guarda o
         próprio ajuste.
       </p>
