@@ -1068,6 +1068,14 @@ function ImageCropModal({
  * editar/apagar ainda (nenhuma das duas APIs tem PATCH/DELETE -- só
  * criar, fica pra depois se o Douglas pedir).
  */
+// chave do localStorage que guarda qual TRAJE foi tocado por último
+// (criado OU editado) -- ver comentário grande perto de "referenceOutfit"
+// no editor de Mobi, mais abaixo, pro porquê disso existir. Módulo (não
+// dentro de um componente) porque tanto AvatarCreatorPanel (quem grava,
+// no fim de handleAvatarSubmit) quanto o corpo principal de ItemEditor
+// (quem lê, calculando referenceOutfit) precisam dela.
+const MOBI_REFERENCE_OUTFIT_STORAGE_KEY = "habbo-gather:mobi-reference-outfit-id";
+
 function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; onChanged: () => void }) {
   const [category, setCategory] = useState<AvatarCreatorCategory>("avatar");
   const [gender, setGender] = useState<AvatarGender>("masculino");
@@ -1750,6 +1758,10 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
       if (uploadError) throw uploadError;
       const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
 
+      // ver comentário grande mais abaixo, perto de MOBI_REFERENCE_OUTFIT_STORAGE_KEY
+      // -- só as 2 ramificações de "traje" preenchem isso.
+      let touchedOutfitId: string | undefined;
+
       if (category === "avatar" && editingSkinId) {
         // "Editar" (pedido do Douglas: "quero editar o Avatar tambem")
         // -- PATCH no lugar de POST, mesmo tom (não cria uma linha
@@ -1792,6 +1804,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "erro ao salvar alterações");
         await loadAvatarItems();
+        touchedOutfitId = category === "traje" ? editingAvatarItemId : undefined;
       } else {
         const res = await fetch("/api/avatar-items", {
           method: "POST",
@@ -1807,6 +1820,31 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "erro ao salvar item");
         await loadAvatarItems();
+        // resposta é { item: {...} } (ver POST /api/avatar-items),
+        // não { id } direto.
+        touchedOutfitId = category === "traje" ? data.item?.id : undefined;
+      }
+
+      // Douglas: "atualiza o carinha sentado no editor de mobi" / "eu
+      // alterei ele, tem que atualizar" -- o boneco de referência do
+      // Mobi (ver referenceOutfit mais abaixo) escolhia sempre o ÚLTIMO
+      // traje do CATÁLOGO (upsertCatalogById mantém a posição de quem já
+      // existia, só empurra item NOVO pro fim -- ver customization.ts).
+      // Isso só reflete "o traje mais recente" quando é um traje
+      // CRIADO agora; editar um traje mais ANTIGO (não o último da
+      // lista) atualiza os dados dele certinho, mas o boneco de
+      // referência continuava mostrando outro traje (o último criado,
+      // não o que acabou de ser editado). Guarda qual foi o traje
+      // tocado por ÚLTIMO (criado OU editado) no localStorage -- sobrevive
+      // a fechar/reabrir o Editor de Itens, sem precisar de coluna nova
+      // no banco (avatar_items não tem updated_at).
+      if (touchedOutfitId) {
+        try {
+          window.localStorage.setItem(MOBI_REFERENCE_OUTFIT_STORAGE_KEY, touchedOutfitId);
+        } catch {
+          // localStorage indisponível (modo privado etc.) -- boneco de
+          // referência só cai no fallback de sempre (último do catálogo)
+        }
       }
 
       resetCreatorForm();
@@ -2952,16 +2990,34 @@ export default function ItemEditor({
   // boneco de referência (ver comentário grande no topo do módulo, perto
   // de onde essas 3 eram `const` fixas) -- recalculado a cada render pra
   // acompanhar HAIR_CATALOG/SKIN_CATALOG/OUTFIT_CATALOG assim que um
-  // fetch de item custom termina. Traje: o ÚLTIMO não-"Nenhum" (não o
-  // primeiro) -- upsertCatalogById (customization.ts) empurra item novo
-  // pro FIM do catálogo, então "o último" é sempre o traje mais
-  // recente que o Douglas cadastrou, com a pose/foto mais nova de cada
-  // uma (é exatamente o que ele quer ver/arrastar aqui depois de subir
-  // um traje com "Sentado" novo).
+  // fetch de item custom termina. Traje: por padrão o ÚLTIMO não-"Nenhum"
+  // (não o primeiro) -- upsertCatalogById (customization.ts) empurra item
+  // NOVO pro fim do catálogo, então "o último" costuma ser o traje mais
+  // recente que o Douglas cadastrou.
+  //
+  // Só que isso quebra quando ele EDITA um traje mais antigo em vez de
+  // criar um novo (pedido: "atualiza o carinha sentado no editor de mobi"
+  // / "eu alterei ele, tem que atualizar") -- upsertCatalogById mantém a
+  // POSIÇÃO de quem já existia (só troca os dados no lugar), então "o
+  // último da lista" continua sendo outro traje qualquer, não o que
+  // acabou de ser editado. MOBI_REFERENCE_OUTFIT_STORAGE_KEY (gravado no
+  // handleAvatarSubmit da AvatarCreatorPanel, tanto ao criar quanto ao
+  // editar) guarda o id do traje TOCADO por último de verdade -- prioridade
+  // sobre o "último do catálogo" sempre que esse id ainda existir no
+  // catálogo atual (item apagado depois cai de volta no fallback).
   const referenceHair = HAIR_CATALOG.find((h) => h.id === DEFAULT_HAIR_ID) ?? HAIR_CATALOG[0];
   const referenceSkin = SKIN_CATALOG.find((s) => s.id === DEFAULT_SKIN_ID) ?? SKIN_CATALOG[0];
   const nonDefaultOutfits = OUTFIT_CATALOG.filter((o) => o.id !== DEFAULT_OUTFIT_ID);
-  const referenceOutfit = nonDefaultOutfits[nonDefaultOutfits.length - 1] ?? OUTFIT_CATALOG[0];
+  let lastTouchedOutfitId: string | null = null;
+  try {
+    lastTouchedOutfitId = window.localStorage.getItem(MOBI_REFERENCE_OUTFIT_STORAGE_KEY);
+  } catch {
+    // localStorage indisponível -- segue pro fallback de sempre
+  }
+  const referenceOutfit =
+    (lastTouchedOutfitId && nonDefaultOutfits.find((o) => o.id === lastTouchedOutfitId)) ||
+    nonDefaultOutfits[nonDefaultOutfits.length - 1] ||
+    OUTFIT_CATALOG[0];
   const referenceOutfitFile = referenceOutfit ? outfitFileForSkin(referenceOutfit, DEFAULT_SKIN_ID) : undefined;
 
   // offset em uso pela direção ATIVA -- "down" lê offsetX/offsetY
