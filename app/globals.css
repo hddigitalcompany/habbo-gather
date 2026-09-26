@@ -4734,3 +4734,155 @@ body {
 .crop-modal-actions .items-panel-submit {
   margin-top: 0;
 }
+
+/* --- color picker próprio (components/ColorPickerField.tsx) --------
+   substitui o <input type="color"> NATIVO (janela do sistema, fora do
+   visual do app) -- pedido do Douglas, mandou print de um picker com
+   quadrado de saturação/brilho + barra de matiz arco-íris + campo hex
+   com conta-gotas: "quero escolher as cores assim". Paleta adaptada pro
+   roxo-escuro do resto da UI (mesmo fundo/borda de .auth-gate-card e
+   .crop-modal-backdrop) -- só o quadrado e a barra em si continuam
+   coloridos de verdade, já que são o próprio seletor. z-index acima do
+   .items-panel-backdrop (400) e do .crop-modal-backdrop (450), pra
+   funcionar também quando aberto dentro do modal de recorte. */
+.color-field {
+  position: relative;
+  display: inline-flex;
+}
+
+.color-field-trigger {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+
+.color-field-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 459;
+  background: transparent;
+}
+
+.color-field-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 460;
+  width: 220px;
+  background: rgba(28, 22, 42, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.color-field-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #cfc4e6;
+  letter-spacing: 0.02em;
+}
+
+.color-field-sv {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  border-radius: 10px;
+  cursor: crosshair;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.color-field-sv-white {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+}
+
+.color-field-sv-black {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, #000, rgba(0, 0, 0, 0));
+}
+
+.color-field-sv-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.color-field-hue {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.color-field-hue-handle {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  margin-top: -8px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  background: transparent;
+}
+
+.color-field-hex-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-field-hex-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex: none;
+}
+
+.color-field-hex-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #f5f0ff;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.color-field-eyedropper {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

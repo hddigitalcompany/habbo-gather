@@ -21,6 +21,7 @@ import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 import { FLOOR_CATEGORIES, FloorCategory } from "@/game/floor";
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
+import { ColorPickerField } from "@/components/ColorPickerField";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
   HAIR_CATALOG,
@@ -2188,10 +2189,10 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         )}
 
         {category === "avatar" && (
-          <label className="items-panel-upload-field">
+          <div className="items-panel-upload-field">
             <span>Cor do botão (opcional)</span>
-            <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} />
-          </label>
+            <ColorPickerField value={hex} onChange={setHex} />
+          </div>
         )}
 
         {usesBySkin && (
@@ -3921,10 +3922,10 @@ export default function ItemEditor({
                     />
                   </label>
                   {floorPlankLength.trim() !== "" && (
-                    <label className="items-panel-upload-field">
+                    <div className="items-panel-upload-field">
                       <span>Cor da linha de junta</span>
-                      <input type="color" value={floorLineColor} onChange={(e) => setFloorLineColor(e.target.value)} />
-                    </label>
+                      <ColorPickerField value={floorLineColor} onChange={setFloorLineColor} />
+                    </div>
                   )}
 
                   {/* lista de cores -- 2 (o de sempre, alternadas) ou
@@ -3936,7 +3937,7 @@ export default function ItemEditor({
                   <p className="settings-hint">Cores (mínimo 2, máximo 6) -- com mais de 2, cada tábua sorteia uma dessas cores.</p>
                   <div className="items-panel-submit-row">
                     {floorColors.map((color, i) => (
-                      <label key={i} className="items-panel-upload-field">
+                      <div key={i} className="items-panel-upload-field">
                         <span>
                           Cor {i + 1}
                           {floorColors.length > 2 && (
@@ -3945,8 +3946,8 @@ export default function ItemEditor({
                             </button>
                           )}
                         </span>
-                        <input type="color" value={color} onChange={(e) => updateFloorColor(i, e.target.value)} />
-                      </label>
+                        <ColorPickerField value={color} onChange={(hex) => updateFloorColor(i, hex)} />
+                      </div>
                     ))}
                   </div>
                   {floorColors.length < 6 && (
