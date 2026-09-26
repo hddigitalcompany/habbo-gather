@@ -4680,6 +4680,45 @@ body {
   background: rgba(255, 255, 255, 0.15);
 }
 
+.crop-modal-guide-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #cfc4e6;
+  cursor: pointer;
+}
+
+/* guia visual do losango do tile por cima da foto no recorte (ver
+   showTileGuide/guideY em ItemEditor.tsx) -- pedido do Douglas: "mas sem
+   o tile ali como eu vou saber kkkkk" (o ajuste fino de rotação sem
+   nenhuma referência de ângulo não serve pra nada). Fica por cima de
+   TUDO (imagem + sombra do recorte) pra continuar visível em qualquer
+   estado, e pointer-events:none pra nunca atrapalhar o arraste do
+   retângulo de recorte por baixo. As linhas cobrem a imagem INTEIRA
+   (bem maiores que o próprio SVG, cortadas pelo viewBox) pra dar pra
+   comparar o ângulo contra qualquer parte da peça, não só onde o
+   losango tá desenhado. Mesma paleta losango-lilás/linha-amarela do
+   destaque de tile do próprio jogo (ver .floor-swatch/addAreaTileRect). */
+.crop-modal-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.crop-modal-guide line {
+  stroke: #ffd447;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+  opacity: 0.85;
+}
+
+.crop-modal-guide polygon {
+  fill: rgba(124, 92, 255, 0.22);
+  stroke: #d9d0ff;
+  stroke-width: 2;
+}
+
 .crop-modal-stage {
   position: relative;
   margin-top: 10px;

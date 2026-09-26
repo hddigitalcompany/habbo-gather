@@ -922,6 +922,20 @@ function ImageCropModal({
   // cima de `effectiveFile` (rotacionado ou não), nunca do `file`
   // original direto, pra prévia e resultado final baterem sempre.
   const [rotatedSource, setRotatedSource] = useState<File | null>(null);
+  // guia visual do losango do tile (pedido do Douglas: "mas sem o tile
+  // ali como eu vou saber kkkkk" -- o ajuste fino de rotação acima é
+  // inútil sem uma referência do ângulo/formato do tile pra comparar
+  // contra) -- puramente ILUSTRATIVO (não sabe a escala/posição real que
+  // a peça vai ocupar na sala, isso é ajustado DEPOIS, na tela de
+  // posição/âncora), só dá um losango no ângulo/proporção CERTOS (2:1,
+  // mesma conta de ISO_TILE_WIDTH/HEIGHT) + 2 linhas-guia no mesmo
+  // ângulo esticadas pela imagem inteira, pra comparar contra as bordas/
+  // pernas da peça em qualquer altura da imagem, não só onde o losango
+  // tá desenhado. guideY é a posição vertical do CENTRO do losango (%
+  // da altura da imagem) -- ajustável porque cada peça tem uma folga
+  // diferente embaixo dos "pés" na foto.
+  const [showTileGuide, setShowTileGuide] = useState(true);
+  const [guideY, setGuideY] = useState(78);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
@@ -1143,6 +1157,25 @@ function ImageCropModal({
               </button>
             )}
           </label>
+          {/* guia do losango -- ver comentário grande no state
+              showTileGuide/guideY acima. */}
+          <label className="crop-modal-guide-toggle">
+            <input type="checkbox" checked={showTileGuide} onChange={(e) => setShowTileGuide(e.target.checked)} />
+            Guia do tile
+          </label>
+          {showTileGuide && (
+            <label className="crop-modal-rotate">
+              <span>Altura da guia</span>
+              <input
+                type="range"
+                min={20}
+                max={95}
+                step={1}
+                value={guideY}
+                onChange={(e) => setGuideY(Number(e.target.value))}
+              />
+            </label>
+          )}
         </div>
         {imgUrl && (
           <div
@@ -1183,6 +1216,31 @@ function ImageCropModal({
                   ))}
                 </div>
               </>
+            )}
+            {showTileGuide && display && (
+              <svg
+                className="crop-modal-guide"
+                width={display.w}
+                height={display.h}
+                viewBox={`0 0 ${display.w} ${display.h}`}
+              >
+                {(() => {
+                  const cx = display.w / 2;
+                  const cy = (display.h * guideY) / 100;
+                  const halfW = Math.min(display.w, display.h * 2.2) * 0.32;
+                  const halfH = halfW / 2;
+                  const big = Math.max(display.w, display.h) * 2;
+                  return (
+                    <>
+                      <line x1={cx - big} y1={cy - big / 2} x2={cx + big} y2={cy + big / 2} />
+                      <line x1={cx - big} y1={cy + big / 2} x2={cx + big} y2={cy - big / 2} />
+                      <polygon
+                        points={`${cx},${cy - halfH} ${cx + halfW},${cy} ${cx},${cy + halfH} ${cx - halfW},${cy}`}
+                      />
+                    </>
+                  );
+                })()}
+              </svg>
             )}
           </div>
         )}
