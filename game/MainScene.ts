@@ -1663,8 +1663,28 @@ export default class MainScene extends Phaser.Scene {
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("hairSprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
-    const currentFrame = sprite.frame.name;
-    sprite.setTexture(hairTextureKey(hairId), currentFrame);
+    // mesma checagem que setLocalSkinId já tinha (textures.exists) --
+    // achado investigando avisos "Texture __MISSING has no frame N" no
+    // console do Douglas (ver comentário grande em runWhenSceneReady,
+    // GameRoom.tsx): GameRoom.tsx aplica o cabelo/barba/acessório/traje
+    // salvos assim que a cena fica pronta, ANTES da textura custom
+    // (Editor de Itens) terminar de chegar do Supabase -- sem essa
+    // checagem, setTexture ia direto com a chave ainda não carregada, o
+    // Phaser caía pro texture "__MISSING" (que só tem 1 frame) e o
+    // currentFrame (de um frame válido da pose ANTERIOR, tipo "4"/"5")
+    // não existe nela -- daí o aviso. setLocalSkinId (logo abaixo) já
+    // tratava isso escondendo a sprite em vez de tentar a textura
+    // quebrada; faltava replicar aqui. Não é permanente: assim que a
+    // busca (fetchAndRegisterCustomSkins/fetchAndRegisterCustomAvatarItems,
+    // GameRoom.tsx) termina, ela chama essa função de novo com a textura
+    // já carregada, e a sprite reaparece certa.
+    const key = hairTextureKey(hairId);
+    const exists = this.textures.exists(key);
+    if (exists) {
+      const currentFrame = sprite.frame.name;
+      sprite.setTexture(key, currentFrame);
+    }
+    sprite.setVisible(exists);
     this.localContainer.setData("hairId", hairId);
   }
 
@@ -1701,9 +1721,17 @@ export default class MainScene extends Phaser.Scene {
       if (outfit) {
         const resolvedSkinId = resolveOutfitSkinId(outfit, skinId);
         if (resolvedSkinId) {
-          const currentFrame = outfitSprite.frame.name;
-          outfitSprite.setTexture(outfitTextureKey(outfit.id, resolvedSkinId), currentFrame);
-          outfitSprite.setVisible(true);
+          // mesma checagem de textures.exists do resto desta função --
+          // ver comentário grande em setLocalHairId (avisos "Texture
+          // __MISSING has no frame N" quando a textura do traje pro tom
+          // novo ainda não chegou do Supabase).
+          const key = outfitTextureKey(outfit.id, resolvedSkinId);
+          const exists = this.textures.exists(key);
+          if (exists) {
+            const currentFrame = outfitSprite.frame.name;
+            outfitSprite.setTexture(key, currentFrame);
+          }
+          outfitSprite.setVisible(exists);
         } else {
           // sem traje pro SEXO do tom novo (ver resolveOutfitSkinId) --
           // esconde em vez de deixar a textura antiga (de outro sexo)
@@ -1720,9 +1748,13 @@ export default class MainScene extends Phaser.Scene {
       if (beard) {
         const resolvedBeardSkinId = resolveBeardSkinId(beard, skinId);
         if (resolvedBeardSkinId) {
-          const currentFrame = beardSprite.frame.name;
-          beardSprite.setTexture(beardTextureKey(beard.id, resolvedBeardSkinId), currentFrame);
-          beardSprite.setVisible(true);
+          const key = beardTextureKey(beard.id, resolvedBeardSkinId);
+          const exists = this.textures.exists(key);
+          if (exists) {
+            const currentFrame = beardSprite.frame.name;
+            beardSprite.setTexture(key, currentFrame);
+          }
+          beardSprite.setVisible(exists);
         } else {
           beardSprite.setVisible(false);
         }
@@ -1749,9 +1781,15 @@ export default class MainScene extends Phaser.Scene {
       this.localContainer.setData("beardId", beardId);
       return;
     }
-    const currentFrame = sprite.frame.name;
-    sprite.setTexture(beardTextureKey(beard.id, resolvedSkinId), currentFrame);
-    sprite.setVisible(true);
+    // mesma checagem de textures.exists -- ver comentário grande em
+    // setLocalHairId (avisos "Texture __MISSING has no frame N").
+    const key = beardTextureKey(beard.id, resolvedSkinId);
+    const exists = this.textures.exists(key);
+    if (exists) {
+      const currentFrame = sprite.frame.name;
+      sprite.setTexture(key, currentFrame);
+    }
+    sprite.setVisible(exists);
     this.localContainer.setData("beardId", beardId);
   }
 
@@ -1760,8 +1798,15 @@ export default class MainScene extends Phaser.Scene {
     if (!this.localContainer) return;
     const sprite = this.localContainer.getData("accessorySprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
-    const currentFrame = sprite.frame.name;
-    sprite.setTexture(accessoryTextureKey(accessoryId), currentFrame);
+    // mesma checagem de textures.exists -- ver comentário grande em
+    // setLocalHairId (avisos "Texture __MISSING has no frame N").
+    const key = accessoryTextureKey(accessoryId);
+    const exists = this.textures.exists(key);
+    if (exists) {
+      const currentFrame = sprite.frame.name;
+      sprite.setTexture(key, currentFrame);
+    }
+    sprite.setVisible(exists);
     this.localContainer.setData("accessoryId", accessoryId);
   }
 
@@ -1790,9 +1835,17 @@ export default class MainScene extends Phaser.Scene {
       this.localContainer.setData("outfitId", outfitId);
       return;
     }
-    const currentFrame = sprite.frame.name;
-    sprite.setTexture(outfitTextureKey(outfit.id, resolvedSkinId), currentFrame);
-    sprite.setVisible(true);
+    // mesma checagem de textures.exists -- ver comentário grande em
+    // setLocalHairId (avisos "Texture __MISSING has no frame N") -- o
+    // traje é justamente o mais provável de ser CUSTOM (Editor de Itens),
+    // então o mais comum de bater essa corrida no carregamento inicial.
+    const key = outfitTextureKey(outfit.id, resolvedSkinId);
+    const exists = this.textures.exists(key);
+    if (exists) {
+      const currentFrame = sprite.frame.name;
+      sprite.setTexture(key, currentFrame);
+    }
+    sprite.setVisible(exists);
     this.localContainer.setData("outfitId", outfitId);
   }
 
