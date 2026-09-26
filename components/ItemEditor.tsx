@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH } from "@/game/furniture";
-import { TILE } from "@/game/grid";
+import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
   HAIR_CATALOG,
@@ -95,15 +95,21 @@ const PREVIEW_SCALE = 2.5;
 // substituiu).
 const AVATAR_DISPLAY_H = FRAME_H * AVATAR_SCALE * PREVIEW_SCALE;
 const AVATAR_DISPLAY_W = FRAME_W * AVATAR_SCALE * PREVIEW_SCALE;
-// distância (px, na tela) do pé do boneco até a borda de BAIXO do tile
-// -- o boneco ancora no CENTRO do tile (+ AVATAR_FOOT_OFFSET_Y pra
-// baixo, só visual, ver comentário em MainScene.ts), o móvel ancora na
-// borda de BAIXO (ver furnitureWorldPos, game/furniture.ts) -- são
-// pontos DIFERENTES do mesmo quadrado, por isso o boneco "flutua" um
-// pouco acima da base do tile no preview -- é assim no jogo de verdade
-// também.
-const AVATAR_FOOT_FROM_TILE_BOTTOM = (TILE / 2 - AVATAR_FOOT_OFFSET_Y) * PREVIEW_SCALE;
-const TILE_SIZE_PX = TILE * PREVIEW_SCALE;
+// distância (px, na tela) do pé do boneco até o vértice de BAIXO do
+// losango do tile (grade isométrica, ver game/grid.ts -- era a borda de
+// baixo de um quadrado, virou a ponta da frente de um losango) -- o
+// boneco ancora no CENTRO do tile (+ AVATAR_FOOT_OFFSET_Y pra baixo, só
+// visual, ver comentário em MainScene.ts), o móvel ancora nesse vértice
+// de baixo (ver furnitureWorldPos, game/furniture.ts) -- são pontos
+// DIFERENTES do mesmo tile, por isso o boneco "flutua" um pouco acima
+// da base no preview -- é assim no jogo de verdade também.
+const AVATAR_FOOT_FROM_TILE_BOTTOM = (ISO_TILE_HEIGHT / 2 - AVATAR_FOOT_OFFSET_Y) * PREVIEW_SCALE;
+// largura/altura (px, na tela) do losango de referência -- era um
+// quadrado único (TILE_SIZE_PX); agora largura e altura do tile são
+// DIFERENTES (proporção 2:1, ver ISO_TILE_WIDTH/ISO_TILE_HEIGHT), então
+// viraram duas constantes.
+const TILE_WIDTH_PX = ISO_TILE_WIDTH * PREVIEW_SCALE;
+const TILE_HEIGHT_PX = ISO_TILE_HEIGHT * PREVIEW_SCALE;
 // margem abaixo da base do tile -- espaço pra arrastar o item pra baixo
 // (offsetY positivo) e pro quadrado continuar visível inteiro.
 const STAGE_BASELINE_PAD = 70;
@@ -2171,7 +2177,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
                 principal mais abaixo). Mesmo tamanho/âncora ali. */}
             <div
               className="item-stage-tile"
-              style={{ bottom: STAGE_BASELINE_PAD, width: TILE_SIZE_PX, height: TILE_SIZE_PX }}
+              style={{ bottom: STAGE_BASELINE_PAD, width: TILE_WIDTH_PX, height: TILE_HEIGHT_PX }}
             />
 
             {/* pedido do Douglas: "eu salvei ela, e depois ela diminuiu
@@ -3250,7 +3256,7 @@ export default function ItemEditor({
 
               <div
                 className="item-stage-tile"
-                style={{ bottom: STAGE_BASELINE_PAD, width: TILE_SIZE_PX, height: TILE_SIZE_PX }}
+                style={{ bottom: STAGE_BASELINE_PAD, width: TILE_WIDTH_PX, height: TILE_HEIGHT_PX }}
               />
 
               {stageArtSrc ? (

@@ -4156,16 +4156,18 @@ body {
   white-space: nowrap;
 }
 
-/* Quadrado do tamanho REAL do tile (ver TILE_SIZE_PX em ItemEditor.tsx)
-   -- só uma referência visual (borda + leve preenchimento), não precisa
-   de textura de piso de verdade. */
+/* Losango do tamanho REAL do tile (ver TILE_WIDTH_PX/TILE_HEIGHT_PX em
+   ItemEditor.tsx) -- só uma referência visual (borda + leve
+   preenchimento), não precisa de textura de piso de verdade. Era um
+   quadrado (border-radius); virou losango via clip-path -- grade
+   isométrica, ver game/grid.ts. */
 .item-stage-tile {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
   border: 2px dashed rgba(124, 92, 255, 0.55);
   background: rgba(124, 92, 255, 0.08);
-  border-radius: 4px;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
   pointer-events: none;
 }
 

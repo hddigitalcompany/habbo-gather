@@ -24,7 +24,19 @@ import {
   seatOffsetGroupKey,
   seatOffsetGroupLabel,
 } from "./furniture";
-import { clampTile, tileToWorld, worldToTile, Direction, TILE, GRID_COLS, GRID_ROWS, GAME_WIDTH, GAME_HEIGHT } from "./grid";
+import {
+  clampTile,
+  tileToWorld,
+  worldToTile,
+  Direction,
+  ISO_TILE_WIDTH,
+  ISO_TILE_HEIGHT,
+  GRID_COLS,
+  GRID_ROWS,
+  GAME_WIDTH,
+  GAME_HEIGHT,
+} from "./grid";
+import { tileDiamondCorners, tileRangeCorners } from "./iso";
 import {
   HAIR_CATALOG,
   DEFAULT_HAIR_ID,
@@ -257,13 +269,16 @@ export function outfitTextureKey(outfitId: string, resolvedSkinId: string): stri
 // no MEIO de um passo (andando continuamente) -- e não só quando ele já
 // terminou de chegar.
 //
-// IMPORTANTE: a fronteira usa a FILEIRA LÓGICA do móvel (f.row), não a
-// posição visual dele (furnitureWorldPos, que pode ter um baseOffsetY
+// IMPORTANTE: a fronteira usa o TILE LÓGICO do móvel (f.col/f.row), não
+// a posição visual dele (furnitureWorldPos, que pode ter um baseOffsetY
 // de ajuste fino -- ver furniture.ts) -- assim reposicionar a arte pra
 // ficar bonita não muda em que tile a troca de profundidade acontece,
-// que continua sendo sempre a borda entre a fileira de cima e a
-// fileira onde o móvel está ancorado (col/row).
-const DEPTH_FURNITURE_ROW_HEIGHT = TILE;
+// que continua sendo sempre o vértice de TRÁS (o de cima) do losango
+// onde o móvel está ancorado. No isométrico precisa do col JUNTO com o
+// row (não só do row como na grade quadrada de antes) -- y agora
+// depende da SOMA col+row, então dois móveis na mesma "fileira" mas em
+// colunas diferentes já não ficam mais na mesma altura de tela.
+const DEPTH_FURNITURE_ROW_HEIGHT = ISO_TILE_HEIGHT;
 
 // exceção: móveis "flat" (tapete, por exemplo -- sem altura de verdade,
 // não faz sentido o boneco passar "por trás" deles) ficam sempre atrás
@@ -313,9 +328,9 @@ const AREA_DIM_ALPHA = 0.45;
 // aparecia nada pintado, por mais que o clique/arrasto funcionasse.
 const DEPTH_ROOM_BACKGROUND = -3_000_000;
 
-/** Fronteira de profundidade de um móvel a partir da FILEIRA lógica dele (não da posição visual) -- ver comentário acima. */
-function furnitureDepthForRow(row: number): number {
-  return tileToWorld(0, row).y + TILE / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
+/** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
+function furnitureDepthForTile(col: number, row: number): number {
+  return tileToWorld(col, row).y + ISO_TILE_HEIGHT / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
 }
 
 // móveis "de vidro" (FurnitureDef.transparent) desenham com essa opacidade
@@ -330,7 +345,7 @@ const GLASS_ALPHA = 0.55;
 // (pedido do Douglas).
 const CATALOG_GHOST_ALPHA = 0.5;
 
-/** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForRow(). */
+/** Profundidade do boneco -- é só o próprio Y dele (ancorado no centro do tile), sem ajuste nenhum: compara direto contra furnitureDepthForTile(). */
 function avatarDepthForY(y: number): number {
   return y;
 }
@@ -598,7 +613,7 @@ export default class MainScene extends Phaser.Scene {
   // tile, pintar de novo em cima troca o tipo em vez de empilhar).
   private selectedAreaTool: AreaTool = null;
   private draftArea: Map<string, AreaTileDef> = new Map();
-  private draftAreaSprites: Map<string, Phaser.GameObjects.Rectangle> = new Map();
+  private draftAreaSprites: Map<string, Phaser.GameObjects.Polygon> = new Map();
   private isPaintingArea = false;
   private lastPaintedAreaKey: string | null = null;
 
@@ -993,7 +1008,7 @@ export default class MainScene extends Phaser.Scene {
     const image = this.add
       .image(pos.x, pos.y, key)
       .setOrigin(0.5, 1)
-      .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(f.row))
+      .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForTile(f.col, f.row))
       .setAlpha(f.transparent ? GLASS_ALPHA : 1);
 
     // item CUSTOM (Editor de Itens, ver FurnitureModelDef.custom em
@@ -1106,7 +1121,7 @@ export default class MainScene extends Phaser.Scene {
     return this.add
       .image(pos.x, pos.y, key)
       .setOrigin(0.5, 0.5)
-      .setDisplaySize(TILE, TILE)
+      .setDisplaySize(ISO_TILE_WIDTH, ISO_TILE_HEIGHT)
       .setDepth(DEPTH_FLOOR);
   }
 
@@ -1777,7 +1792,7 @@ export default class MainScene extends Phaser.Scene {
     // sai na frente naturalmente, sentado "visível" sobre o móvel.
     this.localContainer.setDepth(
       furniture.facing === "up"
-        ? furnitureDepthForRow(furniture.row) - 1
+        ? furnitureDepthForTile(furniture.col, furniture.row) - 1
         : avatarDepthForY(this.localContainer.y)
     );
     // avisa o servidor que sentou (ver protocolo "seat" em
@@ -2466,7 +2481,7 @@ export default class MainScene extends Phaser.Scene {
         this.setPoseFrame(container, SENTADO_FRAMES[furniture.facing]);
         container.setDepth(
           furniture.facing === "up"
-            ? furnitureDepthForRow(furniture.row) - 1
+            ? furnitureDepthForTile(furniture.col, furniture.row) - 1
             : avatarDepthForY(container.y)
         );
       }
@@ -2547,20 +2562,24 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Cria o retângulo de tinta de UM tile de área -- sem textura própria
+   * Cria o losango de tinta de UM tile de área -- sem textura própria
    * (diferente do piso/mobília), é só uma cor chapada semi-transparente
    * (a cor vem do TIPO da área dona do tile, ver areaDefs/AREA_TYPES em
    * game/areas.ts). Alpha depende do modo de edição (mais forte
    * editando, mais discreto no uso normal -- ver refreshAreaTileAlpha).
+   * Era um Rectangle GameObject (tile quadrado) -- virou Polygon (tile
+   * losango, ver game/iso.ts): pontos relativos ao CENTRO (0,0), a
+   * posição de verdade (pos.x/pos.y) é dada separada, igual o Rectangle
+   * fazia antes.
    */
-  private addAreaTileRect(t: AreaTileDef): Phaser.GameObjects.Rectangle {
+  private addAreaTileRect(t: AreaTileDef): Phaser.GameObjects.Polygon {
     const pos = areaWorldPos(t);
     const def = this.areaDefs.get(t.areaId);
     // cinza defensivo se a área sumiu da lista -- não deveria acontecer
     // em uso normal (setAreaDefs já limpa tile órfão), só por segurança.
     const color = def ? areaTypeMeta(def.type).color : 0x888888;
     return this.add
-      .rectangle(pos.x, pos.y, TILE, TILE, color, this.editMode ? 0.35 : 0.16)
+      .polygon(pos.x, pos.y, tileDiamondCorners(0, 0), color, this.editMode ? 0.35 : 0.16)
       .setDepth(DEPTH_AREA);
   }
 
@@ -2659,7 +2678,18 @@ export default class MainScene extends Phaser.Scene {
     this.updateAreaDim(true);
   }
 
-  /** Desenha (do zero) o contorno de cada área que já tem pelo menos 1 tile pintado -- um retângulo por área, do canto superior-esquerdo ao inferior-direito dela (ver areaTileBounds em game/areas.ts; numa área com formato irregular isso pode incluir algum tile de fora, simplificação aceitável pro uso esperado). Mais forte durante a edição, mais discreto no uso normal. */
+  /**
+   * Desenha (do zero) o contorno de cada área que já tem pelo menos 1
+   * tile pintado -- um paralelogramo por área, do vértice de trás ao
+   * vértice da frente do bounding-box dela em col/row (ver
+   * areaTileBounds em game/areas.ts; numa área com formato irregular
+   * isso pode incluir algum tile de fora, simplificação aceitável pro
+   * uso esperado -- mesma simplificação de sempre, só que agora o
+   * "retângulo" reto virou um paralelogramo, porque um retângulo de
+   * tiles projetado no losango isométrico não fica mais com os lados
+   * retos na tela, ver tileRangeCorners em game/iso.ts). Mais forte
+   * durante a edição, mais discreto no uso normal.
+   */
   private redrawAreaBorders() {
     for (const g of this.areaBorderGfx) g.destroy();
     this.areaBorderGfx = [];
@@ -2668,16 +2698,14 @@ export default class MainScene extends Phaser.Scene {
       if (!def) continue; // órfão -- não deveria sobrar depois de setAreaDefs, defensivo
       const meta = areaTypeMeta(def.type);
       const { minCol, maxCol, minRow, maxRow } = areaTileBounds(tiles);
-      const topLeft = tileToWorld(minCol, minRow);
-      const bottomRight = tileToWorld(maxCol, maxRow);
+      // -0.5/+0.5 -- igual ao "+TILE/2 de cada lado" de antes: sem isso
+      // o paralelogramo passaria só pelo CENTRO dos tiles de borda, não
+      // pela borda de fora deles (ver comentário de tileRangeCorners em
+      // game/iso.ts).
+      const corners = tileRangeCorners(tileToWorld, minCol - 0.5, minRow - 0.5, maxCol + 0.5, maxRow + 0.5);
       const g = this.add.graphics().setDepth(DEPTH_AREA);
       g.lineStyle(2, meta.color, this.editMode ? 0.85 : 0.35);
-      g.strokeRect(
-        topLeft.x - TILE / 2,
-        topLeft.y - TILE / 2,
-        bottomRight.x - topLeft.x + TILE,
-        bottomRight.y - topLeft.y + TILE
-      );
+      g.strokePoints(corners, true);
       this.areaBorderGfx.push(g);
     }
   }
@@ -2710,7 +2738,7 @@ export default class MainScene extends Phaser.Scene {
 
     // véu ÚNICO cobrindo o mapa inteiro, recortado por uma MÁSCARA
     // (Graphics + GeometryMask invertida) -- o "buraco" da máscara é
-    // CADA tile pintado da área (um quadrado por tile, não mais um
+    // CADA tile pintado da área (um losango por tile, não mais um
     // retângulo de bounding-box) + a silhueta de tela (getBounds()) de
     // cada móvel de pé num tile dela. Passou por 2 rodadas com o
     // Douglas: primeiro corrigiu o móvel maior que 1 tile (ex: poltrona
@@ -2730,7 +2758,7 @@ export default class MainScene extends Phaser.Scene {
     maskGfx.fillStyle(0xffffff);
     for (const t of tiles) {
       const { x, y } = tileToWorld(t.col, t.row);
-      maskGfx.fillRect(x - TILE / 2, y - TILE / 2, TILE, TILE);
+      maskGfx.fillPoints(tileDiamondCorners(x, y), true);
     }
     const addFurnitureHole = (f: FurnitureDef, sprite: Phaser.GameObjects.Image | undefined) => {
       if (!sprite || !tileKeys.has(`${f.col},${f.row}`)) return;
@@ -2786,14 +2814,25 @@ export default class MainScene extends Phaser.Scene {
     for (const areaId of activeAreaIds) {
       const tiles = tilesByArea.get(areaId)!;
       const { minCol, maxCol, minRow, maxRow } = areaTileBounds(tiles);
-      const topLeft = tileToWorld(minCol, minRow);
-      const bottomRight = tileToWorld(maxCol, maxRow);
-      const centerX = (topLeft.x + bottomRight.x) / 2;
-      const centerY = (topLeft.y + bottomRight.y) / 2;
-      const width = bottomRight.x - topLeft.x + TILE;
-      const height = bottomRight.y - topLeft.y + TILE;
+      // paralelogramo da área (mesma borda -0.5/+0.5 de redrawAreaBorders,
+      // ver tileRangeCorners em game/iso.ts) -- a hitbox de hover em si
+      // continua um RETÂNGULO (Phaser Zone), só que agora encaixado na
+      // caixa delimitadora (AABB) desse paralelogramo em vez da caixa de
+      // um retângulo reto -- simplificação aceitável (mesma ideia já
+      // aceita pra borda antes de virar isométrica): a área clicável fica
+      // um pouco mais generosa que o losango exato nos 4 cantos, não
+      // mais estreita.
+      const corners = tileRangeCorners(tileToWorld, minCol - 0.5, minRow - 0.5, maxCol + 0.5, maxRow + 0.5);
+      const minX = Math.min(...corners.map((p) => p.x));
+      const maxX = Math.max(...corners.map((p) => p.x));
+      const minY = Math.min(...corners.map((p) => p.y));
+      const maxY = Math.max(...corners.map((p) => p.y));
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const width = maxX - minX;
+      const height = maxY - minY;
       const labelX = centerX;
-      const labelY = topLeft.y - TILE / 2 - 6; // -6 = -4 de antes, escalado 1.5x junto com a resolução interna
+      const labelY = minY - 6; // -6 = -4 de antes, escalado 1.5x junto com a resolução interna
 
       let hitZone = this.areaHoverZones.get(areaId);
       if (!hitZone) {
@@ -2860,7 +2899,7 @@ export default class MainScene extends Phaser.Scene {
     for (let col = 0; col <= GRID_COLS; col++) {
       for (let row = 0; row <= GRID_ROWS; row++) {
         const { x, y } = tileToWorld(col, row);
-        g.strokeRect(x - TILE / 2, y - TILE / 2, TILE, TILE);
+        g.strokePoints(tileDiamondCorners(x, y), true);
       }
     }
     this.gridGraphics = g;
@@ -2945,7 +2984,7 @@ export default class MainScene extends Phaser.Scene {
     this.hoverGraphics
       .clear()
       .fillStyle(occupied ? EDIT_HOVER_COLOR_OCCUPIED : EDIT_HOVER_COLOR_FREE, 0.35)
-      .fillRect(x - TILE / 2, y - TILE / 2, TILE, TILE)
+      .fillPoints(tileDiamondCorners(x, y), true)
       .setVisible(true);
 
     // "fantasma" do item selecionado na paleta acompanha o cursor (ver
@@ -2956,7 +2995,7 @@ export default class MainScene extends Phaser.Scene {
     // fileira (pedido do Douglas: ver o resultado exato antes de clicar).
     if (this.catalogGhostSprite) {
       this.catalogGhostSprite.setPosition(x, y);
-      this.catalogGhostSprite.setDepth(furnitureDepthForRow(row));
+      this.catalogGhostSprite.setDepth(furnitureDepthForTile(col, row));
       this.catalogGhostSprite.setVisible(!occupied);
     }
   }
@@ -3026,7 +3065,7 @@ export default class MainScene extends Phaser.Scene {
         if (sprite) {
           const pos = furnitureWorldPos(moving);
           sprite.setPosition(pos.x, pos.y);
-          sprite.setDepth(moving.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForRow(moving.row));
+          sprite.setDepth(moving.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForTile(moving.col, moving.row));
           sprite.clearTint();
         }
         // se o boneco local tava sentado NESSE item, acompanha ele pro

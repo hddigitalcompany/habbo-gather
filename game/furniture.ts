@@ -1,4 +1,4 @@
-import { tileToWorld, Direction, TILE } from "./grid";
+import { tileToWorld, Direction, ISO_TILE_HEIGHT } from "./grid";
 
 /**
  * Móveis da sala, posicionados em coordenada de TILE (não pixel) pra
@@ -470,11 +470,11 @@ export const SEAT_Y_LADO = -18 - 21;
 export const SEAT_X_LADO = 12;
 
 // divisória de vidro: sobe meio tile em relação à base padrão (que fica
-// na borda de baixo do tile) -- ou seja, a base dela passa a ficar
-// exatamente na METADE do tile (mesmo ponto onde o boneco anda
+// no vértice de baixo do losango) -- ou seja, a base dela passa a ficar
+// exatamente no CENTRO do tile (mesmo ponto onde o boneco anda
 // ancorado), não mais encostada no chão. Só reposiciona -- o tamanho da
 // arte continua o mesmo (ver build/process do vidro, não mudou).
-export const VIDRO_BASE_OFFSET_Y = -TILE / 2;
+export const VIDRO_BASE_OFFSET_Y = -ISO_TILE_HEIGHT / 2;
 
 /**
  * Catálogo de opções que aparecem na paleta do editor (botão "Editar
@@ -677,15 +677,17 @@ export function blockingFurnitureAt(col: number, row: number): FurnitureDef | un
 
 export function furnitureWorldPos(f: FurnitureDef) {
   // tileToWorld() dá o CENTRO do tile -- é onde o boneco anda ancorado
-  // (origin bottom-center dele fica bem no meio do quadrado, ver
+  // (origin bottom-center dele fica bem no meio do losango, ver
   // MainScene). O móvel é diferente: ele precisa ficar "dentro do tile,
-  // alinhado embaixo" (o pé/base encostando na borda debaixo do
-  // quadrado, não flutuando no meio dele) -- por isso ancora meio tile
-  // ABAIXO do centro, na borda inferior. Ele ainda pode ultrapassar o
-  // tile por CIMA (altura normalmente > 1 tile), só não pro lado nem
-  // pra baixo -- isso é o overflow esperado, como no Habbo.
+  // alinhado embaixo" (o pé/base encostando no VÉRTICE da frente do
+  // losango -- o canto mais perto da câmera --, não flutuando no meio
+  // dele) -- por isso ancora meio tile ABAIXO do centro, na ponta de
+  // baixo (ISO_TILE_HEIGHT/2, não mais TILE/2 -- o losango é mais baixo
+  // que largo, ver game/grid.ts). Ele ainda pode ultrapassar o tile por
+  // CIMA (altura normalmente > 1 tile), só não pro lado nem pra baixo --
+  // isso é o overflow esperado, como no Habbo.
   const center = tileToWorld(f.col, f.row);
-  return { x: center.x, y: center.y + TILE / 2 + (f.baseOffsetY ?? 0) };
+  return { x: center.x, y: center.y + ISO_TILE_HEIGHT / 2 + (f.baseOffsetY ?? 0) };
 }
 
 // --- assento por MODELO (ver "Assento" no editor de espaço,
