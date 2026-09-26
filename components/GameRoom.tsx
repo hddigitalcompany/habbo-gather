@@ -52,7 +52,7 @@ import {
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
 } from "@/game/furniture";
-import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
+import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorPatternCssGradient, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
 import type { Direction } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
@@ -1003,7 +1003,7 @@ export default function GameRoom({
     try {
       const { data, error } = await supabase
         .from("room_floor_items")
-        .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b");
+        .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors");
       if (error || !data || data.length === 0) return;
       const entries: FloorCatalogEntry[] = data.map(
         (row: {
@@ -1015,6 +1015,9 @@ export default function GameRoom({
           plank_width_px: number | null;
           color_a: string | null;
           color_b: string | null;
+          plank_length_px: number | null;
+          line_color: string | null;
+          colors: string[] | null;
         }) => ({
           id: row.id,
           category: row.category as FloorCatalogEntry["category"],
@@ -1024,14 +1027,24 @@ export default function GameRoom({
           // de linhas... nao precise ser imagem mesmo") -- ver
           // FloorPatternConfig em game/floor.ts. Cor em hex STRING no
           // banco ("#rrggbb", ver supabase/migrations/
-          // 0016_room_floor_items_pattern.sql) -> número que o Phaser
+          // 0016_room_floor_items_pattern.sql e
+          // 0017_room_floor_items_plank.sql) -> número que o Phaser
           // entende (Graphics.fillStyle quer um hex NUMÉRICO, não string).
+          // plank_length_px/line_color/colors (0017) são OPCIONAIS --
+          // tábua emendada com linha de junta e/ou paleta de várias
+          // cores, os mesmos recursos que antes só existiam hard-coded
+          // (ver correção do Douglas: "eu nao defini as cores, so mandei
+          // exemplo, quero criar eles el criar piso" -- agora ele cria
+          // tudo pela aba "Criar Piso", com as cores que ele escolher).
           pattern:
             row.kind === "pattern" && row.plank_width_px && row.color_a && row.color_b
               ? {
                   plankWidthPx: row.plank_width_px,
                   colorA: parseInt(row.color_a.replace("#", ""), 16),
                   colorB: parseInt(row.color_b.replace("#", ""), 16),
+                  plankLengthPx: row.plank_length_px ?? undefined,
+                  lineColor: row.line_color ? parseInt(row.line_color.replace("#", ""), 16) : undefined,
+                  colors: row.colors && row.colors.length > 0 ? row.colors.map((c) => parseInt(c.replace("#", ""), 16)) : undefined,
                 }
               : undefined,
         })
@@ -4322,16 +4335,15 @@ function EditPanel({
                 key={entry.id}
                 className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
                 // piso "padrão" (ver FloorPatternConfig em game/floor.ts)
-                // não tem imagem nenhuma pra usar de miniatura -- um
-                // gradiente CSS repetido com as 2 cores da ripa dá uma
-                // prévia razoável do resultado sem precisar desenhar a
-                // matemática exata da faixa (isso só o Phaser faz, ver
+                // não tem imagem nenhuma pra usar de miniatura -- usa
+                // floorPatternCssGradient (mesma função do preview ao
+                // vivo em ItemEditor.tsx, ver comentário grande lá) pra
+                // dar uma prévia razoável sem precisar desenhar a
+                // matemática exata da tábua (isso só o Phaser faz, ver
                 // createFloorPatternGraphics em MainScene.ts).
                 style={
                   entry.pattern
-                    ? {
-                        backgroundImage: `repeating-linear-gradient(63deg, #${entry.pattern.colorA.toString(16).padStart(6, "0")} 0, #${entry.pattern.colorA.toString(16).padStart(6, "0")} 6px, #${entry.pattern.colorB.toString(16).padStart(6, "0")} 6px, #${entry.pattern.colorB.toString(16).padStart(6, "0")} 12px)`,
-                      }
+                    ? { backgroundImage: floorPatternCssGradient(entry.pattern) }
                     : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }
                 }
                 onClick={() => onSelectFloorPaint(entry)}

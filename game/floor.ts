@@ -111,60 +111,18 @@ export interface FloorCatalogEntry {
 // com `npm run dev`). NÃO editar esse import nem o arquivo dele à mão.
 import { GENERATED_FLOOR_CATALOG } from "./floorCatalog.generated";
 
-/**
- * Pisos "padrão" DE FÁBRICA -- ao contrário dos pisos de IMAGEM (que
- * vêm sozinhos do scanner da pasta de assets, ver GENERATED_FLOOR_CATALOG
- * acima) e dos pisos "padrão" CUSTOM (cadastrados pelo dono na aba
- * "Criar Piso" -> "Padrão", guardados no Supabase, ver
- * registerCustomFloorModels abaixo), um piso "padrão" não tem arquivo
- * nenhum pra escanear -- por isso essa lista é escrita À MÃO aqui, e
- * não pelo scanner. Pedido do Douglas (mandou fotos de referência de
- * pisos de tábua/parquet): "vamos criar padroes aqui, e depois subir
- * lá" -- cada entrada abaixo é um desses padrões, prontos de fábrica
- * pra qualquer sala, sem precisar cadastrar nada no editor.
- */
-const FACTORY_FLOOR_PATTERNS: FloorCatalogEntry[] = [
-  {
-    id: "laminado-tabua-corrida-castanho",
-    category: "laminado",
-    label: "Tábua Corrida Castanho",
-    file: "",
-    pattern: {
-      plankWidthPx: 24,
-      plankLengthPx: 108,
-      // uma cor só (colorA === colorB) -- a textura de "tábuas" vem
-      // inteira da linha de junta (lineColor), igual na foto de
-      // referência que o Douglas mandou (tábuas de tom uniforme,
-      // separadas só por uma linha escura, sem ripa "zebrada").
-      colorA: 0x6f5a42,
-      colorB: 0x6f5a42,
-      lineColor: 0x2c2115,
-    },
-  },
-  {
-    // 3ª foto de referência do Douglas: "e o mesmo do outro mas opcao
-    // de pintar diferente" -- mesma mecânica de tábua emendada/
-    // desalinhada da entrada acima, só que cada tábua sorteia (de
-    // forma determinística, ver plankColorIndex em MainScene.ts) uma
-    // cor de uma PALETA em vez de alternar só 2 cores por coluna --
-    // fica com tábuas de tonalidades variadas, tipo piso de madeira de
-    // reaproveitamento/demolição.
-    id: "laminado-tabua-mesclada",
-    category: "laminado",
-    label: "Tábua Mesclada",
-    file: "",
-    pattern: {
-      plankWidthPx: 24,
-      plankLengthPx: 108,
-      colorA: 0x6f5a42,
-      colorB: 0x6f5a42,
-      lineColor: 0x211a12,
-      colors: [0x8a8079, 0xcda274, 0x6b5842, 0x7d7268],
-    },
-  },
-];
-
-export const FLOOR_CATALOG: FloorCatalogEntry[] = [...GENERATED_FLOOR_CATALOG, ...FACTORY_FLOOR_PATTERNS];
+// Os pisos "padrão" (tábua corrida/mesclada) NÃO ficam mais fixos no
+// código -- correção do Douglas depois que eu cadastrei 2 de fábrica
+// com cores que eu mesmo chutei a partir das fotos de referência: "eu
+// nao defini as cores, so mandei exemplo, quero criar eles el criar
+// piso" -- as fotos eram só EXEMPLO do estilo/padrão da tábua, não uma
+// especificação de cor. Quem cria (e escolhe as cores de verdade) é o
+// Douglas, pela aba "Criar Piso" -> "Padrão" (ver
+// registerCustomFloorModels abaixo, e o formulário completo em
+// components/ItemEditor.tsx, que agora também tem comprimento de
+// tábua/linha de junta/paleta de várias cores, os mesmos recursos que
+// antes só existiam aqui hard-coded).
+export const FLOOR_CATALOG: FloorCatalogEntry[] = [...GENERATED_FLOOR_CATALOG];
 
 export function floorEntryById(id: string): FloorCatalogEntry | undefined {
   return FLOOR_CATALOG.find((e) => e.id === id);
@@ -231,3 +189,72 @@ export function floorWorldPos(f: FloorTileDef) {
 // server/roomStore.js) -- por isso não tem mais um ROOM_FLOOR fixo aqui.
 // MainScene.loadSavedFloor(items) é quem recebe a lista salva (buscada
 // pelo React em GameRoom.tsx assim que a cena fica pronta) e desenha.
+
+function hexToCss(hex: number): string {
+  return `#${hex.toString(16).padStart(6, "0")}`;
+}
+
+/**
+ * Escurece uma cor hex (multiplicando cada canal RGB) -- versão em
+ * espaço de número (não Phaser) da mesma conta de MainScene.darkenColor,
+ * usada aqui só pra ter um fallback de linha de junta na PRÉVIA em CSS
+ * quando lineColor não foi definido (mesma regra do desenho de
+ * verdade). Duplicada de propósito -- esse arquivo não importa nada do
+ * Phaser (é usado também fora da cena, ver ItemEditor.tsx), e é só uma
+ * conta de 3 linhas, não vale a pena quebrar esse isolamento por isso. */
+function darkenHex(hex: number, factor = 0.55): number {
+  const r = Math.round(((hex >> 16) & 0xff) * factor);
+  const g = Math.round(((hex >> 8) & 0xff) * factor);
+  const b = Math.round((hex & 0xff) * factor);
+  return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Gradiente CSS (repeating-linear-gradient) que dá uma prévia razoável
+ * de como um FloorPatternConfig vai ficar quando desenhado de verdade
+ * (ver createFloorPatternGraphics em MainScene.ts) -- usado tanto no
+ * preview ao vivo do formulário "Criar Piso" -> "Padrão"
+ * (ItemEditor.tsx) quanto no losango da paleta de pintura da sala
+ * (GameRoom.tsx, floor-swatch) -- MESMA função pros dois lugares, pra
+ * nunca ficar um mostrando uma coisa e o outro mostrando outra.
+ *
+ * Não é (e não precisa ser) a matemática exata da tábua -- só CSS
+ * simples o bastante pra rodar num <div>, sem reimplementar
+ * across/along/plankColorIndex aqui.
+ */
+export function floorPatternCssGradient(pattern: {
+  colorA: number;
+  colorB: number;
+  plankLengthPx?: number;
+  lineColor?: number;
+  colors?: number[];
+}): string {
+  if (pattern.colors && pattern.colors.length > 0) {
+    // várias tábuas de tons diferentes (ver FloorPatternConfig.colors)
+    // -- gradiente cíclico com TODAS as cores da paleta, uma prévia da
+    // mescla sem sortear tábua por tábua feito o jogo faz de verdade.
+    const stepPct = 100 / pattern.colors.length;
+    const stops = pattern.colors
+      .map((c, i) => {
+        const css = hexToCss(c);
+        return `${css} ${(i * stepPct).toFixed(2)}%, ${css} ${((i + 1) * stepPct).toFixed(2)}%`;
+      })
+      .join(", ");
+    return `repeating-linear-gradient(63deg, ${stops})`;
+  }
+  if (pattern.plankLengthPx) {
+    // tábua emendada de tom só (colorA === colorB no caso mais comum,
+    // ex: "tábua corrida") -- um gradiente colorA/colorB sólido não
+    // mostraria NENHUMA linha de junta quando as duas cores são iguais,
+    // por isso aqui usa listras finas de lineColor por cima do tom
+    // base, só pra indicar visualmente que tem tábua ali.
+    const base = hexToCss(pattern.colorA);
+    const line = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
+    return `repeating-linear-gradient(63deg, ${line} 0, ${line} 2px, ${base} 2px, ${base} 16px)`;
+  }
+  // ripa contínua de 2 cores (comportamento original) -- alterna
+  // colorA/colorB em faixas iguais.
+  const a = hexToCss(pattern.colorA);
+  const b = hexToCss(pattern.colorB);
+  return `repeating-linear-gradient(63deg, ${a} 0, ${a} 6px, ${b} 6px, ${b} 12px)`;
+}

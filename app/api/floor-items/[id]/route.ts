@@ -93,6 +93,41 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     update.color_b = colorB;
   }
 
+  // comprimento da tábua (opcional -- ver supabase/migrations/
+  // 0017_room_floor_items_plank.sql). null explícito apaga (volta pra
+  // ripa contínua sem junta); ausente do corpo não mexe no que já tem.
+  if ("plank_length_px" in body) {
+    if (body.plank_length_px === null || body.plank_length_px === "") {
+      update.plank_length_px = null;
+    } else {
+      const plankLengthPx = typeof body.plank_length_px === "number" && Number.isFinite(body.plank_length_px) ? Math.round(body.plank_length_px) : NaN;
+      if (!Number.isFinite(plankLengthPx) || plankLengthPx < 4 || plankLengthPx > 400) {
+        return NextResponse.json({ error: "comprimento da tábua precisa ser entre 4 e 400" }, { status: 400 });
+      }
+      update.plank_length_px = plankLengthPx;
+    }
+  }
+  // cor da linha de junta (opcional)
+  if ("line_color" in body) {
+    if (body.line_color === null || body.line_color === "") {
+      update.line_color = null;
+    } else if (typeof body.line_color === "string" && HEX_COLOR_RE.test(body.line_color)) {
+      update.line_color = body.line_color;
+    } else {
+      return NextResponse.json({ error: "cor da linha de junta inválida" }, { status: 400 });
+    }
+  }
+  // paleta de várias cores (opcional -- "Tábua Mesclada")
+  if ("colors" in body) {
+    if (body.colors === null || (Array.isArray(body.colors) && body.colors.length === 0)) {
+      update.colors = null;
+    } else if (Array.isArray(body.colors) && body.colors.length >= 2 && body.colors.length <= 6 && body.colors.every((c: unknown) => typeof c === "string" && HEX_COLOR_RE.test(c))) {
+      update.colors = body.colors;
+    } else {
+      return NextResponse.json({ error: "paleta de cores inválida (2 a 6 cores)" }, { status: 400 });
+    }
+  }
+
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });
   }

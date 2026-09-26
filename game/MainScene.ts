@@ -1416,7 +1416,12 @@ export default class MainScene extends Phaser.Scene {
         const ly = dirLen.y * halfLength;
         const wx = dirWid.x * halfWidth;
         const wy = dirWid.y * halfWidth;
-        gfx.fillStyle(((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB, 1);
+        // pickPlankColor (não só o if/else de colorA/colorB) -- pra uma
+        // paleta `colors` com mais de 2 tons também funcionar na ripa
+        // CONTÍNUA, não só na tábua emendada (antes só funcionava lá,
+        // gap encontrado ao trazer plankLengthPx/colors pra aba "Criar
+        // Piso" -- ver pickPlankColor logo acima).
+        gfx.fillStyle(this.pickPlankColor(pattern, i, 0), 1);
         gfx.fillPoints(
           [
             { x: cx - lx - wx, y: cy - ly - wy },

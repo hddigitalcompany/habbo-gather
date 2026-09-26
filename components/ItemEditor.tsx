@@ -19,7 +19,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH, SEAT_X_LADO, SEAT_Y_LADO } from "@/game/furniture";
 import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
-import { FLOOR_CATEGORIES, FloorCategory } from "@/game/floor";
+import { FLOOR_CATEGORIES, FloorCategory, floorPatternCssGradient } from "@/game/floor";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
   HAIR_CATALOG,
@@ -3014,6 +3014,9 @@ export default function ItemEditor({
     plank_width_px: number | null;
     color_a: string | null;
     color_b: string | null;
+    plank_length_px: number | null;
+    line_color: string | null;
+    colors: string[] | null;
   };
   const [floorItems, setFloorItems] = useState<CustomFloorRow[] | null>(null);
   const [floorLabel, setFloorLabel] = useState("");
@@ -3028,12 +3031,24 @@ export default function ItemEditor({
   const floorPreviewUrlRef = useRef<string | null>(null);
   floorPreviewUrlRef.current = floorPreviewUrl;
   // ripa do tipo "padrão" -- largura em px (ver clamp 4..200 em
-  // app/api/floor-items/route.ts) + as 2 cores alternadas, direto como
-  // <input type="color"> já devolve ("#rrggbb", mesmo formato salvo no
-  // banco, ver comentário de FloorPatternConfig em game/floor.ts).
+  // app/api/floor-items/route.ts) + lista de cores (2 a 6, direto como
+  // <input type="color"> já devolve, "#rrggbb", mesmo formato salvo no
+  // banco, ver comentário de FloorPatternConfig em game/floor.ts) --
+  // ANTES eram 2 campos fixos (Cor 1/Cor 2), agora uma lista pra dar pra
+  // criar tanto o efeito de 2 cores alternadas quanto o de "tábua
+  // mesclada" (várias tonalidades) SEM precisar de 2 formulários
+  // diferentes. Correção do Douglas: "eu nao defini as cores, so mandei
+  // exemplo, quero criar eles el criar piso" -- ele quem escolhe.
   const [floorPlankWidth, setFloorPlankWidth] = useState(24);
-  const [floorColorA, setFloorColorA] = useState("#a9835f");
-  const [floorColorB, setFloorColorB] = useState("#8f6a48");
+  const [floorColors, setFloorColors] = useState<string[]>(["#a9835f", "#8f6a48"]);
+  // comprimento da tábua -- STRING (não number) porque "" (vazio) tem um
+  // significado próprio (ripa CONTÍNUA, sem emenda/junta nenhuma,
+  // comportamento original) que não dá pra representar direito com 0
+  // (0 seria uma tábua de comprimento zero, inválido). Só quando
+  // preenchido a tábua vira "emendada" com linha de junta (floorLineColor
+  // abaixo), ver FloorPatternConfig.plankLengthPx em game/floor.ts.
+  const [floorPlankLength, setFloorPlankLength] = useState("");
+  const [floorLineColor, setFloorLineColor] = useState("#2c2115");
   const [floorEditingId, setFloorEditingId] = useState<string | null>(null);
   const [floorExistingFileUrl, setFloorExistingFileUrl] = useState<string | null>(null);
   const [floorSubmitting, setFloorSubmitting] = useState(false);
@@ -3041,13 +3056,35 @@ export default function ItemEditor({
   const [floorError, setFloorError] = useState<string | null>(null);
   const floorFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  /** "#rrggbb" -> número hex (o que floorPatternCssGradient/
+   * FloorPatternConfig esperam, ver game/floor.ts) -- <input
+   * type="color"> só devolve string. */
+  function parseHexColor(css: string): number {
+    return parseInt(css.replace("#", ""), 16) || 0;
+  }
+
+  /** Adiciona uma cor no fim da lista (máximo 6, mesmo teto validado em
+   * app/api/floor-items/route.ts) -- cor de partida genérica, o usuário
+   * troca depois pelo <input type="color"> dela. */
+  function addFloorColor() {
+    setFloorColors((prev) => (prev.length >= 6 ? prev : [...prev, "#8a8079"]));
+  }
+  /** Remove uma cor da lista (mínimo 2 -- padrão "só 2 cores alternadas"
+   * sempre precisa de pelo menos isso, senão não tem o que alternar). */
+  function removeFloorColor(index: number) {
+    setFloorColors((prev) => (prev.length <= 2 ? prev : prev.filter((_, i) => i !== index)));
+  }
+  function updateFloorColor(index: number, value: string) {
+    setFloorColors((prev) => prev.map((c, i) => (i === index ? value : c)));
+  }
+
   async function loadFloorItems() {
     setFloorError(null);
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("room_floor_items")
-      .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b");
+      .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors");
     if (fetchError) {
       setFloorError(fetchError.message);
       return;
@@ -3063,8 +3100,9 @@ export default function ItemEditor({
     setFloorFile(null);
     setFloorExistingFileUrl(null);
     setFloorPlankWidth(24);
-    setFloorColorA("#a9835f");
-    setFloorColorB("#8f6a48");
+    setFloorColors(["#a9835f", "#8f6a48"]);
+    setFloorPlankLength("");
+    setFloorLineColor("#2c2115");
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3088,8 +3126,12 @@ export default function ItemEditor({
     setFloorFile(null);
     setFloorExistingFileUrl(item.file_url);
     setFloorPlankWidth(item.plank_width_px ?? 24);
-    setFloorColorA(item.color_a ?? "#a9835f");
-    setFloorColorB(item.color_b ?? "#8f6a48");
+    // paleta nova (colors) tem prioridade -- se o registro é antigo e só
+    // tem color_a/color_b (de antes de existir a lista), monta uma
+    // lista de 2 com elas, pra editar do mesmo jeito.
+    setFloorColors(item.colors && item.colors.length >= 2 ? item.colors : [item.color_a ?? "#a9835f", item.color_b ?? "#8f6a48"]);
+    setFloorPlankLength(item.plank_length_px ? String(item.plank_length_px) : "");
+    setFloorLineColor(item.line_color ?? "#2c2115");
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3146,8 +3188,31 @@ export default function ItemEditor({
         if (fileUrl) payload.file_url = fileUrl;
       } else {
         payload.plank_width_px = floorPlankWidth;
-        payload.color_a = floorColorA;
-        payload.color_b = floorColorB;
+        // color_a/color_b continuam sendo enviadas (a API ainda exige
+        // as 2, ver app/api/floor-items/route.ts) -- derivadas das 2
+        // primeiras da lista. `colors` vai sempre junto (mesmo com só 2
+        // cores) -- é ela quem manda de verdade na hora de desenhar (ver
+        // pickPlankColor em MainScene.ts), color_a/color_b viram só
+        // fallback pra registro antigo.
+        payload.color_a = floorColors[0];
+        payload.color_b = floorColors[1] ?? floorColors[0];
+        payload.colors = floorColors;
+        // comprimento da tábua -- só manda quando preenchido (senão
+        // ripa contínua sem junta, ver comentário grande no state
+        // floorPlankLength acima). Junto vai a cor da linha de junta.
+        if (floorPlankLength.trim() !== "") {
+          const plankLength = Number(floorPlankLength);
+          if (!Number.isFinite(plankLength) || plankLength < 4 || plankLength > 400) {
+            throw new Error("Comprimento da tábua precisa ser entre 4 e 400.");
+          }
+          payload.plank_length_px = plankLength;
+          payload.line_color = floorLineColor;
+        } else if (floorEditingId) {
+          // editando e deixou o campo em branco -- some com a emenda
+          // (volta pra ripa contínua), não só ignora o campo.
+          payload.plank_length_px = null;
+          payload.line_color = null;
+        }
       }
 
       const res = await fetch(floorEditingId ? `/api/floor-items/${floorEditingId}` : "/api/floor-items", {
@@ -3820,9 +3885,9 @@ export default function ItemEditor({
               ) : (
                 <>
                   <p className="settings-hint">
-                    Sem imagem nenhuma -- o jogo desenha ripas alternando as duas cores abaixo, do tamanho de largura que
-                    você escolher. Mais leve (não baixa arquivo nenhum) e as ripas de tiles vizinhos do mesmo piso
-                    encaixam perfeitinho, parece um piso corrido de verdade.
+                    Sem imagem nenhuma -- o jogo desenha ripas/tábuas alternando as cores abaixo, do tamanho de largura que
+                    você escolher. Mais leve (não baixa arquivo nenhum) e encaixam perfeitinho de um tile pro vizinho,
+                    parece um piso corrido de verdade.
                   </p>
 
                   <label className="items-panel-upload-field">
@@ -3837,16 +3902,57 @@ export default function ItemEditor({
                     />
                   </label>
 
+                  {/* comprimento OPCIONAL -- em branco = ripa contínua
+                      (comportamento de sempre); preenchido = tábuas
+                      EMENDADAS com linha de junta (ver comentário grande
+                      do state floorPlankLength acima e
+                      FloorPatternConfig.plankLengthPx em game/floor.ts). */}
+                  <label className="items-panel-upload-field">
+                    <span>Comprimento da tábua (px) -- opcional</span>
+                    <input
+                      className="items-panel-input"
+                      type="number"
+                      min={4}
+                      max={400}
+                      placeholder="Em branco = ripa contínua, sem emenda"
+                      value={floorPlankLength}
+                      onChange={(e) => setFloorPlankLength(e.target.value)}
+                    />
+                  </label>
+                  {floorPlankLength.trim() !== "" && (
+                    <label className="items-panel-upload-field">
+                      <span>Cor da linha de junta</span>
+                      <input type="color" value={floorLineColor} onChange={(e) => setFloorLineColor(e.target.value)} />
+                    </label>
+                  )}
+
+                  {/* lista de cores -- 2 (o de sempre, alternadas) ou
+                      mais (efeito "tábua mesclada", cada tábua sorteia
+                      uma cor da lista, ver pickPlankColor em
+                      MainScene.ts). Correção do Douglas: "eu nao defini
+                      as cores, so mandei exemplo, quero criar eles el
+                      criar piso" -- agora ele escolhe cada cor aqui. */}
+                  <p className="settings-hint">Cores (mínimo 2, máximo 6) -- com mais de 2, cada tábua sorteia uma dessas cores.</p>
                   <div className="items-panel-submit-row">
-                    <label className="items-panel-upload-field">
-                      <span>Cor 1</span>
-                      <input type="color" value={floorColorA} onChange={(e) => setFloorColorA(e.target.value)} />
-                    </label>
-                    <label className="items-panel-upload-field">
-                      <span>Cor 2</span>
-                      <input type="color" value={floorColorB} onChange={(e) => setFloorColorB(e.target.value)} />
-                    </label>
+                    {floorColors.map((color, i) => (
+                      <label key={i} className="items-panel-upload-field">
+                        <span>
+                          Cor {i + 1}
+                          {floorColors.length > 2 && (
+                            <button type="button" className="clear-btn" onClick={() => removeFloorColor(i)} title="Remover cor">
+                              ✕
+                            </button>
+                          )}
+                        </span>
+                        <input type="color" value={color} onChange={(e) => updateFloorColor(i, e.target.value)} />
+                      </label>
+                    ))}
                   </div>
+                  {floorColors.length < 6 && (
+                    <button type="button" className="clear-btn" onClick={addFloorColor}>
+                      + Adicionar cor
+                    </button>
+                  )}
 
                   {/* pedido do Douglas: "da pra poe essa exibicao no
                       formato do tile?" -- preview no formato de LOSANGO
@@ -3857,12 +3963,21 @@ export default function ItemEditor({
                       em globals.css (o botão que ele clica pra ESCOLHER
                       o piso na paleta da sala), só que centralizado e
                       maior aqui, por ser o preview em destaque do
-                      formulário, não um botão pequeno numa grade. */}
+                      formulário, não um botão pequeno numa grade.
+                      floorPatternCssGradient é a MESMA função usada no
+                      losango da paleta da sala (GameRoom.tsx) -- os dois
+                      lugares sempre mostram a mesma coisa. */}
                   <div className="floor-pattern-preview-wrap">
                     <div
                       className="floor-pattern-preview-tile"
                       style={{
-                        backgroundImage: `repeating-linear-gradient(63deg, ${floorColorA} 0, ${floorColorA} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth * 2}px)`,
+                        backgroundImage: floorPatternCssGradient({
+                          colorA: parseHexColor(floorColors[0]),
+                          colorB: parseHexColor(floorColors[1] ?? floorColors[0]),
+                          plankLengthPx: floorPlankLength.trim() !== "" ? Number(floorPlankLength) : undefined,
+                          lineColor: floorPlankLength.trim() !== "" ? parseHexColor(floorLineColor) : undefined,
+                          colors: floorColors.length > 2 ? floorColors.map(parseHexColor) : undefined,
+                        }),
                       }}
                     />
                   </div>
@@ -3898,7 +4013,13 @@ export default function ItemEditor({
                           <div
                             className="items-panel-thumb"
                             style={{
-                              backgroundImage: `repeating-linear-gradient(63deg, ${item.color_a} 0, ${item.color_a} ${item.plank_width_px ?? 24}px, ${item.color_b} ${item.plank_width_px ?? 24}px, ${item.color_b} ${(item.plank_width_px ?? 24) * 2}px)`,
+                              backgroundImage: floorPatternCssGradient({
+                                colorA: parseHexColor(item.color_a),
+                                colorB: parseHexColor(item.color_b),
+                                plankLengthPx: item.plank_length_px ?? undefined,
+                                lineColor: item.line_color ? parseHexColor(item.line_color) : undefined,
+                                colors: item.colors && item.colors.length > 0 ? item.colors.map(parseHexColor) : undefined,
+                              }),
                             }}
                           />
                         ) : (

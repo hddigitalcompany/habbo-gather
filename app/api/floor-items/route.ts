@@ -11,6 +11,14 @@
 // linhas... nao precise ser imagem mesmo" -- sem arquivo nenhum, só
 // largura da ripa + 2 cores, desenhado por código, ver
 // createFloorPatternGraphics em game/MainScene.ts).
+//
+// plank_length_px/line_color/colors (ver supabase/migrations/
+// 0017_room_floor_items_plank.sql) são OPCIONAIS, só pro kind
+// "pattern": tábua emendada com linha de junta e/ou paleta de várias
+// cores. Correção do Douglas depois que eu cadastrei isso hard-coded
+// com cores chutadas: "eu nao defini as cores, so mandei exemplo,
+// quero criar eles el criar piso" -- agora é tudo por aqui, com as
+// cores que ELE escolher no formulário.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
@@ -20,6 +28,25 @@ export const dynamic = "force-dynamic";
 const ALLOWED_CATEGORIES = ["porcelanato", "laminado", "natural"];
 const ALLOWED_KINDS = ["image", "pattern"];
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+/** Valida um array de cores hex ("#rrggbb") opcional -- 2 a 6 cores,
+ * cada uma no formato certo. Devolve o array validado, ou lança um erro
+ * de validação (mensagem em português, pra devolver direto no 400) se
+ * vier preenchido mas fora do formato esperado. `undefined`/array vazio
+ * não é erro -- a paleta é opcional. */
+function parseColorsField(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  if (value.length < 2 || value.length > 6) {
+    throw new Error("a paleta de cores precisa ter entre 2 e 6 cores");
+  }
+  for (const c of value) {
+    if (typeof c !== "string" || !HEX_COLOR_RE.test(c)) {
+      throw new Error("cor inválida na paleta");
+    }
+  }
+  return value as string[];
+}
 
 export async function POST(req: NextRequest) {
   const callerId = await getVerifiedUserId(req);
@@ -56,6 +83,34 @@ export async function POST(req: NextRequest) {
     insert.plank_width_px = plankWidthPx;
     insert.color_a = colorA;
     insert.color_b = colorB;
+
+    // comprimento da tábua (opcional -- sem isso, ripa contínua sem
+    // junta, comportamento de sempre, ver FloorPatternConfig.plankLengthPx
+    // em game/floor.ts).
+    if (body?.plank_length_px !== undefined && body?.plank_length_px !== null && body?.plank_length_px !== "") {
+      const plankLengthPx = typeof body.plank_length_px === "number" && Number.isFinite(body.plank_length_px) ? Math.round(body.plank_length_px) : NaN;
+      if (!Number.isFinite(plankLengthPx) || plankLengthPx < 4 || plankLengthPx > 400) {
+        return NextResponse.json({ error: "comprimento da tábua precisa ser entre 4 e 400" }, { status: 400 });
+      }
+      insert.plank_length_px = plankLengthPx;
+    }
+    // cor da linha de junta (opcional -- só faz sentido junto com
+    // plank_length_px, mas não é obrigatório: sem ela, o jogo calcula
+    // uma variação escura de color_a sozinho).
+    if (typeof body?.line_color === "string" && body.line_color) {
+      if (!HEX_COLOR_RE.test(body.line_color)) {
+        return NextResponse.json({ error: "cor da linha de junta inválida" }, { status: 400 });
+      }
+      insert.line_color = body.line_color;
+    }
+    // paleta de várias cores (opcional -- "Tábua Mesclada", ver
+    // FloorPatternConfig.colors em game/floor.ts).
+    try {
+      const colors = parseColorsField(body?.colors);
+      if (colors) insert.colors = colors;
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : "paleta de cores inválida" }, { status: 400 });
+    }
   } else {
     const fileUrl = typeof body?.file_url === "string" ? body.file_url : "";
     if (!fileUrl) return NextResponse.json({ error: "imagem é obrigatória" }, { status: 400 });
