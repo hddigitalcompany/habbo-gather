@@ -73,6 +73,19 @@ export interface FloorPatternConfig {
    * "e o mesmo do outro mas opcao de pintar diferente".
    */
   colors?: number[];
+  /**
+   * Veios de madeira (pedido do Douglas, com 2 fotos de referência de
+   * piso laminado: "agora eu quero esse efeito laminado, como voce
+   * conseguiria fazer? de veios de madeira", depois "no sentido das
+   * linhas também") -- riscos finos e semitransparentes DENTRO de cada
+   * tábua, mais claros ou mais escuros que a cor base dela, correndo no
+   * MESMO sentido do comprimento da tábua (rowAxis -- o mesmo sentido
+   * das linhas de junta longas entre colunas, é isso que "no sentido das
+   * linhas" pediu). Só tem efeito junto de plankLengthPx (precisa de uma
+   * tábua DELIMITADA pra conter o veio dentro -- ripa contínua não tem
+   * onde parar o risco, ver woodGrainShapesForPlank abaixo).
+   */
+  woodGrain?: boolean;
 }
 
 export interface FloorCatalogEntry {
@@ -210,6 +223,106 @@ function darkenHex(hex: number, factor = 0.55): number {
   return (r << 16) | (g << 8) | b;
 }
 
+/** Clareia uma cor hex (mesma ideia de darkenHex acima, só que aproxima
+ * cada canal RGB do branco por `factor`, em vez de escurecer) -- usada
+ * pelos veios de madeira mais claros (metade dos veios clareia, metade
+ * escurece, ver woodGrainShapesForPlank abaixo -- só escurecer sempre
+ * ficaria "sujo" em vez de parecer veio de verdade). Cópia pura
+ * (número, não Phaser) da MESMA conta de MainScene.lightenColor. */
+function lightenHex(hex: number, factor = 0.35): number {
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  const lr = Math.round(r + (255 - r) * factor);
+  const lg = Math.round(g + (255 - g) * factor);
+  const lb = Math.round(b + (255 - b) * factor);
+  return (lr << 16) | (lg << 8) | lb;
+}
+
+/** Hash determinístico (float 0..1) pra sortear posição/espessura/
+ * comprimento/tom de CADA veio de uma tábua específica (coluna `i`,
+ * posição `j`, índice `k` do veio dentro da tábua -- uma tábua tem
+ * vários veios, `salt` diferencia cada característica sorteada pro
+ * MESMO veio, senão todas sairiam sempre no mesmo valor). Mesma família
+ * de plankColorIndexPure acima (mistura de bits simples, só precisa
+ * estar bem distribuída, não criptográfica) -- mesma (i,j,k,salt) sempre
+ * cai no mesmo número, então o veio não muda sozinho ao redesenhar (F5,
+ * refreshFloorModel etc.) sem guardar nada em lugar nenhum. Cópia pura
+ * da MESMA conta de MainScene.grainHash. */
+function grainHashPure(i: number, j: number, k: number, salt: number): number {
+  let h = (i * 374761393 + j * 668265263 + k * 2246822519 + salt * 3266489917) ^ (i << 13);
+  h = Math.imul(h ^ (h >>> 15), 1274126177);
+  h = h ^ (h >>> 16);
+  return (Math.abs(h) % 10000) / 10000;
+}
+
+/**
+ * Os riscos (polígonos finos) de veio de madeira de UMA tábua -- 2 a 4
+ * riscos (mais riscos pra tábua mais larga), cada um com posição
+ * atravessada/espessura/comprimento/tom/opacidade sorteados de forma
+ * DETERMINÍSTICA (grainHashPure acima) a partir da posição da tábua na
+ * grade (i,j), correndo no sentido de rowAxis (comprimento da tábua --
+ * ver comentário grande de FloorPatternConfig.woodGrain). Pura (sem
+ * Phaser) -- usada tanto por floorPatternPolygons abaixo (preview em
+ * SVG) quanto, com a MESMA matemática/constantes, por
+ * MainScene.drawWoodGrain (createFloorPatternGraphics) -- os dois
+ * lugares sorteiam exatamente os mesmos veios pra mesma tábua.
+ *
+ * `cx,cy` = centro da tábua (mesmo ponto usado pro polígono dela);
+ * `halfLength`/`halfWidth` = metade do comprimento/largura da tábua;
+ * `rowAxis`/`colAxis` = os mesmos eixos não-ortogonais do losango (ver
+ * comentário grande deles em createFloorPatternGraphics, MainScene.ts);
+ * `baseColor` = a cor JÁ resolvida dessa tábua (pickPlankColorPure) --
+ * os veios são variação DELA, não de colorA/colorB direto.
+ */
+export function woodGrainShapesForPlank(
+  i: number,
+  j: number,
+  cx: number,
+  cy: number,
+  halfLength: number,
+  halfWidth: number,
+  rowAxis: Point,
+  colAxis: Point,
+  baseColor: number
+): FloorPatternPolygon[] {
+  const count = halfWidth * 2 < 24 ? 2 : halfWidth * 2 < 48 ? 3 : 4;
+  const shapes: FloorPatternPolygon[] = [];
+  for (let k = 0; k < count; k++) {
+    // posição através da tábua -- fica dentro de ~80% da largura, senão
+    // o risco "vaza" visualmente por cima da linha de junta longa.
+    const acrossT = (grainHashPure(i, j, k, 1) * 2 - 1) * halfWidth * 0.8;
+    // espessura bem fina (6% a 13% da largura da tábua)
+    const halfThick = halfWidth * (0.06 + grainHashPure(i, j, k, 2) * 0.07);
+    // a maior parte do comprimento (55% a 90%), com um leve
+    // deslocamento ao longo -- pontas recuadas em vez de sempre
+    // encostar exatamente na linha de junta, e nem todo veio
+    // centralizado igual (senão fica repetitivo/artificial).
+    const segHalfLen = halfLength * (0.55 + grainHashPure(i, j, k, 3) * 0.35);
+    const alongOffset = (grainHashPure(i, j, k, 4) * 2 - 1) * (halfLength - segHalfLen);
+    const lighten = grainHashPure(i, j, k, 5) < 0.5;
+    const shade = lighten
+      ? lightenHex(baseColor, 0.16 + grainHashPure(i, j, k, 6) * 0.22)
+      : darkenHex(baseColor, 0.55 + grainHashPure(i, j, k, 6) * 0.3);
+    const opacity = 0.16 + grainHashPure(i, j, k, 7) * 0.22;
+
+    const alongMin = alongOffset - segHalfLen;
+    const alongMax = alongOffset + segHalfLen;
+    const acrossMin = acrossT - halfThick;
+    const acrossMax = acrossT + halfThick;
+    const toWorld = (along: number, across: number): Point => ({
+      x: cx + rowAxis.x * along + colAxis.x * across,
+      y: cy + rowAxis.y * along + colAxis.y * across,
+    });
+    shapes.push({
+      points: [toWorld(alongMin, acrossMin), toWorld(alongMax, acrossMin), toWorld(alongMax, acrossMax), toWorld(alongMin, acrossMax)],
+      fill: hexToCss(shade),
+      opacity,
+    });
+  }
+  return shapes;
+}
+
 /** Índice determinístico (0..len-1) pra escolher a cor de uma tábua
  * (coluna `i`, posição `j`) dentro de FloorPatternConfig.colors -- cópia
  * EXATA (mesmo hash) de MainScene.plankColorIndex, em número puro (sem
@@ -243,6 +356,10 @@ export interface FloorPatternPolygon {
    * contínua (o jogo de verdade também não traça contorno nesse caso,
    * ver createFloorPatternGraphics em MainScene.ts). */
   stroke?: string;
+  /** opacidade (0..1) -- só presente nos riscos de veio de madeira (ver
+   * FloorPatternConfig.woodGrain/woodGrainShapesForPlank acima).
+   * Ausente/undefined nas tábuas/ripas normais (opacas, 1 implícito). */
+  opacity?: number;
 }
 
 /**
@@ -311,6 +428,7 @@ export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternP
         const ly = rowAxis.y * halfLength;
         const wx = colAxis.x * halfWidth;
         const wy = colAxis.y * halfWidth;
+        const plankColor = pickPlankColorPure(pattern, i, j);
         polys.push({
           points: [
             { x: cx - lx - wx, y: cy - ly - wy },
@@ -318,9 +436,15 @@ export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternP
             { x: cx + lx + wx, y: cy + ly + wy },
             { x: cx - lx + wx, y: cy - ly + wy },
           ],
-          fill: hexToCss(pickPlankColorPure(pattern, i, j)),
+          fill: hexToCss(plankColor),
           stroke: lineColor,
         });
+        // veios de madeira (ver comentário grande em
+        // FloorPatternConfig.woodGrain acima) -- desenhados POR CIMA da
+        // tábua que acabou de entrar (mesma ordem que MainScene.ts usa).
+        if (pattern.woodGrain) {
+          polys.push(...woodGrainShapesForPlank(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor));
+        }
       }
     }
   } else {

@@ -1004,7 +1004,9 @@ export default function GameRoom({
     try {
       const { data, error } = await supabase
         .from("room_floor_items")
-        .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors");
+        .select(
+          "id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain"
+        );
       if (error || !data || data.length === 0) return;
       const entries: FloorCatalogEntry[] = data.map(
         (row: {
@@ -1019,6 +1021,7 @@ export default function GameRoom({
           plank_length_px: number | null;
           line_color: string | null;
           colors: string[] | null;
+          wood_grain: boolean | null;
         }) => ({
           id: row.id,
           category: row.category as FloorCatalogEntry["category"],
@@ -1046,6 +1049,10 @@ export default function GameRoom({
                   plankLengthPx: row.plank_length_px ?? undefined,
                   lineColor: row.line_color ? parseInt(row.line_color.replace("#", ""), 16) : undefined,
                   colors: row.colors && row.colors.length > 0 ? row.colors.map((c) => parseInt(c.replace("#", ""), 16)) : undefined,
+                  // efeito "laminado" (ver supabase/migrations/
+                  // 0018_room_floor_items_wood_grain.sql e
+                  // FloorPatternConfig.woodGrain em game/floor.ts).
+                  woodGrain: row.wood_grain ?? undefined,
                 }
               : undefined,
         })

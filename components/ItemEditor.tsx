@@ -3236,6 +3236,7 @@ export default function ItemEditor({
     plank_length_px: number | null;
     line_color: string | null;
     colors: string[] | null;
+    wood_grain: boolean | null;
   };
   const [floorItems, setFloorItems] = useState<CustomFloorRow[] | null>(null);
   const [floorLabel, setFloorLabel] = useState("");
@@ -3268,6 +3269,14 @@ export default function ItemEditor({
   // abaixo), ver FloorPatternConfig.plankLengthPx em game/floor.ts.
   const [floorPlankLength, setFloorPlankLength] = useState("");
   const [floorLineColor, setFloorLineColor] = useState("#2c2115");
+  // efeito "laminado" (pedido do Douglas, com fotos de referência de
+  // piso de madeira: "agora eu quero esse efeito laminado... de veios
+  // de madeira", depois "no sentido das linhas também") -- riscos finos
+  // dentro de cada tábua, ver FloorPatternConfig.woodGrain em
+  // game/floor.ts. Só faz sentido com plankLength preenchido (tábua
+  // EMENDADA -- sem isso, não tem tábua delimitada pra conter o veio),
+  // por isso a checkbox só aparece nesse caso (ver JSX abaixo).
+  const [floorWoodGrain, setFloorWoodGrain] = useState(false);
   const [floorEditingId, setFloorEditingId] = useState<string | null>(null);
   const [floorExistingFileUrl, setFloorExistingFileUrl] = useState<string | null>(null);
   const [floorSubmitting, setFloorSubmitting] = useState(false);
@@ -3303,7 +3312,7 @@ export default function ItemEditor({
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("room_floor_items")
-      .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors");
+      .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain");
     if (fetchError) {
       setFloorError(fetchError.message);
       return;
@@ -3322,6 +3331,7 @@ export default function ItemEditor({
     setFloorColors(["#a9835f", "#8f6a48"]);
     setFloorPlankLength("");
     setFloorLineColor("#2c2115");
+    setFloorWoodGrain(false);
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3351,6 +3361,7 @@ export default function ItemEditor({
     setFloorColors(item.colors && item.colors.length >= 2 ? item.colors : [item.color_a ?? "#a9835f", item.color_b ?? "#8f6a48"]);
     setFloorPlankLength(item.plank_length_px ? String(item.plank_length_px) : "");
     setFloorLineColor(item.line_color ?? "#2c2115");
+    setFloorWoodGrain(item.wood_grain ?? false);
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3426,11 +3437,14 @@ export default function ItemEditor({
           }
           payload.plank_length_px = plankLength;
           payload.line_color = floorLineColor;
+          payload.wood_grain = floorWoodGrain;
         } else if (floorEditingId) {
           // editando e deixou o campo em branco -- some com a emenda
-          // (volta pra ripa contínua), não só ignora o campo.
+          // (volta pra ripa contínua), não só ignora o campo -- e o
+          // veio (que só faz sentido com tábua emendada) some junto.
           payload.plank_length_px = null;
           payload.line_color = null;
+          payload.wood_grain = false;
         }
       }
 
@@ -4139,10 +4153,23 @@ export default function ItemEditor({
                     />
                   </label>
                   {floorPlankLength.trim() !== "" && (
-                    <div className="items-panel-upload-field">
-                      <span>Cor da linha de junta</span>
-                      <ColorPickerField value={floorLineColor} onChange={setFloorLineColor} />
-                    </div>
+                    <>
+                      <div className="items-panel-upload-field">
+                        <span>Cor da linha de junta</span>
+                        <ColorPickerField value={floorLineColor} onChange={setFloorLineColor} />
+                      </div>
+                      {/* efeito "laminado" -- pedido do Douglas: "agora
+                          eu quero esse efeito laminado... de veios de
+                          madeira", depois "no sentido das linhas
+                          também" (ver FloorPatternConfig.woodGrain em
+                          game/floor.ts). Só aparece com tábua emendada
+                          (precisa de comprimento definido pra ter onde
+                          conter o veio). */}
+                      <label className="settings-hint settings-hint-check">
+                        <input type="checkbox" checked={floorWoodGrain} onChange={(e) => setFloorWoodGrain(e.target.checked)} />
+                        Efeito laminado (veios de madeira)
+                      </label>
+                    </>
                   )}
 
                   {/* lista de cores -- 2 (o de sempre, alternadas) ou
@@ -4198,6 +4225,7 @@ export default function ItemEditor({
                           plankLengthPx: floorPlankLength.trim() !== "" ? Number(floorPlankLength) : undefined,
                           lineColor: floorPlankLength.trim() !== "" ? parseHexColor(floorLineColor) : undefined,
                           colors: floorColors.length > 2 ? floorColors.map(parseHexColor) : undefined,
+                          woodGrain: floorPlankLength.trim() !== "" ? floorWoodGrain : undefined,
                         }}
                       />
                     </div>
@@ -4240,6 +4268,7 @@ export default function ItemEditor({
                                 plankLengthPx: item.plank_length_px ?? undefined,
                                 lineColor: item.line_color ? parseHexColor(item.line_color) : undefined,
                                 colors: item.colors && item.colors.length > 0 ? item.colors.map(parseHexColor) : undefined,
+                                woodGrain: item.wood_grain ?? undefined,
                               }}
                             />
                           </div>

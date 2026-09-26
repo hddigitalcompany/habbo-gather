@@ -55,7 +55,16 @@ import {
   DEFAULT_OUTFIT_ID,
   resolveOutfitSkinId,
 } from "./customization";
-import { FLOOR_CATALOG, FloorCatalogEntry, FloorPatternConfig, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
+import {
+  FLOOR_CATALOG,
+  FloorCatalogEntry,
+  FloorPatternConfig,
+  FloorTileDef,
+  floorTextureKey,
+  floorWorldPos,
+  floorEntryById,
+  woodGrainShapesForPlank,
+} from "./floor";
 import {
   AreaDef,
   AreaTileDef,
@@ -1428,7 +1437,8 @@ export default class MainScene extends Phaser.Scene {
             { x: cx + lx + wx, y: cy + ly + wy },
             { x: cx - lx + wx, y: cy - ly + wy },
           ];
-          gfx.fillStyle(this.pickPlankColor(pattern, i, j), 1);
+          const plankColor = this.pickPlankColor(pattern, i, j);
+          gfx.fillStyle(plankColor, 1);
           gfx.fillPoints(points, true);
           // linha bem fina (era 1.5, depois 0.75) -- pedido do Douglas:
           // "afine a linha ficando o mais parecido possivel da imagem
@@ -1437,6 +1447,21 @@ export default class MainScene extends Phaser.Scene {
           // borda grossa).
           gfx.lineStyle(0.4, lineColor, 1);
           gfx.strokePoints(points, true, true);
+          // veios de madeira (pedido do Douglas: "agora eu quero esse
+          // efeito laminado... de veios de madeira", depois "no sentido
+          // das linhas também") -- riscos POR CIMA da tábua que acabou
+          // de entrar, usando a MESMA função pura de game/floor.ts que o
+          // preview do formulário usa (woodGrainShapesForPlank), pra
+          // nunca dessincronizar dos dois (mesmo princípio de
+          // floorPatternPolygons, ver comentário grande lá).
+          if (pattern.woodGrain) {
+            const grainShapes = woodGrainShapesForPlank(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor);
+            for (const shape of grainShapes) {
+              const [p0, p1, p2, p3] = shape.points;
+              gfx.fillStyle(parseInt(shape.fill.replace("#", ""), 16), shape.opacity ?? 1);
+              gfx.fillPoints([p0, p1, p2, p3], true);
+            }
+          }
         }
       }
     } else {

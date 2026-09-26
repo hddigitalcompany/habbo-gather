@@ -111,6 +111,11 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : "paleta de cores inválida" }, { status: 400 });
     }
+    // veios de madeira (opcional -- "efeito laminado", ver
+    // supabase/migrations/0018_room_floor_items_wood_grain.sql e
+    // FloorPatternConfig.woodGrain em game/floor.ts). Só booleano, sem
+    // validação extra -- qualquer coisa "truthy" no corpo vira true.
+    if (typeof body?.wood_grain === "boolean") insert.wood_grain = body.wood_grain;
   } else {
     const fileUrl = typeof body?.file_url === "string" ? body.file_url : "";
     if (!fileUrl) return NextResponse.json({ error: "imagem é obrigatória" }, { status: 400 });

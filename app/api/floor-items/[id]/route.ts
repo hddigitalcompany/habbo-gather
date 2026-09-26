@@ -117,6 +117,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: "cor da linha de junta inválida" }, { status: 400 });
     }
   }
+  // veios de madeira (opcional -- "efeito laminado", ver
+  // supabase/migrations/0018_room_floor_items_wood_grain.sql e
+  // FloorPatternConfig.woodGrain em game/floor.ts).
+  if (typeof body.wood_grain === "boolean") {
+    update.wood_grain = body.wood_grain;
+  }
   // paleta de várias cores (opcional -- "Tábua Mesclada")
   if ("colors" in body) {
     if (body.colors === null || (Array.isArray(body.colors) && body.colors.length === 0)) {

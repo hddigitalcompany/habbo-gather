@@ -36,6 +36,7 @@ export function FloorPatternSwatch({ pattern }: { pattern: FloorPatternConfig })
           key={idx}
           points={poly.points.map((p) => `${p.x},${p.y}`).join(" ")}
           fill={poly.fill}
+          fillOpacity={poly.opacity}
           stroke={poly.stroke}
           strokeWidth={poly.stroke ? 0.4 : undefined}
           strokeLinejoin="round"
