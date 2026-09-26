@@ -19,6 +19,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH, SEAT_X_LADO, SEAT_Y_LADO } from "@/game/furniture";
 import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
+import { FLOOR_CATEGORIES, FloorCategory } from "@/game/floor";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
   HAIR_CATALOG,
@@ -2800,7 +2801,17 @@ export default function ItemEditor({
   // móvel. Ver handleCategoryChange no clique da aba abaixo (trava a
   // categoria) e visibleItems mais abaixo (separa a listagem: parede só
   // mostra parede, mobi só mostra o resto).
-  const [mode, setMode] = useState<"mobi" | "parede" | "avatar">("mobi");
+  //
+  // "Criar Piso" (pedido do Douglas, logo em seguida: "eu quero uma aba
+  // so pra piso tambem... vai ter funcoes totalmente diferentes dos
+  // mobis") -- diferente de "Criar Parede" acima, esse é um sistema de
+  // VERDADE à parte (não reaproveita o formulário de mobi): piso é uma
+  // imagem PLANA só, sem direção/footprint/assento/interação -- todo o
+  // estado/formulário fica em campos "floor*" próprios logo abaixo, e o
+  // JSX dele é um bloco separado (ver {mode === "piso" && (...)} mais
+  // abaixo), guardado numa tabela própria (room_floor_items, ver
+  // supabase/migrations/0015_room_floor_items.sql) em vez de room_items.
+  const [mode, setMode] = useState<"mobi" | "parede" | "piso" | "avatar">("mobi");
   const [items, setItems] = useState<CustomItemRow[] | null>(null);
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<CategoryId>("poltrona");
@@ -2979,6 +2990,164 @@ export default function ItemEditor({
     if (iconInputRef.current) iconInputRef.current.value = "";
   }
 
+  // --- "Criar Piso" (pedido do Douglas: "eu quero uma aba so pra piso
+  // tambem... vai ter funcoes totalmente diferentes dos mobis", ver
+  // comentário grande no mode acima) -- estado TODO separado do resto
+  // do formulário de mobi/parede (nada aqui é reaproveitado de lá):
+  // piso é só nome + categoria + UMA imagem, sem direção/footprint/
+  // assento/interação/cor. Tabela própria (room_floor_items, ver
+  // supabase/migrations/0015_room_floor_items.sql) e rotas próprias
+  // (app/api/floor-items/**). ---
+  type CustomFloorRow = { id: string; label: string; category: FloorCategory; file_url: string };
+  const [floorItems, setFloorItems] = useState<CustomFloorRow[] | null>(null);
+  const [floorLabel, setFloorLabel] = useState("");
+  const [floorCategory, setFloorCategory] = useState<FloorCategory>("porcelanato");
+  const [floorFile, setFloorFile] = useState<File | null>(null);
+  const [floorPreviewUrl, setFloorPreviewUrl] = useState<string | null>(null);
+  const floorPreviewUrlRef = useRef<string | null>(null);
+  floorPreviewUrlRef.current = floorPreviewUrl;
+  const [floorEditingId, setFloorEditingId] = useState<string | null>(null);
+  const [floorExistingFileUrl, setFloorExistingFileUrl] = useState<string | null>(null);
+  const [floorSubmitting, setFloorSubmitting] = useState(false);
+  const [floorBusyId, setFloorBusyId] = useState<string | null>(null);
+  const [floorError, setFloorError] = useState<string | null>(null);
+  const floorFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function loadFloorItems() {
+    setFloorError(null);
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data, error: fetchError } = await supabase
+      .from("room_floor_items")
+      .select("id, label, category, file_url");
+    if (fetchError) {
+      setFloorError(fetchError.message);
+      return;
+    }
+    setFloorItems((data ?? []) as CustomFloorRow[]);
+  }
+
+  function resetFloorForm() {
+    setFloorEditingId(null);
+    setFloorLabel("");
+    setFloorCategory("porcelanato");
+    setFloorFile(null);
+    setFloorExistingFileUrl(null);
+    setFloorPreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
+    if (floorFileInputRef.current) floorFileInputRef.current.value = "";
+  }
+
+  function handleFloorFileChange(file: File | undefined) {
+    setFloorFile(file ?? null);
+    setFloorPreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  function startEditFloorItem(item: CustomFloorRow) {
+    setFloorEditingId(item.id);
+    setFloorLabel(item.label);
+    setFloorCategory(item.category);
+    setFloorFile(null);
+    setFloorExistingFileUrl(item.file_url);
+    setFloorPreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
+    if (floorFileInputRef.current) floorFileInputRef.current.value = "";
+  }
+
+  async function handleFloorSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setFloorError(null);
+    if (!floorLabel.trim()) {
+      setFloorError("Dá um nome pro piso.");
+      return;
+    }
+    if (!floorEditingId && !floorFile) {
+      setFloorError("A imagem é obrigatória.");
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    setFloorSubmitting(true);
+    // mesma correção do handleSubmit de mobi/parede acima (ver comentário
+    // grande lá): sobe a imagem pro Storage PRIMEIRO, só depois grava o
+    // cadastro -- se o cadastro falhar depois do upload, desfaz o upload
+    // órfão no catch, em vez de deixar lixo pra sempre no bucket.
+    const uploadedPaths: string[] = [];
+    try {
+      const slug = slugify(floorLabel);
+      let fileUrl: string | undefined;
+      if (floorFile) {
+        // teto de resolução: piso sempre desenha no tamanho FIXO do tile
+        // (ISO_TILE_WIDTH x ISO_TILE_HEIGHT, ver addFloorSprite em
+        // MainScene.ts -- diferente de móvel, não tem displayWidth
+        // ajustável), então o teto usa direto ISO_TILE_WIDTH (com a
+        // mesma folga de nitidez UPLOAD_SUPERSAMPLE do resto do editor).
+        const resized = await resizeImageForUpload(floorFile, ISO_TILE_WIDTH * UPLOAD_SUPERSAMPLE);
+        const ext = resized.name.split(".").pop() || "png";
+        const path = `piso/${slug}-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("room-items").upload(path, resized, {
+          upsert: false,
+          contentType: resized.type || "image/png",
+        });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+        const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
+        fileUrl = publicUrlData.publicUrl;
+      }
+
+      const payload: Record<string, unknown> = { label: floorLabel.trim(), category: floorCategory };
+      if (fileUrl) payload.file_url = fileUrl;
+
+      const res = await fetch(floorEditingId ? `/api/floor-items/${floorEditingId}` : "/api/floor-items", {
+        method: floorEditingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao salvar piso");
+
+      resetFloorForm();
+      await loadFloorItems();
+      onItemsChanged();
+    } catch (err) {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("room-items").remove(uploadedPaths).catch(() => null);
+      }
+      setFloorError(err instanceof Error ? err.message : "erro ao salvar piso");
+    } finally {
+      setFloorSubmitting(false);
+    }
+  }
+
+  async function handleFloorDelete(id: string) {
+    setFloorBusyId(id);
+    setFloorError(null);
+    try {
+      const res = await fetch(`/api/floor-items/${id}`, { method: "DELETE", headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao apagar piso");
+      if (floorEditingId === id) resetFloorForm();
+      await loadFloorItems();
+      onItemsChanged();
+    } catch (err) {
+      setFloorError(err instanceof Error ? err.message : "erro ao apagar piso");
+    } finally {
+      setFloorBusyId(null);
+    }
+  }
+
+  useEffect(() => {
+    loadFloorItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // limpa as últimas URLs de preview ao desmontar (ex: fechou o editor)
   // -- sem isso o blob fica preso na memória do navegador até a aba
   // fechar.
@@ -2986,6 +3155,7 @@ export default function ItemEditor({
     return () => {
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
       if (iconPreviewUrlRef.current) URL.revokeObjectURL(iconPreviewUrlRef.current);
+      if (floorPreviewUrlRef.current) URL.revokeObjectURL(floorPreviewUrlRef.current);
     };
   }, []);
 
@@ -3477,7 +3647,17 @@ export default function ItemEditor({
     <div className="items-panel-backdrop" onClick={onClose}>
       <div className="items-panel items-panel-editor" onClick={(e) => e.stopPropagation()}>
         <div className="items-panel-header">
-          <h2>{mode === "avatar" ? "Editor de itens" : editingId ? "Editar item" : "Editor de itens"}</h2>
+          <h2>
+            {mode === "avatar"
+              ? "Editor de itens"
+              : mode === "piso"
+                ? floorEditingId
+                  ? "Editar piso"
+                  : "Editor de itens"
+                : editingId
+                  ? "Editar item"
+                  : "Editor de itens"}
+          </h2>
           <button type="button" className="items-panel-close" onClick={onClose} title="Fechar">
             ✕
           </button>
@@ -3503,6 +3683,13 @@ export default function ItemEditor({
           </button>
           <button
             type="button"
+            className={mode === "piso" ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => setMode("piso")}
+          >
+            Criar Piso
+          </button>
+          <button
+            type="button"
             className={mode === "avatar" ? "edit-section-tab selected" : "edit-section-tab"}
             onClick={() => setMode("avatar")}
           >
@@ -3511,6 +3698,98 @@ export default function ItemEditor({
         </div>
 
         {mode === "avatar" && <AvatarCreatorPanel accessToken={accessToken} onChanged={onItemsChanged} />}
+
+        {mode === "piso" && (
+          <>
+            <form className="items-panel-form" onSubmit={handleFloorSubmit}>
+              <input
+                className="items-panel-input"
+                type="text"
+                placeholder="Nome do piso"
+                value={floorLabel}
+                maxLength={40}
+                onChange={(e) => setFloorLabel(e.target.value)}
+              />
+              <select
+                className="items-panel-input"
+                value={floorCategory}
+                onChange={(e) => setFloorCategory(e.target.value as FloorCategory)}
+              >
+                {FLOOR_CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+
+              <p className="settings-hint">
+                Uma imagem PLANA só (sem direção) -- o jogo desenha ela deitada, do tamanho exato do quadrado da grade.
+                {floorEditingId ? " Só reenvie a imagem se quiser TROCAR -- senão continua com a de antes." : ""}
+              </p>
+
+              <label className="items-panel-upload-field">
+                <span>Imagem{!floorEditingId ? " *" : ""}</span>
+                {(floorPreviewUrl || floorExistingFileUrl) && (
+                  <img
+                    className="items-panel-upload-existing"
+                    src={floorPreviewUrl ?? floorExistingFileUrl ?? undefined}
+                    alt="Piso atual"
+                  />
+                )}
+                <input
+                  ref={floorFileInputRef}
+                  type="file"
+                  accept="image/png,image/webp,image/jpeg"
+                  onChange={(e) => handleFloorFileChange(e.target.files?.[0])}
+                />
+              </label>
+
+              {floorError && <p className="items-panel-error">{floorError}</p>}
+
+              <div className="items-panel-submit-row">
+                <button type="submit" className="items-panel-submit" disabled={floorSubmitting}>
+                  {floorSubmitting ? "Enviando..." : floorEditingId ? "Salvar alterações" : "Cadastrar piso"}
+                </button>
+                {floorEditingId && (
+                  <button type="button" className="clear-btn" onClick={resetFloorForm} disabled={floorSubmitting}>
+                    Cancelar edição
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <section className="items-panel-section">
+              <h3>Pisos cadastrados ({floorItems?.length ?? 0})</h3>
+              {!floorItems ? (
+                <p className="items-panel-loading">Carregando...</p>
+              ) : floorItems.length === 0 ? (
+                <p className="items-panel-loading">Nenhum piso custom ainda.</p>
+              ) : (
+                <ul className="items-panel-list">
+                  {floorItems.map((item) => (
+                    <li key={item.id} className="items-panel-row-wrap">
+                      <div className="items-panel-row">
+                        <img className="items-panel-thumb" src={item.file_url} alt={item.label} />
+                        <span className="items-panel-name">
+                          {item.label}{" "}
+                          <span className="items-panel-category">
+                            ({FLOOR_CATEGORIES.find((c) => c.id === item.category)?.label ?? item.category})
+                          </span>
+                        </span>
+                        <button type="button" disabled={floorBusyId === item.id} onClick={() => startEditFloorItem(item)}>
+                          Editar
+                        </button>
+                        <button type="button" disabled={floorBusyId === item.id} onClick={() => handleFloorDelete(item.id)}>
+                          Excluir
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
 
         {(mode === "mobi" || mode === "parede") && (
         <>

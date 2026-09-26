@@ -52,7 +52,7 @@ import {
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
 } from "@/game/furniture";
-import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef } from "@/game/floor";
+import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
 import type { Direction } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
@@ -848,6 +848,11 @@ export default function GameRoom({
   // CUSTOM (Editor de Itens, botão "Criar Avatar" -- ver
   // fetchAndRegisterCustomSkins/registerCustomSkins).
   const [customSkinsVersion, setCustomSkinsVersion] = useState(0);
+  // mesma ideia de customItemsVersion acima, só que pra PISO custom
+  // (Editor de Itens, aba "Criar Piso" -- pedido do Douglas: "eu quero
+  // uma aba so pra piso tambem... vai ter funcoes totalmente diferentes
+  // dos mobis", ver fetchAndRegisterCustomFloor/registerCustomFloorModels).
+  const [customFloorVersion, setCustomFloorVersion] = useState(0);
 
   /**
    * Busca os itens custom no Supabase (leitura pública, ver policy em
@@ -977,6 +982,56 @@ export default function GameRoom({
       for (const modelId of updatedIds) sceneRef.current?.refreshFurnitureModel(modelId);
     } catch {
       // Supabase fora do ar/não configurado -- segue sem item custom, sala funciona igual
+    }
+  }
+
+  /**
+   * Mesmo esquema de fetchAndRegisterCustomFurniture acima, só que pra
+   * PISO customizado (Editor de Itens, aba "Criar Piso" -- pedido do
+   * Douglas: "eu quero uma aba so pra piso tambem... vai ter funcoes
+   * totalmente diferentes dos mobis", ver supabase/migrations/
+   * 0015_room_floor_items.sql). Bem mais simples que móvel: sem cor/
+   * direção/footprint/assento, é só uma imagem por modelo -- por isso
+   * não tem o loop de cores+direções nem o texture-key por
+   * facing/colorId, só UMA textura por entrada (floorTextureKey(id)).
+   * Chamado nos mesmos lugares que fetchAndRegisterCustomFurniture (scene-
+   * ready + onItemsChanged do ItemEditor).
+   */
+  async function fetchAndRegisterCustomFloor(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("room_floor_items").select("id, label, category, file_url");
+      if (error || !data || data.length === 0) return;
+      const entries: FloorCatalogEntry[] = data.map(
+        (row: { id: string; label: string; category: string; file_url: string }) => ({
+          id: row.id,
+          category: row.category as FloorCatalogEntry["category"],
+          label: row.label,
+          file: row.file_url,
+        })
+      );
+      const updatedIds = registerCustomFloorModels(entries);
+      setCustomFloorVersion((v) => v + 1);
+      const textureEntries: { key: string; url: string }[] = entries.map((entry) => ({
+        key: floorTextureKey(entry.id),
+        url: entry.file,
+      }));
+      // item que já existia e mudou (ver "Editar" na aba "Criar Piso") --
+      // limpa a textura ANTIGA da cena antes de recarregar com essa MESMA
+      // chave, mesmo motivo de removeFurnitureTextures em
+      // fetchAndRegisterCustomFurniture acima.
+      for (const id of updatedIds) sceneRef.current?.removeFurnitureTextures([floorTextureKey(id)]);
+      await new Promise<void>((resolve) => {
+        if (sceneRef.current) sceneRef.current.loadCustomFurnitureTextures(textureEntries, resolve);
+        else resolve();
+      });
+      // recria na hora a sprite de todo tile JÁ PINTADO que usa um estilo
+      // que acabou de ser editado -- sem isso, piso editado só atualizaria
+      // visualmente depois de um F5 (mesma ideia de refreshFurnitureModel).
+      for (const id of updatedIds) sceneRef.current?.refreshFloorModel(id);
+    } catch {
+      // Supabase fora do ar/não configurado -- segue sem piso custom, sala funciona igual
     }
   }
 
@@ -2197,16 +2252,23 @@ export default function GameRoom({
         // falha) -- o autosave abaixo confere essa flag antes de mandar
         // qualquer coisa, senão o primeiro render (draftFloorItems ainda
         // vazio, ninguém carregou nada de verdade) apagaria um piso já
-        // salvo antes mesmo da busca responder.
-        fetch(`${REALTIME_HTTP_BASE}/room/floor`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data) => {
-            if (data?.items) sceneRef.current?.loadSavedFloor(data.items);
-          })
-          .catch(() => {})
-          .finally(() => {
-            floorLoadedRef.current = true;
-          });
+        // salvo antes mesmo da busca responder. Espera
+        // fetchAndRegisterCustomFloor() terminar ANTES (mesma corrida já
+        // corrigida pra mobília, ver "ACHADO" no create() acima e
+        // fetchAndRegisterCustomFurniture().finally() logo acima) -- senão
+        // um piso salvo usando um estilo CUSTOM carregaria antes da
+        // textura dele existir na cena.
+        fetchAndRegisterCustomFloor().finally(() => {
+          fetch(`${REALTIME_HTTP_BASE}/room/floor`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              if (data?.items) sceneRef.current?.loadSavedFloor(data.items);
+            })
+            .catch(() => {})
+            .finally(() => {
+              floorLoadedRef.current = true;
+            });
+        });
         // área já salva (ver GET /room/areas em server/index.js) -- mesmo
         // timing/tratamento de falha do piso acima, só que a resposta tem
         // DUAS listas ({list, tiles}, ver getAreaState em roomStore.js):
@@ -3684,6 +3746,7 @@ export default function GameRoom({
             onClose={() => setItemEditorOpen(false)}
             onItemsChanged={(seatModelIdToClear) => {
               const furnitureRefreshed = fetchAndRegisterCustomFurniture();
+              fetchAndRegisterCustomFloor();
               fetchAndRegisterCustomSkins();
               fetchAndRegisterCustomAvatarItems();
               fetchDefaultReferences();
@@ -4228,7 +4291,7 @@ function EditPanel({
               <button
                 key={entry.id}
                 className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
-                style={{ backgroundImage: `url(/assets/${entry.file})` }}
+                style={{ backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }}
                 onClick={() => onSelectFloorPaint(entry)}
                 title={entry.label}
               />

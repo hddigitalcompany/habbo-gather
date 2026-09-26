@@ -1256,6 +1256,29 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
+   * Recria a sprite de todo tile JÁ PINTADO (draftFloor) que usa o
+   * ESTILO dado -- mesma ideia de refreshFurnitureModel logo acima, só
+   * que pra piso (ver registerCustomFloorModels em game/floor.ts e
+   * fetchAndRegisterCustomFloor em GameRoom.tsx, chamado depois de editar
+   * um piso custom no Editor de Itens). addFloorSprite pode devolver null
+   * se a textura nova ainda não terminou de carregar (corrida, ver
+   * comentário grande em addFloorSprite) -- nesse caso só destrói a
+   * sprite velha e sai sem sprite nenhuma no lugar (raro, resolve sozinho
+   * no próximo loadSavedFloor/reload; não vale a pena duplicar aqui o
+   * retry de 400ms que já existe em loadSavedFloor só pra esse caso
+   * bem mais raro).
+   */
+  refreshFloorModel(styleId: string) {
+    for (const [key, f] of this.draftFloor.entries()) {
+      if (f.styleId !== styleId) continue;
+      this.draftFloorSprites.get(key)?.destroy();
+      const sprite = this.addFloorSprite(f);
+      if (sprite) this.draftFloorSprites.set(key, sprite);
+      else this.draftFloorSprites.delete(key);
+    }
+  }
+
+  /**
    * Carrega o piso já salvo no servidor (ver GET /room/floor em
    * server/index.js) -- chamado UMA vez pelo React (GameRoom.tsx) assim
    * que a cena fica pronta E a busca responder (podem chegar em
