@@ -3303,6 +3303,20 @@ export default function ItemEditor({
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     setSubmitting(true);
+    // ACHADO (Douglas: "alguns itens que eu criei antes não aparecem
+    // aqui" -> conferido direto no banco, só existiam 2 linhas de
+    // verdade em room_items -> "apareceu várias" no storage.objects) --
+    // esse handleSubmit sobe TODAS as imagens pro Storage primeiro (loop
+    // abaixo) e só DEPOIS manda o POST/PATCH que grava a linha de
+    // verdade. Se esse POST falhar por qualquer motivo (sessão expirou
+    // no meio do upload, erro de rede, 500 do servidor) DEPOIS que as
+    // imagens já subiram, sobra lixo órfão no bucket pra sempre -- é
+    // exatamente isso que apareceu na consulta. uploadedPaths guarda
+    // cada caminho conforme sobe, pra poder DESFAZER (apagar de volta)
+    // no catch abaixo se o cadastro final não completar -- assim uma
+    // falha no meio do caminho não deixa mais rastro nenhum no Storage,
+    // só o erro visível na tela (ver items-panel-error mais abaixo).
+    const uploadedPaths: string[] = [];
     try {
       const slug = slugify(label);
       // teto de resolução com folga (ver UPLOAD_SUPERSAMPLE acima) -- a
@@ -3323,6 +3337,7 @@ export default function ItemEditor({
           contentType: file.type || "image/png",
         });
         if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
         const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
         art[field.key] = publicUrlData.publicUrl;
       }
@@ -3340,6 +3355,7 @@ export default function ItemEditor({
           contentType: resized.type || "image/png",
         });
         if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
         const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
         iconUrl = publicUrlData.publicUrl;
       } else if (iconCleared) {
@@ -3420,6 +3436,13 @@ export default function ItemEditor({
       await loadItems();
       onItemsChanged(seatModelIdToClear);
     } catch (err) {
+      // desfaz upload(s) órfão(s) (ver comentário grande no início desse
+      // handleSubmit) -- melhor esforço, uma falha aqui não pode
+      // esconder o erro ORIGINAL que já vai aparecer pro Douglas embaixo
+      // do formulário (items-panel-error).
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("room-items").remove(uploadedPaths).catch(() => null);
+      }
       setError(err instanceof Error ? err.message : "erro ao salvar item");
     } finally {
       setSubmitting(false);
