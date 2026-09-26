@@ -25,6 +25,17 @@ export function clampSeatOffset(raw: unknown): number | undefined {
   return Math.round(Math.max(-100, Math.min(100, raw)));
 }
 
+/** Mesma ideia de clampItemOffset acima, faixa do TAMANHO em px
+ * (display_width -- mesma faixa 20..1200 da constraint em
+ * supabase/migrations/0020_room_items_display_width_max.sql).
+ * undefined (não 0) quando ausente/inválido -- igual clampSeatOffset,
+ * "sem override nessa direção" precisa ficar de fora do objeto (cai no
+ * displayWidth de "down"), nunca virar um tamanho de 0px à força. */
+export function clampDisplayWidth(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  return Math.round(Math.max(20, Math.min(1200, raw)));
+}
+
 /** Tamanho de footprint (cols/rows, ver FurnitureModelDef.footprintCols
  * em game/furniture.ts) -- inteiro de 1 a 6 (sem "mobi" real ocupando
  * mais que isso; teto baixo de propósito, evita alguém travar a sala
@@ -103,6 +114,26 @@ export function cleanDirectionOffsets(raw: unknown): Record<string, { x: number;
     const y = (entry as Record<string, unknown>).y;
     if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) continue;
     cleaned[dir] = { x: clampItemOffset(x), y: clampItemOffset(y) };
+  }
+  return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
+
+/** Mesma ideia de cleanDirectionOffsets acima, só que pro TAMANHO (ver
+ * direction_display_width em supabase/migrations/
+ * 0021_room_items_direction_display_width.sql e o comentário grande em
+ * FurnitureModelDef.directionDisplayWidth, game/furniture.ts) -- pedido
+ * do Douglas: "se eu mudar de um ele muda de todas as vistas? nao tem
+ * como isolar?". Também só left/right/up ("down" usa display_width
+ * direto), cada valor limitado pela mesma faixa 20..1200 do tamanho
+ * comum (clampDisplayWidth). */
+export function cleanDirectionDisplayWidth(raw: unknown): Record<string, number> | null {
+  if (raw === null) return null;
+  if (!raw || typeof raw !== "object") return null;
+  const cleaned: Record<string, number> = {};
+  for (const dir of OVERRIDABLE_DIRECTIONS) {
+    const width = clampDisplayWidth((raw as Record<string, unknown>)[dir]);
+    if (width === undefined) continue;
+    cleaned[dir] = width;
   }
   return Object.keys(cleaned).length > 0 ? cleaned : null;
 }

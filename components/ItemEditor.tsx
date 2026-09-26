@@ -372,6 +372,7 @@ type CustomItemRow = {
   offset_x: number | null;
   offset_y: number | null;
   direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
+  direction_display_width: Partial<Record<Exclude<DirectionKey, "down">, number>> | null;
   sittable: boolean | null;
   seat_offset_x: number | null;
   seat_offset_y: number | null;
@@ -3146,6 +3147,17 @@ export default function ItemEditor({
   const [directionOffsets, setDirectionOffsets] = useState<
     Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>>
   >({});
+  // override de displayWidth por direção (pedido do Douglas, testando o
+  // campo digitável de "Tamanho no jogo" recém adicionado: "se eu mudar
+  // de um ele muda de todas as vistas? nao tem como isolar?") -- MESMO
+  // esquema de directionOffsets logo acima: left/right/up só, "down" usa
+  // displayWidth direto (ver comentário em
+  // FurnitureModelDef.directionDisplayWidth, game/furniture.ts). Sem
+  // entrada numa direção = continua reaproveitando o displayWidth de
+  // "down" (comportamento de sempre, sem regressão).
+  const [directionDisplayWidth, setDirectionDisplayWidth] = useState<
+    Partial<Record<Exclude<DirectionKey, "down">, number>>
+  >({});
   const [activeMobiDirection, setActiveMobiDirection] = useState<DirectionKey>("down");
 
   // "Tem interação?" (pedido do Douglas: "se vai ter interação, e qual
@@ -3595,7 +3607,7 @@ export default function ItemEditor({
     const { data, error: fetchError } = await supabase
       .from("room_items")
       .select(
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -3629,6 +3641,7 @@ export default function ItemEditor({
     setOffsetX(0);
     setOffsetY(0);
     setDirectionOffsets({});
+    setDirectionDisplayWidth({});
     setActiveMobiDirection("down");
     setSittable(DEFAULT_SITTABLE_BY_CATEGORY[defaultCategory]);
     setSeatOffsetX(0);
@@ -3675,6 +3688,7 @@ export default function ItemEditor({
     setOffsetX(clamp(item.offset_x ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setOffsetY(clamp(item.offset_y ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setDirectionOffsets(item.direction_offsets ?? {});
+    setDirectionDisplayWidth(item.direction_display_width ?? {});
     setActiveMobiDirection("down");
     setSittable(item.sittable ?? DEFAULT_SITTABLE_BY_CATEGORY[item.category]);
     setSeatOffsetX(clamp(item.seat_offset_x ?? 0, -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
@@ -3770,6 +3784,30 @@ export default function ItemEditor({
   // acontecer no jogo, ver addFurnitureSprite em MainScene.ts).
   const activeMobiOffset =
     activeMobiDirection === "down" ? { x: offsetX, y: offsetY } : directionOffsets[activeMobiDirection] ?? { x: offsetX, y: offsetY };
+
+  // tamanho em uso pela direção ATIVA (mesma ideia de activeMobiOffset
+  // acima, ver comentário grande em directionDisplayWidth/
+  // FurnitureModelDef.directionDisplayWidth) -- "down" lê displayWidth
+  // direto, as outras 3 caem no PRÓPRIO override (directionDisplayWidth)
+  // ou, sem um ainda, no mesmo valor de "down" (mesma prévia do que vai
+  // acontecer no jogo, ver addFurnitureSprite em MainScene.ts). Pedido
+  // do Douglas: "se eu mudar de um ele muda de todas as vistas? nao tem
+  // como isolar?".
+  const activeDisplayWidth =
+    activeMobiDirection === "down" ? displayWidth : directionDisplayWidth[activeMobiDirection] ?? displayWidth;
+  const hasDisplayWidthOverride = activeMobiDirection !== "down" && activeMobiDirection in directionDisplayWidth;
+  /** Grava o tamanho na direção ATIVA -- "down" ajusta displayWidth
+   * direto (base, reaproveitada por qualquer direção sem override
+   * próprio), as outras 3 gravam SÓ o override daquela direção em
+   * directionDisplayWidth, sem mexer em displayWidth nem nas demais. */
+  function setActiveDisplayWidth(value: number) {
+    if (activeMobiDirection === "down") {
+      setDisplayWidth(value);
+    } else {
+      const dir = activeMobiDirection as Exclude<DirectionKey, "down">;
+      setDirectionDisplayWidth((prev) => ({ ...prev, [dir]: value }));
+    }
+  }
 
   // assento em uso pela direção ATIVA (mesma ideia de activeMobiOffset
   // acima, ver comentário grande em seatDirectionOffsets/
@@ -3985,6 +4023,11 @@ export default function ItemEditor({
         // nenhuma direção ajustada) manda null de propósito, limpando
         // qualquer override antigo ao invés de deixar lixo pra trás.
         direction_offsets: Object.keys(directionOffsets).length > 0 ? directionOffsets : null,
+        // tamanho por direção (pedido do Douglas: "se eu mudar de um ele
+        // muda de todas as vistas? nao tem como isolar?") -- mesma regra
+        // de direction_offsets logo acima, ver cleanDirectionDisplayWidth
+        // em lib/supabase/itemFields.ts.
+        direction_display_width: Object.keys(directionDisplayWidth).length > 0 ? directionDisplayWidth : null,
         sittable,
         seat_offset_x: sittable ? seatOffsetX : null,
         seat_offset_y: sittable ? seatOffsetY : null,
@@ -4777,7 +4820,7 @@ export default function ItemEditor({
                   alt="Preview do item"
                   onPointerDown={handleItemPointerDown}
                   style={{
-                    width: displayWidth * PREVIEW_SCALE,
+                    width: activeDisplayWidth * PREVIEW_SCALE,
                     bottom: STAGE_BASELINE_PAD - activeMobiOffset.y * PREVIEW_SCALE,
                     transform: `translate(calc(-50% + ${activeMobiOffset.x * PREVIEW_SCALE}px), 0)`,
                   }}
@@ -4792,15 +4835,26 @@ export default function ItemEditor({
               <StageRuler anchorBottomPx={STAGE_BASELINE_PAD} />
             </div>
 
+            {/* tamanho -- POR DIREÇÃO desde o pedido do Douglas: "se eu
+                mudar de um ele muda de todas as vistas? nao tem como
+                isolar?" (testando o campo digitável de baixo, recém
+                adicionado). Mesmo esquema de "posição no tile" (mais
+                abaixo): "down" ajusta displayWidth direto, as outras 3
+                gravam o PRÓPRIO override em directionDisplayWidth (ver
+                activeDisplayWidth/setActiveDisplayWidth) -- sem
+                override, uma direção continua reaproveitando o tamanho
+                de "down" (comportamento de sempre). */}
             <div className="settings-slider-row settings-slider-row-editable">
-              <span className="settings-slider-name">Tamanho no jogo</span>
+              <span className="settings-slider-name">
+                Tamanho no jogo ({(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).find((f) => f.key === activeMobiDirection)?.label})
+              </span>
               <input
                 type="range"
                 min={DISPLAY_WIDTH_MIN}
                 max={DISPLAY_WIDTH_MAX}
                 step={DISPLAY_WIDTH_STEP}
-                value={displayWidth}
-                onChange={(e) => setDisplayWidth(Number(e.target.value))}
+                value={activeDisplayWidth}
+                onChange={(e) => setActiveDisplayWidth(Number(e.target.value))}
               />
               {/* valor digitável (pedido do Douglas: "deixa essa linha
                   dimensao de pixel aqui digitalvel") -- NÃO trava
@@ -4826,13 +4880,34 @@ export default function ItemEditor({
                   className="settings-slider-value-input"
                   min={DISPLAY_WIDTH_MIN}
                   max={DISPLAY_WIDTH_MAX}
-                  value={displayWidth}
-                  onChange={(e) => setDisplayWidth(Number(e.target.value) || 0)}
-                  onBlur={() => setDisplayWidth((prev) => clamp(Math.round(prev), DISPLAY_WIDTH_MIN, DISPLAY_WIDTH_MAX))}
+                  value={activeDisplayWidth}
+                  onChange={(e) => setActiveDisplayWidth(Number(e.target.value) || 0)}
+                  onBlur={() => setActiveDisplayWidth(clamp(Math.round(activeDisplayWidth), DISPLAY_WIDTH_MIN, DISPLAY_WIDTH_MAX))}
                 />
                 <span>px</span>
               </span>
             </div>
+            {hasDisplayWidthOverride && (
+              <div className="item-stage-offset-row">
+                <span>
+                  tamanho próprio pra essa direção -- diferente do de "
+                  {(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).find((f) => f.key === "down")?.label}"
+                </span>
+                <button
+                  type="button"
+                  className="clear-btn"
+                  onClick={() => {
+                    setDirectionDisplayWidth((prev) => {
+                      const next = { ...prev };
+                      delete next[activeMobiDirection as Exclude<DirectionKey, "down">];
+                      return next;
+                    });
+                  }}
+                >
+                  Redefinir tamanho
+                </button>
+              </div>
+            )}
 
             {/* footprint (pedido do Douglas: "tenho mobis que ocupam mais
                 tiles doq um ou dois, entao preciso selecionar pra que nao

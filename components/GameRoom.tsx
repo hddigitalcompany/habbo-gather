@@ -878,7 +878,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_items")
         .select(
-          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
+          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
         );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
@@ -892,6 +892,7 @@ export default function GameRoom({
           offset_x: number | null;
           offset_y: number | null;
           direction_offsets: Partial<Record<Direction, { x: number; y: number }>> | null;
+          direction_display_width: Partial<Record<Direction, number>> | null;
           sittable: boolean | null;
           seat_offset_x: number | null;
           seat_offset_y: number | null;
@@ -924,6 +925,12 @@ export default function GameRoom({
           // (pedido do Douglas) -- ver supabase/migrations/
           // 0007_room_items_direction_offsets_seat.sql.
           directionOffsets: row.direction_offsets ?? undefined,
+          // tamanho por direção (ver supabase/migrations/
+          // 0021_room_items_direction_display_width.sql e o comentário
+          // grande em FurnitureModelDef.directionDisplayWidth) --
+          // pedido do Douglas: "nao tem como isolar?" (o tamanho não
+          // ficar preso reaproveitando o mesmo valor nas 4 vistas).
+          directionDisplayWidth: row.direction_display_width ?? undefined,
           sittable: row.sittable ?? undefined,
           seatOffsetX: row.seat_offset_x ?? undefined,
           seatOffsetY: row.seat_offset_y ?? undefined,

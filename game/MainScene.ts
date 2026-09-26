@@ -1179,8 +1179,16 @@ export default class MainScene extends Phaser.Scene {
       // preferência: tamanho ajustado à mão no preview do Editor de Itens
       // (model.displayWidth, ver FurnitureModelDef em furniture.ts) --
       // só cai no alvo genérico por categoria pra item cadastrado ANTES
-      // dessa opção existir (display_width null no banco).
-      const targetWidth = model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 225;
+      // dessa opção existir (display_width null no banco). "down"
+      // (frente) sempre usa displayWidth direto -- as outras 3 direções
+      // caem no PRÓPRIO tamanho se tiver (ver
+      // FurnitureModelDef.directionDisplayWidth, pedido do Douglas: "se
+      // eu mudar de um ele muda de todas as vistas? nao tem como
+      // isolar?"), senão reaproveitam o mesmo valor de "down" (mesma
+      // regra de directionOffsets logo abaixo, comportamento de sempre
+      // sem override).
+      const widthOverride = f.facing !== "down" ? model.directionDisplayWidth?.[f.facing] : undefined;
+      const targetWidth = widthOverride ?? model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 225;
       if (nativeW > 0 && nativeH > 0) {
         image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
       }

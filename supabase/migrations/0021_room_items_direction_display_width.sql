@@ -1,0 +1,27 @@
+-- direction_display_width: cada uma das 3 direções que NÃO são "down"
+-- (frente) ganha o PRÓPRIO tamanho (display_width) opcional, em vez de
+-- um valor só valendo pras 4 -- pedido do Douglas, testando o campo
+-- digitável de "Tamanho no jogo" recém adicionado: "se eu mudar de um
+-- ele muda de todas as vistas? nao tem como isolar?".
+--
+-- Mesmo esquema que direction_offsets (0007_room_items_direction_offsets_seat.sql)
+-- já usa pra posição no tile: um override OPCIONAL por direção, ex:
+-- {"left": 320, "up": 480}. "down" continua usando display_width direto
+-- (sem entrada aqui) -- essa coluna só guarda o override das outras 3.
+-- Direção sem entrada aqui cai no display_width de "down" (mesmo
+-- comportamento de sempre, sem regressão pros itens já cadastrados --
+-- todo item hoje fica sem essa coluna preenchida, então continua
+-- reaproveitando um tamanho só nas 4 vistas até o Douglas ajustar).
+--
+-- Sem CHECK constraint pros valores DENTRO do jsonb (mesmo padrão de
+-- direction_offsets/seat_direction_offsets -- validar cada chave de um
+-- jsonb em SQL puro é bem mais complicado que validar uma coluna
+-- simples) -- a validação de verdade (20..1200 por direção, mesma faixa
+-- de display_width) é feita no app, ver cleanDirectionDisplayWidth em
+-- lib/supabase/itemFields.ts.
+--
+-- Rode isso DEPOIS de já ter rodado 0007_room_items_direction_offsets_seat.sql
+-- e 0020_room_items_display_width_max.sql (não depende delas, mas segue
+-- a ordem de sempre).
+alter table public.room_items
+  add column if not exists direction_display_width jsonb;

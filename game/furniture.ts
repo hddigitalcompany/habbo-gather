@@ -190,6 +190,19 @@ export interface FurnitureModelDef {
    * resultado bem diferente de item pra item -- precisa ajustar cada
    * um. */
   displayWidth?: number;
+  /** Override de displayWidth (acima) por direção -- SÓ pra
+   * left/right/up (down usa displayWidth direto, sem entrada aqui).
+   * Pedido do Douglas: "se eu mudar de um ele muda de todas as vistas?
+   * nao tem como isolar?" -- antes o tamanho era um valor ÚNICO por
+   * ITEM (não por vista), reaproveitado nas 4 direções sem exceção,
+   * diferente da posição (directionOffsets acima), que já podia ser
+   * ajustada por lado desde 0007. Mesmo esquema: ajustado no campo
+   * digitável/slider "Tamanho no jogo" olhando a aba de cada direção no
+   * preview do Editor de Itens -- direção sem entrada aqui cai no
+   * displayWidth de "down" (comportamento de sempre, sem regressão pros
+   * itens já cadastrados). Útil pra parede, por exemplo: a "quina" pode
+   * precisar de uma largura bem diferente da "frente". */
+  directionDisplayWidth?: Partial<Record<Exclude<Direction, "down">, number>>;
   /** Ícone PRÓPRIO pro botão do catálogo (URL do Storage) -- pedido do
    * Douglas: "escolher o favicon que aparece no catálogo", separado das
    * 4 fotos de direção (a arte da peça pode não ficar boa cortada em

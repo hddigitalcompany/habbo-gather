@@ -12,6 +12,7 @@ import {
   clampFootprintSize,
   clampItemOffset,
   clampSeatOffset,
+  cleanDirectionDisplayWidth,
   cleanDirectionOffsets,
   cleanExtraSeats,
   cleanSeatDirectionOffsets,
@@ -68,6 +69,13 @@ export async function POST(req: NextRequest) {
   // 0007_room_items_direction_offsets_seat.sql e o comentário de cada
   // helper em lib/supabase/itemFields.ts.
   const directionOffsets = cleanDirectionOffsets(body?.direction_offsets);
+  // tamanho POR DIREÇÃO (pedido do Douglas: "se eu mudar de um ele muda
+  // de todas as vistas? nao tem como isolar?") -- ver
+  // supabase/migrations/0021_room_items_direction_display_width.sql e o
+  // comentário grande em FurnitureModelDef.directionDisplayWidth,
+  // game/furniture.ts. Mesmo esquema de direction_offsets acima, só que
+  // pro tamanho (displayWidth) em vez da posição.
+  const directionDisplayWidth = cleanDirectionDisplayWidth(body?.direction_display_width);
   const sittable = typeof body?.sittable === "boolean" ? body.sittable : null;
   const seatOffsetX = clampSeatOffset(body?.seat_offset_x) ?? null;
   const seatOffsetY = clampSeatOffset(body?.seat_offset_y) ?? null;
@@ -116,6 +124,7 @@ export async function POST(req: NextRequest) {
       offset_x: offsetX,
       offset_y: offsetY,
       direction_offsets: directionOffsets,
+      direction_display_width: directionDisplayWidth,
       sittable,
       seat_offset_x: seatOffsetX,
       seat_offset_y: seatOffsetY,

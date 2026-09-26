@@ -17,6 +17,7 @@ import {
   clampFootprintSize,
   clampItemOffset,
   clampSeatOffset,
+  cleanDirectionDisplayWidth,
   cleanDirectionOffsets,
   cleanExtraSeats,
   cleanSeatDirectionOffsets,
@@ -127,6 +128,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // truthiness): null explícito é uma edição de verdade (limpa o
   // override/volta pro fallback), diferente de "não mandou esse campo".
   if ("direction_offsets" in body) update.direction_offsets = cleanDirectionOffsets(body.direction_offsets);
+  // tamanho por direção (ver comentário equivalente em app/api/items/
+  // route.ts/POST) -- "in body" de propósito, mesmo motivo de
+  // direction_offsets acima.
+  if ("direction_display_width" in body) update.direction_display_width = cleanDirectionDisplayWidth(body.direction_display_width);
   if (typeof body.sittable === "boolean") update.sittable = body.sittable;
   if ("seat_offset_x" in body) update.seat_offset_x = clampSeatOffset(body.seat_offset_x) ?? null;
   if ("seat_offset_y" in body) update.seat_offset_y = clampSeatOffset(body.seat_offset_y) ?? null;
