@@ -1846,6 +1846,31 @@ export default class MainScene extends Phaser.Scene {
     this.onSeatOffsetChange?.(groupKey, furniture.facing, nextValue.x, nextValue.y);
   }
 
+  /**
+   * Apaga o ajuste de "Assento" salvo de um MODELO inteiro, nas 4
+   * direções de uma vez -- diferente de resetSeatOffset (que só limpa a
+   * direção ATUAL de quem tá sentado agora). Chamado quando o
+   * seat_offset_x/y PADRÃO do próprio modelo muda no Editor de Itens
+   * (ver onItemsChanged em GameRoom.tsx, ItemEditor.tsx): Douglas editou
+   * lá, o preview mostrava certo, mas a sala continuava presa no ajuste
+   * "Assento" antigo (prioridade #1 em resolveSeatOffset, por cima do
+   * padrão do modelo) -- "no editor ta certo no mapa real nao ficou".
+   * Limpar aqui deixa o valor recém-editado valer na hora, sem precisar
+   * abrir "Assento" de novo só pra destravar. Reposiciona quem estiver
+   * sentado nesse modelo agora, se houver (não precisa estar sentado
+   * pra chamar -- ao contrário de resetSeatOffset/nudgeSeatOffset).
+   */
+  clearSeatOffsetsForModel(groupKey: string) {
+    if (!(groupKey in this.seatOffsets)) return;
+    const next = { ...this.seatOffsets };
+    delete next[groupKey];
+    this.seatOffsets = next;
+    if (this.seatedAt && seatOffsetGroupKey(this.seatedAt) === groupKey) {
+      this.applySeatVisualPosition(this.seatedAt);
+      this.emitSeatTuningState();
+    }
+  }
+
   /** Botão "Redefinir" do "Assento" (ver EditPanel, GameRoom.tsx) -- apaga o ajuste manual do grupo+direção atual (volta pro padrão genérico, ver resolveSeatOffset). Ignorado se não estiver sentado. */
   resetSeatOffset() {
     if (!this.seatedAt) return;

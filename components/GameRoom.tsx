@@ -3588,11 +3588,32 @@ export default function GameRoom({
           <ItemEditor
             accessToken={accountAccessToken}
             onClose={() => setItemEditorOpen(false)}
-            onItemsChanged={() => {
+            onItemsChanged={(seatModelIdToClear) => {
               fetchAndRegisterCustomFurniture();
               fetchAndRegisterCustomSkins();
               fetchAndRegisterCustomAvatarItems();
               fetchDefaultReferences();
+              // Douglas: "eu fui editar ela pra posicionar o carinha
+              // melhor e ficou assim -- no editor ta certo no mapa real
+              // nao ficou" -- ver comentário grande em
+              // clearSeatOffsetsForModel (MainScene.ts) e em
+              // handleSubmit (ItemEditor.tsx) pro porquê: um ajuste
+              // "Assento" salvo POR CIMA na sala (seatOffsets) escondia
+              // o seat_offset_x/y novo que acabou de ser salvo no
+              // modelo. Limpa nos dois lugares -- na cena AO VIVO (pra
+              // valer na hora, sem F5) e no estado React (seatOffsets),
+              // que já autosalva sozinho (ver useEffect combinado de
+              // mobília+assento mais abaixo, depende de [draftItems,
+              // seatOffsets]).
+              if (seatModelIdToClear) {
+                sceneRef.current?.clearSeatOffsetsForModel(seatModelIdToClear);
+                setSeatOffsetsState((prev) => {
+                  if (!(seatModelIdToClear in prev)) return prev;
+                  const next = { ...prev };
+                  delete next[seatModelIdToClear];
+                  return next;
+                });
+              }
             }}
           />
         )}

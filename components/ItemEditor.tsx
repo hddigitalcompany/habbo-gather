@@ -2673,7 +2673,11 @@ export default function ItemEditor({
 }: {
   accessToken: string;
   onClose: () => void;
-  onItemsChanged: () => void;
+  // parâmetro opcional (pedido do Douglas: "eu fui editar ela pra
+  // posicionar o carinha melhor e ficou assim -- no editor ta certo no
+  // mapa real nao ficou") -- ver comentário grande em handleSubmit mais
+  // abaixo, perto de onItemsChanged(seatModelIdToClear).
+  onItemsChanged: (seatModelIdToClear?: string) => void;
 }) {
   // "Criar Mobi" (de sempre) / "Criar Avatar" (pedido do Douglas: "la
   // encima quero dois botoes criar mobi/criar avatar") -- dois modos
@@ -3145,9 +3149,27 @@ export default function ItemEditor({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "erro ao salvar item");
 
+      // ACHADO (Douglas: "eu fui editar ela pra posicionar o carinha
+      // melhor e ficou assim -- no editor ta certo no mapa real nao
+      // ficou"): resolveSeatOffset (game/furniture.ts) dá prioridade a
+      // um ajuste "Assento" já salvo POR MODELO no editor de espaço
+      // (roomStore.furnitureSeatOffsets, GET/POST /room/furniture) por
+      // cima do seat_offset_x/y padrão do MODELO que a gente acabou de
+      // salvar aqui -- editar o padrão aqui não muda nada na sala se já
+      // existir esse ajuste mais específico, o boneco continua sentando
+      // na posição VELHA, presa. Avisa o GameRoom (editingId = o mesmo
+      // id usado como seatOffsetGroupKey pro modelo, ver seatOffsetGroupKey
+      // em furniture.ts) pra limpar esse ajuste travado quando a peça é
+      // sentável -- assim o valor que acabou de ser salvo aqui passa a
+      // valer na hora, sem precisar abrir o editor de espaço e mexer no
+      // "Assento" de novo só pra "destravar". Só faz sentido num item
+      // JÁ existente (editingId) -- um item novo nunca teve ajuste de
+      // Assento salvo, não tem nada pra limpar.
+      const seatModelIdToClear = sittable && editingId ? editingId : undefined;
+
       resetForm();
       await loadItems();
-      onItemsChanged();
+      onItemsChanged(seatModelIdToClear);
     } catch (err) {
       setError(err instanceof Error ? err.message : "erro ao salvar item");
     } finally {
