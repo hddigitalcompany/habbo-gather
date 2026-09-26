@@ -8,7 +8,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
-import { clampItemOffset, clampSeatOffset, cleanDirectionOffsets, cleanSeatDirectionOffsets } from "@/lib/supabase/itemFields";
+import {
+  clampFootprintSize,
+  clampItemOffset,
+  clampSeatOffset,
+  cleanDirectionOffsets,
+  cleanSeatDirectionOffsets,
+} from "@/lib/supabase/itemFields";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +71,13 @@ export async function POST(req: NextRequest) {
   // 0011_room_items_seat_direction_offsets.sql) -- mesmo esquema de
   // direction_offsets acima, só que pro assento.
   const seatDirectionOffsets = cleanSeatDirectionOffsets(body?.seat_direction_offsets);
+  // tamanho do footprint (pedido do Douglas: "tenho mobis que ocupam
+  // mais tiles doq um ou dois, entao preciso selecionar pra que nao se
+  // suba em um item") -- ver supabase/migrations/0013_room_items_footprint.sql
+  // e o comentário grande em FurnitureModelDef.footprintCols,
+  // game/furniture.ts. 1/1 (padrão) = comportamento de sempre.
+  const footprintCols = clampFootprintSize(body?.footprint_cols);
+  const footprintRows = clampFootprintSize(body?.footprint_rows);
 
   if (!label) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!ALLOWED_CATEGORIES.includes(category)) {
@@ -97,6 +110,8 @@ export async function POST(req: NextRequest) {
       seat_offset_x: seatOffsetX,
       seat_offset_y: seatOffsetY,
       seat_direction_offsets: seatDirectionOffsets,
+      footprint_cols: footprintCols,
+      footprint_rows: footprintRows,
       created_by: callerId,
     })
     .select()

@@ -18,6 +18,7 @@ import {
   furnitureTextureKeyFor,
   furnitureBlocksMovement,
   furnitureModelById,
+  furnitureFootprintTiles,
   isFurnitureSittable,
   blockingFurnitureAt,
   resolveSeatOffset,
@@ -3147,8 +3148,16 @@ export default class MainScene extends Phaser.Scene {
   /** Esse tile trava a passagem por causa de algum móvel (fixo OU colocado pelo editor, ver FURNITURE_BLOCKS_MOVEMENT em furniture.ts) -- usado em startStep(). blockingFurnitureAt (furniture.ts) só sabe de ROOM_FURNITURE; aqui completa com draftFurniture, pra um item colocado pelo editor (ex: nova divisória de vidro) travar passagem na hora, sem precisar de restart. */
   private isMovementBlockedAt(col: number, row: number): boolean {
     if (blockingFurnitureAt(col, row)) return true;
+    // mesma regra de blockingFurnitureAt (furniture.ts) pro item RASCUNHO
+    // (colocado agora no editor, sem restart) -- âncora só trava se a
+    // categoria travar, resto do footprint (ver furnitureFootprintTiles)
+    // trava sempre.
     for (const f of this.draftFurniture.values()) {
-      if (f.col === col && f.row === row && furnitureBlocksMovement(f.type)) return true;
+      if (f.col === col && f.row === row) {
+        if (furnitureBlocksMovement(f.type)) return true;
+        continue;
+      }
+      if (furnitureFootprintTiles(f).some((t) => t.col === col && t.row === row)) return true;
     }
     return false;
   }

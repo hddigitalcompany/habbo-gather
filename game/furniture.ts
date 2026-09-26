@@ -262,6 +262,46 @@ export interface FurnitureModelDef {
    * que já é uma aproximação bem melhor que aplicar um valor pensado
    * pra frente/costas de lado. */
   seatDirectionOffsets?: Partial<Record<Exclude<Direction, "down">, { x: number; y: number }>>;
+  /** Tamanho do FOOTPRINT (em tiles do grid col/row) desse modelo --
+   * pedido do Douglas: "tenho mobis que ocupam mais tiles doq um ou
+   * dois, entao preciso selecionar pra que nao se suba em um item". Até
+   * aqui TODO móvel travava passagem (quando trava, ver
+   * FURNITURE_BLOCKS_MOVEMENT) só no próprio tile-âncora (f.col,f.row)
+   * -- um sofá/mesa desenhado mais largo que 1 tile deixava o resto da
+   * peça andável, dava pra atravessar "por dentro" dela. 1/undefined
+   * (padrão) = comportamento de sempre, só a âncora -- não regride
+   * NENHUM item existente. >1 soma um retângulo de footprintCols x
+   * footprintRows tiles a partir da âncora (ver furnitureFootprintTiles
+   * abaixo), sempre travando passagem nos tiles ALÉM da âncora (mesmo
+   * pra categoria que senta, tipo sofá -- só a âncora mantém o
+   * comportamento de "anda até aqui e senta", o resto da peça trava
+   * igual objeto sólido até ganhar assento próprio ali, ver comentário
+   * grande sobre "vários assentos" combinado com o Douglas). NÃO gira
+   * sozinho por direção -- ajustado olhando a peça já virada do jeito
+   * que normalmente fica na sala. */
+  footprintCols?: number;
+  footprintRows?: number;
+}
+
+/**
+ * Tiles (col,row) que ESSE item ocupa -- a âncora (f.col,f.row) sempre,
+ * mais o retângulo footprintCols x footprintRows do modelo (se tiver,
+ * ver FurnitureModelDef.footprintCols acima), crescendo em col/row a
+ * partir da âncora. Sem modelo ou footprint 1x1 (padrão de sempre),
+ * devolve só a âncora.
+ */
+export function furnitureFootprintTiles(f: FurnitureDef): { col: number; row: number }[] {
+  const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+  const cols = Math.max(1, Math.round(model?.footprintCols ?? 1));
+  const rows = Math.max(1, Math.round(model?.footprintRows ?? 1));
+  if (cols <= 1 && rows <= 1) return [{ col: f.col, row: f.row }];
+  const tiles: { col: number; row: number }[] = [];
+  for (let dc = 0; dc < cols; dc++) {
+    for (let dr = 0; dr < rows; dr++) {
+      tiles.push({ col: f.col + dc, row: f.row + dr });
+    }
+  }
+  return tiles;
 }
 
 /**
@@ -696,10 +736,21 @@ export function catalogIndicesForGroup(groupKey: string): number[] {
 export const ROOM_FURNITURE: FurnitureDef[] = [];
 
 /** Retorna o móvel que TRAVA a passagem no tile dado, se houver (ver startStep() em MainScene.ts). */
+/**
+ * Item (fixo, ROOM_FURNITURE) que trava passagem nesse tile -- a âncora
+ * (f.col,f.row) só trava se a CATEGORIA travar (FURNITURE_BLOCKS_MOVEMENT,
+ * comportamento de sempre: poltrona/sofá não travam a própria âncora,
+ * é onde se senta), mas qualquer OUTRO tile do footprint (ver
+ * furnitureFootprintTiles/FurnitureModelDef.footprintCols) trava SEMPRE,
+ * mesmo pra categoria que senta -- o resto da peça (ex: o braço/almofada
+ * extra de um sofá largo) ainda não tem assento próprio ali, então
+ * continua sólido em vez de andável.
+ */
 export function blockingFurnitureAt(col: number, row: number): FurnitureDef | undefined {
-  return ROOM_FURNITURE.find(
-    (f) => f.col === col && f.row === row && furnitureBlocksMovement(f.type)
-  );
+  return ROOM_FURNITURE.find((f) => {
+    if (f.col === col && f.row === row) return furnitureBlocksMovement(f.type);
+    return furnitureFootprintTiles(f).some((t) => t.col === col && t.row === row);
+  });
 }
 
 export function furnitureWorldPos(f: FurnitureDef) {

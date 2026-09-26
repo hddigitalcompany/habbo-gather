@@ -25,6 +25,16 @@ export function clampSeatOffset(raw: unknown): number | undefined {
   return Math.round(Math.max(-100, Math.min(100, raw)));
 }
 
+/** Tamanho de footprint (cols/rows, ver FurnitureModelDef.footprintCols
+ * em game/furniture.ts) -- inteiro de 1 a 6 (sem "mobi" real ocupando
+ * mais que isso; teto baixo de propósito, evita alguém travar a sala
+ * inteira sem querer com um número digitado errado). Ausente/inválido
+ * vira 1 (comportamento de sempre, só a âncora). */
+export function clampFootprintSize(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 1;
+  return Math.round(Math.max(1, Math.min(6, raw)));
+}
+
 /** Direções que aceitam override em direction_offsets (ver
  * supabase/migrations/0007_room_items_direction_offsets_seat.sql) --
  * "down" fica de fora de propósito (usa offset_x/offset_y direto, ver

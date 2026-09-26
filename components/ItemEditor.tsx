@@ -349,6 +349,8 @@ type CustomItemRow = {
   seat_offset_y: number | null;
   seat_direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
   colors: FurnitureModelColorOption[] | null;
+  footprint_cols: number | null;
+  footprint_rows: number | null;
 };
 
 // mesma faixa -100..100 da constraint em supabase/migrations/
@@ -2772,6 +2774,17 @@ export default function ItemEditor({
   // (editar um item existente não deve jogar fora o tamanho já ajustado
   // dele só por trocar a categoria).
   const [displayWidth, setDisplayWidth] = useState<number>(CUSTOM_ITEM_TARGET_WIDTH.poltrona);
+  // footprint (em tiles do grid, não em px) -- pedido do Douglas: "tenho
+  // mobis que ocupam mais tiles doq um ou dois, entao preciso selecionar
+  // pra que nao se suba em um item". 1x1 (padrão) = comportamento de
+  // sempre, só o próprio tile-âncora trava passagem (quando a categoria
+  // trava, ver FURNITURE_BLOCKS_MOVEMENT em game/furniture.ts) -- acima
+  // disso, o RESTO do retângulo footprintCols x footprintRows (a partir
+  // da âncora) trava sempre, mesmo pra item que senta (só a âncora
+  // mantém "anda até aqui e senta", ver furnitureFootprintTiles/
+  // blockingFurnitureAt).
+  const [footprintCols, setFootprintCols] = useState(1);
+  const [footprintRows, setFootprintRows] = useState(1);
   // posição do item DENTRO do tile (pedido do Douglas: "delimitar ali no
   // editor a posição do mobi no tile") -- ajustado arrastando o item em
   // cima do quadrado/boneco de referência no preview (ver
@@ -2895,7 +2908,7 @@ export default function ItemEditor({
     const { data, error: fetchError } = await supabase
       .from("room_items")
       .select(
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors"
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -2917,6 +2930,8 @@ export default function ItemEditor({
     setFiles({});
     setExistingArt({});
     setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH.poltrona);
+    setFootprintCols(1);
+    setFootprintRows(1);
     setOffsetX(0);
     setOffsetY(0);
     setDirectionOffsets({});
@@ -2953,6 +2968,8 @@ export default function ItemEditor({
     setFiles({});
     setExistingArt(item.art ?? {});
     setDisplayWidth(item.display_width ?? CUSTOM_ITEM_TARGET_WIDTH[item.category]);
+    setFootprintCols(clamp(item.footprint_cols ?? 1, 1, 6));
+    setFootprintRows(clamp(item.footprint_rows ?? 1, 1, 6));
     setOffsetX(clamp(item.offset_x ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setOffsetY(clamp(item.offset_y ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setDirectionOffsets(item.direction_offsets ?? {});
@@ -3233,6 +3250,13 @@ export default function ItemEditor({
         category,
         art,
         display_width: displayWidth,
+        // footprint (pedido do Douglas: "tenho mobis que ocupam mais
+        // tiles doq um ou dois, entao preciso selecionar pra que nao se
+        // suba em um item") -- ver clampFootprintSize em
+        // lib/supabase/itemFields.ts e a migration
+        // 0013_room_items_footprint.sql.
+        footprint_cols: footprintCols,
+        footprint_rows: footprintRows,
         offset_x: offsetX,
         offset_y: offsetY,
         // ajuste por direção + interação/assento (pedido do Douglas:
@@ -3642,6 +3666,38 @@ export default function ItemEditor({
                 onChange={(e) => setDisplayWidth(Number(e.target.value))}
               />
               <span className="settings-slider-value">{displayWidth}px</span>
+            </div>
+
+            {/* footprint (pedido do Douglas: "tenho mobis que ocupam mais
+                tiles doq um ou dois, entao preciso selecionar pra que nao
+                se suba em um item") -- em TILES do grid (não em px), 1x1
+                de sempre = só a própria âncora trava passagem; acima
+                disso o resto do retângulo trava SEMPRE (ver
+                furnitureFootprintTiles/blockingFurnitureAt, game/furniture.ts),
+                mesmo pra item que senta (poltrona/sofá) -- só a âncora
+                mantém "anda até aqui e senta". */}
+            <div className="settings-slider-row">
+              <span className="settings-slider-name">Ocupa (tiles)</span>
+              <input
+                type="number"
+                min={1}
+                max={6}
+                value={footprintCols}
+                onChange={(e) => setFootprintCols(clamp(Math.round(Number(e.target.value) || 1), 1, 6))}
+                style={{ width: 48 }}
+              />
+              <span className="settings-slider-name">×</span>
+              <input
+                type="number"
+                min={1}
+                max={6}
+                value={footprintRows}
+                onChange={(e) => setFootprintRows(clamp(Math.round(Number(e.target.value) || 1), 1, 6))}
+                style={{ width: 48 }}
+              />
+              <span className="edit-hint">
+                colunas × linhas a partir da âncora -- 1×1 é só o próprio tile (padrão de sempre)
+              </span>
             </div>
 
             <div className="item-stage-offset-row">

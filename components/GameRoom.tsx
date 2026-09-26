@@ -859,7 +859,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_items")
         .select(
-          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors"
+          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows"
         );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
@@ -878,6 +878,8 @@ export default function GameRoom({
           seat_offset_y: number | null;
           seat_direction_offsets: Partial<Record<Direction, { x: number; y: number }>> | null;
           colors: { id: string; label: string; art: Partial<Record<Direction, string>> }[] | null;
+          footprint_cols: number | null;
+          footprint_rows: number | null;
         }) => ({
           id: row.id,
           type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
@@ -909,6 +911,14 @@ export default function GameRoom({
           // 0011_room_items_seat_direction_offsets.sql e o comentário
           // grande em FurnitureModelDef.seatDirectionOffsets).
           seatDirectionOffsets: row.seat_direction_offsets ?? undefined,
+          // footprint (pedido do Douglas: "tenho mobis que ocupam mais
+          // tiles doq um ou dois, entao preciso selecionar pra que nao
+          // se suba em um item") -- ver supabase/migrations/
+          // 0013_room_items_footprint.sql e furnitureFootprintTiles/
+          // blockingFurnitureAt em game/furniture.ts. null/1 = comporta-
+          // mento de sempre (só a âncora).
+          footprintCols: typeof row.footprint_cols === "number" ? row.footprint_cols : undefined,
+          footprintRows: typeof row.footprint_rows === "number" ? row.footprint_rows : undefined,
         })
       );
       const updatedIds = registerCustomFurnitureModels(models);

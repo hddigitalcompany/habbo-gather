@@ -13,7 +13,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
-import { clampItemOffset, clampSeatOffset, cleanDirectionOffsets, cleanSeatDirectionOffsets } from "@/lib/supabase/itemFields";
+import {
+  clampFootprintSize,
+  clampItemOffset,
+  clampSeatOffset,
+  cleanDirectionOffsets,
+  cleanSeatDirectionOffsets,
+} from "@/lib/supabase/itemFields";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +130,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // app/api/items/route.ts/POST) -- "in body" de propósito, mesmo
   // motivo de direction_offsets acima.
   if ("seat_direction_offsets" in body) update.seat_direction_offsets = cleanSeatDirectionOffsets(body.seat_direction_offsets);
+  // tamanho do footprint (ver comentário equivalente em
+  // app/api/items/route.ts/POST) -- "in body" de propósito, mesmo motivo
+  // dos outros campos opcionais acima.
+  if ("footprint_cols" in body) update.footprint_cols = clampFootprintSize(body.footprint_cols);
+  if ("footprint_rows" in body) update.footprint_rows = clampFootprintSize(body.footprint_rows);
 
   // `colors` -- ver FurnitureColorZoneTool.tsx, formato de
   // FurnitureModelColorOption em game/furniture.ts (id/label/art
