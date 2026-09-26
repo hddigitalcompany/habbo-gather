@@ -414,19 +414,30 @@ function warmDarkenHex(hex: number, factor = 0.55): number {
 }
 
 /**
- * Os riscos (polígonos) de veio de MÁRMORE de UMA placa -- 2 a 3 veios
- * em DIAGONAL (ângulo sorteado, não preso ao sentido do comprimento da
- * placa como o veio de madeira, ver woodGrainShapesForPlank acima),
- * cada um desenhado em 3 CAMADAS concêntricas (larga+fraca por baixo,
- * estreita+forte por cima) pra imitar uma borda suave/desfocada -- a
- * mesma técnica clássica de "camadas de opacidade decrescente" em vez
- * de um filtro de blur de verdade (que se comportaria diferente entre
- * o preview em SVG, feGaussianBlur, e o canvas 2D do jogo, `ctx.filter`
- * -- manter só polígono garante os dois lugares SEMPRE idênticos,
- * mesmo princípio de floorPatternPolygons/createFloorPatternGraphics
- * nunca dessincronizarem). Pura (sem Phaser) -- usada tanto aqui
- * (preview em SVG) quanto por MainScene.createFloorPatternGraphics, com
- * a MESMA matemática, pra sortear exatamente os mesmos veios pra mesma
+ * Os polígonos de veio/mancha de MÁRMORE de UMA placa. Primeira versão
+ * (só o veio ondulado em 3 camadas, largura constante) saiu parecendo
+ * "risco/rachadura", não pedra -- feedback do Douglas testando ao vivo:
+ * "nao ta parecendo marmore nao kkkkk", depois "só consegue linha de
+ * efeito?". Duas coisas fazem mármore de verdade LER como mármore, não
+ * como linha em cima de uma cor lisa:
+ *
+ * 1) MANCHA (mottling) -- variação de tom em ÁREA, difusa, por baixo de
+ *    tudo (drawCloudBlob abaixo) -- sem isso, por mais suave que o veio
+ *    fique, o fundo continua liso e denuncia "desenho de linha".
+ * 2) Espessura do VEIO variando ao longo do próprio comprimento
+ *    (pinça/incha, thickAt abaixo) -- um veio de espessura constante,
+ *    por mais ondulado/suave que seja, ainda lê como "fio", não como
+ *    veio mineral (que engrossa e afina organicamente).
+ *
+ * As duas formas usam a MESMA técnica de "camadas concêntricas de
+ * opacidade decrescente" pra imitar borda suave/desfocada sem depender
+ * de filtro de blur de verdade (que se comportaria diferente entre o
+ * preview em SVG, feGaussianBlur, e o canvas 2D do jogo, `ctx.filter`
+ * -- manter só polígono garante os dois lugares SEMPRE idênticos, mesmo
+ * princípio de floorPatternPolygons/createFloorPatternGraphics nunca
+ * dessincronizarem). Pura (sem Phaser) -- usada tanto aqui (preview em
+ * SVG) quanto por MainScene.createFloorPatternGraphics, com a MESMA
+ * matemática, pra sortear exatamente as mesmas manchas/veios pra mesma
  * placa nos dois lugares.
  *
  * `cx,cy` = centro da placa; `halfLength`/`halfWidth` = metade do
@@ -435,7 +446,7 @@ function warmDarkenHex(hex: number, factor = 0.55): number {
  * `rowAxis`/`colAxis` = os mesmos eixos não-ortogonais do losango (ver
  * comentário grande deles em createFloorPatternGraphics, MainScene.ts);
  * `baseColor` = a cor JÁ resolvida dessa placa (pickPlankColorPure) --
- * os veios são variação DELA, não de colorA/colorB direto.
+ * as manchas/veios são variação DELA, não de colorA/colorB direto.
  */
 export function marbleVeinShapesForSlab(
   i: number,
@@ -453,9 +464,50 @@ export function marbleVeinShapesForSlab(
     x: cx + rowAxis.x * along + colAxis.x * across,
     y: cy + rowAxis.y * along + colAxis.y * across,
   });
-  const veinCount = grainHashPure(i, j, 0, 30) < 0.5 ? 2 : 3;
-  const SEGMENTS = 8;
   const minHalf = Math.min(halfLength, halfWidth);
+
+  // 1) manchas largas e bem suaves por baixo dos veios (ver comentário
+  // grande da função acima) -- um "blob" irregular (raio sorteado ponto
+  // a ponto num polígono de N lados, não um círculo perfeito), em 3
+  // camadas bem fracas de opacidade.
+  const cloudCount = grainHashPure(i, j, 0, 50) < 0.5 ? 1 : 2;
+  for (let c = 0; c < cloudCount; c++) {
+    const cAlong = (grainHashPure(i, j, c, 51) * 2 - 1) * halfLength * 0.5;
+    const cAcross = (grainHashPure(i, j, c, 52) * 2 - 1) * halfWidth * 0.5;
+    const cRadiusL = minHalf * (0.5 + grainHashPure(i, j, c, 53) * 0.4);
+    const cRadiusW = minHalf * (0.35 + grainHashPure(i, j, c, 54) * 0.3);
+    const cRot = grainHashPure(i, j, c, 55) * Math.PI;
+    const warmC = grainHashPure(i, j, c, 56) < 0.5;
+    const cloudShade = warmC
+      ? warmDarkenHex(baseColor, 0.78 + grainHashPure(i, j, c, 57) * 0.12)
+      : darkenHex(baseColor, 0.8 + grainHashPure(i, j, c, 57) * 0.12);
+    const cloudFill = hexToCss(cloudShade);
+    const N = 10;
+    const layerDefs = [
+      { mul: 1.7, opacity: 0.05 },
+      { mul: 1.2, opacity: 0.06 },
+      { mul: 0.8, opacity: 0.07 },
+    ];
+    for (const layer of layerDefs) {
+      const pts: Point[] = [];
+      for (let n = 0; n < N; n++) {
+        const ang = (n / N) * Math.PI * 2;
+        const rJitter = 0.7 + grainHashPure(i, j, c, 60 + n) * 0.6;
+        const localAlong = Math.cos(ang) * cRadiusL * layer.mul * rJitter;
+        const localAcross = Math.sin(ang) * cRadiusW * layer.mul * rJitter;
+        const rotAlong = localAlong * Math.cos(cRot) - localAcross * Math.sin(cRot);
+        const rotAcross = localAlong * Math.sin(cRot) + localAcross * Math.cos(cRot);
+        pts.push(toWorld(cAlong + rotAlong, cAcross + rotAcross));
+      }
+      shapes.push({ points: pts, fill: cloudFill, opacity: layer.opacity });
+    }
+  }
+
+  // 2) veios finos em diagonal, POR CIMA das manchas -- espessura
+  // variando ao longo do próprio veio (thickAt, ver comentário grande
+  // da função acima), não mais constante.
+  const veinCount = grainHashPure(i, j, 0, 30) < 0.5 ? 2 : 3;
+  const SEGMENTS = 10;
   for (let k = 0; k < veinCount; k++) {
     // ângulo do veio nesse espaço local (along,across) -- ~22.5° a 90°,
     // com sinal sorteado, pra cruzar a placa em diagonal (nem reto no
@@ -475,24 +527,34 @@ export function marbleVeinShapesForSlab(
     const amplitude = minHalf * (0.12 + grainHashPure(i, j, k, 35) * 0.18);
     const cycles = 0.6 + grainHashPure(i, j, k, 36) * 0.9;
     const phase = grainHashPure(i, j, k, 37) * Math.PI * 2;
-    const baseThick = minHalf * (0.05 + grainHashPure(i, j, k, 38) * 0.05);
+    const baseThick = minHalf * (0.06 + grainHashPure(i, j, k, 38) * 0.06);
+    // espessura ao longo do próprio veio (pinça/incha) -- onda separada
+    // da posição (frequência mais alta), elevada a uma potência pra
+    // deixar os "incha" mais localizados/orgânicos em vez de um
+    // batimento suave simétrico.
+    const thickPhase = grainHashPure(i, j, k, 42) * Math.PI * 2;
+    const thickCycles = 1.1 + grainHashPure(i, j, k, 43) * 1.6;
+    const thickAt = (t: number) => {
+      const wave = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * thickCycles + thickPhase);
+      return baseThick * (0.25 + Math.pow(wave, 1.6) * 1.15);
+    };
     const warm = grainHashPure(i, j, k, 39) < 0.5;
     const coreShade = warm
-      ? warmDarkenHex(baseColor, 0.5 + grainHashPure(i, j, k, 40) * 0.2)
-      : darkenHex(baseColor, 0.55 + grainHashPure(i, j, k, 40) * 0.25);
+      ? warmDarkenHex(baseColor, 0.45 + grainHashPure(i, j, k, 40) * 0.2)
+      : darkenHex(baseColor, 0.5 + grainHashPure(i, j, k, 40) * 0.25);
     const fill = hexToCss(coreShade);
 
-    // 3 camadas concêntricas (larga/fraca -> estreita/forte) -- ver
+    // 4 camadas concêntricas (larga/fraca -> estreita/forte) -- ver
     // comentário grande da função acima pro motivo de não usar blur de
     // verdade.
     const layers = [
-      { widthMul: 2.6, opacity: 0.1 },
-      { widthMul: 1.5, opacity: 0.22 },
-      { widthMul: 1, opacity: 0.4 + grainHashPure(i, j, k, 41) * 0.15 },
+      { widthMul: 3, opacity: 0.07 },
+      { widthMul: 2, opacity: 0.12 },
+      { widthMul: 1.3, opacity: 0.2 },
+      { widthMul: 1, opacity: 0.3 + grainHashPure(i, j, k, 41) * 0.12 },
     ];
 
     for (const layer of layers) {
-      const halfThick = baseThick * layer.widthMul;
       for (let s = 0; s < SEGMENTS; s++) {
         const t0 = s / SEGMENTS - 0.5;
         const t1 = (s + 1) / SEGMENTS - 0.5;
@@ -502,12 +564,14 @@ export function marbleVeinShapesForSlab(
         const across0 = centerAcross + dirAcross * span * t0 + perpAcross * wob0;
         const along1 = centerAlong + dirAlong * span * t1 + perpAlong * wob1;
         const across1 = centerAcross + dirAcross * span * t1 + perpAcross * wob1;
+        const halfThick0 = thickAt(t0) * layer.widthMul;
+        const halfThick1 = thickAt(t1) * layer.widthMul;
         shapes.push({
           points: [
-            toWorld(along0 - perpAlong * halfThick, across0 - perpAcross * halfThick),
-            toWorld(along1 - perpAlong * halfThick, across1 - perpAcross * halfThick),
-            toWorld(along1 + perpAlong * halfThick, across1 + perpAcross * halfThick),
-            toWorld(along0 + perpAlong * halfThick, across0 + perpAcross * halfThick),
+            toWorld(along0 - perpAlong * halfThick0, across0 - perpAcross * halfThick0),
+            toWorld(along1 - perpAlong * halfThick1, across1 - perpAcross * halfThick1),
+            toWorld(along1 + perpAlong * halfThick1, across1 + perpAcross * halfThick1),
+            toWorld(along0 + perpAlong * halfThick0, across0 + perpAcross * halfThick0),
           ],
           fill,
           opacity: layer.opacity,
