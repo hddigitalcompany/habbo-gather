@@ -304,6 +304,14 @@ const DEPTH_AREA = -1_500_000;
 const DEPTH_AREA_HOVER = DEPTH_AREA + 1;
 const DEPTH_AREA_LABEL = DEPTH_AREA + 2;
 
+// destaque leve do tile sob o mouse fora do modo de edição (ver
+// roomHoverGraphics/handleRoomPointerMove) -- acima do piso/tinta de área
+// (senão ficaria escondido debaixo deles), mas ainda abaixo de móvel/
+// boneco (DEPTH_FLAT_FURNITURE e a profundidade dinâmica por fileira, que
+// começam em -1_000_000 e sobem) -- assim o destaque nunca "cobre" quem
+// está em cima do tile, só o piso vazio ao redor.
+const DEPTH_ROOM_TILE_HOVER = DEPTH_AREA_LABEL + 1;
+
 // pedido do Douglas: "quando o avatar entrar dentro de um ambiente,
 // area, o resto do mapa tem que esmaecer, e apenas os mobis que estao
 // dentro daquela area ficam na tonalidade normal, dando a sensacao de
@@ -545,6 +553,23 @@ export default class MainScene extends Phaser.Scene {
   // "fantasma" (ver refreshCatalogGhost) do item selecionado na paleta,
   // seguindo o cursor -- null quando nenhum item de móvel está selecionado.
   private catalogGhostSprite: Phaser.GameObjects.Image | null = null;
+
+  // --- clique-pra-andar + destaque de tile fora do modo de edição
+  // (pedido do Douglas: "pro mouse fazer o boneco andar" + "o piso
+  // aparecer um elo de seleção enquanto a pessoa anda com o mouse pela
+  // tela, bem leve") -----------------------------------------------------
+  // destaque BEM leve do tile sob o mouse em uso normal (não edição) --
+  // separado do hoverGraphics do editor de espaço (esse aqui não some
+  // fora da grade de edição, e usa um alfa bem mais discreto, ver
+  // handleRoomPointerMove).
+  private roomHoverGraphics?: Phaser.GameObjects.Graphics;
+  // fila de direções (um passo por tile) que update() consome sozinho, um
+  // por frame, igual ao passo por teclado (ver startStep) -- computada por
+  // BFS em computeWalkPath ao clicar num tile (handleRoomPointerDown).
+  // Uma tecla de seta/WASD apertada CANCELA a fila na hora e devolve o
+  // controle pro teclado (ver update()) -- clique-pra-andar nunca briga
+  // com o movimento manual.
+  private walkQueue: Direction[] = [];
 
   // --- ferramenta "Mover" do editor de espaço (ver selectMoveTool) --
   // pedido do Douglas: até aqui, clicar num item já colocado só APAGAVA
@@ -878,6 +903,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.drawEditGrid();
     this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
+    this.roomHoverGraphics = this.add.graphics().setDepth(DEPTH_ROOM_TILE_HOVER).setVisible(false);
 
     // câmera começa igual sempre foi (zoom 1, sala inteira visível,
     // scroll em 0,0 -- ver clampCameraScroll: SEM setBounds automático
@@ -889,10 +915,12 @@ export default class MainScene extends Phaser.Scene {
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       this.handleEditPointerMove(pointer);
+      this.handleRoomPointerMove(pointer);
       this.handleCameraPan(pointer);
     });
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       this.handleEditPointerDown(pointer);
+      this.handleRoomPointerDown(pointer);
       this.startCameraPan(pointer);
     });
     this.input.on("pointerup", () => {
@@ -1971,6 +1999,7 @@ export default class MainScene extends Phaser.Scene {
   setMovementLocked(locked: boolean) {
     this.movementLocked = locked;
     if (locked) {
+      this.walkQueue = []; // trava também cancela um destino clicado pendente
       this.input.keyboard?.disableGlobalCapture();
     } else {
       this.input.keyboard?.enableGlobalCapture();
@@ -2138,7 +2167,12 @@ export default class MainScene extends Phaser.Scene {
       // levanta mais -- vira nudge fino do assento (ver
       // nudgeSeatOffset, disparado pelos listeners "keydown-*" no
       // create(), não por aqui/por polling).
-      if (inputDir && !this.seatTuningActive) {
+      // walkQueue também levanta (defensivo -- na prática
+      // handleRoomPointerDown já chama standUp() direto antes de montar a
+      // fila, então localActivity já não é mais "sentado" quando esse
+      // frame roda; isso só cobre alguma sentada futura no meio do
+      // caminho por outro caminho de código).
+      if ((inputDir || this.walkQueue.length > 0) && !this.seatTuningActive) {
         // qualquer tecla de direção levanta -- o passo de verdade só
         // começa no próximo frame (já sai da cadeira "de pé" primeiro)
         this.standUp();
@@ -2159,7 +2193,22 @@ export default class MainScene extends Phaser.Scene {
         this.localContainer.setPosition(this.stepTo.x, this.stepTo.y);
       }
     } else if (inputDir) {
+      // teclado sempre tem prioridade sobre o clique-pra-andar -- apertar
+      // uma seta/WASD cancela o destino clicado na hora, devolve o
+      // controle todo pro teclado.
+      this.walkQueue = [];
       this.startStep(inputDir);
+    } else if (this.walkQueue.length > 0) {
+      const dir = this.walkQueue.shift()!;
+      this.startStep(dir);
+      if (!this.stepping) {
+        // startStep recusou o passo (tile ficou bloqueado nesse
+        // meio-tempo -- ex: alguém colocou um móvel no caminho enquanto o
+        // boneco já estava andando pra lá) -- cancela o resto do caminho
+        // em vez de continuar tentando às cegas contra um caminho que já
+        // não bate mais com o mapa atual.
+        this.walkQueue = [];
+      }
     } else {
       // totalmente parado (não só entre passos) -- só aqui checa auto-sentar
       this.stopWalk(this.localContainer);
@@ -2262,6 +2311,14 @@ export default class MainScene extends Phaser.Scene {
     this.refreshCatalogGhost();
     this.gridGraphics?.setVisible(active);
     if (!active) this.hoverGraphics?.setVisible(false);
+    // entrar no modo de edição cancela um destino de clique-pra-andar
+    // pendente e some com o destaque leve do tile (esse é só do uso
+    // normal, ver roomHoverGraphics/handleRoomPointerMove) -- os dois
+    // voltam a fazer algo só depois de sair do editor de novo.
+    if (active) {
+      this.walkQueue = [];
+      this.roomHoverGraphics?.setVisible(false);
+    }
     // a tinta/contorno de área fica mais forte durante a edição (pra
     // pintar com precisão) e mais discreta no uso normal (só um lembrete
     // visual de onde a área está) -- ver refreshAreaTileAlpha/
@@ -2977,6 +3034,108 @@ export default class MainScene extends Phaser.Scene {
       if (f.col === col && f.row === row && furnitureBlocksMovement(f.type)) return true;
     }
     return false;
+  }
+
+  /**
+   * Menor caminho (BFS, só as 4 direções sem diagonal, mesma grade do
+   * passo por teclado) do tile atual até (targetCol,targetRow), pulando
+   * qualquer tile travado (ver isMovementBlockedAt) -- usado pelo
+   * clique-pra-andar (handleRoomPointerDown). Retorna a lista de direções
+   * (um passo por tile) que update() vai consumir sozinho, ou null se não
+   * existe caminho (destino cercado de móvel/parede). Grade pequena (13x8
+   * tiles, GRID_COLS/GRID_ROWS) -- BFS simples é de sobra, sem precisar de
+   * A-estrela/heurística nenhuma.
+   */
+  private computeWalkPath(
+    fromCol: number,
+    fromRow: number,
+    targetCol: number,
+    targetRow: number
+  ): Direction[] | null {
+    if (fromCol === targetCol && fromRow === targetRow) return [];
+    const key = (c: number, r: number) => `${c},${r}`;
+    const steps: { dir: Direction; dc: number; dr: number }[] = [
+      { dir: "up", dc: 0, dr: -1 },
+      { dir: "down", dc: 0, dr: 1 },
+      { dir: "left", dc: -1, dr: 0 },
+      { dir: "right", dc: 1, dr: 0 },
+    ];
+    const visited = new Set<string>([key(fromCol, fromRow)]);
+    const queue: { col: number; row: number; path: Direction[] }[] = [{ col: fromCol, row: fromRow, path: [] }];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      for (const s of steps) {
+        const nc = cur.col + s.dc;
+        const nr = cur.row + s.dr;
+        if (nc < 0 || nc > GRID_COLS || nr < 0 || nr > GRID_ROWS) continue;
+        const k = key(nc, nr);
+        if (visited.has(k) || this.isMovementBlockedAt(nc, nr)) continue;
+        const path = [...cur.path, s.dir];
+        if (nc === targetCol && nr === targetRow) return path;
+        visited.add(k);
+        queue.push({ col: nc, row: nr, path });
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Destaque BEM leve do tile sob o mouse fora do modo de edição --
+   * pedido do Douglas: "o piso aparecer um elo de seleção enquanto a
+   * pessoa anda com o mouse pela tela, bem leve". Separado do
+   * hoverGraphics do editor de espaço (esse some fora da grade de edição
+   * e usa cores fortes pra distinguir tile livre/ocupado -- aqui não
+   * precisa: é só feedback de "clicando aqui você anda pra esse tile",
+   * por isso um alfa bem baixo e uma cor neutra, sem distinguir nada.
+   */
+  private handleRoomPointerMove(pointer: Phaser.Input.Pointer) {
+    if (!this.roomHoverGraphics) return;
+    if (this.editMode) {
+      this.roomHoverGraphics.setVisible(false);
+      return;
+    }
+    const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
+    const inBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
+    if (!inBounds) {
+      this.roomHoverGraphics.setVisible(false);
+      return;
+    }
+    const { x, y } = tileToWorld(col, row);
+    this.roomHoverGraphics
+      .clear()
+      .fillStyle(0xffffff, 0.1)
+      .lineStyle(1, 0xffffff, 0.18)
+      .fillPoints(tileDiamondCorners(x, y), true)
+      .strokePoints(tileDiamondCorners(x, y), true)
+      .setVisible(true);
+  }
+
+  /**
+   * Clique fora do modo de edição: anda até o tile clicado
+   * (clique-pra-andar -- pedido antigo do Douglas: "pro mouse fazer o
+   * boenco andar"). Clicar em cima de um avatar continua abrindo o card
+   * de perfil (ver isPointerOnAnyAvatar/onAvatarClick), não anda pra lá.
+   * Clicar de novo enquanto já anda troca de destino na hora (substitui a
+   * fila); uma tecla de seta/WASD cancela a fila e devolve o controle pro
+   * teclado (ver update()) -- os dois jeitos de andar convivem sem
+   * conflito, igual teclado+nudge de assento já conviviam antes.
+   */
+  private handleRoomPointerDown(pointer: Phaser.Input.Pointer) {
+    if (this.editMode || this.movementLocked || this.seatTuningActive) return;
+    if (this.isPointerOnAnyAvatar(pointer)) return;
+    const { col: targetCol, row: targetRow } = worldToTile(pointer.worldX, pointer.worldY);
+    const inBounds = targetCol >= 0 && targetCol <= GRID_COLS && targetRow >= 0 && targetRow <= GRID_ROWS;
+    if (!inBounds || this.isMovementBlockedAt(targetCol, targetRow)) {
+      this.walkQueue = [];
+      return;
+    }
+    // sentado -- levanta primeiro, igual uma tecla de seta faria (ver
+    // update()); o passo de verdade só começa no frame seguinte, já com
+    // localActivity de volta a "idle" (standUp() muda isso na hora, sem
+    // animação/timer no meio).
+    if (this.localActivity === "sentado") this.standUp();
+    const { col: fromCol, row: fromRow } = worldToTile(this.localContainer.x, this.localContainer.y);
+    this.walkQueue = this.computeWalkPath(fromCol, fromRow, targetCol, targetRow) ?? [];
   }
 
   private draftIdAt(col: number, row: number): string | null {
