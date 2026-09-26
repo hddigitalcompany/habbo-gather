@@ -1001,22 +1001,52 @@ export default function GameRoom({
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     try {
-      const { data, error } = await supabase.from("room_floor_items").select("id, label, category, file_url");
+      const { data, error } = await supabase
+        .from("room_floor_items")
+        .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b");
       if (error || !data || data.length === 0) return;
       const entries: FloorCatalogEntry[] = data.map(
-        (row: { id: string; label: string; category: string; file_url: string }) => ({
+        (row: {
+          id: string;
+          label: string;
+          category: string;
+          kind: string | null;
+          file_url: string | null;
+          plank_width_px: number | null;
+          color_a: string | null;
+          color_b: string | null;
+        }) => ({
           id: row.id,
           category: row.category as FloorCatalogEntry["category"],
           label: row.label,
-          file: row.file_url,
+          file: row.file_url ?? "",
+          // piso "padrão" (pedido do Douglas: "...forma de preenchimento
+          // de linhas... nao precise ser imagem mesmo") -- ver
+          // FloorPatternConfig em game/floor.ts. Cor em hex STRING no
+          // banco ("#rrggbb", ver supabase/migrations/
+          // 0016_room_floor_items_pattern.sql) -> número que o Phaser
+          // entende (Graphics.fillStyle quer um hex NUMÉRICO, não string).
+          pattern:
+            row.kind === "pattern" && row.plank_width_px && row.color_a && row.color_b
+              ? {
+                  plankWidthPx: row.plank_width_px,
+                  colorA: parseInt(row.color_a.replace("#", ""), 16),
+                  colorB: parseInt(row.color_b.replace("#", ""), 16),
+                }
+              : undefined,
         })
       );
       const updatedIds = registerCustomFloorModels(entries);
       setCustomFloorVersion((v) => v + 1);
-      const textureEntries: { key: string; url: string }[] = entries.map((entry) => ({
-        key: floorTextureKey(entry.id),
-        url: entry.file,
-      }));
+      // piso "padrão" não tem textura NENHUMA pra carregar (é vetor puro,
+      // ver createFloorPatternGraphics em MainScene.ts) -- só os de
+      // imagem entram na fila do loader.
+      const textureEntries: { key: string; url: string }[] = entries
+        .filter((entry) => !entry.pattern)
+        .map((entry) => ({
+          key: floorTextureKey(entry.id),
+          url: entry.file,
+        }));
       // item que já existia e mudou (ver "Editar" na aba "Criar Piso") --
       // limpa a textura ANTIGA da cena antes de recarregar com essa MESMA
       // chave, mesmo motivo de removeFurnitureTextures em
@@ -4291,7 +4321,19 @@ function EditPanel({
               <button
                 key={entry.id}
                 className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
-                style={{ backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }}
+                // piso "padrão" (ver FloorPatternConfig em game/floor.ts)
+                // não tem imagem nenhuma pra usar de miniatura -- um
+                // gradiente CSS repetido com as 2 cores da ripa dá uma
+                // prévia razoável do resultado sem precisar desenhar a
+                // matemática exata da faixa (isso só o Phaser faz, ver
+                // createFloorPatternGraphics em MainScene.ts).
+                style={
+                  entry.pattern
+                    ? {
+                        backgroundImage: `repeating-linear-gradient(63deg, #${entry.pattern.colorA.toString(16).padStart(6, "0")} 0, #${entry.pattern.colorA.toString(16).padStart(6, "0")} 6px, #${entry.pattern.colorB.toString(16).padStart(6, "0")} 6px, #${entry.pattern.colorB.toString(16).padStart(6, "0")} 12px)`,
+                      }
+                    : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }
+                }
                 onClick={() => onSelectFloorPaint(entry)}
                 title={entry.label}
               />

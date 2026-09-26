@@ -2994,18 +2994,46 @@ export default function ItemEditor({
   // tambem... vai ter funcoes totalmente diferentes dos mobis", ver
   // comentário grande no mode acima) -- estado TODO separado do resto
   // do formulário de mobi/parede (nada aqui é reaproveitado de lá):
-  // piso é só nome + categoria + UMA imagem, sem direção/footprint/
-  // assento/interação/cor. Tabela própria (room_floor_items, ver
-  // supabase/migrations/0015_room_floor_items.sql) e rotas próprias
-  // (app/api/floor-items/**). ---
-  type CustomFloorRow = { id: string; label: string; category: FloorCategory; file_url: string };
+  // piso é só nome + categoria + (imagem OU padrão), sem direção/
+  // footprint/assento/interação/cor. Tabela própria (room_floor_items,
+  // ver supabase/migrations/0015_room_floor_items.sql e
+  // 0016_room_floor_items_pattern.sql) e rotas próprias
+  // (app/api/floor-items/**).
+  //
+  // "Padrão" (pedido do Douglas, mandou foto de um piso de tacos: "...
+  // criamos ali dentro uma forma de preenchimento de linhas... nao
+  // precise ser imagem mesmo, faz sentido? ficaria mais leve?") -- SEM
+  // imagem nenhuma: largura da ripa + 2 cores, desenhado por código
+  // direto no jogo (ver createFloorPatternGraphics em MainScene.ts). ---
+  type CustomFloorRow = {
+    id: string;
+    label: string;
+    category: FloorCategory;
+    kind: "image" | "pattern";
+    file_url: string | null;
+    plank_width_px: number | null;
+    color_a: string | null;
+    color_b: string | null;
+  };
   const [floorItems, setFloorItems] = useState<CustomFloorRow[] | null>(null);
   const [floorLabel, setFloorLabel] = useState("");
   const [floorCategory, setFloorCategory] = useState<FloorCategory>("porcelanato");
+  // "Imagem" (de sempre) ou "Padrão" (sem imagem, ver comentário acima)
+  // -- só escolhível ao CADASTRAR um piso novo (trocar o tipo no meio de
+  // uma edição misturaria os dois formulários à toa; pra trocar o tipo
+  // de um piso já existente, apaga e cadastra de novo).
+  const [floorKind, setFloorKind] = useState<"image" | "pattern">("image");
   const [floorFile, setFloorFile] = useState<File | null>(null);
   const [floorPreviewUrl, setFloorPreviewUrl] = useState<string | null>(null);
   const floorPreviewUrlRef = useRef<string | null>(null);
   floorPreviewUrlRef.current = floorPreviewUrl;
+  // ripa do tipo "padrão" -- largura em px (ver clamp 4..200 em
+  // app/api/floor-items/route.ts) + as 2 cores alternadas, direto como
+  // <input type="color"> já devolve ("#rrggbb", mesmo formato salvo no
+  // banco, ver comentário de FloorPatternConfig em game/floor.ts).
+  const [floorPlankWidth, setFloorPlankWidth] = useState(24);
+  const [floorColorA, setFloorColorA] = useState("#a9835f");
+  const [floorColorB, setFloorColorB] = useState("#8f6a48");
   const [floorEditingId, setFloorEditingId] = useState<string | null>(null);
   const [floorExistingFileUrl, setFloorExistingFileUrl] = useState<string | null>(null);
   const [floorSubmitting, setFloorSubmitting] = useState(false);
@@ -3019,7 +3047,7 @@ export default function ItemEditor({
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("room_floor_items")
-      .select("id, label, category, file_url");
+      .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b");
     if (fetchError) {
       setFloorError(fetchError.message);
       return;
@@ -3031,8 +3059,12 @@ export default function ItemEditor({
     setFloorEditingId(null);
     setFloorLabel("");
     setFloorCategory("porcelanato");
+    setFloorKind("image");
     setFloorFile(null);
     setFloorExistingFileUrl(null);
+    setFloorPlankWidth(24);
+    setFloorColorA("#a9835f");
+    setFloorColorB("#8f6a48");
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3052,8 +3084,12 @@ export default function ItemEditor({
     setFloorEditingId(item.id);
     setFloorLabel(item.label);
     setFloorCategory(item.category);
+    setFloorKind(item.kind);
     setFloorFile(null);
     setFloorExistingFileUrl(item.file_url);
+    setFloorPlankWidth(item.plank_width_px ?? 24);
+    setFloorColorA(item.color_a ?? "#a9835f");
+    setFloorColorB(item.color_b ?? "#8f6a48");
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3068,7 +3104,7 @@ export default function ItemEditor({
       setFloorError("Dá um nome pro piso.");
       return;
     }
-    if (!floorEditingId && !floorFile) {
+    if (floorKind === "image" && !floorEditingId && !floorFile) {
       setFloorError("A imagem é obrigatória.");
       return;
     }
@@ -3078,12 +3114,14 @@ export default function ItemEditor({
     // mesma correção do handleSubmit de mobi/parede acima (ver comentário
     // grande lá): sobe a imagem pro Storage PRIMEIRO, só depois grava o
     // cadastro -- se o cadastro falhar depois do upload, desfaz o upload
-    // órfão no catch, em vez de deixar lixo pra sempre no bucket.
+    // órfão no catch, em vez de deixar lixo pra sempre no bucket. Piso
+    // "padrão" não sobe imagem nenhuma -- uploadedPaths fica vazio, e o
+    // desfazer no catch vira um no-op.
     const uploadedPaths: string[] = [];
     try {
       const slug = slugify(floorLabel);
       let fileUrl: string | undefined;
-      if (floorFile) {
+      if (floorKind === "image" && floorFile) {
         // teto de resolução: piso sempre desenha no tamanho FIXO do tile
         // (ISO_TILE_WIDTH x ISO_TILE_HEIGHT, ver addFloorSprite em
         // MainScene.ts -- diferente de móvel, não tem displayWidth
@@ -3103,7 +3141,14 @@ export default function ItemEditor({
       }
 
       const payload: Record<string, unknown> = { label: floorLabel.trim(), category: floorCategory };
-      if (fileUrl) payload.file_url = fileUrl;
+      if (!floorEditingId) payload.kind = floorKind;
+      if (floorKind === "image") {
+        if (fileUrl) payload.file_url = fileUrl;
+      } else {
+        payload.plank_width_px = floorPlankWidth;
+        payload.color_a = floorColorA;
+        payload.color_b = floorColorB;
+      }
 
       const res = await fetch(floorEditingId ? `/api/floor-items/${floorEditingId}` : "/api/floor-items", {
         method: floorEditingId ? "PATCH" : "POST",
@@ -3722,27 +3767,96 @@ export default function ItemEditor({
                 ))}
               </select>
 
-              <p className="settings-hint">
-                Uma imagem PLANA só (sem direção) -- o jogo desenha ela deitada, do tamanho exato do quadrado da grade.
-                {floorEditingId ? " Só reenvie a imagem se quiser TROCAR -- senão continua com a de antes." : ""}
-              </p>
+              {/* pedido do Douglas: "criamos ali dentro uma forma de
+                  preenchimento de linhas... pra que nao precise ser
+                  imagem mesmo, faz sentido? ficaria mais leve?" -- só dá
+                  pra escolher "Imagem" ou "Padrão" ao CADASTRAR um piso
+                  novo (não no meio de uma edição, pra não misturar os
+                  dois formulários à toa -- pra trocar o tipo de um piso
+                  já existente, apaga e cadastra de novo). */}
+              {!floorEditingId && (
+                <div className="items-panel-submit-row">
+                  <button
+                    type="button"
+                    className={floorKind === "image" ? "edit-section-tab selected" : "edit-section-tab"}
+                    onClick={() => setFloorKind("image")}
+                  >
+                    Imagem
+                  </button>
+                  <button
+                    type="button"
+                    className={floorKind === "pattern" ? "edit-section-tab selected" : "edit-section-tab"}
+                    onClick={() => setFloorKind("pattern")}
+                  >
+                    Padrão (sem imagem)
+                  </button>
+                </div>
+              )}
 
-              <label className="items-panel-upload-field">
-                <span>Imagem{!floorEditingId ? " *" : ""}</span>
-                {(floorPreviewUrl || floorExistingFileUrl) && (
-                  <img
+              {floorKind === "image" ? (
+                <>
+                  <p className="settings-hint">
+                    Uma imagem PLANA só (sem direção) -- o jogo desenha ela deitada, do tamanho exato do quadrado da grade.
+                    {floorEditingId ? " Só reenvie a imagem se quiser TROCAR -- senão continua com a de antes." : ""}
+                  </p>
+
+                  <label className="items-panel-upload-field">
+                    <span>Imagem{!floorEditingId ? " *" : ""}</span>
+                    {(floorPreviewUrl || floorExistingFileUrl) && (
+                      <img
+                        className="items-panel-upload-existing"
+                        src={floorPreviewUrl ?? floorExistingFileUrl ?? undefined}
+                        alt="Piso atual"
+                      />
+                    )}
+                    <input
+                      ref={floorFileInputRef}
+                      type="file"
+                      accept="image/png,image/webp,image/jpeg"
+                      onChange={(e) => handleFloorFileChange(e.target.files?.[0])}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p className="settings-hint">
+                    Sem imagem nenhuma -- o jogo desenha ripas alternando as duas cores abaixo, do tamanho de largura que
+                    você escolher. Mais leve (não baixa arquivo nenhum) e as ripas de tiles vizinhos do mesmo piso
+                    encaixam perfeitinho, parece um piso corrido de verdade.
+                  </p>
+
+                  <label className="items-panel-upload-field">
+                    <span>Largura da ripa (px)</span>
+                    <input
+                      className="items-panel-input"
+                      type="number"
+                      min={4}
+                      max={200}
+                      value={floorPlankWidth}
+                      onChange={(e) => setFloorPlankWidth(Number(e.target.value))}
+                    />
+                  </label>
+
+                  <div className="items-panel-submit-row">
+                    <label className="items-panel-upload-field">
+                      <span>Cor 1</span>
+                      <input type="color" value={floorColorA} onChange={(e) => setFloorColorA(e.target.value)} />
+                    </label>
+                    <label className="items-panel-upload-field">
+                      <span>Cor 2</span>
+                      <input type="color" value={floorColorB} onChange={(e) => setFloorColorB(e.target.value)} />
+                    </label>
+                  </div>
+
+                  <div
                     className="items-panel-upload-existing"
-                    src={floorPreviewUrl ?? floorExistingFileUrl ?? undefined}
-                    alt="Piso atual"
+                    style={{
+                      height: 48,
+                      backgroundImage: `repeating-linear-gradient(63deg, ${floorColorA} 0, ${floorColorA} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth}px, ${floorColorB} ${floorPlankWidth * 2}px)`,
+                    }}
                   />
-                )}
-                <input
-                  ref={floorFileInputRef}
-                  type="file"
-                  accept="image/png,image/webp,image/jpeg"
-                  onChange={(e) => handleFloorFileChange(e.target.files?.[0])}
-                />
-              </label>
+                </>
+              )}
 
               {floorError && <p className="items-panel-error">{floorError}</p>}
 
@@ -3769,7 +3883,16 @@ export default function ItemEditor({
                   {floorItems.map((item) => (
                     <li key={item.id} className="items-panel-row-wrap">
                       <div className="items-panel-row">
-                        <img className="items-panel-thumb" src={item.file_url} alt={item.label} />
+                        {item.kind === "pattern" && item.color_a && item.color_b ? (
+                          <div
+                            className="items-panel-thumb"
+                            style={{
+                              backgroundImage: `repeating-linear-gradient(63deg, ${item.color_a} 0, ${item.color_a} ${item.plank_width_px ?? 24}px, ${item.color_b} ${item.plank_width_px ?? 24}px, ${item.color_b} ${(item.plank_width_px ?? 24) * 2}px)`,
+                            }}
+                          />
+                        ) : (
+                          <img className="items-panel-thumb" src={item.file_url ?? undefined} alt={item.label} />
+                        )}
                         <span className="items-panel-name">
                           {item.label}{" "}
                           <span className="items-panel-category">

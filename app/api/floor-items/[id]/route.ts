@@ -11,6 +11,8 @@ import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_CATEGORIES = ["porcelanato", "laminado", "natural"];
+const ALLOWED_KINDS = ["image", "pattern"];
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 /** Extrai o caminho DENTRO do bucket a partir da URL pública do Storage (.../object/public/<bucket>/<path>) -- null se não bater com o formato esperado. Mesma função de app/api/items/[id]/route.ts (não compartilhada num helper à parte só por isso -- são só 5 linhas). */
 function storagePathFromPublicUrl(url: string, bucket: string): string | null {
@@ -34,7 +36,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const { data: existing, error: fetchError } = await admin
     .from("room_floor_items")
-    .select("file_url")
+    .select("file_url, kind")
     .eq("id", params.id)
     .maybeSingle();
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -56,13 +58,39 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     update.category = body.category;
   }
+  // troca de tipo (image <-> pattern, ver supabase/migrations/
+  // 0016_room_floor_items_pattern.sql) -- raro (a aba "Criar Piso" não
+  // deixa trocar tipo no meio de uma edição, só ao cadastrar um novo),
+  // mas aceito aqui por completude/futuro.
+  if (typeof body.kind === "string" && ALLOWED_KINDS.includes(body.kind)) update.kind = body.kind;
+
   // imagem nova (re-upload no editar) -- apaga (melhor esforço) o
   // arquivo ANTIGO no Storage quando troca por uma URL diferente, mesmo
   // esquema de `art` em app/api/items/[id]/route.ts.
   if (typeof body.file_url === "string" && body.file_url && body.file_url !== existing.file_url) {
-    const oldPath = storagePathFromPublicUrl(existing.file_url as string, "room-items");
-    if (oldPath) await admin.storage.from("room-items").remove([oldPath]).catch(() => null);
+    if (existing.file_url) {
+      const oldPath = storagePathFromPublicUrl(existing.file_url as string, "room-items");
+      if (oldPath) await admin.storage.from("room-items").remove([oldPath]).catch(() => null);
+    }
     update.file_url = body.file_url;
+  }
+
+  // ripa/cores do piso "padrão" (ver FloorPatternConfig em
+  // game/floor.ts) -- os 3 juntos ou nenhum, pra nunca salvar uma
+  // combinação pela metade.
+  if ("plank_width_px" in body || "color_a" in body || "color_b" in body) {
+    const plankWidthPx = typeof body.plank_width_px === "number" && Number.isFinite(body.plank_width_px) ? Math.round(body.plank_width_px) : NaN;
+    const colorA = typeof body.color_a === "string" ? body.color_a : "";
+    const colorB = typeof body.color_b === "string" ? body.color_b : "";
+    if (!Number.isFinite(plankWidthPx) || plankWidthPx < 4 || plankWidthPx > 200) {
+      return NextResponse.json({ error: "largura da ripa precisa ser entre 4 e 200" }, { status: 400 });
+    }
+    if (!HEX_COLOR_RE.test(colorA) || !HEX_COLOR_RE.test(colorB)) {
+      return NextResponse.json({ error: "as duas cores da ripa são obrigatórias" }, { status: 400 });
+    }
+    update.plank_width_px = plankWidthPx;
+    update.color_a = colorA;
+    update.color_b = colorB;
   }
 
   if (Object.keys(update).length === 0) {

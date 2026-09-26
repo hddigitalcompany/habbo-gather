@@ -17,6 +17,33 @@ export const FLOOR_CATEGORIES: { id: FloorCategory; label: string }[] = [
   { id: "natural", label: "Natural" },
 ];
 
+/**
+ * Piso "padrão" (pedido do Douglas: "precisamos de algo leve pro piso,
+ * pois vai encobrir toda a sala... criamos ali dentro uma forma de
+ * preenchimento de linhas... nao precise ser imagem mesmo, faz sentido?
+ * ficaria mais leve?") -- SEM arquivo nenhum, desenhado direto por
+ * código (Graphics, ver createFloorPatternGraphics em MainScene.ts):
+ * ripas/faixas alternando 2 cores, cortadas no formato do losango do
+ * tile. Mais leve que imagem (zero download/textura pra carregar) e,
+ * por a faixa ser calculada em coordenada ABSOLUTA da tela (não
+ * relativa a cada tile), as ripas de tiles VIZINHOS do mesmo estilo
+ * continuam perfeitamente uma na outra -- a sala inteira parece um piso
+ * corrido de verdade, em vez do "carimbo" repetido que uma imagem
+ * batida tile a tile sempre é.
+ */
+export interface FloorPatternConfig {
+  /** Largura de cada ripa (unidade "de tela" do próprio cálculo da
+   * faixa, não é 1:1 com px de verdade -- ajusta por olho, ver o
+   * preview ao vivo no Editor de Itens, aba "Criar Piso"). Um valor
+   * baixo demais (ripa mais fina que ~4) fica ilegível/pichado. */
+  plankWidthPx: number;
+  /** cor base (hex Phaser, ex: 0xa9835f) */
+  colorA: number;
+  /** cor da ripa alternada (a "sombra" fixa que dá profundidade, ex:
+   * um pouco mais escura que colorA) */
+  colorB: number;
+}
+
 export interface FloorCatalogEntry {
   /** "<categoria>-<slug-do-arquivo>" pro piso DE FÁBRICA (ver
    * scripts/syncFloorAssets.mjs) -- pro piso CUSTOM (ver
@@ -29,12 +56,18 @@ export interface FloorCatalogEntry {
   label: string;
   /** De fábrica: só o NOME do arquivo dentro de public/assets/ (precisa
    * do prefixo "/assets/" pra virar um caminho de verdade, ver preload()
-   * em MainScene.ts). Custom: a URL PÚBLICA COMPLETA do Storage
-   * (cadastrado pelo Editor de Itens, aba "Criar Piso") -- já pronta pra
-   * usar direto, sem prefixo nenhum (ver furnitureAssetUrl em
+   * em MainScene.ts). Custom (tipo "imagem"): a URL PÚBLICA COMPLETA do
+   * Storage (cadastrado pelo Editor de Itens, aba "Criar Piso") -- já
+   * pronta pra usar direto, sem prefixo nenhum (ver furnitureAssetUrl em
    * GameRoom.tsx, mesmo helper que já resolve os dois casos pro móvel,
-   * reaproveitado aqui). */
+   * reaproveitado aqui). Vazio ("") quando `pattern` está preenchido
+   * (tipo "padrão", sem imagem nenhuma, ver abaixo). */
   file: string;
+  /** Presente = esse modelo é "padrão" (sem imagem, ver
+   * FloorPatternConfig acima) -- ausente/undefined = modelo de IMAGEM,
+   * comportamento de sempre (`file` é o que manda). Nunca os dois ao
+   * mesmo tempo. */
+  pattern?: FloorPatternConfig;
   /** true só pros modelos CUSTOM (ver registerCustomFloorModels abaixo)
    * -- mesma ideia de FurnitureModelDef.custom em game/furniture.ts,
    * hoje sem nenhum uso real (piso não tem teto de resolução por

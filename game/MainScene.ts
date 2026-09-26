@@ -55,7 +55,7 @@ import {
   DEFAULT_OUTFIT_ID,
   resolveOutfitSkinId,
 } from "./customization";
-import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
+import { FLOOR_CATALOG, FloorCatalogEntry, FloorPatternConfig, FloorTileDef, floorTextureKey, floorWorldPos, floorEntryById } from "./floor";
 import {
   AreaDef,
   AreaTileDef,
@@ -678,7 +678,14 @@ export default class MainScene extends Phaser.Scene {
   // clique (ver paintFloorAt/handleEditPointerDown).
   private selectedFloorTool: FloorTool = null;
   private draftFloor: Map<string, FloorTileDef> = new Map();
-  private draftFloorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
+  // Image (piso "imagem", de sempre) OU Graphics (piso "padrão", ver
+  // createFloorPatternGraphics/FloorPatternConfig em game/floor.ts --
+  // pedido do Douglas: "criamos ali dentro uma forma de preenchimento
+  // de linhas... nao precise ser imagem mesmo") -- os dois têm
+  // .destroy()/.setDepth() em comum, que é tudo que o resto do código
+  // usa daqui (ver destroyFloorDisplayObject logo abaixo, que cuida de
+  // apagar também a máscara "escondida" de um Graphics de padrão).
+  private draftFloorSprites: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Graphics> = new Map();
   private isPaintingFloor = false;
   private lastPaintedFloorKey: string | null = null;
 
@@ -1223,23 +1230,31 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Cria (ou recria) a imagem de UM quadrado de piso pintado, já com
-   * origem/tamanho/profundidade certos -- usado tanto pro piso já salvo
-   * (ver loadSavedFloor) quanto pros tiles pintados na hora no editor de
-   * espaço (ver paintFloorAt), mesma ideia do addFurnitureSprite. Devolve
-   * null se o styleId não bate com nenhum item do catálogo (defensivo --
-   * não deveria acontecer normalmente) OU se a textura desse estilo, por
-   * algum motivo, não terminou de carregar ainda (ver comentário abaixo --
-   * bug reportado pelo Douglas: piso salvo virando o quadriculado preto/
-   * verde do Phaser -- "textura faltando" -- depois de um F5). Nos dois
-   * casos, MELHOR não desenhar nada (o tile fica só sem o piso pintado,
-   * mostrando o fundo padrão por baixo) do que mostrar esse quadriculado
-   * feio -- e o console.warn dá uma pista de verdade (styleId + chave) da
-   * próxima vez que acontecer, em vez de só "sumiu".
+   * Cria (ou recria) a imagem/desenho de UM quadrado de piso pintado, já
+   * com origem/tamanho/profundidade certos -- usado tanto pro piso já
+   * salvo (ver loadSavedFloor) quanto pros tiles pintados na hora no
+   * editor de espaço (ver paintFloorAt), mesma ideia do
+   * addFurnitureSprite. Ramifica em dois tipos de modelo (ver
+   * FloorCatalogEntry em game/floor.ts): "imagem" (de sempre, textura
+   * carregada por URL) ou "padrão" (pedido do Douglas: piso sem imagem
+   * nenhuma, desenhado por código -- ver createFloorPatternGraphics
+   * abaixo). Devolve null se o styleId não bate com nenhum item do
+   * catálogo (defensivo -- não deveria acontecer normalmente) OU, só
+   * pro tipo "imagem", se a textura desse estilo, por algum motivo, não
+   * terminou de carregar ainda (ver comentário abaixo -- bug reportado
+   * pelo Douglas: piso salvo virando o quadriculado preto/verde do
+   * Phaser -- "textura faltando" -- depois de um F5); piso "padrão"
+   * nunca cai nesse caso (não depende de textura nenhuma pra existir).
+   * Nos casos de null, MELHOR não desenhar nada (o tile fica só sem o
+   * piso pintado, mostrando o fundo padrão por baixo) do que mostrar
+   * esse quadriculado feio -- e o console.warn dá uma pista de verdade
+   * (styleId + chave) da próxima vez que acontecer, em vez de só
+   * "sumiu".
    */
-  private addFloorSprite(f: FloorTileDef): Phaser.GameObjects.Image | null {
+  private addFloorSprite(f: FloorTileDef): Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | null {
     const entry = floorEntryById(f.styleId);
     if (!entry) return null;
+    if (entry.pattern) return this.createFloorPatternGraphics(f, entry.pattern);
     const key = floorTextureKey(f.styleId);
     if (!this.textures.exists(key)) {
       console.warn(
@@ -1253,6 +1268,100 @@ export default class MainScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5)
       .setDisplaySize(ISO_TILE_WIDTH, ISO_TILE_HEIGHT)
       .setDepth(DEPTH_FLOOR);
+  }
+
+  /**
+   * Desenha um tile de piso "padrão" (sem imagem nenhuma, ver
+   * FloorPatternConfig em game/floor.ts -- pedido do Douglas: "criamos
+   * ali dentro uma forma de preenchimento de linhas... nao precise ser
+   * imagem mesmo, faz sentido? ficaria mais leve?"): Graphics com
+   * ripas/faixas alternando colorA/colorB, recortado no formato do
+   * losango do tile via GeometryMask (mesmo padrão já usado em
+   * updateAreaDim mais abaixo, ver maskGfx.createGeometryMask() lá).
+   *
+   * A MATEMÁTICA da ripa: p(x,y) = x + 2*y é a coordenada, em pixel de
+   * TELA ABSOLUTO, perpendicular à direção "ao longo de uma aresta do
+   * losango" -- vem direto da proporção 2:1 do tile (ver
+   * ISO_TILE_WIDTH/HEIGHT em grid.ts: a aresta "col fixo, row variando"
+   * anda (-hw,+hh) por passo, e (1,2) é perpendicular a isso). Cada
+   * faixa é a região entre dois valores consecutivos de p, múltiplos de
+   * plankWidthPx -- desenhada como um retângulo comprido (bem maior que
+   * 1 tile) na direção da ripa, sem precisar recortar contra o losango
+   * na mão (a MÁSCARA cuida disso). Por p ser uma fórmula em coordenada
+   * ABSOLUTA (não relativa a f.col/f.row), a MESMA faixa continua
+   * exatamente de um tile pro vizinho -- é isso que faz a sala inteira
+   * parecer um piso corrido, em vez de um carimbo repetido.
+   */
+  private createFloorPatternGraphics(f: FloorTileDef, pattern: FloorPatternConfig): Phaser.GameObjects.Graphics {
+    const pos = floorWorldPos(f);
+    const gfx = this.add.graphics().setDepth(DEPTH_FLOOR);
+    const step = Math.max(4, pattern.plankWidthPx);
+    const sqrt5 = Math.sqrt(5);
+    // vetores UNITÁRIOS fixos (não dependem do tile): comprimento da
+    // ripa na direção "col fixo, row variando" (-2,1) normalizada, e
+    // perpendicular a ela (1,2) normalizada -- ver comentário grande
+    // acima.
+    const dirLen = { x: -2 / sqrt5, y: 1 / sqrt5 };
+    const dirWid = { x: 1 / sqrt5, y: 2 / sqrt5 };
+    const halfLength = ISO_TILE_WIDTH; // bem mais que suficiente pra cobrir 1 tile (128x64) inteiro, sobra de propósito
+    const p0 = pos.x + 2 * pos.y;
+    // alcance de faixas que podem tocar o tile -- folga de +-(hw+hh) em
+    // p (a maior distância possível do centro até qualquer canto do
+    // losango, com folga) garante que nenhuma faixa borda fique de fora.
+    const reach = ISO_TILE_WIDTH / 2 + ISO_TILE_HEIGHT;
+    const minIndex = Math.floor((p0 - reach) / step) - 1;
+    const maxIndex = Math.ceil((p0 + reach) / step) + 1;
+    for (let i = minIndex; i <= maxIndex; i++) {
+      const pTarget = (i + 0.5) * step;
+      const dist = (pTarget - p0) / sqrt5;
+      const cx = pos.x + dirWid.x * dist;
+      const cy = pos.y + dirWid.y * dist;
+      const halfWidth = step / (2 * sqrt5);
+      const lx = dirLen.x * halfLength;
+      const ly = dirLen.y * halfLength;
+      const wx = dirWid.x * halfWidth;
+      const wy = dirWid.y * halfWidth;
+      gfx.fillStyle(((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB, 1);
+      gfx.fillPoints(
+        [
+          { x: cx - lx - wx, y: cy - ly - wy },
+          { x: cx + lx - wx, y: cy + ly - wy },
+          { x: cx + lx + wx, y: cy + ly + wy },
+          { x: cx - lx + wx, y: cy - ly + wy },
+        ],
+        true
+      );
+    }
+    // máscara: só o losango do tile fica visível -- mesmo padrão de
+    // updateAreaDim (maskGfx "escondido", nunca desenhado na cena de
+    // verdade, só serve de fonte de recorte). Guardada via setData pra
+    // destroyFloorDisplayObject saber apagar ela JUNTO quando o tile for
+    // apagado/repintado/editado -- senão vazaria 1 Graphics órfã por
+    // tile toda vez (ver comentário grande lá).
+    const maskGfx = this.add.graphics();
+    maskGfx.fillStyle(0xffffff);
+    maskGfx.fillPoints(tileDiamondCorners(pos.x, pos.y), true);
+    maskGfx.setVisible(false);
+    gfx.setMask(maskGfx.createGeometryMask());
+    gfx.setData("maskGraphics", maskGfx);
+    return gfx;
+  }
+
+  /**
+   * Apaga um tile de piso (Image OU Graphics, ver draftFloorSprites
+   * acima) -- ponto ÚNICO que sabe que um Graphics de piso "padrão" tem
+   * uma máscara "escondida" junto (ver createFloorPatternGraphics acima)
+   * que precisa ser apagada TAMBÉM, senão vaza 1 Graphics órfã por tile
+   * toda vez que um piso padrão é apagado/repintado/editado (nunca
+   * aparece na tela, mas fica ocupando memória pra sempre). Uma Image de
+   * piso "imagem" não tem essa data, getData devolve undefined, e o
+   * `?.destroy()` da máscara não faz nada -- mesmo código serve pros
+   * dois tipos sem precisar checar qual é.
+   */
+  private destroyFloorDisplayObject(obj: Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | undefined) {
+    if (!obj) return;
+    (obj.getData("maskGraphics") as Phaser.GameObjects.Graphics | undefined)?.destroy();
+    obj.destroy();
   }
 
   /**
@@ -1271,7 +1380,7 @@ export default class MainScene extends Phaser.Scene {
   refreshFloorModel(styleId: string) {
     for (const [key, f] of this.draftFloor.entries()) {
       if (f.styleId !== styleId) continue;
-      this.draftFloorSprites.get(key)?.destroy();
+      this.destroyFloorDisplayObject(this.draftFloorSprites.get(key));
       const sprite = this.addFloorSprite(f);
       if (sprite) this.draftFloorSprites.set(key, sprite);
       else this.draftFloorSprites.delete(key);
@@ -2676,7 +2785,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   clearDraftFloor() {
-    for (const sprite of this.draftFloorSprites.values()) sprite.destroy();
+    for (const sprite of this.draftFloorSprites.values()) this.destroyFloorDisplayObject(sprite);
     this.draftFloorSprites.clear();
     this.draftFloor.clear();
     this.onDraftFloorChange?.(this.getDraftFloorList());
@@ -2827,7 +2936,7 @@ export default class MainScene extends Phaser.Scene {
     if (tool.kind === "erase") {
       const existing = this.draftFloor.get(key);
       if (!existing) return; // nada pintado aqui nesta sessão, não tem o que apagar
-      this.draftFloorSprites.get(key)?.destroy();
+      this.destroyFloorDisplayObject(this.draftFloorSprites.get(key));
       this.draftFloorSprites.delete(key);
       this.draftFloor.delete(key);
       this.onDraftFloorChange?.(this.getDraftFloorList());
@@ -2837,7 +2946,7 @@ export default class MainScene extends Phaser.Scene {
     const existing = this.draftFloor.get(key);
     if (existing && existing.styleId === tool.entry.id) return; // já pintado com o mesmo modelo, nada a fazer
 
-    this.draftFloorSprites.get(key)?.destroy();
+    this.destroyFloorDisplayObject(this.draftFloorSprites.get(key));
     const def: FloorTileDef = { col, row, styleId: tool.entry.id };
     const sprite = this.addFloorSprite(def);
     if (!sprite) return;
