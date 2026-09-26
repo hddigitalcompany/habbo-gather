@@ -3299,6 +3299,30 @@ export default function ItemEditor({
   const [floorError, setFloorError] = useState<string | null>(null);
   const floorFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // trava do Douglas (print de um porcelanato com a linha de junta
+  // cruzando no MEIO do losango do tile em vez de bater na borda dele):
+  // "o porcelanato nao ta com a linha na divisa do tile, quero travar
+  // isso, entao no porcelanato nao me deixe colocar dimensao, ele e do
+  // tamanho do tile e pronto, e tambem ja vem com linha". Causa: com
+  // dimensão livre, dava pra esquecer de clicar "Placa do tamanho do
+  // tile" (ou editar o valor depois) e a placa saía de um tamanho
+  // diferente do tile, sem tileAligned -- daí a junta não bate na borda
+  // do losango. Categoria "Porcelanato" agora SEMPRE usa
+  // TILE_SIZED_PLANK_PX (1 placa = 1 tile exato, ver comentário grande
+  // dela em game/floor.ts) + tileAligned=true, sem campo de dimensão
+  // editável na tela (ver JSX abaixo, e o clamp de segurança extra em
+  // handleFloorSubmit). Roda em toda troca de categoria -- inclusive ao
+  // abrir pra editar um porcelanato antigo salvo com dimensão errada
+  // (como o do print), corrigindo sozinho.
+  useEffect(() => {
+    if (floorCategory === "porcelanato") {
+      const size = Math.round(TILE_SIZED_PLANK_PX * 100) / 100;
+      setFloorPlankWidth(size);
+      setFloorPlankLength(String(size));
+      setFloorTileAligned(true);
+    }
+  }, [floorCategory]);
+
   /** "#rrggbb" -> número hex (o que FloorPatternConfig/
    * <FloorPatternSwatch> esperam, ver game/floor.ts) -- <input
    * type="color"> só devolve string. */
@@ -3438,7 +3462,14 @@ export default function ItemEditor({
       if (floorKind === "image") {
         if (fileUrl) payload.file_url = fileUrl;
       } else {
-        payload.plank_width_px = floorPlankWidth;
+        // porcelanato é travado no tamanho do tile (ver useEffect acima
+        // e pedido do Douglas no comentário dele) -- clamp de segurança
+        // aqui também, pra nunca mandar uma dimensão fora do tile pro
+        // banco mesmo que o state do form esteja dessincronizado por
+        // algum motivo.
+        const isPorcelanato = floorCategory === "porcelanato";
+        const tileSize = Math.round(TILE_SIZED_PLANK_PX * 100) / 100;
+        payload.plank_width_px = isPorcelanato ? tileSize : floorPlankWidth;
         // color_a/color_b continuam sendo enviadas (a API ainda exige
         // as 2, ver app/api/floor-items/route.ts) -- derivadas das 2
         // primeiras da lista. `colors` vai sempre junto (mesmo com só 2
@@ -3451,8 +3482,10 @@ export default function ItemEditor({
         // comprimento da tábua -- só manda quando preenchido (senão
         // ripa contínua sem junta, ver comentário grande no state
         // floorPlankLength acima). Junto vai a cor da linha de junta.
-        if (floorPlankLength.trim() !== "") {
-          const plankLength = Number(floorPlankLength);
+        // Porcelanato sempre cai aqui (nunca fica em branco, travado
+        // pelo useEffect acima) -- "já vem com linha" por padrão.
+        if (isPorcelanato || floorPlankLength.trim() !== "") {
+          const plankLength = isPorcelanato ? tileSize : Number(floorPlankLength);
           if (!Number.isFinite(plankLength) || plankLength < 4 || plankLength > 400) {
             throw new Error("Comprimento da tábua precisa ser entre 4 e 400.");
           }
@@ -3460,7 +3493,7 @@ export default function ItemEditor({
           payload.line_color = floorLineColor;
           payload.wood_grain = floorWoodGrain;
           payload.marble = floorMarble;
-          payload.tile_aligned = floorTileAligned;
+          payload.tile_aligned = isPorcelanato ? true : floorTileAligned;
         } else if (floorEditingId) {
           // editando e deixou o campo em branco -- some com a emenda
           // (volta pra ripa contínua), não só ignora o campo -- e o
@@ -4149,56 +4182,76 @@ export default function ItemEditor({
                     parece um piso corrido de verdade.
                   </p>
 
-                  <label className="items-panel-upload-field">
-                    <span>Largura da ripa (px)</span>
-                    <input
-                      className="items-panel-input"
-                      type="number"
-                      min={4}
-                      max={200}
-                      value={floorPlankWidth}
-                      onChange={(e) => setFloorPlankWidth(Number(e.target.value))}
-                    />
-                  </label>
+                  {/* categoria "Porcelanato" é travada no tamanho exato
+                      do tile, sem campo de dimensão editável -- pedido
+                      do Douglas depois de um print com a linha de junta
+                      saindo no meio do losango em vez de bater na borda:
+                      "o porcelanato nao ta com a linha na divisa do
+                      tile, quero travar isso, entao no porcelanato nao
+                      me deixe colocar dimensao, ele e do tamanho do
+                      tile e pronto, e tambem ja vem com linha" (ver
+                      useEffect que trava floorPlankWidth/
+                      floorPlankLength/floorTileAligned mais acima). Pra
+                      laminado/natural a largura/comprimento continuam
+                      livres (é o efeito de ripa/tábua, que não é do
+                      tamanho do tile por natureza). */}
+                  {floorCategory === "porcelanato" ? (
+                    <p className="settings-hint">
+                      Porcelanato é sempre do tamanho exato do tile, com linha de junta batendo certinho na borda do
+                      losango -- sem precisar configurar dimensão.
+                    </p>
+                  ) : (
+                    <>
+                      <label className="items-panel-upload-field">
+                        <span>Largura da ripa (px)</span>
+                        <input
+                          className="items-panel-input"
+                          type="number"
+                          min={4}
+                          max={200}
+                          value={floorPlankWidth}
+                          onChange={(e) => setFloorPlankWidth(Number(e.target.value))}
+                        />
+                      </label>
 
-                  {/* comprimento OPCIONAL -- em branco = ripa contínua
-                      (comportamento de sempre); preenchido = tábuas
-                      EMENDADAS com linha de junta (ver comentário grande
-                      do state floorPlankLength acima e
-                      FloorPatternConfig.plankLengthPx em game/floor.ts). */}
-                  <label className="items-panel-upload-field">
-                    <span>Comprimento da tábua (px) -- opcional</span>
-                    <input
-                      className="items-panel-input"
-                      type="number"
-                      min={4}
-                      max={400}
-                      placeholder="Em branco = ripa contínua, sem emenda"
-                      value={floorPlankLength}
-                      onChange={(e) => setFloorPlankLength(e.target.value)}
-                    />
-                  </label>
-                  {/* atalho pro porcelanato (pedido do Douglas: "vai ser
-                      do tamanho do tile") -- preenche largura/comprimento
-                      com o valor exato que faz 1 placa cobrir 1 tile
-                      inteiro (TILE_SIZED_PLANK_PX, ver comentário grande
-                      dela em game/floor.ts), sem precisar calcular
-                      32*sqrt(5) à mão. Marca também "emenda alinhada à
-                      grade" junto (senão colunas ímpares saem
-                      desalinhadas da borda do tile, ver
-                      FloorPatternConfig.tileAligned). */}
-                  <button
-                    type="button"
-                    className="clear-btn"
-                    onClick={() => {
-                      const size = Math.round(TILE_SIZED_PLANK_PX * 100) / 100;
-                      setFloorPlankWidth(size);
-                      setFloorPlankLength(String(size));
-                      setFloorTileAligned(true);
-                    }}
-                  >
-                    Placa do tamanho do tile (porcelanato)
-                  </button>
+                      {/* comprimento OPCIONAL -- em branco = ripa contínua
+                          (comportamento de sempre); preenchido = tábuas
+                          EMENDADAS com linha de junta (ver comentário grande
+                          do state floorPlankLength acima e
+                          FloorPatternConfig.plankLengthPx em game/floor.ts). */}
+                      <label className="items-panel-upload-field">
+                        <span>Comprimento da tábua (px) -- opcional</span>
+                        <input
+                          className="items-panel-input"
+                          type="number"
+                          min={4}
+                          max={400}
+                          placeholder="Em branco = ripa contínua, sem emenda"
+                          value={floorPlankLength}
+                          onChange={(e) => setFloorPlankLength(e.target.value)}
+                        />
+                      </label>
+                      {/* atalho pra deixar a ripa/tábua do tamanho do
+                          tile mesmo fora da categoria porcelanato (ver
+                          TILE_SIZED_PLANK_PX em game/floor.ts), sem
+                          precisar calcular 32*sqrt(5) à mão. Marca
+                          também "emenda alinhada à grade" junto (senão
+                          colunas ímpares saem desalinhadas da borda do
+                          tile, ver FloorPatternConfig.tileAligned). */}
+                      <button
+                        type="button"
+                        className="clear-btn"
+                        onClick={() => {
+                          const size = Math.round(TILE_SIZED_PLANK_PX * 100) / 100;
+                          setFloorPlankWidth(size);
+                          setFloorPlankLength(String(size));
+                          setFloorTileAligned(true);
+                        }}
+                      >
+                        Placa do tamanho do tile
+                      </button>
+                    </>
+                  )}
                   {floorPlankLength.trim() !== "" && (
                     <>
                       <div className="items-panel-upload-field">
@@ -4226,20 +4279,24 @@ export default function ItemEditor({
                         <input type="checkbox" checked={floorMarble} onChange={(e) => setFloorMarble(e.target.checked)} />
                         Efeito marmorado (veios de mármore)
                       </label>
-                      {/* emenda alinhada à grade -- o botão "Placa do
-                          tamanho do tile" acima já marca isso sozinho,
-                          mas fica editável aqui pra quem quiser um
-                          tamanho de placa diferente do tile inteiro e
-                          ainda assim sem desalinhamento entre colunas
-                          (ver FloorPatternConfig.tileAligned). */}
-                      <label className="settings-hint settings-hint-check">
-                        <input
-                          type="checkbox"
-                          checked={floorTileAligned}
-                          onChange={(e) => setFloorTileAligned(e.target.checked)}
-                        />
-                        Emenda alinhada à grade (sem amarração/intercalado)
-                      </label>
+                      {/* emenda alinhada à grade -- pra porcelanato fica
+                          travada em true (ver useEffect mais acima), sem
+                          checkbox pra não dar pra destravar sem querer;
+                          o botão "Placa do tamanho do tile" acima já
+                          marca isso sozinho, mas fica editável aqui pra
+                          quem quiser um tamanho de placa diferente do
+                          tile inteiro e ainda assim sem desalinhamento
+                          entre colunas (ver FloorPatternConfig.tileAligned). */}
+                      {floorCategory !== "porcelanato" && (
+                        <label className="settings-hint settings-hint-check">
+                          <input
+                            type="checkbox"
+                            checked={floorTileAligned}
+                            onChange={(e) => setFloorTileAligned(e.target.checked)}
+                          />
+                          Emenda alinhada à grade (sem amarração/intercalado)
+                        </label>
+                      )}
                     </>
                   )}
 
