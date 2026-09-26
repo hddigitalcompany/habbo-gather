@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { CUSTOM_ITEM_TARGET_WIDTH } from "@/game/furniture";
+import { CUSTOM_ITEM_TARGET_WIDTH, SEAT_X_LADO, SEAT_Y_LADO } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
@@ -345,6 +345,7 @@ type CustomItemRow = {
   sittable: boolean | null;
   seat_offset_x: number | null;
   seat_offset_y: number | null;
+  seat_direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
 };
 
 // mesma faixa -100..100 da constraint em supabase/migrations/
@@ -2789,11 +2790,25 @@ export default function ItemEditor({
   // mudar -- ver handleCategoryChange, que só reajusta esse palpite
   // quando NÃO tá editando (mesma regra do displayWidth acima).
   const [sittable, setSittable] = useState(() => DEFAULT_SITTABLE_BY_CATEGORY.poltrona);
-  // ajuste PADRÃO (não por direção -- isso continua sendo o "Assento" do
-  // editor de espaço) de onde o boneco senta -- só importa quando
+  // ajuste PADRÃO (direção "down", também usado pra "up" sem override --
+  // ver seatDirectionOffsets logo abaixo e resolveSeatOffset em
+  // game/furniture.ts) de onde o boneco senta -- só importa quando
   // sittable=true, ver seat-marker arrastável no preview.
   const [seatOffsetX, setSeatOffsetX] = useState(0);
   const [seatOffsetY, setSeatOffsetY] = useState(0);
+  // override do assento por direção (achado no "continua torto": um
+  // valor só pras 4 direções sentava torto de lado sempre que ajustado
+  // olhando frente/costas, ou vice-versa -- ver comentário grande em
+  // FurnitureModelDef.seatDirectionOffsets, game/furniture.ts) --
+  // left/right só (down/up caem em seatOffsetX/Y acima, mesmo esquema de
+  // directionOffsets, MAS sem reaproveitar o valor de baixo quando falta
+  // -- ver activeSeatOffset/resolveSeatOffset). Reaproveita
+  // activeMobiDirection (mesma aba de direção da posição no tile) em vez
+  // de um seletor à parte -- menos controle na tela, e o boneco já muda
+  // de pose junto com a aba mesmo.
+  const [seatDirectionOffsets, setSeatDirectionOffsets] = useState<
+    Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>>
+  >({});
 
   // URL (blob local, nunca sobe pra lugar nenhum) da imagem de FRENTE
   // escolhida, só pra mostrar no preview grande -- revogada
@@ -2872,7 +2887,7 @@ export default function ItemEditor({
     const { data, error: fetchError } = await supabase
       .from("room_items")
       .select(
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y"
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -2901,6 +2916,7 @@ export default function ItemEditor({
     setSittable(DEFAULT_SITTABLE_BY_CATEGORY.poltrona);
     setSeatOffsetX(0);
     setSeatOffsetY(0);
+    setSeatDirectionOffsets({});
     setPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -2936,6 +2952,7 @@ export default function ItemEditor({
     setSittable(item.sittable ?? DEFAULT_SITTABLE_BY_CATEGORY[item.category]);
     setSeatOffsetX(clamp(item.seat_offset_x ?? 0, -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
     setSeatOffsetY(clamp(item.seat_offset_y ?? 0, -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
+    setSeatDirectionOffsets(item.seat_direction_offsets ?? {});
     setPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3027,6 +3044,22 @@ export default function ItemEditor({
   const activeMobiOffset =
     activeMobiDirection === "down" ? { x: offsetX, y: offsetY } : directionOffsets[activeMobiDirection] ?? { x: offsetX, y: offsetY };
 
+  // assento em uso pela direção ATIVA (mesma ideia de activeMobiOffset
+  // acima, ver comentário grande em seatDirectionOffsets/
+  // FurnitureModelDef.seatDirectionOffsets) -- "down"/"up" leem
+  // seatOffsetX/Y direto, "left"/"right" caem no PRÓPRIO override
+  // (seatDirectionOffsets) ou, sem um ainda, no MESMO heurístico
+  // genérico de "sentar de lado" que o jogo usa quando não tem nada
+  // ajustado (SEAT_Y_LADO/SEAT_X_LADO, ver resolveSeatOffset em
+  // game/furniture.ts) -- diferente de activeMobiOffset, NÃO cai no
+  // valor de "down": é exatamente esse reaproveitamento que deixava o
+  // boneco "torto" de lado.
+  const isActiveSeatSide = activeMobiDirection === "left" || activeMobiDirection === "right";
+  const activeSeatOffset = !isActiveSeatSide
+    ? { x: seatOffsetX, y: seatOffsetY }
+    : seatDirectionOffsets[activeMobiDirection] ??
+      { x: activeMobiDirection === "left" ? -SEAT_X_LADO : SEAT_X_LADO, y: SEAT_Y_LADO };
+
   // boneco de referência NA POSE da direção ativa (mesmo esquema do
   // "Criar Avatar", ver DIRECTION_FIRST_FRAME_INDEX/frameOffsetXPx em
   // AvatarCreatorPanel acima).
@@ -3088,23 +3121,34 @@ export default function ItemEditor({
 
   // --- arrastar o MARCADOR de onde o boneco senta (pedido do Douglas:
   // "editar também a posição sentado lá dentro") -- só aparece quando
-  // sittable=true (ver seletor "Tem interação?"). Um ajuste só, vale
-  // nas 4 direções (o fino por direção continua sendo o "Assento" do
-  // editor de espaço, ver resolveSeatOffset em game/furniture.ts).
+  // sittable=true (ver seletor "Tem interação?"). MESMO esquema de
+  // handleItemPointerDown acima (posição no tile): "down"/"up" escrevem
+  // em seatOffsetX/Y direto, "left"/"right" caem no PRÓPRIO override
+  // (seatDirectionOffsets) -- ver activeSeatOffset/comentário grande em
+  // FurnitureModelDef.seatDirectionOffsets (game/furniture.ts) pro
+  // porquê de existir (achado: "eu salvo a posição e ele fica em outra
+  // no mapa" -- um valor só pras 4 direções sentava torto de lado).
   function handleSeatMarkerPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     e.preventDefault();
+    const dir = activeMobiDirection;
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
     const startClientX = e.clientX;
     const startClientY = e.clientY;
-    const startX = seatOffsetX;
-    const startY = seatOffsetY;
+    const startX = activeSeatOffset.x;
+    const startY = activeSeatOffset.y;
 
     function onMove(ev: PointerEvent) {
       const dx = (ev.clientX - startClientX) / PREVIEW_SCALE;
       const dy = (ev.clientY - startClientY) / PREVIEW_SCALE;
-      setSeatOffsetX(clamp(Math.round(startX + dx), -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
-      setSeatOffsetY(clamp(Math.round(startY + dy), -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT));
+      const nextX = clamp(Math.round(startX + dx), -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT);
+      const nextY = clamp(Math.round(startY + dy), -SEAT_OFFSET_LIMIT, SEAT_OFFSET_LIMIT);
+      if (dir === "left" || dir === "right") {
+        setSeatDirectionOffsets((prev) => ({ ...prev, [dir]: { x: nextX, y: nextY } }));
+      } else {
+        setSeatOffsetX(nextX);
+        setSeatOffsetY(nextY);
+      }
     }
     function onUp(ev: PointerEvent) {
       target.releasePointerCapture(ev.pointerId);
@@ -3194,6 +3238,11 @@ export default function ItemEditor({
         sittable,
         seat_offset_x: sittable ? seatOffsetX : null,
         seat_offset_y: sittable ? seatOffsetY : null,
+        // ajuste do assento por direção (ver activeSeatOffset/
+        // handleSeatMarkerPointerDown acima e a migration
+        // 0011_room_items_seat_direction_offsets.sql) -- mesma regra de
+        // direction_offsets: vazio manda null de propósito.
+        seat_direction_offsets: sittable && Object.keys(seatDirectionOffsets).length > 0 ? seatDirectionOffsets : null,
       };
       if (iconUrl !== undefined) payload.icon_url = iconUrl;
 
@@ -3486,26 +3535,30 @@ export default function ItemEditor({
 
               {/* boneco SENTADO arrastável (só quando "Sentar" tá
                   ligado acima) -- arrasta o próprio boneco (já na pose
-                  sentado da direção ativa) pra ajustar o ponto padrão;
-                  o fino por direção continua no "Assento" do editor de
-                  espaço (resolveSeatOffset em game/furniture.ts), esse
-                  aqui só define o PADRÃO usado antes de qualquer ajuste
-                  ao vivo. Mesmo referencial de item-stage-item-img
-                  logo abaixo -- ancorado no mesmo "bottom" que os pés
-                  do boneco em pé (STAGE_BASELINE_PAD +
-                  AVATAR_FOOT_FROM_TILE_BOTTOM), só deslocado pelo
-                  seatOffsetX/Y atual (mesma conta que a bolinha antiga
-                  fazia). Pedido do Douglas: trocar a bolinha abstrata
-                  por um boneco de verdade, bem mais intuitivo de
-                  posicionar. */}
+                  sentado da direção ATIVA, aba de cima) pra ajustar o
+                  assento daquela direção (down/up em seatOffsetX/Y,
+                  left/right em seatDirectionOffsets -- ver
+                  activeSeatOffset/handleSeatMarkerPointerDown e o
+                  comentário grande em
+                  FurnitureModelDef.seatDirectionOffsets,
+                  game/furniture.ts). Mesmo referencial de
+                  item-stage-item-img logo abaixo -- ancorado no mesmo
+                  "bottom" que os pés do boneco em pé (STAGE_BASELINE_PAD
+                  + AVATAR_FOOT_FROM_TILE_BOTTOM), só deslocado pelo
+                  activeSeatOffset.x/y atual (mesma conta que a bolinha
+                  antiga fazia). Pedido do Douglas: trocar a bolinha
+                  abstrata por um boneco de verdade, bem mais intuitivo
+                  de posicionar -- e, depois, deixar ajustar por direção
+                  (achado: um valor só pras 4 direções sentava torto de
+                  lado). */}
               {sittable && (
                 <div
                   className="item-stage-seat-avatar"
                   style={{
-                    bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM - seatOffsetY * PREVIEW_SCALE,
+                    bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM - activeSeatOffset.y * PREVIEW_SCALE,
                     width: AVATAR_DISPLAY_W,
                     height: AVATAR_DISPLAY_H,
-                    transform: `translate(calc(-50% + ${seatOffsetX * PREVIEW_SCALE}px), 0)`,
+                    transform: `translate(calc(-50% + ${activeSeatOffset.x * PREVIEW_SCALE}px), 0)`,
                   }}
                   onPointerDown={handleSeatMarkerPointerDown}
                   title="Arraste o boneco sentado pra ajustar onde ele senta"
@@ -3597,15 +3650,23 @@ export default function ItemEditor({
             {sittable && (
               <div className="item-stage-offset-row">
                 <span>
-                  posição sentado -- x: {seatOffsetX}px · y: {seatOffsetY}px
+                  posição sentado ({DIRECTION_FIELDS.find((f) => f.key === activeMobiDirection)?.label}) -- x: {activeSeatOffset.x}px · y: {activeSeatOffset.y}px
                 </span>
-                {(seatOffsetX !== 0 || seatOffsetY !== 0) && (
+                {(isActiveSeatSide ? activeMobiDirection in seatDirectionOffsets : seatOffsetX !== 0 || seatOffsetY !== 0) && (
                   <button
                     type="button"
                     className="clear-btn"
                     onClick={() => {
-                      setSeatOffsetX(0);
-                      setSeatOffsetY(0);
+                      if (isActiveSeatSide) {
+                        setSeatDirectionOffsets((prev) => {
+                          const next = { ...prev };
+                          delete next[activeMobiDirection as Exclude<DirectionKey, "down">];
+                          return next;
+                        });
+                      } else {
+                        setSeatOffsetX(0);
+                        setSeatOffsetY(0);
+                      }
                     }}
                   >
                     Redefinir assento

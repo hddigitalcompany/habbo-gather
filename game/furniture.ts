@@ -235,6 +235,33 @@ export interface FurnitureModelDef {
    * costas vs lado, ver resolveSeatOffset). */
   seatOffsetX?: number;
   seatOffsetY?: number;
+  /** Override de seatOffsetX/Y (ver acima) por direção -- SÓ pra
+   * left/right/up (down usa seatOffsetX/Y direto, sem entrada aqui) --
+   * MESMO esquema de directionOffsets (posição no tile), agora aplicado
+   * ao assento também.
+   *
+   * ACHADO ("continua torto", 3ª+ rodada -- Douglas: "eu salvo a
+   * posição e ele fica em outra no mapa"): até aqui seatOffsetX/Y era
+   * um valor ÚNICO pras 4 direções por design (ver migration 0007) --
+   * o ajuste fino por direção ficava só no painel "Assento" do editor
+   * de espaço (fora do Editor de Itens, ver resolveSeatOffset). Só que
+   * a diferença entre sentar de frente/costas e sentar de lado é GRANDE
+   * (a poltrona é bem mais estreita de perfil -- ver
+   * SEAT_Y_FRENTE_COSTAS vs SEAT_Y_LADO abaixo), então ajustar o valor
+   * único olhando uma direção sempre desalinhava as outras -- e como
+   * "Assento" é um painel SEPARADO (editor de espaço, não o Editor de
+   * Itens onde o Douglas mexe de verdade), o resultado tinha cara de
+   * "salvei e não mudou nada"/"virou outra posição" dependendo de qual
+   * direção ele tava olhando. Agora o próprio preview do Editor de
+   * Itens deixa arrastar o boneco sentado em CADA aba de direção (igual
+   * já fazia pra posição no tile) -- down/up caem em seatOffsetX/Y,
+   * left/right ganham o PRÓPRIO valor aqui quando ajustados. Sem
+   * ajuste aqui, left/right NÃO reaproveitam mais o valor de baixo (ao
+   * contrário de directionOffsets) -- caem direto no heurístico
+   * genérico de lado (SEAT_Y_LADO/SEAT_X_LADO, ver resolveSeatOffset),
+   * que já é uma aproximação bem melhor que aplicar um valor pensado
+   * pra frente/costas de lado. */
+  seatDirectionOffsets?: Partial<Record<Exclude<Direction, "down">, { x: number; y: number }>>;
 }
 
 /**
@@ -705,19 +732,24 @@ export type FurnitureSeatOffsetsMap = Record<string, Partial<Record<Direction, {
  * Deslocamento (px) de onde o boneco aparece sentado num móvel -- ordem
  * de prioridade:
  *  1. Ajuste salvo por MODELO+direção (ver FurnitureSeatOffsetsMap,
- *     "Assento" no editor) -- vale pra TODO item já colocado desse
- *     modelo, não só o que foi usado pra ajustar.
+ *     "Assento" no editor de espaço) -- vale pra TODO item já colocado
+ *     desse modelo, não só o que foi usado pra ajustar.
  *  2. Valor gravado na própria instância (seatOffsetX/Y no FurnitureDef)
  *     -- só existe nos itens antigos de ROOM_FURNITURE escritos à mão
  *     antes dos modelos existirem.
- *  3. Padrão do MODELO custom (FurnitureModelDef.seatOffsetX/Y, ajustado
- *     no Editor de Itens junto com "Tem interação?" -- pedido do
- *     Douglas: "editar também a posição sentado lá dentro").
+ *  3. Padrão do MODELO custom PARA AQUELA DIREÇÃO -- left/right/up
+ *     primeiro checam seatDirectionOffsets (ajustado por aba de direção
+ *     no Editor de Itens, ver comentário grande na interface); down/up
+ *     sem override aí (ou down direto) caem no seatOffsetX/Y "geral" do
+ *     modelo. left/right SEM seatDirectionOffsets NÃO reaproveitam o
+ *     valor geral (ver #4 abaixo) -- diferente de directionOffsets (tile),
+ *     um valor pensado pra frente/costas fica torto de lado com muito
+ *     mais frequência do que a posição do móvel em si.
  *  4. Padrão genérico por GRUPO de direção (frente/costas x lado) -- pra
- *     um modelo novo, recém-sincronizado, já sentar numa posição
- *     razoável antes de qualquer ajuste fino (mesmos valores que já
- *     eram usados fixos pra poltrona, ver SEAT_Y_FRENTE_COSTAS/
- *     SEAT_Y_LADO/SEAT_X_LADO).
+ *     um modelo novo (ou left/right sem ajuste ainda, ver #3) já sentar
+ *     numa posição razoável antes de qualquer ajuste fino (mesmos
+ *     valores que já eram usados fixos pra poltrona, ver
+ *     SEAT_Y_FRENTE_COSTAS/SEAT_Y_LADO/SEAT_X_LADO).
  */
 export function resolveSeatOffset(f: FurnitureDef, seatOffsets: FurnitureSeatOffsetsMap): { x: number; y: number } {
   const override = seatOffsets[seatOffsetGroupKey(f)]?.[f.facing];
@@ -726,10 +758,17 @@ export function resolveSeatOffset(f: FurnitureDef, seatOffsets: FurnitureSeatOff
     return { x: f.seatOffsetX ?? 0, y: f.seatOffsetY ?? 0 };
   }
   const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
-  if (model && (model.seatOffsetX !== undefined || model.seatOffsetY !== undefined)) {
-    return { x: model.seatOffsetX ?? 0, y: model.seatOffsetY ?? 0 };
-  }
   const isSide = f.facing === "left" || f.facing === "right";
+  if (model) {
+    // narrowing inline (não via `isSide`) -- TS não propaga a checagem
+    // de `f.facing` feita lá em cima pra dentro dessa variável boolean.
+    if (f.facing === "left" || f.facing === "right") {
+      const perDirection = model.seatDirectionOffsets?.[f.facing];
+      if (perDirection) return perDirection;
+    } else if (model.seatOffsetX !== undefined || model.seatOffsetY !== undefined) {
+      return { x: model.seatOffsetX ?? 0, y: model.seatOffsetY ?? 0 };
+    }
+  }
   if (!isSide) return { x: 0, y: SEAT_Y_FRENTE_COSTAS };
   return { x: f.facing === "left" ? -SEAT_X_LADO : SEAT_X_LADO, y: SEAT_Y_LADO };
 }

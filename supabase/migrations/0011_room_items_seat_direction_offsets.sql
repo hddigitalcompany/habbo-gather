@@ -1,0 +1,31 @@
+-- ACHADO ("continua torto", rodada 3+ -- Douglas: "eu salvo a posicao e
+-- ele fica em outra no mapa"): desde 0007_room_items_direction_offsets_seat.sql,
+-- seat_offset_x/seat_offset_y era um valor ÚNICO aplicado nas 4 direções
+-- por design ("o ajuste fino POR DIREÇÃO continua sendo o painel
+-- 'Assento' já existente no editor de espaço"). Na prática isso confundia
+-- demais: o Douglas ajusta a posição sentado no Editor de Itens (onde ele
+-- mexe de verdade), vê o boneco certinho na direção que tava olhando no
+-- preview, salva -- e na sala, a MESMA posição cai igual nas outras 3
+-- direções, incluindo "de lado", que precisa de um ajuste BEM diferente
+-- de frente/costas (ver SEAT_Y_FRENTE_COSTAS vs SEAT_Y_LADO em
+-- game/furniture.ts -- a diferença é grande, a poltrona é bem mais
+-- estreita de perfil). Resultado: parecia que salvar "não pegava"/"pulava
+-- pra outro lugar", dependendo de qual direção ele tinha ajustado por
+-- último.
+--
+-- seat_direction_offsets replica o MESMO esquema que direction_offsets
+-- (0007) já usa pra posição no tile: um override OPCIONAL por direção
+-- (left/right/up -- "down" continua usando seat_offset_x/seat_offset_y
+-- direto). Ajustado arrastando o boneco sentado em CADA aba de direção
+-- no preview do Editor de Itens (ver handleSeatMarkerPointerDown,
+-- ItemEditor.tsx) -- sem ajuste numa direção, ela NÃO cai mais no valor
+-- de seat_offset_x/y (diferente de direction_offsets): left/right sem
+-- entrada aqui usam o heurístico genérico de "sentar de lado"
+-- (SEAT_Y_LADO/SEAT_X_LADO em resolveSeatOffset, game/furniture.ts), que
+-- já é uma aproximação bem melhor do que aplicar torto um valor pensado
+-- pra frente.
+--
+-- Rode isso no SQL Editor do Supabase DEPOIS de já ter rodado
+-- 0007_room_items_direction_offsets_seat.sql.
+alter table public.room_items
+  add column if not exists seat_direction_offsets jsonb;

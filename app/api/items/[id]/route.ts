@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
-import { clampItemOffset, clampSeatOffset, cleanDirectionOffsets } from "@/lib/supabase/itemFields";
+import { clampItemOffset, clampSeatOffset, cleanDirectionOffsets, cleanSeatDirectionOffsets } from "@/lib/supabase/itemFields";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +120,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (typeof body.sittable === "boolean") update.sittable = body.sittable;
   if ("seat_offset_x" in body) update.seat_offset_x = clampSeatOffset(body.seat_offset_x) ?? null;
   if ("seat_offset_y" in body) update.seat_offset_y = clampSeatOffset(body.seat_offset_y) ?? null;
+  // ajuste do assento POR DIREÇÃO (ver comentário equivalente em
+  // app/api/items/route.ts/POST) -- "in body" de propósito, mesmo
+  // motivo de direction_offsets acima.
+  if ("seat_direction_offsets" in body) update.seat_direction_offsets = cleanSeatDirectionOffsets(body.seat_direction_offsets);
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });

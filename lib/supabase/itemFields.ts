@@ -51,3 +51,24 @@ export function cleanDirectionOffsets(raw: unknown): Record<string, { x: number;
   }
   return Object.keys(cleaned).length > 0 ? cleaned : null;
 }
+
+/** Mesma ideia de cleanDirectionOffsets acima, só que pro ASSENTO (ver
+ * seat_direction_offsets em supabase/migrations/
+ * 0008_room_items_seat_direction_offsets.sql e o comentário grande em
+ * FurnitureModelDef.seatDirectionOffsets, game/furniture.ts) -- também
+ * só left/right/up, mas usa a faixa mais estreita do assento
+ * (clampSeatOffset, -100..100) em vez da faixa de posição no tile. */
+export function cleanSeatDirectionOffsets(raw: unknown): Record<string, { x: number; y: number }> | null {
+  if (raw === null) return null;
+  if (!raw || typeof raw !== "object") return null;
+  const cleaned: Record<string, { x: number; y: number }> = {};
+  for (const dir of OVERRIDABLE_DIRECTIONS) {
+    const entry = (raw as Record<string, unknown>)[dir];
+    if (!entry || typeof entry !== "object") continue;
+    const x = clampSeatOffset((entry as Record<string, unknown>).x);
+    const y = clampSeatOffset((entry as Record<string, unknown>).y);
+    if (x === undefined || y === undefined) continue;
+    cleaned[dir] = { x, y };
+  }
+  return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
