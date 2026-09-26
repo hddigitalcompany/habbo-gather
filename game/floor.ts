@@ -249,9 +249,9 @@ export interface FloorPatternPolygon {
  * Calcula os polígonos de como um FloorPatternConfig fica desenhado
  * dentro de UM tile ISOLADO, centrado na origem (0,0) -- é a MESMA
  * matemática de createFloorPatternGraphics em MainScene.ts (mesmos
- * across/along/dirWid/dirLen/plankColorIndex), só que em TypeScript
- * puro (sem Phaser.Graphics), devolvendo os pontos já prontos pra
- * desenhar num `<svg><polygon>`.
+ * acrossCol/alongRow/colAxis/rowAxis/plankColorIndex), só que em
+ * TypeScript puro (sem Phaser.Graphics), devolvendo os pontos já
+ * prontos pra desenhar num `<svg><polygon>`.
  *
  * Usada pelo preview ao vivo do formulário "Criar Piso" -> "Padrão"
  * (ItemEditor.tsx) e pelo losango da paleta de pintura da sala
@@ -264,40 +264,53 @@ export interface FloorPatternPolygon {
  * contrario" e "seu corretor fez foi piorar o angulo" do Douglas; a
  * forma de nunca mais errar o ângulo é não ter ângulo nenhum pra
  * chutar -- reusar o MESMO cálculo ponto a ponto do jogo).
+ *
+ * colAxis/rowAxis (ver comentário grande espelhado em
+ * createFloorPatternGraphics, MainScene.ts) são os DOIS eixos DE
+ * VERDADE do losango do tile -- NÃO são perpendiculares entre si (ao
+ * contrário da base ortonormal antiga dirWid/dirLen), então cada tábua
+ * sai um PARALELOGRAMO com as pontas na mesma inclinação do losango,
+ * igual a referência que o Douglas mandou (piso pintado na sala "ta
+ * fora do angulo do piso" -> "quero na mesma posicao/sentido da linha
+ * do tile... assim como na imagem que te mandei").
  */
 export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternPolygon[] {
   const pos = { x: 0, y: 0 }; // tile isolado, centrado na origem -- ver comentário da função
   const step = Math.max(4, pattern.plankWidthPx);
   const sqrt5 = Math.sqrt(5);
-  const dirLen = { x: -2 / sqrt5, y: 1 / sqrt5 };
-  const dirWid = { x: 1 / sqrt5, y: 2 / sqrt5 };
-  const p0 = pos.x + 2 * pos.y; // = 0 (tile na origem)
+  const rowAxis = { x: -2 / sqrt5, y: 1 / sqrt5 };
+  const colAxis = { x: 2 / sqrt5, y: 1 / sqrt5 };
+  function acrossColOf(x: number, y: number) {
+    return (sqrt5 * (x + 2 * y)) / 4;
+  }
+  function alongRowOf(x: number, y: number) {
+    return (sqrt5 * (2 * y - x)) / 4;
+  }
+  const acrossCol0 = acrossColOf(pos.x, pos.y); // = 0 (tile na origem)
   const reach = ISO_TILE_WIDTH / 2 + ISO_TILE_HEIGHT;
-  const minIndex = Math.floor((p0 - reach) / step) - 1;
-  const maxIndex = Math.ceil((p0 + reach) / step) + 1;
+  const minIndex = Math.floor((acrossCol0 - reach) / step) - 1;
+  const maxIndex = Math.ceil((acrossCol0 + reach) / step) + 1;
   const polys: FloorPatternPolygon[] = [];
 
   if (pattern.plankLengthPx) {
     const lenStep = Math.max(4, pattern.plankLengthPx);
-    const q0 = -2 * pos.x + pos.y; // = 0
+    const alongRow0 = alongRowOf(pos.x, pos.y); // = 0
     const lineColor = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
     for (let i = minIndex; i <= maxIndex; i++) {
       const colOffset = ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
-      const minJ = Math.floor((q0 - reach - colOffset) / lenStep) - 1;
-      const maxJ = Math.ceil((q0 + reach - colOffset) / lenStep) + 1;
+      const minJ = Math.floor((alongRow0 - reach - colOffset) / lenStep) - 1;
+      const maxJ = Math.ceil((alongRow0 + reach - colOffset) / lenStep) + 1;
       for (let j = minJ; j <= maxJ; j++) {
-        const pTarget = (i + 0.5) * step;
-        const qTarget = j * lenStep + colOffset + lenStep / 2;
-        const across = pTarget / sqrt5;
-        const along = qTarget / sqrt5;
-        const cx = across * dirWid.x + along * dirLen.x;
-        const cy = across * dirWid.y + along * dirLen.y;
-        const halfWidth = step / (2 * sqrt5);
-        const halfLength = lenStep / (2 * sqrt5);
-        const lx = dirLen.x * halfLength;
-        const ly = dirLen.y * halfLength;
-        const wx = dirWid.x * halfWidth;
-        const wy = dirWid.y * halfWidth;
+        const acrossTarget = (i + 0.5) * step;
+        const alongTarget = j * lenStep + colOffset + lenStep / 2;
+        const cx = acrossTarget * colAxis.x + alongTarget * rowAxis.x;
+        const cy = acrossTarget * colAxis.y + alongTarget * rowAxis.y;
+        const halfWidth = step / 2;
+        const halfLength = lenStep / 2;
+        const lx = rowAxis.x * halfLength;
+        const ly = rowAxis.y * halfLength;
+        const wx = colAxis.x * halfWidth;
+        const wy = colAxis.y * halfWidth;
         polys.push({
           points: [
             { x: cx - lx - wx, y: cy - ly - wy },
@@ -313,15 +326,15 @@ export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternP
   } else {
     const halfLength = ISO_TILE_WIDTH; // mesmo exagero de MainScene.ts -- sobra de propósito, cobre o tile inteiro
     for (let i = minIndex; i <= maxIndex; i++) {
-      const pTarget = (i + 0.5) * step;
-      const dist = (pTarget - p0) / sqrt5;
-      const cx = pos.x + dirWid.x * dist;
-      const cy = pos.y + dirWid.y * dist;
-      const halfWidth = step / (2 * sqrt5);
-      const lx = dirLen.x * halfLength;
-      const ly = dirLen.y * halfLength;
-      const wx = dirWid.x * halfWidth;
-      const wy = dirWid.y * halfWidth;
+      const acrossTarget = (i + 0.5) * step;
+      const dist = acrossTarget - acrossCol0;
+      const cx = pos.x + colAxis.x * dist;
+      const cy = pos.y + colAxis.y * dist;
+      const halfWidth = step / 2;
+      const lx = rowAxis.x * halfLength;
+      const ly = rowAxis.y * halfLength;
+      const wx = colAxis.x * halfWidth;
+      const wy = colAxis.y * halfWidth;
       polys.push({
         points: [
           { x: cx - lx - wx, y: cy - ly - wy },

@@ -1335,32 +1335,68 @@ export default class MainScene extends Phaser.Scene {
     const gfx = this.add.graphics().setDepth(DEPTH_FLOOR);
     const step = Math.max(4, pattern.plankWidthPx);
     const sqrt5 = Math.sqrt(5);
-    // vetores UNITÁRIOS fixos (não dependem do tile): comprimento da
-    // ripa na direção "col fixo, row variando" (-2,1) normalizada, e
-    // perpendicular a ela (1,2) normalizada -- ver comentário grande
-    // acima. Juntos formam uma base ORTONORMAL (dirWid . dirLen = 0),
-    // então qualquer ponto do mundo pode ser escrito como
-    // across*dirWid + along*dirLen, com across/along calculados abaixo.
-    const dirLen = { x: -2 / sqrt5, y: 1 / sqrt5 };
-    const dirWid = { x: 1 / sqrt5, y: 2 / sqrt5 };
-    const p0 = pos.x + 2 * pos.y; // "across" do centro do tile (escala p, ver comentário grande acima)
+    // vetores UNITÁRIOS fixos (não dependem do tile), OS DOIS iguais aos
+    // eixos DE VERDADE da grade isométrica (ver tileToWorld em
+    // game/grid.ts): rowAxis = "col fixo, row variando" (-2,1)
+    // normalizada (a MESMA direção da aresta esquerda do losango do
+    // tile), colAxis = "col variando, row fixo" (2,1) normalizada (a
+    // MESMA direção da aresta direita do losango). Diferente de uma
+    // base ortonormal (90° entre si), rowAxis/colAxis NÃO são
+    // perpendiculares (ângulo de ~126.87°, igual ao ângulo do próprio
+    // losango do tile) -- É ISSO QUE FAZ A TÁBUA FICAR "NO ÂNGULO DO
+    // PISO": antes (dirWid = perpendicular EUCLIDIANA de dirLen, não
+    // batia com nenhuma aresta de verdade do tile) o Douglas reportou,
+    // com o piso já pintado na sala: "ta fora do angulo do piso" -- as
+    // tábuas saíam RETANGULARES (ângulo reto de verdade na tela), mas
+    // um retângulo reto NUNCA fica alinhado com as DUAS arestas de um
+    // losango 2:1 ao mesmo tempo (só uma reta é perpendicular a outra
+    // reta; as arestas do losango não são perpendiculares entre si).
+    // Usando os eixos REAIS do losango pras tábuas (como um quadrado do
+    // MUNDO 3D vira um paralelogramo ao projetar em isométrico -- é
+    // assim que TODO o resto da cena já é desenhado, ver tileToWorld),
+    // cada tábua vira um PARALELOGRAMO com as pontas cortadas na MESMA
+    // inclinação do losango -- exatamente a foto de referência que o
+    // Douglas mandou ("quero na mesma posicao/sentido da linha do
+    // tile... assim como na imagem que te mandei").
+    const rowAxis = { x: -2 / sqrt5, y: 1 / sqrt5 };
+    const colAxis = { x: 2 / sqrt5, y: 1 / sqrt5 };
+    // Decompor um ponto absoluto (x,y) em (acrossCol, alongRow) tal que
+    // (x,y) = acrossCol*colAxis + alongRow*rowAxis -- como colAxis/
+    // rowAxis NÃO são ortogonais, isso não é mais um produto escalar
+    // simples (como era com a base ortonormal antiga), é resolver o
+    // sistema linear 2x2 ponto = a*colAxis + b*rowAxis pra (a,b) -- dá
+    // a = sqrt5*(x+2y)/4 e b = sqrt5*(2y-x)/4 (conta fechada, só
+    // depende da proporção 2:1 do tile, não do tamanho de cada tábua).
+    // acrossCol/alongRow já saem em PIXEL de verdade (não precisa
+    // dividir por sqrt5 de novo mais na frente, diferente da conta
+    // antiga com p0/q0) -- across/alongOf calculados em coordenada
+    // ABSOLUTA da tela (não por tile), então a mesma grade de tábuas
+    // continua exatamente igual de um tile pro vizinho.
+    function acrossColOf(x: number, y: number) {
+      return (sqrt5 * (x + 2 * y)) / 4;
+    }
+    function alongRowOf(x: number, y: number) {
+      return (sqrt5 * (2 * y - x)) / 4;
+    }
+    const acrossCol0 = acrossColOf(pos.x, pos.y); // posição do centro do tile ao longo de colAxis
     // alcance de faixas que podem tocar o tile -- folga de +-(hw+hh) em
-    // p (a maior distância possível do centro até qualquer canto do
-    // losango, com folga) garante que nenhuma faixa/tábua borda fique de
-    // fora, nos dois eixos (across E along -- o losango do tile cabe
-    // inteiro num raio bem menor que isso nos dois sentidos).
+    // px de verdade (acrossCol0/alongRow0 já são pixel, ver acima)
+    // garante que nenhuma faixa/tábua borda fique de fora, nos dois
+    // eixos -- o losango do tile cabe inteiro num raio bem menor que
+    // isso nos dois sentidos.
     const reach = ISO_TILE_WIDTH / 2 + ISO_TILE_HEIGHT;
-    const minIndex = Math.floor((p0 - reach) / step) - 1;
-    const maxIndex = Math.ceil((p0 + reach) / step) + 1;
+    const minIndex = Math.floor((acrossCol0 - reach) / step) - 1;
+    const maxIndex = Math.ceil((acrossCol0 + reach) / step) + 1;
 
     if (pattern.plankLengthPx) {
       // --- Tábuas EMENDADAS, com linha de junta e desalinhamento entre
       // colunas ("amarração" de assoalho de verdade -- ver comentário
       // grande de FloorPatternConfig.plankLengthPx em game/floor.ts).
       // Pedido do Douglas junto com foto de referência de piso de
-      // tábua corrida: "vamos criar padroes aqui, e depois subir lá". ---
+      // tábua corrida: "vamos criar padroes aqui, e depois subir lá",
+      // e depois: "e é nessa ideia de intercalado". ---
       const lenStep = Math.max(4, pattern.plankLengthPx);
-      const q0 = -2 * pos.x + pos.y; // "along" do centro do tile (escala q, mesmo raciocínio de p0)
+      const alongRow0 = alongRowOf(pos.x, pos.y); // posição do centro do tile ao longo de rowAxis
       const lineColor = pattern.lineColor ?? this.darkenColor(pattern.colorA);
       for (let i = minIndex; i <= maxIndex; i++) {
         // colunas pares ficam alinhadas em j=0, colunas ímpares
@@ -1368,27 +1404,24 @@ export default class MainScene extends Phaser.Scene {
         // colunas vizinhas NÃO caírem todas na mesma linha (senão
         // pareceria ladrilho/grade, não piso de tábua de verdade).
         const colOffset = ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
-        const minJ = Math.floor((q0 - reach - colOffset) / lenStep) - 1;
-        const maxJ = Math.ceil((q0 + reach - colOffset) / lenStep) + 1;
+        const minJ = Math.floor((alongRow0 - reach - colOffset) / lenStep) - 1;
+        const maxJ = Math.ceil((alongRow0 + reach - colOffset) / lenStep) + 1;
         for (let j = minJ; j <= maxJ; j++) {
-          const pTarget = (i + 0.5) * step;
-          const qTarget = j * lenStep + colOffset + lenStep / 2;
-          // ponto (cx,cy) = across*dirWid + along*dirLen, com
-          // across=pTarget/sqrt5 e along=qTarget/sqrt5 -- coordenadas
-          // ABSOLUTAS na base ortonormal (dirWid,dirLen), por isso a
-          // mesma grade de tábuas cai exatamente igual em tiles
+          const acrossTarget = (i + 0.5) * step;
+          const alongTarget = j * lenStep + colOffset + lenStep / 2;
+          // ponto (cx,cy) = acrossTarget*colAxis + alongTarget*rowAxis
+          // -- coordenadas ABSOLUTAS na base (colAxis,rowAxis), por isso
+          // a mesma grade de tábuas cai exatamente igual em tiles
           // vizinhos, sem precisar de nenhum estado compartilhado entre
           // eles (mesmo truque do resto do arquivo).
-          const across = pTarget / sqrt5;
-          const along = qTarget / sqrt5;
-          const cx = across * dirWid.x + along * dirLen.x;
-          const cy = across * dirWid.y + along * dirLen.y;
-          const halfWidth = step / (2 * sqrt5);
-          const halfLength = lenStep / (2 * sqrt5);
-          const lx = dirLen.x * halfLength;
-          const ly = dirLen.y * halfLength;
-          const wx = dirWid.x * halfWidth;
-          const wy = dirWid.y * halfWidth;
+          const cx = acrossTarget * colAxis.x + alongTarget * rowAxis.x;
+          const cy = acrossTarget * colAxis.y + alongTarget * rowAxis.y;
+          const halfWidth = step / 2;
+          const halfLength = lenStep / 2;
+          const lx = rowAxis.x * halfLength;
+          const ly = rowAxis.y * halfLength;
+          const wx = colAxis.x * halfWidth;
+          const wy = colAxis.y * halfWidth;
           const points = [
             { x: cx - lx - wx, y: cy - ly - wy },
             { x: cx + lx - wx, y: cy + ly - wy },
@@ -1407,15 +1440,15 @@ export default class MainScene extends Phaser.Scene {
       // cadastrado por alguém sem plankLengthPx definido. ---
       const halfLength = ISO_TILE_WIDTH; // bem mais que suficiente pra cobrir 1 tile (128x64) inteiro, sobra de propósito
       for (let i = minIndex; i <= maxIndex; i++) {
-        const pTarget = (i + 0.5) * step;
-        const dist = (pTarget - p0) / sqrt5;
-        const cx = pos.x + dirWid.x * dist;
-        const cy = pos.y + dirWid.y * dist;
-        const halfWidth = step / (2 * sqrt5);
-        const lx = dirLen.x * halfLength;
-        const ly = dirLen.y * halfLength;
-        const wx = dirWid.x * halfWidth;
-        const wy = dirWid.y * halfWidth;
+        const acrossTarget = (i + 0.5) * step;
+        const dist = acrossTarget - acrossCol0;
+        const cx = pos.x + colAxis.x * dist;
+        const cy = pos.y + colAxis.y * dist;
+        const halfWidth = step / 2;
+        const lx = rowAxis.x * halfLength;
+        const ly = rowAxis.y * halfLength;
+        const wx = colAxis.x * halfWidth;
+        const wy = colAxis.y * halfWidth;
         // pickPlankColor (não só o if/else de colorA/colorB) -- pra uma
         // paleta `colors` com mais de 2 tons também funcionar na ripa
         // CONTÍNUA, não só na tábua emendada (antes só funcionava lá,
