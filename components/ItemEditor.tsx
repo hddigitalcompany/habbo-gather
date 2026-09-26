@@ -1032,7 +1032,18 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   // redesenha por cima sem mudar o espaço ocupado, e ia exigir um
   // wrapper com overflow pra não cortar o preview ampliado. Suportado
   // no Chrome (que é o que o Douglas usa, ver screenshots).
-  const [zoom, setZoom] = useState(1.5);
+  // Diminuir o card sem quebrar arrastar/posição já salva (pedido:
+  // "pode diminuir ainda mais essa janela de avatar [de edição]", DEPOIS
+  // de reduzir STAGE_HEIGHT ter quebrado tudo -- ver revert no commit
+  // 08cc428) usa esse MESMO zoom em vez de mexer no tamanho da folha --
+  // `zoom` encolhe TUDO proporcionalmente de uma vez (o "canvas" lógico
+  // e o espaço vazio acima do boneco encolhem juntos, na mesma
+  // proporção), então a folga pra arrastar continua exatamente do
+  // mesmo TAMANHO RELATIVO de antes -- nada fica cortado, só menor na
+  // tela. Só o valor INICIAL mudou (100% em vez de 150%); o slider "Zoom
+  // do preview" continua indo até 300% pra quem quiser ampliar nessa
+  // sessão.
+  const [zoom, setZoom] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skins, setSkins] = useState<CustomSkinRow[] | null>(null);
