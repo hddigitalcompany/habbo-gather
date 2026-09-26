@@ -64,6 +64,7 @@ import {
   floorWorldPos,
   floorEntryById,
   woodGrainShapesForPlank,
+  marbleVeinShapesForSlab,
   JOINT_LINE_WIDTH,
   JOINT_LINE_ALPHA,
 } from "./floor";
@@ -1494,7 +1495,7 @@ export default class MainScene extends Phaser.Scene {
         // deslocadas meio comprimento -- é isso que faz as juntas de
         // colunas vizinhas NÃO caírem todas na mesma linha (senão
         // pareceria ladrilho/grade, não piso de tábua de verdade).
-        const colOffset = ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
+        const colOffset = pattern.tileAligned ? 0 : ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
         const minJ = Math.floor((alongRow0 - reach - colOffset) / lenStep) - 1;
         const maxJ = Math.ceil((alongRow0 + reach - colOffset) / lenStep) + 1;
         for (let j = minJ; j <= maxJ; j++) {
@@ -1546,6 +1547,21 @@ export default class MainScene extends Phaser.Scene {
           if (pattern.woodGrain) {
             const grainShapes = woodGrainShapesForPlank(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor);
             for (const shape of grainShapes) {
+              pathFor(shape.points);
+              ctx.fillStyle = shape.fill;
+              ctx.globalAlpha = shape.opacity ?? 1;
+              ctx.fill();
+              ctx.globalAlpha = 1;
+            }
+          }
+          // veios de mármore (pedido do Douglas: "porcelanato... do
+          // tamanho do tile... com efeito de porcelanato marmorado") --
+          // mesma função pura de game/floor.ts que o preview do
+          // formulário usa (marbleVeinShapesForSlab), mesmo princípio de
+          // woodGrain logo acima.
+          if (pattern.marble) {
+            const veinShapes = marbleVeinShapesForSlab(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor);
+            for (const shape of veinShapes) {
               pathFor(shape.points);
               ctx.fillStyle = shape.fill;
               ctx.globalAlpha = shape.opacity ?? 1;

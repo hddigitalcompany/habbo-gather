@@ -86,7 +86,50 @@ export interface FloorPatternConfig {
    * onde parar o risco, ver woodGrainShapesForPlank abaixo).
    */
   woodGrain?: boolean;
+  /**
+   * Veios de mármore (pedido do Douglas, com foto de referência de
+   * porcelanato marmorado: "agora eu quero um, porcelanato, que vai ser
+   * do tamanho do tile, com linha divisoria, e com efeito de
+   * porcelanato marmorado, assim") -- riscos ondulados em DIAGONAL
+   * dentro de cada placa (ao contrário do veio de madeira, que corre só
+   * no sentido do comprimento da tábua -- mármore cruza a placa em
+   * qualquer ângulo, como pedra de verdade), com bordas suaves (3
+   * camadas concêntricas de opacidade decrescente, ver
+   * marbleVeinShapesForSlab abaixo -- imita desfoque sem precisar de
+   * filtro de blur de verdade, que se comportaria diferente entre o
+   * preview em SVG e o jogo). Mesma regra do woodGrain: só tem efeito
+   * junto de plankLengthPx (precisa de uma placa DELIMITADA pra conter
+   * o veio dentro).
+   */
+  marble?: boolean;
+  /**
+   * Emenda alinhada à GRADE do jogo, sem o desalinhamento "amarração"
+   * (colOffset) que as tábuas de madeira usam -- pedido do Douglas
+   * junto com o marmorado: "vai ser do tamanho do tile" (cada placa
+   * ocupa exatamente 1 quadrado da grade, com a junta caindo bem na
+   * borda do tile, como porcelanato de verdade é instalado -- reto,
+   * não intercalado feito assoalho). Sem isso, mesmo com
+   * plankWidthPx/plankLengthPx do tamanho do tile, colunas ímpares
+   * sairiam deslocadas meio comprimento (ver colOffset em
+   * createFloorPatternGraphics, MainScene.ts) e a junta não bateria
+   * com a borda do tile pra elas.
+   */
+  tileAligned?: boolean;
 }
+
+/** Tamanho (em px "de tela" da faixa, mesma unidade de plankWidthPx/
+ * plankLengthPx) de UMA placa que cobre exatamente 1 tile inteiro,
+ * emenda batendo na borda do losango -- ver conta no comentário grande
+ * de FloorPatternConfig.tileAligned/createFloorPatternGraphics
+ * (MainScene.ts): nessa base (colAxis,rowAxis) o losango do tile vira
+ * um QUADRADO de lado 2*(ISO_TILE_WIDTH/2)*sqrt5/... na prática dá
+ * exatamente ISO_TILE_WIDTH/4*sqrt5 (= 32*sqrt5, com
+ * ISO_TILE_WIDTH=128). Usado pelo botão "Placa do tamanho do tile" no
+ * formulário "Criar Piso" (ItemEditor.tsx) pra preencher
+ * plankWidthPx/plankLengthPx sem o Douglas precisar calcular esse
+ * número à mão.
+ */
+export const TILE_SIZED_PLANK_PX = (ISO_TILE_WIDTH / 4) * Math.sqrt(5);
 
 export interface FloorCatalogEntry {
   /** "<categoria>-<slug-do-arquivo>" pro piso DE FÁBRICA (ver
@@ -356,6 +399,125 @@ export function woodGrainShapesForPlank(
   return shapes;
 }
 
+/** Variação de darkenHex com um leve viés MORNO (puxa pro
+ * castanho/taupe em vez de cinza neutro) -- usada em metade dos veios
+ * de mármore pra alternar entre tom acinzentado e amarronzado, igual à
+ * foto de referência do Douglas (mistura dos dois na mesma placa).
+ * Escurece o canal AZUL um pouco mais que R/G (o resultado puxa mais
+ * quente/terroso quanto mais escuro). Cópia pura (mesma família de
+ * darkenHex acima), usada só por marbleVeinShapesForSlab abaixo. */
+function warmDarkenHex(hex: number, factor = 0.55): number {
+  const r = Math.round(((hex >> 16) & 0xff) * factor);
+  const g = Math.round(((hex >> 8) & 0xff) * factor * 0.94);
+  const b = Math.round((hex & 0xff) * factor * 0.84);
+  return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Os riscos (polígonos) de veio de MÁRMORE de UMA placa -- 2 a 3 veios
+ * em DIAGONAL (ângulo sorteado, não preso ao sentido do comprimento da
+ * placa como o veio de madeira, ver woodGrainShapesForPlank acima),
+ * cada um desenhado em 3 CAMADAS concêntricas (larga+fraca por baixo,
+ * estreita+forte por cima) pra imitar uma borda suave/desfocada -- a
+ * mesma técnica clássica de "camadas de opacidade decrescente" em vez
+ * de um filtro de blur de verdade (que se comportaria diferente entre
+ * o preview em SVG, feGaussianBlur, e o canvas 2D do jogo, `ctx.filter`
+ * -- manter só polígono garante os dois lugares SEMPRE idênticos,
+ * mesmo princípio de floorPatternPolygons/createFloorPatternGraphics
+ * nunca dessincronizarem). Pura (sem Phaser) -- usada tanto aqui
+ * (preview em SVG) quanto por MainScene.createFloorPatternGraphics, com
+ * a MESMA matemática, pra sortear exatamente os mesmos veios pra mesma
+ * placa nos dois lugares.
+ *
+ * `cx,cy` = centro da placa; `halfLength`/`halfWidth` = metade do
+ * comprimento/largura dela (com FloorPatternConfig.tileAligned e
+ * TILE_SIZED_PLANK_PX, os dois batem com o losango do tile inteiro);
+ * `rowAxis`/`colAxis` = os mesmos eixos não-ortogonais do losango (ver
+ * comentário grande deles em createFloorPatternGraphics, MainScene.ts);
+ * `baseColor` = a cor JÁ resolvida dessa placa (pickPlankColorPure) --
+ * os veios são variação DELA, não de colorA/colorB direto.
+ */
+export function marbleVeinShapesForSlab(
+  i: number,
+  j: number,
+  cx: number,
+  cy: number,
+  halfLength: number,
+  halfWidth: number,
+  rowAxis: Point,
+  colAxis: Point,
+  baseColor: number
+): FloorPatternPolygon[] {
+  const shapes: FloorPatternPolygon[] = [];
+  const toWorld = (along: number, across: number): Point => ({
+    x: cx + rowAxis.x * along + colAxis.x * across,
+    y: cy + rowAxis.y * along + colAxis.y * across,
+  });
+  const veinCount = grainHashPure(i, j, 0, 30) < 0.5 ? 2 : 3;
+  const SEGMENTS = 8;
+  const minHalf = Math.min(halfLength, halfWidth);
+  for (let k = 0; k < veinCount; k++) {
+    // ângulo do veio nesse espaço local (along,across) -- ~22.5° a 90°,
+    // com sinal sorteado, pra cruzar a placa em diagonal (nem reto no
+    // sentido do comprimento nem da largura, o que pareceria veio de
+    // madeira/ripa em vez de mármore).
+    const angle = Math.PI / 8 + grainHashPure(i, j, k, 31) * ((Math.PI * 3) / 8);
+    const flip = grainHashPure(i, j, k, 32) < 0.5 ? 1 : -1;
+    const dirAlong = Math.cos(angle) * flip;
+    const dirAcross = Math.sin(angle);
+    // perpendicular ao sentido do veio (nessa mesma base local) -- pra
+    // deslocar a onda/espessura pro lado, não no sentido do próprio veio.
+    const perpAlong = -dirAcross;
+    const perpAcross = dirAlong;
+    const span = Math.max(halfLength, halfWidth) * 2.3; // atravessa além da borda -- o recorte do losango corta o resto sozinho
+    const centerAlong = (grainHashPure(i, j, k, 33) * 2 - 1) * halfLength * 0.45;
+    const centerAcross = (grainHashPure(i, j, k, 34) * 2 - 1) * halfWidth * 0.45;
+    const amplitude = minHalf * (0.12 + grainHashPure(i, j, k, 35) * 0.18);
+    const cycles = 0.6 + grainHashPure(i, j, k, 36) * 0.9;
+    const phase = grainHashPure(i, j, k, 37) * Math.PI * 2;
+    const baseThick = minHalf * (0.05 + grainHashPure(i, j, k, 38) * 0.05);
+    const warm = grainHashPure(i, j, k, 39) < 0.5;
+    const coreShade = warm
+      ? warmDarkenHex(baseColor, 0.5 + grainHashPure(i, j, k, 40) * 0.2)
+      : darkenHex(baseColor, 0.55 + grainHashPure(i, j, k, 40) * 0.25);
+    const fill = hexToCss(coreShade);
+
+    // 3 camadas concêntricas (larga/fraca -> estreita/forte) -- ver
+    // comentário grande da função acima pro motivo de não usar blur de
+    // verdade.
+    const layers = [
+      { widthMul: 2.6, opacity: 0.1 },
+      { widthMul: 1.5, opacity: 0.22 },
+      { widthMul: 1, opacity: 0.4 + grainHashPure(i, j, k, 41) * 0.15 },
+    ];
+
+    for (const layer of layers) {
+      const halfThick = baseThick * layer.widthMul;
+      for (let s = 0; s < SEGMENTS; s++) {
+        const t0 = s / SEGMENTS - 0.5;
+        const t1 = (s + 1) / SEGMENTS - 0.5;
+        const wob0 = amplitude * Math.sin(t0 * Math.PI * 2 * cycles + phase);
+        const wob1 = amplitude * Math.sin(t1 * Math.PI * 2 * cycles + phase);
+        const along0 = centerAlong + dirAlong * span * t0 + perpAlong * wob0;
+        const across0 = centerAcross + dirAcross * span * t0 + perpAcross * wob0;
+        const along1 = centerAlong + dirAlong * span * t1 + perpAlong * wob1;
+        const across1 = centerAcross + dirAcross * span * t1 + perpAcross * wob1;
+        shapes.push({
+          points: [
+            toWorld(along0 - perpAlong * halfThick, across0 - perpAcross * halfThick),
+            toWorld(along1 - perpAlong * halfThick, across1 - perpAcross * halfThick),
+            toWorld(along1 + perpAlong * halfThick, across1 + perpAcross * halfThick),
+            toWorld(along0 + perpAlong * halfThick, across0 + perpAcross * halfThick),
+          ],
+          fill,
+          opacity: layer.opacity,
+        });
+      }
+    }
+  }
+  return shapes;
+}
+
 /** Índice determinístico (0..len-1) pra escolher a cor de uma tábua
  * (coluna `i`, posição `j`) dentro de FloorPatternConfig.colors -- cópia
  * EXATA (mesmo hash) de MainScene.plankColorIndex, em número puro (sem
@@ -466,7 +628,7 @@ export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternP
     const alongRow0 = alongRowOf(pos.x, pos.y); // = 0
     const lineColor = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
     for (let i = minIndex; i <= maxIndex; i++) {
-      const colOffset = ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
+      const colOffset = pattern.tileAligned ? 0 : ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
       const minJ = Math.floor((alongRow0 - reach - colOffset) / lenStep) - 1;
       const maxJ = Math.ceil((alongRow0 + reach - colOffset) / lenStep) + 1;
       for (let j = minJ; j <= maxJ; j++) {
@@ -497,6 +659,12 @@ export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternP
         // tábua que acabou de entrar (mesma ordem que MainScene.ts usa).
         if (pattern.woodGrain) {
           polys.push(...woodGrainShapesForPlank(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor));
+        }
+        // veios de mármore (ver comentário grande em
+        // FloorPatternConfig.marble acima) -- desenhados POR CIMA da
+        // placa, mesma ordem de woodGrain acima.
+        if (pattern.marble) {
+          polys.push(...marbleVeinShapesForSlab(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor));
         }
       }
     }

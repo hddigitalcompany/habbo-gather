@@ -19,7 +19,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH, SEAT_X_LADO, SEAT_Y_LADO } from "@/game/furniture";
 import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
-import { FLOOR_CATEGORIES, FloorCategory } from "@/game/floor";
+import { FLOOR_CATEGORIES, FloorCategory, TILE_SIZED_PLANK_PX } from "@/game/floor";
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
 import { ColorPickerField } from "@/components/ColorPickerField";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
@@ -3237,6 +3237,8 @@ export default function ItemEditor({
     line_color: string | null;
     colors: string[] | null;
     wood_grain: boolean | null;
+    marble: boolean | null;
+    tile_aligned: boolean | null;
   };
   const [floorItems, setFloorItems] = useState<CustomFloorRow[] | null>(null);
   const [floorLabel, setFloorLabel] = useState("");
@@ -3277,6 +3279,19 @@ export default function ItemEditor({
   // EMENDADA -- sem isso, não tem tábua delimitada pra conter o veio),
   // por isso a checkbox só aparece nesse caso (ver JSX abaixo).
   const [floorWoodGrain, setFloorWoodGrain] = useState(false);
+  // efeito "marmorado" (pedido do Douglas, foto de referência de
+  // porcelanato marmorado: "agora eu quero um, porcelanato, que vai ser
+  // do tamanho do tile, com linha divisoria, e com efeito de
+  // porcelanato marmorado, assim") -- veios em diagonal dentro de cada
+  // placa, ver FloorPatternConfig.marble em game/floor.ts. Mesma regra
+  // do floorWoodGrain (só aparece com tábua/placa emendada).
+  const [floorMarble, setFloorMarble] = useState(false);
+  // emenda alinhada à grade (sem "amarração"/desalinhamento entre
+  // colunas) -- junto do botão "Placa do tamanho do tile" abaixo, é o
+  // que faz "vai ser do tamanho do tile" virar de verdade 1 placa = 1
+  // quadrado da grade, com a junta batendo na borda (ver
+  // FloorPatternConfig.tileAligned em game/floor.ts).
+  const [floorTileAligned, setFloorTileAligned] = useState(false);
   const [floorEditingId, setFloorEditingId] = useState<string | null>(null);
   const [floorExistingFileUrl, setFloorExistingFileUrl] = useState<string | null>(null);
   const [floorSubmitting, setFloorSubmitting] = useState(false);
@@ -3312,7 +3327,9 @@ export default function ItemEditor({
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("room_floor_items")
-      .select("id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain");
+      .select(
+        "id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain, marble, tile_aligned"
+      );
     if (fetchError) {
       setFloorError(fetchError.message);
       return;
@@ -3332,6 +3349,8 @@ export default function ItemEditor({
     setFloorPlankLength("");
     setFloorLineColor("#2c2115");
     setFloorWoodGrain(false);
+    setFloorMarble(false);
+    setFloorTileAligned(false);
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3362,6 +3381,8 @@ export default function ItemEditor({
     setFloorPlankLength(item.plank_length_px ? String(item.plank_length_px) : "");
     setFloorLineColor(item.line_color ?? "#2c2115");
     setFloorWoodGrain(item.wood_grain ?? false);
+    setFloorMarble(item.marble ?? false);
+    setFloorTileAligned(item.tile_aligned ?? false);
     setFloorPreviewUrl((prevUrl) => {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
@@ -3438,13 +3459,18 @@ export default function ItemEditor({
           payload.plank_length_px = plankLength;
           payload.line_color = floorLineColor;
           payload.wood_grain = floorWoodGrain;
+          payload.marble = floorMarble;
+          payload.tile_aligned = floorTileAligned;
         } else if (floorEditingId) {
           // editando e deixou o campo em branco -- some com a emenda
           // (volta pra ripa contínua), não só ignora o campo -- e o
-          // veio (que só faz sentido com tábua emendada) some junto.
+          // veio/marmorado/alinhamento (que só fazem sentido com
+          // tábua/placa emendada) somem junto.
           payload.plank_length_px = null;
           payload.line_color = null;
           payload.wood_grain = false;
+          payload.marble = false;
+          payload.tile_aligned = false;
         }
       }
 
@@ -4152,6 +4178,27 @@ export default function ItemEditor({
                       onChange={(e) => setFloorPlankLength(e.target.value)}
                     />
                   </label>
+                  {/* atalho pro porcelanato (pedido do Douglas: "vai ser
+                      do tamanho do tile") -- preenche largura/comprimento
+                      com o valor exato que faz 1 placa cobrir 1 tile
+                      inteiro (TILE_SIZED_PLANK_PX, ver comentário grande
+                      dela em game/floor.ts), sem precisar calcular
+                      32*sqrt(5) à mão. Marca também "emenda alinhada à
+                      grade" junto (senão colunas ímpares saem
+                      desalinhadas da borda do tile, ver
+                      FloorPatternConfig.tileAligned). */}
+                  <button
+                    type="button"
+                    className="clear-btn"
+                    onClick={() => {
+                      const size = Math.round(TILE_SIZED_PLANK_PX * 100) / 100;
+                      setFloorPlankWidth(size);
+                      setFloorPlankLength(String(size));
+                      setFloorTileAligned(true);
+                    }}
+                  >
+                    Placa do tamanho do tile (porcelanato)
+                  </button>
                   {floorPlankLength.trim() !== "" && (
                     <>
                       <div className="items-panel-upload-field">
@@ -4168,6 +4215,30 @@ export default function ItemEditor({
                       <label className="settings-hint settings-hint-check">
                         <input type="checkbox" checked={floorWoodGrain} onChange={(e) => setFloorWoodGrain(e.target.checked)} />
                         Efeito laminado (veios de madeira)
+                      </label>
+                      {/* efeito "marmorado" -- pedido do Douglas, foto de
+                          referência de porcelanato marmorado: "agora eu
+                          quero um, porcelanato, que vai ser do tamanho
+                          do tile, com linha divisoria, e com efeito de
+                          porcelanato marmorado, assim" (ver
+                          FloorPatternConfig.marble em game/floor.ts). */}
+                      <label className="settings-hint settings-hint-check">
+                        <input type="checkbox" checked={floorMarble} onChange={(e) => setFloorMarble(e.target.checked)} />
+                        Efeito marmorado (veios de mármore)
+                      </label>
+                      {/* emenda alinhada à grade -- o botão "Placa do
+                          tamanho do tile" acima já marca isso sozinho,
+                          mas fica editável aqui pra quem quiser um
+                          tamanho de placa diferente do tile inteiro e
+                          ainda assim sem desalinhamento entre colunas
+                          (ver FloorPatternConfig.tileAligned). */}
+                      <label className="settings-hint settings-hint-check">
+                        <input
+                          type="checkbox"
+                          checked={floorTileAligned}
+                          onChange={(e) => setFloorTileAligned(e.target.checked)}
+                        />
+                        Emenda alinhada à grade (sem amarração/intercalado)
                       </label>
                     </>
                   )}
@@ -4226,6 +4297,8 @@ export default function ItemEditor({
                           lineColor: floorPlankLength.trim() !== "" ? parseHexColor(floorLineColor) : undefined,
                           colors: floorColors.length > 2 ? floorColors.map(parseHexColor) : undefined,
                           woodGrain: floorPlankLength.trim() !== "" ? floorWoodGrain : undefined,
+                          marble: floorPlankLength.trim() !== "" ? floorMarble : undefined,
+                          tileAligned: floorPlankLength.trim() !== "" ? floorTileAligned : undefined,
                         }}
                       />
                     </div>
@@ -4269,6 +4342,8 @@ export default function ItemEditor({
                                 lineColor: item.line_color ? parseHexColor(item.line_color) : undefined,
                                 colors: item.colors && item.colors.length > 0 ? item.colors.map(parseHexColor) : undefined,
                                 woodGrain: item.wood_grain ?? undefined,
+                                marble: item.marble ?? undefined,
+                                tileAligned: item.tile_aligned ?? undefined,
                               }}
                             />
                           </div>

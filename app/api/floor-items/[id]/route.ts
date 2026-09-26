@@ -123,6 +123,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (typeof body.wood_grain === "boolean") {
     update.wood_grain = body.wood_grain;
   }
+  // veios de mármore + emenda alinhada à grade (opcional -- ver
+  // supabase/migrations/0019_room_floor_items_marble.sql e
+  // FloorPatternConfig.marble/tileAligned em game/floor.ts).
+  if (typeof body.marble === "boolean") {
+    update.marble = body.marble;
+  }
+  if (typeof body.tile_aligned === "boolean") {
+    update.tile_aligned = body.tile_aligned;
+  }
   // paleta de várias cores (opcional -- "Tábua Mesclada")
   if ("colors" in body) {
     if (body.colors === null || (Array.isArray(body.colors) && body.colors.length === 0)) {

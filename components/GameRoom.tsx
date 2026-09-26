@@ -1005,7 +1005,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_floor_items")
         .select(
-          "id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain"
+          "id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain, marble, tile_aligned"
         );
       if (error || !data || data.length === 0) return;
       const entries: FloorCatalogEntry[] = data.map(
@@ -1022,6 +1022,8 @@ export default function GameRoom({
           line_color: string | null;
           colors: string[] | null;
           wood_grain: boolean | null;
+          marble: boolean | null;
+          tile_aligned: boolean | null;
         }) => ({
           id: row.id,
           category: row.category as FloorCatalogEntry["category"],
@@ -1053,6 +1055,14 @@ export default function GameRoom({
                   // 0018_room_floor_items_wood_grain.sql e
                   // FloorPatternConfig.woodGrain em game/floor.ts).
                   woodGrain: row.wood_grain ?? undefined,
+                  // efeito "marmorado" + emenda alinhada à grade (pedido
+                  // do Douglas: "porcelanato... do tamanho do tile...
+                  // com efeito de porcelanato marmorado", ver
+                  // supabase/migrations/0019_room_floor_items_marble.sql
+                  // e FloorPatternConfig.marble/tileAligned em
+                  // game/floor.ts).
+                  marble: row.marble ?? undefined,
+                  tileAligned: row.tile_aligned ?? undefined,
                 }
               : undefined,
         })

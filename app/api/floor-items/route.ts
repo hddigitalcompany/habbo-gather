@@ -116,6 +116,13 @@ export async function POST(req: NextRequest) {
     // FloorPatternConfig.woodGrain em game/floor.ts). Só booleano, sem
     // validação extra -- qualquer coisa "truthy" no corpo vira true.
     if (typeof body?.wood_grain === "boolean") insert.wood_grain = body.wood_grain;
+    // veios de mármore + emenda alinhada à grade (opcional --
+    // "porcelanato... do tamanho do tile... efeito de porcelanato
+    // marmorado", ver supabase/migrations/0019_room_floor_items_marble.sql
+    // e FloorPatternConfig.marble/tileAligned em game/floor.ts). Mesmo
+    // padrão do wood_grain acima -- só booleano, sem validação extra.
+    if (typeof body?.marble === "boolean") insert.marble = body.marble;
+    if (typeof body?.tile_aligned === "boolean") insert.tile_aligned = body.tile_aligned;
   } else {
     const fileUrl = typeof body?.file_url === "string" ? body.file_url : "";
     if (!fileUrl) return NextResponse.json({ error: "imagem é obrigatória" }, { status: 400 });
