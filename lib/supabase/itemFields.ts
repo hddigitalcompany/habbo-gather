@@ -35,6 +35,51 @@ export function clampFootprintSize(raw: unknown): number {
   return Math.round(Math.max(1, Math.min(6, raw)));
 }
 
+/**
+ * Assentos EXTRA de um item (ver FurnitureModelDef.extraSeats em
+ * game/furniture.ts, coluna extra_seats em supabase/migrations/
+ * 0014_room_items_extra_seats.sql) -- pedido do Douglas: "configurar
+ * dois avatares no caso em que tenha mais de um assento" (ex: sofá com
+ * 2 lugares). Cada entrada é {dCol, dRow, x, y}: dCol/dRow (tile, OFFSET
+ * a partir da âncora, não tile absoluto -- continua valendo se o item
+ * for arrastado no editor de espaço) + x/y (px, deslocamento FIXO de
+ * onde o boneco aparece sentado ali -- sem heurístico nenhum, diferente
+ * do assento da âncora, ver resolveSeatOffset/seatSpotAt). Qualquer
+ * entrada fora do formato (falta campo, não é número) é descartada em
+ * silêncio, nunca quebra o cadastro por causa desse campo opcional --
+ * [] se nada sobrar (ou o corpo não mandou um array).
+ */
+export function cleanExtraSeats(raw: unknown): { dCol: number; dRow: number; x: number; y: number }[] {
+  if (!Array.isArray(raw)) return [];
+  const cleaned: { dCol: number; dRow: number; x: number; y: number }[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const dColRaw = (entry as Record<string, unknown>).dCol;
+    const dRowRaw = (entry as Record<string, unknown>).dRow;
+    const xRaw = (entry as Record<string, unknown>).x;
+    const yRaw = (entry as Record<string, unknown>).y;
+    if (
+      typeof dColRaw !== "number" ||
+      typeof dRowRaw !== "number" ||
+      typeof xRaw !== "number" ||
+      typeof yRaw !== "number" ||
+      !Number.isFinite(dColRaw) ||
+      !Number.isFinite(dRowRaw) ||
+      !Number.isFinite(xRaw) ||
+      !Number.isFinite(yRaw)
+    ) {
+      continue;
+    }
+    cleaned.push({
+      dCol: Math.round(Math.max(-6, Math.min(6, dColRaw))),
+      dRow: Math.round(Math.max(-6, Math.min(6, dRowRaw))),
+      x: clampItemOffset(xRaw),
+      y: clampItemOffset(yRaw),
+    });
+  }
+  return cleaned;
+}
+
 /** Direções que aceitam override em direction_offsets (ver
  * supabase/migrations/0007_room_items_direction_offsets_seat.sql) --
  * "down" fica de fora de propósito (usa offset_x/offset_y direto, ver

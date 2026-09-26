@@ -13,6 +13,7 @@ import {
   clampItemOffset,
   clampSeatOffset,
   cleanDirectionOffsets,
+  cleanExtraSeats,
   cleanSeatDirectionOffsets,
 } from "@/lib/supabase/itemFields";
 
@@ -78,6 +79,12 @@ export async function POST(req: NextRequest) {
   // game/furniture.ts. 1/1 (padrão) = comportamento de sempre.
   const footprintCols = clampFootprintSize(body?.footprint_cols);
   const footprintRows = clampFootprintSize(body?.footprint_rows);
+  // assentos EXTRA (pedido do Douglas: "configurar dois avatares no
+  // caso em que tenha mais de um assento") -- ver supabase/migrations/
+  // 0014_room_items_extra_seats.sql e o comentário grande em
+  // cleanExtraSeats, lib/supabase/itemFields.ts. [] (padrão) = só a
+  // âncora, comportamento de sempre.
+  const extraSeats = cleanExtraSeats(body?.extra_seats);
 
   if (!label) return NextResponse.json({ error: "nome é obrigatório" }, { status: 400 });
   if (!ALLOWED_CATEGORIES.includes(category)) {
@@ -112,6 +119,7 @@ export async function POST(req: NextRequest) {
       seat_direction_offsets: seatDirectionOffsets,
       footprint_cols: footprintCols,
       footprint_rows: footprintRows,
+      extra_seats: extraSeats,
       created_by: callerId,
     })
     .select()

@@ -148,7 +148,20 @@ function pickRandomOutfitId(): string {
 // undefined se tá de pé -- vem do server (ver "seat" no protocolo de
 // server/index.js), guardado igual x/y (ver checkProximity/handlePartyMessage
 // mais abaixo, que repassam pra dentro da cena via scene.setRemoteSeat).
-type RemotePlayer = { id: string; userId: string; x: number; y: number; color: string; seatFurnitureId?: string | null } & RemoteProfile;
+// seatDCol/seatDRow: qual ASSENTO desse item (0/0 = âncora, comportamento
+// de sempre) -- ver FurnitureModelDef.extraSeats em game/furniture.ts,
+// pedido do Douglas pra sofá/item com mais de um lugar. Undefined (item
+// antigo sem modelId, ou item sem extraSeats) equivale a 0/0.
+type RemotePlayer = {
+  id: string;
+  userId: string;
+  x: number;
+  y: number;
+  color: string;
+  seatFurnitureId?: string | null;
+  seatDCol?: number;
+  seatDRow?: number;
+} & RemoteProfile;
 type Toast = { id: string; text: string };
 
 // --- chat de verdade (direta/grupo/histórico/anexos) -- ver comentário
@@ -859,7 +872,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_items")
         .select(
-          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows"
+          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
         );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
@@ -880,6 +893,7 @@ export default function GameRoom({
           colors: { id: string; label: string; art: Partial<Record<Direction, string>> }[] | null;
           footprint_cols: number | null;
           footprint_rows: number | null;
+          extra_seats: { dCol: number; dRow: number; x: number; y: number }[] | null;
         }) => ({
           id: row.id,
           type: CUSTOM_ITEM_CATEGORY_TYPE[row.category as FurnitureCategoryId] ?? "poltrona",
@@ -919,6 +933,12 @@ export default function GameRoom({
           // mento de sempre (só a âncora).
           footprintCols: typeof row.footprint_cols === "number" ? row.footprint_cols : undefined,
           footprintRows: typeof row.footprint_rows === "number" ? row.footprint_rows : undefined,
+          // assentos EXTRA (pedido do Douglas: "preciso... configurar dois
+          // avatares no caso em que tenha mais de um assento") -- ver
+          // supabase/migrations/0014_room_items_extra_seats.sql e o
+          // comentário grande em FurnitureExtraSeat, game/furniture.ts.
+          // [] (padrão)/null = só a âncora, comportamento de sempre.
+          extraSeats: Array.isArray(row.extra_seats) ? row.extra_seats : undefined,
         })
       );
       const updatedIds = registerCustomFurnitureModels(models);
@@ -1722,7 +1742,9 @@ export default function GameRoom({
           // já chega sentado (entrou na sala depois de alguém já estar
           // numa mesa privada, ver "seat" no protocolo) -- sem isso a
           // pose/posse só apareceria depois do PRÓXIMO "seat" de verdade.
-          if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name);
+          // dCol/dRow (ver comentário grande em RemotePlayer acima) pra
+          // já sentar no assento CERTO de um item com mais de um lugar.
+          if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name, p.seatDCol, p.seatDRow);
         }
         setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
 
@@ -1756,14 +1778,19 @@ export default function GameRoom({
         remotePlayersRef.current.set(p.id, p);
         setRemoteProfiles((prev) => ({ ...prev, [p.id]: pickRemoteProfile(p) }));
         scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name, statusColorFor(p.status));
-        if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name);
+        if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name, p.seatDCol, p.seatDRow);
       } else if (data.type === "seat") {
         // ver protocolo "seat" em server/index.js -- outra pessoa sentou
         // ou levantou (furnitureId null); só pose-sync, não mexe em posse
-        // de mesa privada (ver "area-owner" abaixo pra isso).
+        // de mesa privada (ver "area-owner" abaixo pra isso). dCol/dRow:
+        // qual assento desse item (ver comentário grande em RemotePlayer).
         const existing = remotePlayersRef.current.get(data.id);
-        if (existing) existing.seatFurnitureId = data.furnitureId;
-        scene?.setRemoteSeat(data.id, data.furnitureId, existing?.name ?? "?");
+        if (existing) {
+          existing.seatFurnitureId = data.furnitureId;
+          existing.seatDCol = data.dCol;
+          existing.seatDRow = data.dRow;
+        }
+        scene?.setRemoteSeat(data.id, data.furnitureId, existing?.name ?? "?", data.dCol, data.dRow);
       } else if (data.type === "area-owner") {
         // ver protocolo "claim-area"/"release-area"/"area-owner" em
         // server/index.js -- alguém tomou posse de uma mesa privada (ou
@@ -2079,8 +2106,8 @@ export default function GameRoom({
         // server/index.js -- não mexe mais em posse de mesa privada) --
         // muda bem menos vezes que a posição, então manda direto, sem
         // passar pelo mesmo throttle de reportPosition do onLocalMove.
-        scene.onLocalSeatChange = (furnitureId) => {
-          socketRef.current?.send(JSON.stringify({ type: "seat", furnitureId }));
+        scene.onLocalSeatChange = (furnitureId, dCol, dRow) => {
+          socketRef.current?.send(JSON.stringify({ type: "seat", furnitureId, dCol, dRow }));
         };
         // botão "Tomar posse" / soltar posse numa mesa privada (ver
         // protocolo "claim-area"/"release-area" em server/index.js) --

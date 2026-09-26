@@ -18,6 +18,7 @@ import {
   clampItemOffset,
   clampSeatOffset,
   cleanDirectionOffsets,
+  cleanExtraSeats,
   cleanSeatDirectionOffsets,
 } from "@/lib/supabase/itemFields";
 
@@ -135,6 +136,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // dos outros campos opcionais acima.
   if ("footprint_cols" in body) update.footprint_cols = clampFootprintSize(body.footprint_cols);
   if ("footprint_rows" in body) update.footprint_rows = clampFootprintSize(body.footprint_rows);
+  // assentos EXTRA (ver comentário equivalente em app/api/items/
+  // route.ts/POST) -- "in body" de propósito, mesmo motivo dos outros
+  // campos opcionais acima (null/ausente nunca chega aqui de verdade já
+  // que cleanExtraSeats sempre devolve um array, mas a checagem evita
+  // sobrescrever com [] só porque o corpo desse PATCH nem tocou nesse
+  // campo).
+  if ("extra_seats" in body) update.extra_seats = cleanExtraSeats(body.extra_seats);
 
   // `colors` -- ver FurnitureColorZoneTool.tsx, formato de
   // FurnitureModelColorOption em game/furniture.ts (id/label/art

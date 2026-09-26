@@ -9,17 +9,23 @@
 //   init    -> { type: "init", selfId, players: [...] }
 //   join    -> { type: "join", player }
 //   move    -> { type: "move", id, x, y }
-//   seat    -> cliente->servidor: { type: "seat", furnitureId }  (furnitureId
-//              = id do móvel sentado agora, ou null ao levantar -- ver
-//              sitAt/standUp em MainScene.ts)
-//              servidor->sala: { type: "seat", id, furnitureId }
-//              (o server guarda o último valor em player.seatFurnitureId,
-//              igual x/y -- por isso ele já sai certo dentro de "init"/
-//              "join" pra quem entra depois de alguém já sentado. Só
-//              corrige a POSE do boneco remoto -- que antes nunca
-//              mostrava sentado pela rede, ver setRemoteSeat em
-//              MainScene.ts -- NÃO tem nada a ver com posse de mesa
-//              privada, que é "claim-area"/"release-area" abaixo)
+//   seat    -> cliente->servidor: { type: "seat", furnitureId, dCol?, dRow? }
+//              (furnitureId = id do móvel sentado agora, ou null ao
+//              levantar -- ver sitAt/standUp em MainScene.ts; dCol/dRow =
+//              qual ASSENTO desse item, 0/0 = âncora -- ver
+//              FurnitureModelDef.extraSeats em game/furniture.ts, pedido
+//              do Douglas pra sofá/item com mais de uma pessoa sentada)
+//              servidor->sala: { type: "seat", id, furnitureId, dCol, dRow }
+//              (o server guarda o último valor em player.seatFurnitureId/
+//              seatDCol/seatDRow, igual x/y -- por isso ele já sai certo
+//              dentro de "init"/"join" pra quem entra depois de alguém já
+//              sentado. Só corrige a POSE/profundidade do boneco remoto --
+//              que antes nunca mostrava sentado pela rede, ver
+//              setRemoteSeat em MainScene.ts -- NÃO tem nada a ver com
+//              posse de mesa privada, que é "claim-area"/"release-area"
+//              abaixo; também NÃO trava/reserva o assento pra ninguém --
+//              cada cliente ainda decide sozinho onde senta, mesma falta
+//              de arbitragem que já existia pra cadeira única antes disso)
 //   leave   -> { type: "leave", id }
 //   signal  -> { type: "signal", from, data }   (relay de WebRTC)
 //   chat    -> cliente->servidor: { type: "chat", text?, attachment?, kind? }
@@ -901,6 +907,12 @@ wss.on("connection", (ws, req) => {
     // x/y) pra sair certo dentro de "init"/"join" pra quem entra DEPOIS
     // de alguém já sentado numa mesa privada.
     seatFurnitureId: null,
+    // qual ASSENTO de seatFurnitureId (0/0 = âncora, comportamento de
+    // sempre) -- ver FurnitureModelDef.extraSeats em game/furniture.ts,
+    // pedido do Douglas pra sofá/item com mais de um lugar (mais de uma
+    // pessoa sentada no mesmo móvel, cada uma no seu assento).
+    seatDCol: 0,
+    seatDRow: 0,
     status: "online",
     instagram: "",
     bio: "",
@@ -1009,8 +1021,20 @@ wss.on("connection", (ws, req) => {
       case "seat": {
         const furnitureId =
           typeof data.furnitureId === "string" && data.furnitureId ? data.furnitureId.slice(0, 200) : null;
+        // dCol/dRow: qual ASSENTO desse item (ver FurnitureModelDef.
+        // extraSeats em game/furniture.ts, pedido do Douglas pra
+        // sofá/item com mais de um lugar) -- só faz sentido junto de um
+        // furnitureId de verdade, levantar (furnitureId null) sempre
+        // zera os dois. Clamp defensivo (mesma faixa 1-6 de
+        // clampFootprintSize em lib/supabase/itemFields.ts, dando folga
+        // pra negativo também já que é um DELTA, não um tamanho) --
+        // nunca confia sem checar, vem direto do cliente.
+        const dCol = furnitureId && Number.isFinite(data.dCol) ? Math.max(-6, Math.min(6, Math.round(data.dCol))) : 0;
+        const dRow = furnitureId && Number.isFinite(data.dRow) ? Math.max(-6, Math.min(6, Math.round(data.dRow))) : 0;
         player.seatFurnitureId = furnitureId;
-        broadcast(room, { type: "seat", id, furnitureId }, id);
+        player.seatDCol = dCol;
+        player.seatDRow = dRow;
+        broadcast(room, { type: "seat", id, furnitureId, dCol, dRow }, id);
         break;
       }
       case "claim-area": {

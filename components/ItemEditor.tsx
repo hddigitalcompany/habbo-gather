@@ -351,7 +351,14 @@ type CustomItemRow = {
   colors: FurnitureModelColorOption[] | null;
   footprint_cols: number | null;
   footprint_rows: number | null;
+  extra_seats: ExtraSeatRow[] | null;
 };
+
+/** Um assento EXTRA (ver comentário grande em FurnitureExtraSeat,
+ * game/furniture.ts, e supabase/migrations/0014_room_items_extra_seats.sql)
+ * -- dCol/dRow (tile, offset a partir da âncora) + x/y (px, deslocamento
+ * FIXO de onde o boneco senta ali, sem ajuste ao vivo no jogo). */
+type ExtraSeatRow = { dCol: number; dRow: number; x: number; y: number };
 
 // mesma faixa -100..100 da constraint em supabase/migrations/
 // 0007_room_items_direction_offsets_seat.sql -- ajuste de assento é
@@ -2785,6 +2792,17 @@ export default function ItemEditor({
   // blockingFurnitureAt).
   const [footprintCols, setFootprintCols] = useState(1);
   const [footprintRows, setFootprintRows] = useState(1);
+  // assentos EXTRA (pedido do Douglas: "preciso... configurar dois
+  // avatares no caso em que tenha mais de um assento", ex: sofá com 2
+  // lugares) -- fora a âncora (que já senta do jeito de sempre, ver
+  // sittable/seatOffsetX/Y acima/abaixo), cada entrada aqui é UM lugar
+  // extra pra sentar: dCol/dRow (tile, offset a partir da âncora, dentro
+  // do footprintCols x footprintRows acima) + x/y (px, deslocamento FIXO
+  // de onde o boneco aparece sentado ali -- sem ajuste ao vivo no jogo,
+  // ver comentário grande em FurnitureExtraSeat/seatSpotAt,
+  // game/furniture.ts; ajustar aqui de novo é o jeito de afinar). []
+  // (padrão) = só a âncora, comportamento de sempre.
+  const [extraSeats, setExtraSeats] = useState<ExtraSeatRow[]>([]);
   // posição do item DENTRO do tile (pedido do Douglas: "delimitar ali no
   // editor a posição do mobi no tile") -- ajustado arrastando o item em
   // cima do quadrado/boneco de referência no preview (ver
@@ -2908,7 +2926,7 @@ export default function ItemEditor({
     const { data, error: fetchError } = await supabase
       .from("room_items")
       .select(
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows"
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -2932,6 +2950,7 @@ export default function ItemEditor({
     setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH.poltrona);
     setFootprintCols(1);
     setFootprintRows(1);
+    setExtraSeats([]);
     setOffsetX(0);
     setOffsetY(0);
     setDirectionOffsets({});
@@ -2970,6 +2989,14 @@ export default function ItemEditor({
     setDisplayWidth(item.display_width ?? CUSTOM_ITEM_TARGET_WIDTH[item.category]);
     setFootprintCols(clamp(item.footprint_cols ?? 1, 1, 6));
     setFootprintRows(clamp(item.footprint_rows ?? 1, 1, 6));
+    setExtraSeats(
+      (item.extra_seats ?? []).map((s) => ({
+        dCol: clamp(s.dCol ?? 0, -6, 6),
+        dRow: clamp(s.dRow ?? 0, -6, 6),
+        x: clamp(s.x ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT),
+        y: clamp(s.y ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT),
+      }))
+    );
     setOffsetX(clamp(item.offset_x ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setOffsetY(clamp(item.offset_y ?? 0, -OFFSET_LIMIT, OFFSET_LIMIT));
     setDirectionOffsets(item.direction_offsets ?? {});
@@ -3275,6 +3302,13 @@ export default function ItemEditor({
         // 0011_room_items_seat_direction_offsets.sql) -- mesma regra de
         // direction_offsets: vazio manda null de propósito.
         seat_direction_offsets: sittable && Object.keys(seatDirectionOffsets).length > 0 ? seatDirectionOffsets : null,
+        // assentos EXTRA (pedido do Douglas: "configurar dois avatares
+        // no caso em que tenha mais de um assento") -- ver
+        // cleanExtraSeats em lib/supabase/itemFields.ts e a migration
+        // 0014_room_items_extra_seats.sql. NÃO depende de `sittable`
+        // (a âncora pode não sentar e o item ainda ter assentos extras,
+        // ex: um sofá em que só as almofadas sentam, não o braço).
+        extra_seats: extraSeats,
       };
       if (iconUrl !== undefined) payload.icon_url = iconUrl;
 
@@ -3697,6 +3731,87 @@ export default function ItemEditor({
               />
               <span className="edit-hint">
                 colunas × linhas a partir da âncora -- 1×1 é só o próprio tile (padrão de sempre)
+              </span>
+            </div>
+
+            {/* assentos EXTRA (pedido do Douglas: "preciso... configurar
+                dois avatares no caso em que tenha mais de um assento",
+                ex: sofá de 2 lugares) -- cada linha é UM lugar extra pra
+                sentar, fora a âncora (que já senta pelo "Tem interação?"/
+                assento acima) -- dCol/dRow: tile, offset a partir da
+                âncora (normalmente dentro do "Ocupa (tiles)" acima); x/y:
+                posição (px) FIXA de onde o boneco aparece sentado ali --
+                sem ajuste ao vivo no jogo (diferente do assento da
+                âncora, que dá pra arrastar/nudge lá, ver "Assento" no
+                editor de espaço) -- afinar é editar os números aqui de
+                novo. Ver FurnitureExtraSeat/seatSpotAt em
+                game/furniture.ts. */}
+            <div className="settings-slider-row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+              <span className="settings-slider-name">Assentos extras</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+                {extraSeats.map((seat, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="edit-hint">#{idx + 1}</span>
+                    <span className="edit-hint">col</span>
+                    <input
+                      type="number"
+                      value={seat.dCol}
+                      onChange={(e) => {
+                        const dCol = clamp(Math.round(Number(e.target.value) || 0), -6, 6);
+                        setExtraSeats((prev) => prev.map((s, i) => (i === idx ? { ...s, dCol } : s)));
+                      }}
+                      style={{ width: 44 }}
+                    />
+                    <span className="edit-hint">lin</span>
+                    <input
+                      type="number"
+                      value={seat.dRow}
+                      onChange={(e) => {
+                        const dRow = clamp(Math.round(Number(e.target.value) || 0), -6, 6);
+                        setExtraSeats((prev) => prev.map((s, i) => (i === idx ? { ...s, dRow } : s)));
+                      }}
+                      style={{ width: 44 }}
+                    />
+                    <span className="edit-hint">x</span>
+                    <input
+                      type="number"
+                      value={seat.x}
+                      onChange={(e) => {
+                        const x = clamp(Math.round(Number(e.target.value) || 0), -OFFSET_LIMIT, OFFSET_LIMIT);
+                        setExtraSeats((prev) => prev.map((s, i) => (i === idx ? { ...s, x } : s)));
+                      }}
+                      style={{ width: 56 }}
+                    />
+                    <span className="edit-hint">y</span>
+                    <input
+                      type="number"
+                      value={seat.y}
+                      onChange={(e) => {
+                        const y = clamp(Math.round(Number(e.target.value) || 0), -OFFSET_LIMIT, OFFSET_LIMIT);
+                        setExtraSeats((prev) => prev.map((s, i) => (i === idx ? { ...s, y } : s)));
+                      }}
+                      style={{ width: 56 }}
+                    />
+                    <button
+                      type="button"
+                      className="clear-btn"
+                      onClick={() => setExtraSeats((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      remover
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="clear-btn"
+                  onClick={() => setExtraSeats((prev) => [...prev, { dCol: 1, dRow: 0, x: 0, y: 0 }])}
+                  style={{ alignSelf: "flex-start" }}
+                >
+                  + assento extra
+                </button>
+              </div>
+              <span className="edit-hint">
+                fora a âncora -- col/lin: tile a partir da âncora · x/y: posição (px) fixa de onde o boneco senta (sem arrastar no jogo, ajuste aqui de novo pra afinar)
               </span>
             </div>
 

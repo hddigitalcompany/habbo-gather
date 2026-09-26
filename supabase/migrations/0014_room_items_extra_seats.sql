@@ -1,0 +1,30 @@
+-- "preciso inclusive dai, configurar dois avatares no caso em que
+-- tenha mais de um assento" -- item que já ocupa mais de um tile (ver
+-- footprint_cols/footprint_rows em 0013_room_items_footprint.sql, ex:
+-- um sofá de 2 lugares) agora pode ter mais de um lugar pra SENTAR de
+-- verdade (2 pessoas sentadas ao mesmo tempo, cada uma no seu tile).
+--
+-- Cada entrada em `extra_seats` é um assento EXTRA (fora a âncora, que
+-- já senta do jeito de sempre -- ver isFurnitureSittable/
+-- resolveSeatOffset em game/furniture.ts, sem mudança nenhuma):
+--   { dCol, dRow, x, y }
+-- dCol/dRow = tile desse assento, como OFFSET a partir da âncora (não
+-- tile absoluto -- assim continua valendo se o item for movido no
+-- editor de espaço); x/y = deslocamento (px) de onde o boneco aparece
+-- sentado ali, valor FIXO definido à mão no Editor de Itens (SEM o
+-- ajuste "Assento" ao vivo que a âncora tem, ver comentário grande em
+-- FurnitureExtraSeat/seatSpotAt, game/furniture.ts -- simplificação de
+-- V1, ajuste fino de um assento extra é editar o x/y aí de novo, não
+-- arrastar no jogo).
+--
+-- NÃO é por direção (mesma simplificação de footprint_cols/rows acima)
+-- -- os mesmos dCol/dRow/x/y valem pra qualquer direção que o item
+-- esteja virado. Um assento extra NUNCA trava passagem (ver
+-- blockingFurnitureAt em game/furniture.ts), mesmo dentro do footprint.
+--
+-- [] (padrão) = só a âncora, comportamento de sempre, não regride
+-- NENHUM item existente.
+--
+-- Rode isso no SQL Editor do Supabase.
+alter table public.room_items
+  add column if not exists extra_seats jsonb not null default '[]'::jsonb;

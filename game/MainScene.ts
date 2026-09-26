@@ -13,15 +13,18 @@ import {
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
   furnitureWorldPos,
+  furnitureWorldPosAt,
   furnitureTextureKey,
   furnitureVariantTextureKey,
   furnitureTextureKeyFor,
   furnitureBlocksMovement,
   furnitureModelById,
   furnitureFootprintTiles,
+  furnitureExtraSeats,
   isFurnitureSittable,
   blockingFurnitureAt,
   resolveSeatOffset,
+  seatSpotAt,
   seatOffsetGroupKey,
   seatOffsetGroupLabel,
 } from "./furniture";
@@ -378,10 +381,17 @@ function avatarDepthForY(y: number): number {
  * fileira lógica do móvel (só se desloca visualmente uns pixels por
  * cima dele) -- por isso usa o MESMO Y que usaria em pé nesse tile
  * (tileToWorld), igual a exceção que já existia só pro "up".
+ *
+ * col/row recebido À PARTE (não mais furniture.col/row direto) -- pra
+ * um ASSENTO EXTRA (ver FurnitureModelDef.extraSeats, game/furniture.ts)
+ * a profundidade tem que usar o tile do ASSENTO em si (pode ser outra
+ * fileira do sofá, por exemplo), não sempre a âncora do item. Quem
+ * chama passa furniture.col+dCol/furniture.row+dRow (0/0 pra âncora,
+ * comportamento de sempre).
  */
-function seatDepth(furniture: FurnitureDef): number {
-  if (furniture.facing === "up") return furnitureDepthForTile(furniture.col, furniture.row) - 1;
-  return avatarDepthForY(tileToWorld(furniture.col, furniture.row).y);
+function seatDepth(furniture: FurnitureDef, col: number, row: number): number {
+  if (furniture.facing === "up") return furnitureDepthForTile(col, row) - 1;
+  return avatarDepthForY(tileToWorld(col, row).y);
 }
 
 // grade e highlight do editor de espaço (ver setEditMode) sempre por
@@ -542,6 +552,12 @@ export default class MainScene extends Phaser.Scene {
   private localActivity: Activity = "idle";
   private sitCooldownUntil = 0;
   private seatedAt: FurnitureDef | null = null;
+  // qual ASSENTO de `seatedAt` (offset relativo à âncora, não tile
+  // absoluto -- continua valendo se o móvel for arrastado pro editor,
+  // ver handleEditPointerDown mais abaixo) -- {0,0} pra âncora
+  // (comportamento de sempre), ou o dCol/dRow de um FurnitureExtraSeat
+  // (ver game/furniture.ts) pra um item com mais de um lugar (ex: sofá).
+  private seatedAtOffset: { dCol: number; dRow: number } = { dCol: 0, dRow: 0 };
 
   // estado do passo atual na grade (tile a tile)
   private stepping = false;
@@ -731,16 +747,18 @@ export default class MainScene extends Phaser.Scene {
   // móvel (id) + nome de cada jogador REMOTO sentado agora, alimentado
   // de fora pelas mensagens "seat" recebidas (ver setRemoteSeat, chamado
   // pelo GameRoom.tsx) -- o LOCAL usa this.seatedAt direto, nunca passa
-  // por aqui.
-  private remoteSeat: Map<string, { furnitureId: string | null; name: string }> = new Map();
+  // por aqui. dCol/dRow: qual ASSENTO do item (0/0 = âncora, ver
+  // FurnitureModelDef.extraSeats) -- precisa pra profundidade (seatDepth)
+  // ficar certa quando o assento fica noutra fileira da âncora.
+  private remoteSeat: Map<string, { furnitureId: string | null; name: string; dCol: number; dRow: number }> = new Map();
 
   // hitbox de hover (mostra/esconde o nome) + o próprio texto do nome,
   // um par por zona "mesa-privada" -- ver updateAreaHoverLabels.
   private areaHoverZones: Map<string, Phaser.GameObjects.Zone> = new Map();
   private areaNameLabels: Map<string, Phaser.GameObjects.Text> = new Map();
 
-  /** Definido de fora (GameRoom.tsx) -- chamado toda vez que o jogador LOCAL senta/levanta, pra mandar "seat" pro servidor (ver protocolo em server/index.js). */
-  onLocalSeatChange?: (furnitureId: string | null) => void;
+  /** Definido de fora (GameRoom.tsx) -- chamado toda vez que o jogador LOCAL senta/levanta, pra mandar "seat" pro servidor (ver protocolo em server/index.js). dCol/dRow: qual ASSENTO do item (ver FurnitureModelDef.extraSeats) -- ausentes/undefined ao levantar (furnitureId null) ou ao sentar na âncora (0,0, comportamento de sempre). */
+  onLocalSeatChange?: (furnitureId: string | null, dCol?: number, dRow?: number) => void;
 
   /** Definido de fora (GameRoom.tsx) -- chamado ao clicar no nome (hover) do dono de uma mesa privada, pra abrir o card de perfil dele -- mesmo destino do onAvatarClick acima, só que disparado pela MESA, não pelo boneco. */
   onAreaOwnerClick?: (info: { playerId: string; isLocal: boolean }) => void;
@@ -1916,6 +1934,7 @@ export default class MainScene extends Phaser.Scene {
   private standUp() {
     this.localActivity = "idle";
     this.seatedAt = null;
+    this.seatedAtOffset = { dCol: 0, dRow: 0 };
     this.sitCooldownUntil = this.time.now + STAND_COOLDOWN_MS;
     this.localContainer.setDepth(avatarDepthForY(this.localContainer.y));
     this.stopWalk(this.localContainer);
@@ -1932,23 +1951,46 @@ export default class MainScene extends Phaser.Scene {
     if (this.localActivity === "sentado") this.standUp();
   }
 
-  /** Repõe o boneco local na posição de sentado, a partir do ajuste ATUAL (ver resolveSeatOffset) -- separado de sitAt() pra poder ser chamado nos dois casos: sentar de verdade (primeira vez) e só reposicionar depois de um nudge (ver nudgeSeatOffset), sem repetir toda a troca de pose/profundidade/aviso ao servidor. */
-  private applySeatVisualPosition(furniture: FurnitureDef) {
-    const pos = furnitureWorldPos(furniture);
-    const offset = resolveSeatOffset(furniture, this.seatOffsets);
+  /**
+   * Repõe o boneco local na posição de sentado, a partir do ajuste
+   * ATUAL (ver resolveSeatOffset) -- separado de sitAt() pra poder ser
+   * chamado nos dois casos: sentar de verdade (primeira vez) e só
+   * reposicionar depois de um nudge (ver nudgeSeatOffset) ou de arrastar
+   * o móvel no editor, sem repetir toda a troca de pose/profundidade/
+   * aviso ao servidor.
+   *
+   * dCol/dRow: qual ASSENTO de `furniture` (ver FurnitureModelDef.
+   * extraSeats, game/furniture.ts) -- 0,0 é a âncora (comportamento de
+   * sempre, resolveSeatOffset com toda a heurística de sempre); qualquer
+   * outro valor é um assento EXTRA (sofá etc.), que usa x/y PRÓPRIO
+   * (ver seatSpotAt), sem passar pelo ajuste "Assento" (esse só existe
+   * pra âncora, ver nudgeSeatOffset/resetSeatOffset).
+   */
+  private applySeatVisualPosition(furniture: FurnitureDef, dCol: number, dRow: number) {
+    const col = furniture.col + dCol;
+    const row = furniture.row + dRow;
+    const pos = furnitureWorldPosAt(furniture, col, row);
+    const spot = seatSpotAt(furniture, col, row, this.seatOffsets);
+    const offset = spot ?? resolveSeatOffset(furniture, this.seatOffsets);
     this.localContainer.setPosition(pos.x + offset.x, pos.y + offset.y);
     // profundidade junto (ver seatDepth) -- reaplicada toda vez que a
-    // posição muda (nudge/reset/troca de modelo), não só ao sentar de
-    // verdade (sitAt), já que ela usa o TILE, não o Y, então nunca fica
-    // desatualizada por um ajuste de assento novo.
-    this.localContainer.setDepth(seatDepth(furniture));
+    // posição muda (nudge/reset/troca de modelo/móvel arrastado), não só
+    // ao sentar de verdade (sitAt), já que ela usa o TILE, não o Y,
+    // então nunca fica desatualizada por um ajuste de assento novo.
+    this.localContainer.setDepth(seatDepth(furniture, col, row));
   }
 
-  /** Senta automaticamente no móvel passado (chamado ao PARAR no tile dele). */
-  private sitAt(furniture: FurnitureDef) {
+  /**
+   * Senta automaticamente no móvel passado (chamado ao PARAR no tile
+   * dele) -- dCol/dRow (padrão 0,0 = âncora) identifica QUAL assento,
+   * quando o item tem mais de um (ver FurnitureModelDef.extraSeats e
+   * findChairAtCurrentTile, que já resolve isso antes de chamar aqui).
+   */
+  private sitAt(furniture: FurnitureDef, dCol: number = 0, dRow: number = 0) {
     this.localActivity = "sentado";
     this.seatedAt = furniture;
-    this.applySeatVisualPosition(furniture);
+    this.seatedAtOffset = { dCol, dRow };
+    this.applySeatVisualPosition(furniture, dCol, dRow);
     // a pose sentada segue a direção que o móvel "olha" (facing), não a
     // direção que o jogador estava andando antes de sentar
     this.localContainer.setData("dir", furniture.facing);
@@ -1959,14 +2001,16 @@ export default class MainScene extends Phaser.Scene {
     // avisa o servidor que sentou (ver protocolo "seat" em
     // server/index.js) -- puramente pose-sync agora, NÃO toma posse de
     // mesa nenhuma (posse só muda via botão "Tomar posse", ver
-    // onClaimArea/updateAreaHoverLabels).
-    this.onLocalSeatChange?.(furniture.id);
+    // onClaimArea/updateAreaHoverLabels). dCol/dRow também vão, pra quem
+    // olha de fora (setRemoteSeat) desenhar a pose/profundidade certa
+    // no assento certo, não sempre na âncora.
+    this.onLocalSeatChange?.(furniture.id, dCol, dRow);
     this.emitSeatTuningState();
   }
 
-  /** Manda pro React (ver onSeatTuningChange) o estado atual do "Assento" -- null se não há nada pra ajustar agora (modo desligado, ou não sentado). Chamado sempre que esse estado pode ter mudado: sentou, levantou, ligou/desligou o modo, ou fez um nudge. */
+  /** Manda pro React (ver onSeatTuningChange) o estado atual do "Assento" -- null se não há nada pra ajustar agora (modo desligado, não sentado, ou sentado num assento EXTRA -- ver FurnitureModelDef.extraSeats -- que não tem ajuste fino ao vivo, só a âncora tem). Chamado sempre que esse estado pode ter mudado: sentou, levantou, ligou/desligou o modo, ou fez um nudge. */
   private emitSeatTuningState() {
-    if (!this.seatTuningActive || !this.seatedAt) {
+    if (!this.seatTuningActive || !this.seatedAt || this.seatedAtOffset.dCol !== 0 || this.seatedAtOffset.dRow !== 0) {
       this.onSeatTuningChange?.(null);
       return;
     }
@@ -1991,9 +2035,10 @@ export default class MainScene extends Phaser.Scene {
     this.seatOffsets = map;
   }
 
-  /** Ajusta fino (px) o assento do GRUPO (modelo, ver seatOffsetGroupKey) do item em que o boneco local está sentado agora -- ignorado se não estiver com o modo de ajuste ligado E sentado (ver setSeatTuningMode/update()). Reposiciona o boneco NA HORA (ver applySeatVisualPosition) e avisa o React (ver onSeatTuningChange), que autosalva (mesmo esquema de piso/área, debounced). */
+  /** Ajusta fino (px) o assento do GRUPO (modelo, ver seatOffsetGroupKey) do item em que o boneco local está sentado agora -- ignorado se não estiver com o modo de ajuste ligado E sentado (ver setSeatTuningMode/update()), ou se estiver sentado num assento EXTRA (ver FurnitureModelDef.extraSeats -- esse não tem ajuste ao vivo, só x/y fixo definido no Editor de Itens; emitSeatTuningState já manda null nesse caso, então o painel "Assento" nem aparece, mas a guarda fica aqui também por segurança). Reposiciona o boneco NA HORA (ver applySeatVisualPosition) e avisa o React (ver onSeatTuningChange), que autosalva (mesmo esquema de piso/área, debounced). */
   private nudgeSeatOffset(dx: number, dy: number, big: boolean) {
     if (!this.seatTuningActive || !this.seatedAt || this.movementLocked) return;
+    if (this.seatedAtOffset.dCol !== 0 || this.seatedAtOffset.dRow !== 0) return;
     const furniture = this.seatedAt;
     const step = big ? 5 : 1;
     const current = resolveSeatOffset(furniture, this.seatOffsets);
@@ -2002,7 +2047,7 @@ export default class MainScene extends Phaser.Scene {
     const nextValue = { x: current.x + dx * step, y: current.y + dy * step };
     nextByFacing[furniture.facing] = nextValue;
     this.seatOffsets = { ...this.seatOffsets, [groupKey]: nextByFacing };
-    this.applySeatVisualPosition(furniture);
+    this.applySeatVisualPosition(furniture, 0, 0);
     this.emitSeatTuningState();
     this.onSeatOffsetChange?.(groupKey, furniture.facing, nextValue.x, nextValue.y);
   }
@@ -2044,14 +2089,15 @@ export default class MainScene extends Phaser.Scene {
       this.seatOffsets = next;
     }
     if (this.seatedAt && seatOffsetGroupKey(this.seatedAt) === groupKey) {
-      this.applySeatVisualPosition(this.seatedAt);
+      this.applySeatVisualPosition(this.seatedAt, this.seatedAtOffset.dCol, this.seatedAtOffset.dRow);
       this.emitSeatTuningState();
     }
   }
 
-  /** Botão "Redefinir" do "Assento" (ver EditPanel, GameRoom.tsx) -- apaga o ajuste manual do grupo+direção atual (volta pro padrão genérico, ver resolveSeatOffset). Ignorado se não estiver sentado. */
+  /** Botão "Redefinir" do "Assento" (ver EditPanel, GameRoom.tsx) -- apaga o ajuste manual do grupo+direção atual (volta pro padrão genérico, ver resolveSeatOffset). Ignorado se não estiver sentado, ou se estiver sentado num assento EXTRA (ver comentário grande em nudgeSeatOffset -- mesma guarda, esse botão nem aparece nesse caso). */
   resetSeatOffset() {
     if (!this.seatedAt) return;
+    if (this.seatedAtOffset.dCol !== 0 || this.seatedAtOffset.dRow !== 0) return;
     const furniture = this.seatedAt;
     const groupKey = seatOffsetGroupKey(furniture);
     const byFacing = this.seatOffsets[groupKey];
@@ -2060,34 +2106,48 @@ export default class MainScene extends Phaser.Scene {
       delete nextByFacing[furniture.facing];
       this.seatOffsets = { ...this.seatOffsets, [groupKey]: nextByFacing };
     }
-    this.applySeatVisualPosition(furniture);
+    this.applySeatVisualPosition(furniture, 0, 0);
     this.emitSeatTuningState();
     this.onSeatOffsetReset?.(groupKey, furniture.facing);
   }
 
   /**
+   * Se `f` tem um assento no tile (col,row) -- a ÂNCORA (se `f` for
+   * sentável, ver isFurnitureSittable) ou um dos assentos EXTRA dele
+   * (ver FurnitureModelDef.extraSeats, game/furniture.ts -- esses valem
+   * MESMO que o tipo/categoria não seja sentável por padrão: definir um
+   * extraSeat já é o sinal explícito de que aquele tile é assento, ex.
+   * um sofá com 2 lugares). null se não for nenhum dos dois.
+   */
+  private chairSpotAt(f: FurnitureDef, col: number, row: number): { furniture: FurnitureDef; dCol: number; dRow: number } | null {
+    if (f.col === col && f.row === row) {
+      return isFurnitureSittable(f) ? { furniture: f, dCol: 0, dRow: 0 } : null;
+    }
+    const spot = seatSpotAt(f, col, row, this.seatOffsets);
+    return spot ? { furniture: f, dCol: spot.dCol, dRow: spot.dRow } : null;
+  }
+
+  /**
    * Só considera sentar quando o boneco está IDLE (parado, não no meio
    * de um passo) exatamente em cima do tile de uma cadeira -- andar
-   * perto ou passar por cima sem parar não senta.
+   * perto ou passar por cima sem parar não senta. Devolve também
+   * dCol/dRow (0,0 pra âncora) pra sitAt saber EM QUAL assento sentar,
+   * quando o item tem mais de um (ver chairSpotAt acima).
    */
-  private findChairAtCurrentTile(): FurnitureDef | null {
+  private findChairAtCurrentTile(): { furniture: FurnitureDef; dCol: number; dRow: number } | null {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
-    // só item sentável (ver isFurnitureSittable em furniture.ts -- por
-    // MODELO se o Editor de Itens já escolheu, senão cai no fallback por
-    // categoria, hoje poltrona/sofá) -- vidro/mesa/planta/computador (ou
-    // um custom marcado "Nenhuma" interação) não devem disparar o
-    // auto-sentar só por o boneco parar em cima do tile dele. Procura
-    // tanto na mobília FIXA
-    // (ROOM_FURNITURE) quanto na colocada pelo editor (draftFurniture --
-    // desde que ganhou persistência de verdade, ver POST /room/furniture,
-    // esses itens também precisam ser sentáveis na hora, sem precisar de
-    // restart/deploy).
+    // procura tanto na mobília FIXA (ROOM_FURNITURE) quanto na colocada
+    // pelo editor (draftFurniture -- desde que ganhou persistência de
+    // verdade, ver POST /room/furniture, esses itens também precisam
+    // ser sentáveis na hora, sem precisar de restart/deploy).
     for (const f of ROOM_FURNITURE) {
-      if (isFurnitureSittable(f) && f.col === col && f.row === row) return f;
+      const spot = this.chairSpotAt(f, col, row);
+      if (spot) return spot;
     }
     for (const f of this.draftFurniture.values()) {
-      if (isFurnitureSittable(f) && f.col === col && f.row === row) return f;
+      const spot = this.chairSpotAt(f, col, row);
+      if (spot) return spot;
     }
     return null;
   }
@@ -2332,7 +2392,7 @@ export default class MainScene extends Phaser.Scene {
       // totalmente parado (não só entre passos) -- só aqui checa auto-sentar
       this.stopWalk(this.localContainer);
       const chair = this.findChairAtCurrentTile();
-      if (chair) this.sitAt(chair);
+      if (chair) this.sitAt(chair.furniture, chair.dCol, chair.dRow);
     }
 
     // profundidade recalculada todo frame (contínuo, mesmo no meio de um
@@ -2702,9 +2762,14 @@ export default class MainScene extends Phaser.Scene {
    * no protocolo) -- NÃO tem mais nada a ver com posse de mesa privada,
    * que agora é um botão explícito ("Tomar posse", ver
    * onClaimArea/onReleaseArea), não sentar numa cadeira.
+   *
+   * dCol/dRow (padrão 0,0 = âncora): qual ASSENTO desse item (ver
+   * FurnitureModelDef.extraSeats) -- vem da mensagem "seat" da rede
+   * (ver onLocalSeatChange/server/index.js), só importa pra profundidade
+   * (seatDepth usa o tile do ASSENTO, não sempre a âncora).
    */
-  setRemoteSeat(id: string, furnitureId: string | null, name: string) {
-    this.remoteSeat.set(id, { furnitureId, name });
+  setRemoteSeat(id: string, furnitureId: string | null, name: string, dCol: number = 0, dRow: number = 0) {
+    this.remoteSeat.set(id, { furnitureId, name, dCol, dRow });
     if (furnitureId) {
       const furniture = this.furnitureById(furnitureId);
       const container = this.remoteContainers.get(id);
@@ -2712,9 +2777,9 @@ export default class MainScene extends Phaser.Scene {
         container.setData("dir", furniture.facing);
         this.setPoseFrame(container, SENTADO_FRAMES[furniture.facing]);
         // mesma correção de seatDepth (ver comentário grande dela) --
-        // baseada no tile do móvel, não no Y (já deslocado pelo assento)
-        // da posição que chegou pelo "move".
-        container.setDepth(seatDepth(furniture));
+        // baseada no tile do ASSENTO (âncora + dCol/dRow), não no Y (já
+        // deslocado pelo assento) da posição que chegou pelo "move".
+        container.setDepth(seatDepth(furniture, furniture.col + dCol, furniture.row + dRow));
       }
     }
   }
@@ -3150,13 +3215,15 @@ export default class MainScene extends Phaser.Scene {
     if (blockingFurnitureAt(col, row)) return true;
     // mesma regra de blockingFurnitureAt (furniture.ts) pro item RASCUNHO
     // (colocado agora no editor, sem restart) -- âncora só trava se a
-    // categoria travar, resto do footprint (ver furnitureFootprintTiles)
-    // trava sempre.
+    // categoria travar, tile de ASSENTO extra (ver FurnitureModelDef.
+    // extraSeats) nunca trava, resto do footprint (ver
+    // furnitureFootprintTiles) trava sempre.
     for (const f of this.draftFurniture.values()) {
       if (f.col === col && f.row === row) {
         if (furnitureBlocksMovement(f.type)) return true;
         continue;
       }
+      if (furnitureExtraSeats(f).some((s) => f.col + s.dCol === col && f.row + s.dRow === row)) continue;
       if (furnitureFootprintTiles(f).some((t) => t.col === col && t.row === row)) return true;
     }
     return false;
@@ -3415,7 +3482,7 @@ export default class MainScene extends Phaser.Scene {
         // Douglas: a posição do boneco, na interação de sentar, tem que
         // seguir o ITEM, não ficar presa a um ponto fixo do espaço).
         if (this.localActivity === "sentado" && this.seatedAt?.id === this.movingFurnitureId) {
-          this.applySeatVisualPosition(moving);
+          this.applySeatVisualPosition(moving, this.seatedAtOffset.dCol, this.seatedAtOffset.dRow);
         }
         this.movingFurnitureId = null;
         this.onDraftChange?.(this.getDraftFurnitureList());

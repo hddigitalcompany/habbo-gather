@@ -281,6 +281,41 @@ export interface FurnitureModelDef {
    * que normalmente fica na sala. */
   footprintCols?: number;
   footprintRows?: number;
+  /** Assentos EXTRAS (além do assento padrão da âncora, ver
+   * seatOffsetX/Y/seatDirectionOffsets acima) -- pedido do Douglas: "um
+   * sofa ex, que ocupa mais de um tile, e mais de um tile se senta,
+   * preciso inclusive dai, configurar dois avatares no caso em que tenha
+   * mais de um assento". Cada entrada é um tile DENTRO do footprint
+   * (dCol/dRow relativos à âncora -- 0,0 seria a própria âncora, mas ela
+   * já tem assento via seatOffsetX/Y, normalmente >0) com seu PRÓPRIO
+   * deslocamento (x,y) de onde o boneco senta ali -- mesma unidade/faixa
+   * de seatOffsetX/Y, só que sem fallback nenhum (assento extra sem x/y
+   * ajustado cai em 0,0, o Douglas arrasta certinho no preview, ver
+   * ItemEditor.tsx). Diferente de directionOffsets/seatDirectionOffsets,
+   * NÃO é por direção (mesma simplificação de footprintCols/Rows acima
+   * -- a lista vale igual não importa a direção atual do item). Um tile
+   * de assento extra NUNCA trava passagem (ver blockingFurnitureAt) --
+   * é sentável, não sólido, mesmo dentro do footprint. undefined/[] =
+   * comportamento de sempre, só o assento da âncora. */
+  extraSeats?: FurnitureExtraSeat[];
+}
+
+/** Um assento EXTRA (ver FurnitureModelDef.extraSeats acima) -- tile
+ * (dCol,dRow, relativo à âncora do item) + deslocamento (x,y) de onde o
+ * boneco senta nesse tile. */
+export interface FurnitureExtraSeat {
+  dCol: number;
+  dRow: number;
+  x: number;
+  y: number;
+}
+
+/** Lista de assentos extras do MODELO desse item (ver
+ * FurnitureModelDef.extraSeats) -- [] quando não tem modelo ou o modelo
+ * não tem nenhum configurado. */
+export function furnitureExtraSeats(f: FurnitureDef): FurnitureExtraSeat[] {
+  const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+  return model?.extraSeats ?? [];
 }
 
 /**
@@ -749,11 +784,25 @@ export const ROOM_FURNITURE: FurnitureDef[] = [];
 export function blockingFurnitureAt(col: number, row: number): FurnitureDef | undefined {
   return ROOM_FURNITURE.find((f) => {
     if (f.col === col && f.row === row) return furnitureBlocksMovement(f.type);
+    // tile de ASSENTO extra (ver FurnitureModelDef.extraSeats) nunca
+    // trava -- é sentável, não sólido, mesmo dentro do footprint.
+    if (furnitureExtraSeats(f).some((s) => f.col + s.dCol === col && f.row + s.dRow === row)) return false;
     return furnitureFootprintTiles(f).some((t) => t.col === col && t.row === row);
   });
 }
 
 export function furnitureWorldPos(f: FurnitureDef) {
+  return furnitureWorldPosAt(f, f.col, f.row);
+}
+
+/**
+ * Mesma conta de furnitureWorldPos acima, num tile QUALQUER (não só a
+ * âncora do item) -- usada pro boneco sentado num ASSENTO EXTRA (ver
+ * FurnitureModelDef.extraSeats), que fica num tile diferente da âncora
+ * mas ainda "pertence" a esse item (baseOffsetY/overflow por cima
+ * seguem os mesmos, só o tile embaixo muda).
+ */
+export function furnitureWorldPosAt(f: FurnitureDef, col: number, row: number) {
   // tileToWorld() dá o CENTRO do tile -- é onde o boneco anda ancorado
   // (origin bottom-center dele fica bem no meio do losango, ver
   // MainScene). O móvel é diferente: ele precisa ficar "dentro do tile,
@@ -764,7 +813,7 @@ export function furnitureWorldPos(f: FurnitureDef) {
   // que largo, ver game/grid.ts). Ele ainda pode ultrapassar o tile por
   // CIMA (altura normalmente > 1 tile), só não pro lado nem pra baixo --
   // isso é o overflow esperado, como no Habbo.
-  const center = tileToWorld(f.col, f.row);
+  const center = tileToWorld(col, row);
   return { x: center.x, y: center.y + ISO_TILE_HEIGHT / 2 + (f.baseOffsetY ?? 0) };
 }
 
@@ -822,6 +871,32 @@ export function resolveSeatOffset(f: FurnitureDef, seatOffsets: FurnitureSeatOff
   }
   if (!isSide) return { x: 0, y: SEAT_Y_FRENTE_COSTAS };
   return { x: f.facing === "left" ? -SEAT_X_LADO : SEAT_X_LADO, y: SEAT_Y_LADO };
+}
+
+/**
+ * Assento (se houver) no tile (col,row) dado, considerando ESSE item --
+ * devolve o deslocamento (x,y) pra sentar aí, mais o dCol/dRow (relativo
+ * à âncora) do assento encontrado, ou null se esse tile não é nem a
+ * âncora nem um assento extra desse item (ver
+ * FurnitureModelDef.extraSeats). A âncora usa resolveSeatOffset de
+ * sempre (facing/override/heurístico) -- um assento extra usa o x,y
+ * PRÓPRIO dele direto, sem fallback (ver comentário grande em
+ * FurnitureExtraSeat). Usada tanto pra decidir se o boneco senta ao
+ * parar num tile (findChairAtCurrentTile, MainScene.ts) quanto pra
+ * calcular a posição visual dele sentado ali (applySeatVisualPosition).
+ */
+export function seatSpotAt(
+  f: FurnitureDef,
+  col: number,
+  row: number,
+  seatOffsets: FurnitureSeatOffsetsMap
+): { x: number; y: number; dCol: number; dRow: number } | null {
+  if (f.col === col && f.row === row) {
+    const offset = resolveSeatOffset(f, seatOffsets);
+    return { x: offset.x, y: offset.y, dCol: 0, dRow: 0 };
+  }
+  const extra = furnitureExtraSeats(f).find((s) => f.col + s.dCol === col && f.row + s.dRow === row);
+  return extra ? { x: extra.x, y: extra.y, dCol: extra.dCol, dRow: extra.dRow } : null;
 }
 
 /** Nome pra mostrar no "Assento" do editor pro grupo de um item (ver seatOffsetGroupKey) -- nome do modelo quando tiver, senão o nome do tipo + "(clássica)" pros itens antigos sem modelo. */
