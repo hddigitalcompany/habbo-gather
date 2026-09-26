@@ -408,6 +408,60 @@ async function resizeImageForUpload(file: File, maxWidth: number): Promise<File>
   }
 }
 
+// Fator de correção medido em peças reais geradas no PixelLab (pedido
+// do Douglas: "ele vai corrigir automaticamente? pode fazer") -- ele
+// gera sempre nas mesmas configurações de câmera lá (um ângulo mais
+// raso, ~19°, batendo com o preset "low top-down" do PixelLab), sempre
+// mais raso que o ângulo de verdade do jogo (2:1, ~26.57°, ver
+// ISO_TILE_WIDTH/ISO_TILE_HEIGHT em game/grid.ts) -- por isso os móveis
+// saem meio "tortos"/achatados quando colocados na sala. Medido
+// direto em 2 peças reais que ele mandou (poltrona de costas e de
+// frente, régua do encosto/frame): 1.435 e 1.472 -- usa a média das
+// duas. Se ele trocar as configs de câmera no PixelLab, esse número
+// precisa ser remedido (manda uma peça crua nova pra eu recalibrar).
+const PIXELLAB_VERTICAL_FIX = 1.45;
+
+/**
+ * Estica a imagem NA VERTICAL (largura intacta, ver PIXELLAB_VERTICAL_FIX
+ * acima) -- corrige o ângulo isométrico raso de sempre do PixelLab pro
+ * ângulo real do jogo ANTES de entrar no formulário, então tanto o
+ * preview quanto o arquivo final já saem certos, sem precisar mandar
+ * pra remedir toda vez. Chamada no `apply` do recorte (ver pendingCrop/
+ * ImageCropModal mais abaixo), só quando o checkbox "Corrigir ângulo
+ * (PixelLab)" está marcado -- NUNCA em cima de uma imagem que já não
+ * veio de lá (esticaria errado uma arte que já tava na proporção
+ * certa). Mesmo padrão createImageBitmap+canvas de resizeImageForUpload
+ * acima; se falhar (formato exótico, navegador antigo), devolve o
+ * arquivo ORIGINAL sem a correção -- upload continua funcionando, só
+ * sem o ajuste.
+ */
+async function fixPixellabIsometricAngle(file: File): Promise<File> {
+  if (typeof createImageBitmap !== "function") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const targetW = bitmap.width;
+    const targetH = Math.max(1, Math.round(bitmap.height * PIXELLAB_VERTICAL_FIX));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    bitmap.close?.();
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" });
+  } catch (e) {
+    console.warn("Não deu pra corrigir o ângulo isométrico da imagem do PixelLab, mandando original", e);
+    return file;
+  }
+}
+
 function slugify(text: string): string {
   return (
     text
@@ -2736,11 +2790,29 @@ export default function ItemEditor({
   // um componente à parte (AvatarCreatorPanel, ver acima) com seu próprio
   // formulário/estado, já que os campos são bem diferentes (sexo,
   // categoria, folha composta no navegador) do de móvel.
-  const [mode, setMode] = useState<"mobi" | "avatar">("mobi");
+  // "Criar Parede" (pedido do Douglas: "criar parede cria uma aba nova:
+  // criar mobi, criar parede, criar avatar") -- terceiro modo, mas NÃO é
+  // um sistema novo: reaproveita o mesmo formulário/tabela de "Criar
+  // Mobi" de sempre, só que com a categoria travada em "divisoria" (o
+  // mesmo tipo que já virou "Parede" no rótulo da barra lateral da sala,
+  // ver CATEGORY_ICONS em GameRoom.tsx) -- vira uma aba própria só pra
+  // não precisar catar "Divisória" no meio do dropdown de categoria de
+  // móvel. Ver handleCategoryChange no clique da aba abaixo (trava a
+  // categoria) e visibleItems mais abaixo (separa a listagem: parede só
+  // mostra parede, mobi só mostra o resto).
+  const [mode, setMode] = useState<"mobi" | "parede" | "avatar">("mobi");
   const [items, setItems] = useState<CustomItemRow[] | null>(null);
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<CategoryId>("poltrona");
   const [files, setFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  // "Corrigir ângulo (PixelLab)" -- pedido do Douglas: "ele vai
+  // corrigir automaticamente? pode fazer". Marcado por padrão (hoje
+  // toda a arte de mobi vem de lá) -- aplica fixPixellabIsometricAngle
+  // (ver acima) em CADA foto de direção assim que ela é escolhida, e
+  // some depois de virar o padrão de todo mundo... por ora dá pra
+  // desmarcar se a imagem já vier de outro lugar (já corrigida, feita
+  // à mão, etc.) pra não esticar ela errado.
+  const [fixPixellabAngle, setFixPixellabAngle] = useState(true);
   // zoom do preview -- mesma ideia do zoom em AvatarCreatorPanel acima
   // (pedido do Douglas: "tem como eu dar zoom nesse editor? ta mt
   // longe"), estado próprio aqui porque "Criar Mobi" é um componente
@@ -2940,14 +3012,20 @@ export default function ItemEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Limpa o formulário inteiro de volta pro modo "cadastrar item novo". */
+  /** Limpa o formulário inteiro de volta pro modo "cadastrar item novo".
+   * Categoria padrão depende da aba atual (ver mode acima) -- "poltrona"
+   * pra "Criar Mobi" (de sempre), "divisoria" pra "Criar Parede" (senão,
+   * depois de cadastrar UMA parede, o formulário voltava pra categoria
+   * "poltrona" por baixo dos panos mesmo a aba continuando em "Criar
+   * Parede", e a PRÓXIMA parede cadastrada saía como móvel comum). */
   function resetForm() {
+    const defaultCategory: CategoryId = mode === "parede" ? "divisoria" : "poltrona";
     setEditingId(null);
     setLabel("");
-    setCategory("poltrona");
+    setCategory(defaultCategory);
     setFiles({});
     setExistingArt({});
-    setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH.poltrona);
+    setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH[defaultCategory]);
     setFootprintCols(1);
     setFootprintRows(1);
     setExtraSeats([]);
@@ -2955,7 +3033,7 @@ export default function ItemEditor({
     setOffsetY(0);
     setDirectionOffsets({});
     setActiveMobiDirection("down");
-    setSittable(DEFAULT_SITTABLE_BY_CATEGORY.poltrona);
+    setSittable(DEFAULT_SITTABLE_BY_CATEGORY[defaultCategory]);
     setSeatOffsetX(0);
     setSeatOffsetY(0);
     setSeatDirectionOffsets({});
@@ -3365,6 +3443,13 @@ export default function ItemEditor({
     }
   }
 
+  // separa a listagem "Itens cadastrados" por aba (ver comentário do
+  // mode acima) -- null enquanto ainda tá carregando (mesmo estado que
+  // items), senão o array já filtrado: parede só mostra category
+  // "divisoria", mobi mostra o resto (nunca mistura os dois na mesma
+  // lista, já que agora são fluxos de cadastro separados).
+  const visibleItems = items?.filter((it) => (mode === "parede" ? it.category === "divisoria" : it.category !== "divisoria")) ?? null;
+
   return (
     <div className="items-panel-backdrop" onClick={onClose}>
       <div className="items-panel items-panel-editor" onClick={(e) => e.stopPropagation()}>
@@ -3385,6 +3470,16 @@ export default function ItemEditor({
           </button>
           <button
             type="button"
+            className={mode === "parede" ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => {
+              setMode("parede");
+              handleCategoryChange("divisoria");
+            }}
+          >
+            Criar Parede
+          </button>
+          <button
+            type="button"
             className={mode === "avatar" ? "edit-section-tab selected" : "edit-section-tab"}
             onClick={() => setMode("avatar")}
           >
@@ -3394,29 +3489,52 @@ export default function ItemEditor({
 
         {mode === "avatar" && <AvatarCreatorPanel accessToken={accessToken} onChanged={onItemsChanged} />}
 
-        {mode === "mobi" && (
+        {(mode === "mobi" || mode === "parede") && (
         <>
         <form className="items-panel-form" onSubmit={handleSubmit}>
           <input
             className="items-panel-input"
             type="text"
-            placeholder="Nome do item"
+            placeholder={mode === "parede" ? "Nome da parede" : "Nome do item"}
             value={label}
             maxLength={40}
             onChange={(e) => setLabel(e.target.value)}
           />
-          <select className="items-panel-input" value={category} onChange={(e) => handleCategoryChange(e.target.value as CategoryId)}>
-            {CATEGORIES.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </select>
+          {mode === "parede" ? (
+            <p className="settings-hint">
+              Categoria: Parede -- usa o mesmo tipo "Divisória" que já aparece assim na barra lateral da sala, só que numa aba própria pra não precisar catar no meio do dropdown de móvel.
+            </p>
+          ) : (
+            <select className="items-panel-input" value={category} onChange={(e) => handleCategoryChange(e.target.value as CategoryId)}>
+              {CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          )}
 
           <p className="settings-hint">
             Pode subir a imagem na qualidade original (do ChatGPT/Canva, sem redimensionar à mão) -- ajuste o tamanho de exibição no preview abaixo, o jogo encolhe sozinho pro tamanho certo.
             {editingId ? " Só reenvie a foto da direção que quiser TROCAR -- as outras continuam com a arte já salva." : ""}
           </p>
+
+          {/* pedido do Douglas: "ele vai corrigir automaticamente? pode
+              fazer" -- corrige sozinho o ângulo isométrico raso de
+              sempre do PixelLab (ver fixPixellabIsometricAngle acima)
+              em CADA foto de direção assim que ela é escolhida, antes
+              de entrar no formulário. Ligado por padrão (hoje é o fluxo
+              normal de toda arte nova de mobi/parede) -- desmarca só se
+              a imagem vier de outro lugar (já corrigida, feita à mão,
+              etc.), senão estica ela errado. */}
+          <label className="settings-hint settings-hint-check">
+            <input
+              type="checkbox"
+              checked={fixPixellabAngle}
+              onChange={(e) => setFixPixellabAngle(e.target.checked)}
+            />
+            Corrigir ângulo isométrico (PixelLab) -- deixa marcado se a arte de cada direção veio de lá
+          </label>
 
           <div className="items-panel-uploads">
             {DIRECTION_FIELDS.map((field) => {
@@ -3445,9 +3563,15 @@ export default function ItemEditor({
                       setPendingCrop({
                         file,
                         inputKey: field.key,
-                        apply: (result) => {
-                          if (field.key === "down") handleDownFileChange(result);
-                          else setFiles((prev) => ({ ...prev, [field.key]: result }));
+                        // "apply" é async aqui (ver fixPixellabIsometricAngle
+                        // acima) -- TS aceita normal numa posição de função
+                        // que devolve void (a Promise só não é esperada por
+                        // quem chama, mas a UI já reage certo assim que ela
+                        // resolve, via os setState lá dentro).
+                        apply: async (result) => {
+                          const finalFile = fixPixellabAngle ? await fixPixellabIsometricAngle(result) : result;
+                          if (field.key === "down") handleDownFileChange(finalFile);
+                          else setFiles((prev) => ({ ...prev, [field.key]: finalFile }));
                           // pula o preview pra direção que acabou de
                           // receber arquivo -- assim dá pra ajustar a
                           // posição dela na hora, sem precisar clicar na
@@ -3874,7 +3998,7 @@ export default function ItemEditor({
 
           <div className="items-panel-submit-row">
             <button type="submit" className="items-panel-submit" disabled={submitting}>
-              {submitting ? "Enviando..." : editingId ? "Salvar alterações" : "Cadastrar item"}
+              {submitting ? "Enviando..." : editingId ? "Salvar alterações" : mode === "parede" ? "Cadastrar parede" : "Cadastrar item"}
             </button>
             {editingId && (
               <button type="button" className="clear-btn" onClick={resetForm} disabled={submitting}>
@@ -3885,14 +4009,14 @@ export default function ItemEditor({
         </form>
 
         <section className="items-panel-section">
-          <h3>Itens cadastrados ({items?.length ?? 0})</h3>
-          {!items ? (
+          <h3>{mode === "parede" ? "Paredes cadastradas" : "Itens cadastrados"} ({visibleItems?.length ?? 0})</h3>
+          {!visibleItems ? (
             <p className="items-panel-loading">Carregando...</p>
-          ) : items.length === 0 ? (
-            <p className="items-panel-loading">Nenhum item custom ainda.</p>
+          ) : visibleItems.length === 0 ? (
+            <p className="items-panel-loading">{mode === "parede" ? "Nenhuma parede custom ainda." : "Nenhum item custom ainda."}</p>
           ) : (
             <ul className="items-panel-list">
-              {items.map((item) => (
+              {visibleItems.map((item) => (
                 <li key={item.id} className="items-panel-row-wrap">
                   <div className="items-panel-row">
                     {(item.icon_url ?? item.art.down) && (

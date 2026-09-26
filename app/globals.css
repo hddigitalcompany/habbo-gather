@@ -4478,6 +4478,16 @@ body {
   margin: 4px 0 0;
 }
 
+/* checkbox de dica inline (ex: "Corrigir ângulo isométrico (PixelLab)"
+   no Editor de Itens) -- mesma cor/tamanho de .settings-hint, só em
+   linha com o checkbox em vez de parágrafo solto. */
+.settings-hint-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 .settings-slider-row {
   display: grid;
   grid-template-columns: 1fr minmax(90px, 2fr) 40px;
