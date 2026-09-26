@@ -210,6 +210,43 @@ function darkenHex(hex: number, factor = 0.55): number {
 }
 
 /**
+ * Ângulos do gradiente CSS derivados dos MESMOS vetores ortonormais
+ * usados na renderização de verdade (dirWid=(1,2)/sqrt5, dirLen=(-2,1)/
+ * sqrt5, ver createFloorPatternGraphics em MainScene.ts) -- a proporção
+ * ISO_TILE_WIDTH:ISO_TILE_HEIGHT é sempre 2:1, por isso esses ângulos são
+ * uma constante fixa, não dependem do tamanho real do tile.
+ *
+ * ANTES essa prévia usava "63deg" chutado de olho pras duas camadas (63
+ * pra base, 63-90 pra junta) -- só que, feitas as contas direito, esse
+ * valor tava TROCADO entre as duas: a linha de junta saía alinhada com a
+ * direção da ripa (dirLen) em vez de cortar ela, e a separação entre
+ * ripas saía alinhada com dirWid em vez de correr ao longo da ripa --
+ * exatamente o oposto do desenho de verdade. Bug reportado pelo Douglas
+ * com o piso já pintado na sala: "a linha ta no sentido contrario".
+ *
+ * Com a convenção de ângulo do CSS (0deg = pra cima, sentido horário)
+ * num eixo de tela com y crescendo pra BAIXO (mesma convenção do
+ * Phaser), um vetor (dx,dy) equivale ao ângulo atan2(dx,-dy). Aplicando
+ * isso: o eixo do gradiente (a direção em que a cor MUDA) precisa
+ * apontar na mesma direção do vetor físico correspondente, porque a
+ * FAIXA/linha resultante do CSS sempre sai perpendicular ao eixo do
+ * gradiente -- então:
+ * - camada de BASE (ripas lado a lado, mudando de cor ao longo de
+ *   dirWid): eixo = direção de dirWid (~153.43deg) -- daí a faixa/linha
+ *   de separação sai paralela a dirLen, ou seja, corre ao longo do
+ *   comprimento da tábua, igual à borda lateral de uma tábua de
+ *   verdade.
+ * - camada de JUNTA (linha cruzando a cada plankLengthPx, ao longo de
+ *   dirLen): eixo = direção de dirLen (~63.43deg, mod 180 -- uma reta
+ *   não tem "sentido", só orientação) -- daí a linha sai paralela a
+ *   dirWid, cortando a tábua na largura, igual à junta de verdade entre
+ *   uma tábua e a próxima da mesma coluna.
+ */
+const ATAN2_DEG = Math.atan(2) * (180 / Math.PI); // ~63.43 -- atan(2) em graus
+const FLOOR_BASE_ANGLE_DEG = 90 + ATAN2_DEG; // ~153.43 -- direção de dirWid
+const FLOOR_JOINT_ANGLE_DEG = ATAN2_DEG; // ~63.43 -- direção de dirLen (mod 180)
+
+/**
  * Gradiente CSS (repeating-linear-gradient) que dá uma prévia razoável
  * de como um FloorPatternConfig vai ficar quando desenhado de verdade
  * (ver createFloorPatternGraphics em MainScene.ts) -- usado tanto no
@@ -248,19 +285,20 @@ export function floorPatternCssGradient(pattern: {
         return `${css} ${i * widStep}px, ${css} ${(i + 1) * widStep}px`;
       })
       .join(", ");
-    baseLayer = `repeating-linear-gradient(63deg, ${stops})`;
+    baseLayer = `repeating-linear-gradient(${FLOOR_BASE_ANGLE_DEG}deg, ${stops})`;
   } else {
     // ripa/tábua de 2 cores (comportamento original) -- alterna
     // colorA/colorB em faixas do tamanho de plankWidthPx.
     const a = hexToCss(pattern.colorA);
     const b = hexToCss(pattern.colorB);
-    baseLayer = `repeating-linear-gradient(63deg, ${a} 0, ${a} ${widStep}px, ${b} ${widStep}px, ${b} ${widStep * 2}px)`;
+    baseLayer = `repeating-linear-gradient(${FLOOR_BASE_ANGLE_DEG}deg, ${a} 0, ${a} ${widStep}px, ${b} ${widStep}px, ${b} ${widStep * 2}px)`;
   }
   if (!pattern.plankLengthPx) return baseLayer;
   // camada de LINHA DE JUNTA -- separada da base, em CIMA dela (2
   // background-image empilhados, o de trás é a base, ver ordem no
-  // `return` abaixo), numa direção PERPENDICULAR (63-90 = -27deg) à das
-  // ripas, com ciclo em plankLengthPx (o campo "Comprimento da tábua"
+  // `return` abaixo), no eixo FLOOR_JOINT_ANGLE_DEG (perpendicular ao
+  // eixo da base, ver comentário grande acima), com ciclo em
+  // plankLengthPx (o campo "Comprimento da tábua"
   // -- antes esse valor não aparecia em LUGAR NENHUM da prévia, por
   // isso o Douglas via a mesma imagem não importava o que digitasse
   // ali). Maioria transparente, só uma faixa fina de lineColor a cada
@@ -268,6 +306,6 @@ export function floorPatternCssGradient(pattern: {
   // cima da base, tipo a junta de verdade entre tábuas.
   const lenStep = Math.max(4, pattern.plankLengthPx);
   const line = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
-  const jointLayer = `repeating-linear-gradient(${63 - 90}deg, ${line} 0, ${line} 3px, transparent 3px, transparent ${lenStep}px)`;
+  const jointLayer = `repeating-linear-gradient(${FLOOR_JOINT_ANGLE_DEG}deg, ${line} 0, ${line} 3px, transparent 3px, transparent ${lenStep}px)`;
   return `${jointLayer}, ${baseLayer}`;
 }
