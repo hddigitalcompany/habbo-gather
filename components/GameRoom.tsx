@@ -2317,6 +2317,15 @@ export default function GameRoom({
           fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
+              // trava contra StrictMode/dev double-invoke (ver comentário
+              // grande logo abaixo, no fetch de /room/floor -- mesmo bug,
+              // mesma correção) -- sem isso, essa busca (disparada pelo
+              // MOUNT #1, já destruído) podia responder DEPOIS de
+              // sceneRef.current já apontar pra cena do MOUNT #2 (ou,
+              // pior, ainda apontar pra cena #1 destruída nesse meio-
+              // tempo) e desenhar mobília sobre uma cena/texture manager
+              // que não deveria mais existir.
+              if (destroyed) return;
               if (data?.seatOffsets) {
                 setSeatOffsetsState(data.seatOffsets);
                 sceneRef.current?.setSeatOffsets(data.seatOffsets);
@@ -2346,6 +2355,39 @@ export default function GameRoom({
           fetch(`${REALTIME_HTTP_BASE}/room/floor`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
+              // ACHADO investigando o erro "TypeError: Cannot read
+              // properties of null (reading 'glTexture')" que o Douglas
+              // reportou (print do jogo travado, WebGLRenderer.render ->
+              // Frame.get glTexture): next.config.js tem
+              // reactStrictMode:true, então em DEV (só em dev -- é
+              // exatamente por isso que só acontecia com "npm run dev")
+              // o React monta esse efeito, DESLIGA ele (destroyed=true,
+              // gameRef.current.destroy(true) -- apaga o Phaser.Game #1
+              // inteiro, textura/WebGL incluso) e MONTA de novo (Game #2)
+              // de propósito, pra pegar bug de cleanup incompleto (ver
+              // https://react.dev/learn/synchronizing-with-effects#how-to-handle-the-effect-firing-twice-in-development).
+              // Esse fetch aqui é disparado pelo MOUNT #1 -- se ele só
+              // responde DEPOIS do destroy (rede é mais lenta que o
+              // remount), sceneRef.current (um ref COMPARTILHADO entre
+              // as duas montagens, não uma variável local de cada
+              // efeito) já pode estar apontando pra cena do MOUNT #2 (daí
+              // loadSavedFloor roda 2x, uma vez por mount -- inofensivo
+              // sozinho, o draftFloor.has(key) do MainScene.ts já
+              // deduplica) OU, pior, ainda apontar pra cena #1 JÁ
+              // DESTRUÍDA (a atribuição sceneRef.current = scene só
+              // acontece dentro do Phaser.Core.Events.READY de CADA
+              // Game, que pode demorar um pouco mais que o destroy do
+              // Game anterior) -- nesse caso loadSavedFloor ia criar
+              // textura de canvas (this.textures.createCanvas) e Image
+              // (this.add.image) num texture manager/cena JÁ destruídos,
+              // exatamente o tipo de objeto quebrado (frame sem source
+              // WebGL de verdade) que gera esse erro no próximo render.
+              // Mesma trava que requestMedia (mais acima nesse mesmo
+              // efeito) já usa pro getUserMedia -- `destroyed` É local de
+              // CADA invocação do efeito (uma closure por mount), então
+              // só o mount que criou ESSE fetch específico consegue ver
+              // o SEU PRÓPRIO destroyed=true, é exatamente o guard certo.
+              if (destroyed) return;
               if (data?.items) sceneRef.current?.loadSavedFloor(data.items);
             })
             .catch(() => {})
@@ -2363,6 +2405,10 @@ export default function GameRoom({
         fetch(`${REALTIME_HTTP_BASE}/room/areas`)
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
+            // trava contra StrictMode/dev double-invoke -- mesmo bug/
+            // mesma correção do fetch de /room/floor logo acima (ver
+            // comentário grande lá).
+            if (destroyed) return;
             if (data?.list) {
               // MESCLA em vez de SOBRESCREVER -- bug encontrado
               // investigando "as areas que eu crio nao tao salvando"
