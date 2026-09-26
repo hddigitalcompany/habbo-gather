@@ -125,6 +125,18 @@ const STAGE_BASELINE_PAD = 70;
 // exatamente onde estava, só sobra mais espaço vazio acima dele agora.
 const STAGE_TOP_PAD = 160;
 const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + STAGE_TOP_PAD);
+// pedido do Douglas (depois): "esse espaco do editor em avatar ta mt
+// grande ta ruim descer tudo isso, ele nao precisava ser tao grande"
+// -- os 160px acima (STAGE_TOP_PAD) sobravam praticamente inteiros na
+// tela de Avatar (cabelo/tom/etc), que raramente precisa de tanta
+// margem pro cabelo -- só o editor de MOBI (item-stage lá embaixo,
+// AvatarCreatorPanel não) continua usando STAGE_HEIGHT cheio, já que
+// não foi ele que ficou grande demais. Card ~100px mais baixo aqui,
+// ainda com uma folga (60px) pra cabelo alto não cortar de novo.
+const AVATAR_STAGE_TOP_PAD = 60;
+const AVATAR_STAGE_HEIGHT = Math.ceil(
+  STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + AVATAR_STAGE_TOP_PAD
+);
 
 // Réguas de medida no preview (pedido do Douglas: "coloca umas linhas de
 // medida, a partir do tile, pra eu conseguir me posicionar melhor") --
@@ -2198,7 +2210,7 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
         </div>
 
         <div className="item-size-card">
-          <div className="item-stage" style={{ height: STAGE_HEIGHT, zoom }}>
+          <div className="item-stage" style={{ height: AVATAR_STAGE_HEIGHT, zoom }}>
             <div
               className="item-stage-avatar"
               style={{
