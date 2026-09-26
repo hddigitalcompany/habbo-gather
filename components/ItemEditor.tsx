@@ -206,10 +206,21 @@ function StageRuler({ anchorBottomPx, pxPerUnit = PREVIEW_SCALE }: { anchorBotto
 // arquivo transparente): desde que a camada base virou só cabeça (ver
 // scripts/syncSkinAssets.mjs), o boneco de referência ficaria sem corpo
 // nenhum com o traje padrão.
-const REFERENCE_HAIR = HAIR_CATALOG.find((h) => h.id === DEFAULT_HAIR_ID) ?? HAIR_CATALOG[0];
-const REFERENCE_SKIN = SKIN_CATALOG.find((s) => s.id === DEFAULT_SKIN_ID) ?? SKIN_CATALOG[0];
-const REFERENCE_OUTFIT = OUTFIT_CATALOG.find((o) => o.id !== DEFAULT_OUTFIT_ID) ?? OUTFIT_CATALOG[0];
-const REFERENCE_OUTFIT_FILE = REFERENCE_OUTFIT ? outfitFileForSkin(REFERENCE_OUTFIT, DEFAULT_SKIN_ID) : undefined;
+// "boneco de referência" do editor de MOBI (cabelo/tom/traje padrão pra
+// posicionar item/assento por cima, ver referenceHair/referenceSkin/
+// referenceOutfit dentro do componente ItemEditor, perto de
+// mobiFrameOffsetXPx) -- NÃO são mais `const` fixas aqui no topo do
+// módulo (congeladas na primeira vez que o arquivo carrega): SKIN_CATALOG
+// começa VAZIO e HAIR/OUTFIT_CATALOG só ganham os itens CUSTOM depois de
+// um fetch assíncrono (ver fetchAndRegisterCustomAvatarItems em
+// GameRoom.tsx), que roda DEPOIS do módulo já ter sido avaliado -- uma
+// `const` no topo do arquivo ficava pra sempre travada no que o catálogo
+// tinha nesse instante zero. Pedido do Douglas: "ja subi um traje
+// sentado, adiciona na edicao de mobi pra eu posicionar" -- o traje que
+// ele acabou de subir (com pose "Sentado" de verdade) nunca aparecia no
+// boneco arrastável aqui, mesmo depois do upload terminar. Recalculado a
+// cada render (dentro do componente, array `.find`/`.filter` simples,
+// sem custo real) acompanha o catálogo sempre que ele muda.
 
 const CATEGORIES: { id: CategoryId; label: string }[] = [
   { id: "poltrona", label: "Poltrona" },
@@ -2788,6 +2799,21 @@ export default function ItemEditor({
       : activeMobiBlobUrl ?? existingArt[activeMobiDirection] ?? null;
   const stageIconSrc = iconPreviewUrl ?? (!iconCleared ? existingIconUrl : null);
 
+  // boneco de referência (ver comentário grande no topo do módulo, perto
+  // de onde essas 3 eram `const` fixas) -- recalculado a cada render pra
+  // acompanhar HAIR_CATALOG/SKIN_CATALOG/OUTFIT_CATALOG assim que um
+  // fetch de item custom termina. Traje: o ÚLTIMO não-"Nenhum" (não o
+  // primeiro) -- upsertCatalogById (customization.ts) empurra item novo
+  // pro FIM do catálogo, então "o último" é sempre o traje mais
+  // recente que o Douglas cadastrou, com a pose/foto mais nova de cada
+  // uma (é exatamente o que ele quer ver/arrastar aqui depois de subir
+  // um traje com "Sentado" novo).
+  const referenceHair = HAIR_CATALOG.find((h) => h.id === DEFAULT_HAIR_ID) ?? HAIR_CATALOG[0];
+  const referenceSkin = SKIN_CATALOG.find((s) => s.id === DEFAULT_SKIN_ID) ?? SKIN_CATALOG[0];
+  const nonDefaultOutfits = OUTFIT_CATALOG.filter((o) => o.id !== DEFAULT_OUTFIT_ID);
+  const referenceOutfit = nonDefaultOutfits[nonDefaultOutfits.length - 1] ?? OUTFIT_CATALOG[0];
+  const referenceOutfitFile = referenceOutfit ? outfitFileForSkin(referenceOutfit, DEFAULT_SKIN_ID) : undefined;
+
   // offset em uso pela direção ATIVA -- "down" lê offsetX/offsetY
   // direto, as outras 3 caem no PRÓPRIO override (directionOffsets) ou,
   // sem um ainda, no mesmo valor de "down" (mesma prévia do que vai
@@ -3213,11 +3239,11 @@ export default function ItemEditor({
                     transform: `translate(-${mobiFrameOffsetXPx}px, -${mobiFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                   }}
                 >
-                  {REFERENCE_OUTFIT_FILE && (
-                    <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_OUTFIT_FILE}`} alt="" />
+                  {referenceOutfitFile && (
+                    <img className="item-stage-avatar-layer" src={`/assets/${referenceOutfitFile}`} alt="" />
                   )}
-                  {REFERENCE_SKIN && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_SKIN.file}`} alt="" />}
-                  {REFERENCE_HAIR && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_HAIR.file}`} alt="" />}
+                  {referenceSkin && <img className="item-stage-avatar-layer" src={`/assets/${referenceSkin.file}`} alt="" />}
+                  {referenceHair && <img className="item-stage-avatar-layer" src={`/assets/${referenceHair.file}`} alt="" />}
                 </div>
               </div>
 
@@ -3256,11 +3282,11 @@ export default function ItemEditor({
                       transform: `translate(-${seatFrameOffsetXPx}px, -${seatFrameOffsetYPx}px) scale(${AVATAR_SCALE * PREVIEW_SCALE})`,
                     }}
                   >
-                    {REFERENCE_OUTFIT_FILE && (
-                      <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_OUTFIT_FILE}`} alt="" />
+                    {referenceOutfitFile && (
+                      <img className="item-stage-avatar-layer" src={`/assets/${referenceOutfitFile}`} alt="" />
                     )}
-                    {REFERENCE_SKIN && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_SKIN.file}`} alt="" />}
-                    {REFERENCE_HAIR && <img className="item-stage-avatar-layer" src={`/assets/${REFERENCE_HAIR.file}`} alt="" />}
+                    {referenceSkin && <img className="item-stage-avatar-layer" src={`/assets/${referenceSkin.file}`} alt="" />}
+                    {referenceHair && <img className="item-stage-avatar-layer" src={`/assets/${referenceHair.file}`} alt="" />}
                   </div>
                 </div>
               )}
