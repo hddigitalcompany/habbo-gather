@@ -1341,9 +1341,8 @@ export default class MainScene extends Phaser.Scene {
     return ((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB;
   }
 
-  private createFloorPatternGraphics(f: FloorTileDef, pattern: FloorPatternConfig): Phaser.GameObjects.Graphics {
+  private createFloorPatternGraphics(f: FloorTileDef, pattern: FloorPatternConfig): Phaser.GameObjects.Image {
     const pos = floorWorldPos(f);
-    const gfx = this.add.graphics().setDepth(DEPTH_FLOOR);
     const step = Math.max(4, pattern.plankWidthPx);
     const sqrt5 = Math.sqrt(5);
     // vetores UNITÁRIOS fixos (não dependem do tile), OS DOIS iguais aos
@@ -1399,6 +1398,87 @@ export default class MainScene extends Phaser.Scene {
     const minIndex = Math.floor((acrossCol0 - reach) / step) - 1;
     const maxIndex = Math.ceil((acrossCol0 + reach) / step) + 1;
 
+    // ACHADO depois de 3 tentativas que NÃO resolveram a linha de junta
+    // picotada numa diagonal (afinar espessura 1.5->0.75->0.4px, depois
+    // reduzir opacidade, depois trocar stroke por retângulos
+    // preenchidos -- Douglas testou e confirmou: "ta igual ainda"):
+    // causa raiz de VERDADE é a RESOLUÇÃO. O jogo roda numa resolução
+    // INTERNA fixa (GAME_WIDTH/HEIGHT = 1200x900, ver grid.ts) que o
+    // Phaser estica (Scale.ENVELOP) pra cobrir a tela real -- numa tela
+    // grande/retina isso é um upscale considerável, e QUALQUER geometria
+    // fina desenhada ao vivo ali (fill OU stroke, não importa) sai
+    // picotada, porque o anti-serrilhado (WebGL MSAA) acontece ANTES do
+    // upscale, na resolução BAIXA -- é só o resultado JÁ picotado que
+    // fica esticado/em blocos depois. (Não dá pra simplesmente aumentar
+    // GAME_WIDTH/HEIGHT pra resolver: já foi testado em 2x -- ver
+    // comentário grande em grid.ts -- e o Douglas sentiu peso real de
+    // performance, por afetar a cena INTEIRA em TODO frame.)
+    //
+    // Fix sem mexer na resolução do jogo (e sem custo de performance por
+    // frame, já que roda só 1x por tile PINTADO, não a cada frame):
+    // desenha o padrão dessa tábua/tile num <canvas> 2D OFFSCREEN, numa
+    // resolução BEM maior que o tamanho do tile na tela (super-
+    // amostragem), usando a API de Canvas 2D nativa do navegador (que
+    // SEMPRE anti-serrilha bem uma diagonal fina, mesmo bem fina --
+    // diferente do Graphics do Phaser em WebGL) -- e essa imagem, já com
+    // a linha lisa desenhada em alta resolução, vira uma TEXTURA
+    // (this.textures.createCanvas), mostrada como uma Image comum do
+    // tamanho NORMAL do tile (setDisplaySize encolhe de volta pro
+    // tamanho de sempre). Esse encolhimento (filtro bilinear da GPU, já
+    // que pixelArt:false/antialias:true na config, ver game/config.ts) é
+    // quem faz a mágica de "super-amostragem" de verdade: reamostra os
+    // pixels finos da linha lisa pra menos pixels na tela, sem nenhum
+    // serrilhado -- a mesma técnica clássica de "desenha em alta
+    // resolução, encolhe pra exibir" usada em qualquer motor gráfico pra
+    // deixar vetor fino nítido.
+    const SS = 3; // fator de super-amostragem (o tile é desenhado 3x maior no canvas offscreen, depois encolhido de volta)
+    const canvasW = ISO_TILE_WIDTH * SS;
+    const canvasH = ISO_TILE_HEIGHT * SS;
+    // chave ÚNICA por tile PINTADO (não por estilo) -- diferente do piso
+    // "imagem" (que reusa a MESMA textura do catálogo em vários tiles),
+    // aqui cada tile tem sua própria textura porque a fase da faixa (ver
+    // acrossCol0/alongRow0 acima) depende da posição ABSOLUTA do tile,
+    // então o conteúdo desenhado é único por (col,row) mesmo dentro do
+    // MESMO estilo. destroyFloorDisplayObject (logo abaixo) sabe apagar
+    // essa textura junto quando o tile é apagado/repintado/editado.
+    const texKey = `floor-pattern-${f.styleId}-${f.col}-${f.row}`;
+    if (this.textures.exists(texKey)) this.textures.remove(texKey);
+    const canvasTexture = this.textures.createCanvas(texKey, canvasW, canvasH)!;
+    const ctx = canvasTexture.context;
+    // ponto em coordenada ABSOLUTA do mundo (a mesma base colAxis/
+    // rowAxis de sempre, ver comentário grande acima) -> coordenada do
+    // CANVAS desse tile: relativo ao centro do tile (pos.x,pos.y),
+    // deslocado pro centro do canvas e escalado pelo super-amostragem.
+    const toCanvas = (worldX: number, worldY: number) => ({
+      x: (worldX - pos.x + ISO_TILE_WIDTH / 2) * SS,
+      y: (worldY - pos.y + ISO_TILE_HEIGHT / 2) * SS,
+    });
+    const pathFor = (points: { x: number; y: number }[]) => {
+      ctx.beginPath();
+      points.forEach((p, idx) => {
+        const c = toCanvas(p.x, p.y);
+        if (idx === 0) ctx.moveTo(c.x, c.y);
+        else ctx.lineTo(c.x, c.y);
+      });
+      ctx.closePath();
+    };
+    const cssColor = (hex: number) => `#${hex.toString(16).padStart(6, "0")}`;
+    // recorte: só o losango do tile fica visível -- antes isso era uma
+    // MÁSCARA Phaser à parte (um 2º Graphics "escondido" só de fonte de
+    // recorte, ver comentário antigo removido daqui); agora é o próprio
+    // canvas que recorta (ctx.clip()), mais simples, sem precisar de
+    // mais nenhum objeto extra pra rastrear/apagar depois.
+    const diamond = tileDiamondCorners(0, 0);
+    ctx.save();
+    ctx.beginPath();
+    diamond.forEach((p, idx) => {
+      const c = toCanvas(pos.x + p.x, pos.y + p.y);
+      if (idx === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.clip();
+
     if (pattern.plankLengthPx) {
       // --- Tábuas EMENDADAS, com linha de junta e desalinhamento entre
       // colunas ("amarração" de assoalho de verdade -- ver comentário
@@ -1408,7 +1488,7 @@ export default class MainScene extends Phaser.Scene {
       // e depois: "e é nessa ideia de intercalado". ---
       const lenStep = Math.max(4, pattern.plankLengthPx);
       const alongRow0 = alongRowOf(pos.x, pos.y); // posição do centro do tile ao longo de rowAxis
-      const lineColor = pattern.lineColor ?? this.darkenColor(pattern.colorA);
+      const lineColorCss = cssColor(pattern.lineColor ?? this.darkenColor(pattern.colorA));
       for (let i = minIndex; i <= maxIndex; i++) {
         // colunas pares ficam alinhadas em j=0, colunas ímpares
         // deslocadas meio comprimento -- é isso que faz as juntas de
@@ -1440,78 +1520,22 @@ export default class MainScene extends Phaser.Scene {
             { x: cx - lx + wx, y: cy - ly + wy },
           ];
           const plankColor = this.pickPlankColor(pattern, i, j);
-          gfx.fillStyle(plankColor, 1);
-          gfx.fillPoints(points, true);
-          // linha de junta -- ACHADO depois que só afinar a espessura
-          // (1.5 -> 0.75 -> 0.4px) e depois reduzir a opacidade AINDA
-          // ficou picotada numa diagonal (screenshot do Douglas: "quero
-          // linha continua nas emendas igual a dos icones do site
-          // assim, sem ser pixelizada" -- comparando com os ícones da
-          // barra, que são DOM/vetor, sempre nítidos): o problema nunca
-          // foi a espessura, é que gfx.lineStyle+strokePoints (traçado
-          // de LINHA do Phaser em WebGL) usa uma tesselação própria,
-          // SEM o mesmo anti-serrilhado do PREENCHIMENTO -- fica sempre
-          // com esse aspecto picotado numa diagonal, não importa a
-          // espessura/opacidade. gfx.fillPoints (PREENCHIMENTO), por
-          // outro lado, passa pelo pipeline normal de triângulos do
-          // WebGL (o mesmo que já deixa o resto da cena liso com
-          // antialias:true) -- por isso a borda agora é desenhada como
-          // 4 retângulos FINOS PREENCHIDOS (um por aresta da tábua,
-          // levemente esticados nas pontas pra fechar o canto sem
-          // buraco), a MESMA técnica que os veios de madeira abaixo já
-          // usavam (nunca tiveram esse problema). JOINT_LINE_WIDTH/ALPHA
-          // (game/floor.ts) continuam sendo a espessura/opacidade da
-          // linha, só que aplicadas como preenchimento, não mais como
-          // "stroke" de verdade.
-          {
-            const bt = JOINT_LINE_WIDTH / 2;
-            const toWorld = (along: number, across: number) => ({
-              x: cx + rowAxis.x * along + colAxis.x * across,
-              y: cy + rowAxis.y * along + colAxis.y * across,
-            });
-            gfx.fillStyle(lineColor, JOINT_LINE_ALPHA);
-            // as 2 bordas LONGAS (paralelas ao comprimento -- a junta
-            // entre COLUNAS de tábuas, a que corre no mesmo sentido do
-            // veio de madeira).
-            gfx.fillPoints(
-              [
-                toWorld(-halfLength - bt, -halfWidth - bt),
-                toWorld(halfLength + bt, -halfWidth - bt),
-                toWorld(halfLength + bt, -halfWidth + bt),
-                toWorld(-halfLength - bt, -halfWidth + bt),
-              ],
-              true
-            );
-            gfx.fillPoints(
-              [
-                toWorld(-halfLength - bt, halfWidth - bt),
-                toWorld(halfLength + bt, halfWidth - bt),
-                toWorld(halfLength + bt, halfWidth + bt),
-                toWorld(-halfLength - bt, halfWidth + bt),
-              ],
-              true
-            );
-            // as 2 bordas CURTAS (as pontas da tábua -- a emenda entre
-            // tábuas EMENDADAS da mesma coluna).
-            gfx.fillPoints(
-              [
-                toWorld(-halfLength - bt, -halfWidth - bt),
-                toWorld(-halfLength + bt, -halfWidth - bt),
-                toWorld(-halfLength + bt, halfWidth + bt),
-                toWorld(-halfLength - bt, halfWidth + bt),
-              ],
-              true
-            );
-            gfx.fillPoints(
-              [
-                toWorld(halfLength - bt, -halfWidth - bt),
-                toWorld(halfLength + bt, -halfWidth - bt),
-                toWorld(halfLength + bt, halfWidth + bt),
-                toWorld(halfLength - bt, halfWidth + bt),
-              ],
-              true
-            );
-          }
+          pathFor(points);
+          ctx.fillStyle = cssColor(plankColor);
+          ctx.fill();
+          // linha de junta -- ctx.stroke() do Canvas 2D nativo já
+          // anti-serrilha bem uma diagonal fina sozinho (é desenhado no
+          // canvas offscreen supersampled, ver comentário grande no
+          // início da função) -- diferente das tentativas anteriores
+          // com o Graphics do Phaser em WebGL (lineStyle+strokePoints,
+          // depois um truque de retângulos preenchidos), não precisa de
+          // nenhuma técnica especial aqui, um stroke comum já fica liso.
+          pathFor(points);
+          ctx.lineWidth = JOINT_LINE_WIDTH * SS;
+          ctx.strokeStyle = lineColorCss;
+          ctx.globalAlpha = JOINT_LINE_ALPHA;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
           // veios de madeira (pedido do Douglas: "agora eu quero esse
           // efeito laminado... de veios de madeira", depois "no sentido
           // das linhas também") -- riscos POR CIMA da tábua que acabou
@@ -1522,9 +1546,11 @@ export default class MainScene extends Phaser.Scene {
           if (pattern.woodGrain) {
             const grainShapes = woodGrainShapesForPlank(i, j, cx, cy, halfLength, halfWidth, rowAxis, colAxis, plankColor);
             for (const shape of grainShapes) {
-              const [p0, p1, p2, p3] = shape.points;
-              gfx.fillStyle(parseInt(shape.fill.replace("#", ""), 16), shape.opacity ?? 1);
-              gfx.fillPoints([p0, p1, p2, p3], true);
+              pathFor(shape.points);
+              ctx.fillStyle = shape.fill;
+              ctx.globalAlpha = shape.opacity ?? 1;
+              ctx.fill();
+              ctx.globalAlpha = 1;
             }
           }
         }
@@ -1549,47 +1575,51 @@ export default class MainScene extends Phaser.Scene {
         // CONTÍNUA, não só na tábua emendada (antes só funcionava lá,
         // gap encontrado ao trazer plankLengthPx/colors pra aba "Criar
         // Piso" -- ver pickPlankColor logo acima).
-        gfx.fillStyle(this.pickPlankColor(pattern, i, 0), 1);
-        gfx.fillPoints(
-          [
-            { x: cx - lx - wx, y: cy - ly - wy },
-            { x: cx + lx - wx, y: cy + ly - wy },
-            { x: cx + lx + wx, y: cy + ly + wy },
-            { x: cx - lx + wx, y: cy - ly + wy },
-          ],
-          true
-        );
+        pathFor([
+          { x: cx - lx - wx, y: cy - ly - wy },
+          { x: cx + lx - wx, y: cy + ly - wy },
+          { x: cx + lx + wx, y: cy + ly + wy },
+          { x: cx - lx + wx, y: cy - ly + wy },
+        ]);
+        ctx.fillStyle = cssColor(this.pickPlankColor(pattern, i, 0));
+        ctx.fill();
       }
     }
-    // máscara: só o losango do tile fica visível -- mesmo padrão de
-    // updateAreaDim (maskGfx "escondido", nunca desenhado na cena de
-    // verdade, só serve de fonte de recorte). Guardada via setData pra
-    // destroyFloorDisplayObject saber apagar ela JUNTO quando o tile for
-    // apagado/repintado/editado -- senão vazaria 1 Graphics órfã por
-    // tile toda vez (ver comentário grande lá).
-    const maskGfx = this.add.graphics();
-    maskGfx.fillStyle(0xffffff);
-    maskGfx.fillPoints(tileDiamondCorners(pos.x, pos.y), true);
-    maskGfx.setVisible(false);
-    gfx.setMask(maskGfx.createGeometryMask());
-    gfx.setData("maskGraphics", maskGfx);
-    return gfx;
+    ctx.restore();
+    canvasTexture.refresh();
+
+    // Image comum (não mais Graphics ao vivo) mostrando a textura já
+    // pronta (em alta resolução) ENCOLHIDA pro tamanho normal do tile
+    // -- ver comentário grande no início da função pro motivo (é esse
+    // encolhimento que deixa a linha lisa).
+    const img = this.add.image(pos.x, pos.y, texKey).setDepth(DEPTH_FLOOR);
+    img.setDisplaySize(ISO_TILE_WIDTH, ISO_TILE_HEIGHT);
+    img.setData("patternTextureKey", texKey);
+    return img;
   }
 
   /**
    * Apaga um tile de piso (Image OU Graphics, ver draftFloorSprites
-   * acima) -- ponto ÚNICO que sabe que um Graphics de piso "padrão" tem
-   * uma máscara "escondida" junto (ver createFloorPatternGraphics acima)
-   * que precisa ser apagada TAMBÉM, senão vaza 1 Graphics órfã por tile
-   * toda vez que um piso padrão é apagado/repintado/editado (nunca
-   * aparece na tela, mas fica ocupando memória pra sempre). Uma Image de
-   * piso "imagem" não tem essa data, getData devolve undefined, e o
-   * `?.destroy()` da máscara não faz nada -- mesmo código serve pros
-   * dois tipos sem precisar checar qual é.
+   * acima) -- ponto ÚNICO que sabe que uma Image de piso "padrão" (ver
+   * createFloorPatternGraphics acima) tem uma TEXTURA ÚNICA (uma por
+   * tile pintado, não compartilhada com mais ninguém -- diferente do
+   * piso "imagem", que reusa a mesma textura do catálogo em vários
+   * tiles) que precisa ser apagada TAMBÉM, senão vaza 1 textura (e a
+   * memória de GPU dela) por tile toda vez que um piso padrão é
+   * apagado/repintado/editado. Uma Image de piso "imagem" (ou um
+   * Graphics de versão antiga em memória) não tem essa data, getData
+   * devolve undefined, e o `?.destroy()`/remove não fazem nada -- mesmo
+   * código serve pros casos sem precisar checar qual é.
    */
   private destroyFloorDisplayObject(obj: Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | undefined) {
     if (!obj) return;
+    // compat com uma versão antiga (removida) que usava um 2º Graphics
+    // "escondido" só de máscara -- fica só por segurança, nunca mais é
+    // setado por createFloorPatternGraphics (agora recorta com
+    // ctx.clip() dentro do próprio canvas, sem precisar de máscara).
     (obj.getData("maskGraphics") as Phaser.GameObjects.Graphics | undefined)?.destroy();
+    const patternTextureKey = obj.getData("patternTextureKey") as string | undefined;
+    if (patternTextureKey && this.textures.exists(patternTextureKey)) this.textures.remove(patternTextureKey);
     obj.destroy();
   }
 
