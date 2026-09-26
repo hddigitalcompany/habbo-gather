@@ -1,4 +1,5 @@
-import { tileToWorld } from "./grid";
+import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT, tileToWorld } from "./grid";
+import { Point, tileDiamondCorners } from "./iso";
 
 /**
  * Piso da sala -- textura PLANA por quadrado da grade (sem poses/
@@ -209,103 +210,136 @@ function darkenHex(hex: number, factor = 0.55): number {
   return (r << 16) | (g << 8) | b;
 }
 
-/**
- * Ângulos do gradiente CSS derivados dos MESMOS vetores ortonormais
- * usados na renderização de verdade (dirWid=(1,2)/sqrt5, dirLen=(-2,1)/
- * sqrt5, ver createFloorPatternGraphics em MainScene.ts) -- a proporção
- * ISO_TILE_WIDTH:ISO_TILE_HEIGHT é sempre 2:1, por isso esses ângulos são
- * uma constante fixa, não dependem do tamanho real do tile.
- *
- * ANTES essa prévia usava "63deg" chutado de olho pras duas camadas (63
- * pra base, 63-90 pra junta) -- só que, feitas as contas direito, esse
- * valor tava TROCADO entre as duas: a linha de junta saía alinhada com a
- * direção da ripa (dirLen) em vez de cortar ela, e a separação entre
- * ripas saía alinhada com dirWid em vez de correr ao longo da ripa --
- * exatamente o oposto do desenho de verdade. Bug reportado pelo Douglas
- * com o piso já pintado na sala: "a linha ta no sentido contrario".
- *
- * Com a convenção de ângulo do CSS (0deg = pra cima, sentido horário)
- * num eixo de tela com y crescendo pra BAIXO (mesma convenção do
- * Phaser), um vetor (dx,dy) equivale ao ângulo atan2(dx,-dy). Aplicando
- * isso: o eixo do gradiente (a direção em que a cor MUDA) precisa
- * apontar na mesma direção do vetor físico correspondente, porque a
- * FAIXA/linha resultante do CSS sempre sai perpendicular ao eixo do
- * gradiente -- então:
- * - camada de BASE (ripas lado a lado, mudando de cor ao longo de
- *   dirWid): eixo = direção de dirWid (~153.43deg) -- daí a faixa/linha
- *   de separação sai paralela a dirLen, ou seja, corre ao longo do
- *   comprimento da tábua, igual à borda lateral de uma tábua de
- *   verdade.
- * - camada de JUNTA (linha cruzando a cada plankLengthPx, ao longo de
- *   dirLen): eixo = direção de dirLen (~63.43deg, mod 180 -- uma reta
- *   não tem "sentido", só orientação) -- daí a linha sai paralela a
- *   dirWid, cortando a tábua na largura, igual à junta de verdade entre
- *   uma tábua e a próxima da mesma coluna.
- */
-const ATAN2_DEG = Math.atan(2) * (180 / Math.PI); // ~63.43 -- atan(2) em graus
-const FLOOR_BASE_ANGLE_DEG = 90 + ATAN2_DEG; // ~153.43 -- direção de dirWid
-const FLOOR_JOINT_ANGLE_DEG = ATAN2_DEG; // ~63.43 -- direção de dirLen (mod 180)
+/** Índice determinístico (0..len-1) pra escolher a cor de uma tábua
+ * (coluna `i`, posição `j`) dentro de FloorPatternConfig.colors -- cópia
+ * EXATA (mesmo hash) de MainScene.plankColorIndex, em número puro (sem
+ * Phaser), usada só por floorPatternPolygons abaixo. Duplicada de
+ * propósito, mesmo motivo de darkenHex acima -- e precisa ser IDÊNTICA
+ * bit a bit ao original pra sortear a mesma cor pra mesma tábua nos dois
+ * lugares. */
+function plankColorIndexPure(i: number, j: number, len: number): number {
+  let h = (i * 374761393 + j * 668265263) ^ (i << 13);
+  h = Math.imul(h ^ (h >>> 15), 1274126177);
+  h = h ^ (h >>> 16);
+  return Math.abs(h) % len;
+}
+
+/** Cópia pura de MainScene.pickPlankColor (ver plankColorIndexPure
+ * acima). */
+function pickPlankColorPure(pattern: FloorPatternConfig, i: number, j: number): number {
+  if (pattern.colors && pattern.colors.length > 0) {
+    return pattern.colors[plankColorIndexPure(i, j, pattern.colors.length)];
+  }
+  return ((i % 2) + 2) % 2 === 0 ? pattern.colorA : pattern.colorB;
+}
+
+/** Um polígono (tábua/ripa) já pronto pra virar um `<polygon>` de SVG. */
+export interface FloorPatternPolygon {
+  points: Point[];
+  /** cor de preenchimento, CSS hex ("#rrggbb") */
+  fill: string;
+  /** cor do contorno, CSS hex -- só presente nas tábuas EMENDADAS
+   * (plankLengthPx definido, ver FloorPatternConfig). Ausente na ripa
+   * contínua (o jogo de verdade também não traça contorno nesse caso,
+   * ver createFloorPatternGraphics em MainScene.ts). */
+  stroke?: string;
+}
 
 /**
- * Gradiente CSS (repeating-linear-gradient) que dá uma prévia razoável
- * de como um FloorPatternConfig vai ficar quando desenhado de verdade
- * (ver createFloorPatternGraphics em MainScene.ts) -- usado tanto no
- * preview ao vivo do formulário "Criar Piso" -> "Padrão"
- * (ItemEditor.tsx) quanto no losango da paleta de pintura da sala
- * (GameRoom.tsx, floor-swatch) -- MESMA função pros dois lugares, pra
- * nunca ficar um mostrando uma coisa e o outro mostrando outra.
+ * Calcula os polígonos de como um FloorPatternConfig fica desenhado
+ * dentro de UM tile ISOLADO, centrado na origem (0,0) -- é a MESMA
+ * matemática de createFloorPatternGraphics em MainScene.ts (mesmos
+ * across/along/dirWid/dirLen/plankColorIndex), só que em TypeScript
+ * puro (sem Phaser.Graphics), devolvendo os pontos já prontos pra
+ * desenhar num `<svg><polygon>`.
  *
- * Não é (e não precisa ser) a matemática exata da tábua -- só CSS
- * simples o bastante pra rodar num <div>, sem reimplementar
- * across/along/plankColorIndex aqui.
+ * Usada pelo preview ao vivo do formulário "Criar Piso" -> "Padrão"
+ * (ItemEditor.tsx) e pelo losango da paleta de pintura da sala
+ * (GameRoom.tsx, floor-swatch), pelo componente compartilhado
+ * <FloorPatternSwatch> (components/FloorPatternSwatch.tsx) -- os dois
+ * lugares sempre mostram a MESMA coisa, e agora de verdade FIEL ao que
+ * o jogo desenha (não mais uma aproximação em CSS gradient, chutando
+ * ângulo -- 2 tentativas de aproximação por CSS já renderam "a exibicao
+ * no criar nao e fiel ao que vai pro jogo", "a linha ta no sentido
+ * contrario" e "seu corretor fez foi piorar o angulo" do Douglas; a
+ * forma de nunca mais errar o ângulo é não ter ângulo nenhum pra
+ * chutar -- reusar o MESMO cálculo ponto a ponto do jogo).
  */
-export function floorPatternCssGradient(pattern: {
-  plankWidthPx: number;
-  colorA: number;
-  colorB: number;
-  plankLengthPx?: number;
-  lineColor?: number;
-  colors?: number[];
-}): string {
-  // camada de BASE (as ripas/tábuas em si, na direção da largura) --
-  // ciclo em px de verdade (plankWidthPx), não mais um número fixo, pra
-  // essa prévia reagir de verdade ao valor que o usuário digitou (era um
-  // dos problemas que o Douglas apontou: "nao intercala" -- o gradiente
-  // antigo usava sempre o mesmo ciclo fixo de 6px/12px, ignorando o
-  // campo "Largura da ripa" por completo).
-  const widStep = Math.max(4, pattern.plankWidthPx);
-  let baseLayer: string;
-  if (pattern.colors && pattern.colors.length > 0) {
-    // várias tábuas de tons diferentes (ver FloorPatternConfig.colors)
-    // -- gradiente cíclico com TODAS as cores da paleta, uma prévia da
-    // mescla sem sortear tábua por tábua feito o jogo faz de verdade.
-    const stops = pattern.colors
-      .map((c, i) => {
-        const css = hexToCss(c);
-        return `${css} ${i * widStep}px, ${css} ${(i + 1) * widStep}px`;
-      })
-      .join(", ");
-    baseLayer = `repeating-linear-gradient(${FLOOR_BASE_ANGLE_DEG}deg, ${stops})`;
+export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternPolygon[] {
+  const pos = { x: 0, y: 0 }; // tile isolado, centrado na origem -- ver comentário da função
+  const step = Math.max(4, pattern.plankWidthPx);
+  const sqrt5 = Math.sqrt(5);
+  const dirLen = { x: -2 / sqrt5, y: 1 / sqrt5 };
+  const dirWid = { x: 1 / sqrt5, y: 2 / sqrt5 };
+  const p0 = pos.x + 2 * pos.y; // = 0 (tile na origem)
+  const reach = ISO_TILE_WIDTH / 2 + ISO_TILE_HEIGHT;
+  const minIndex = Math.floor((p0 - reach) / step) - 1;
+  const maxIndex = Math.ceil((p0 + reach) / step) + 1;
+  const polys: FloorPatternPolygon[] = [];
+
+  if (pattern.plankLengthPx) {
+    const lenStep = Math.max(4, pattern.plankLengthPx);
+    const q0 = -2 * pos.x + pos.y; // = 0
+    const lineColor = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
+    for (let i = minIndex; i <= maxIndex; i++) {
+      const colOffset = ((i % 2) + 2) % 2 === 0 ? 0 : lenStep / 2;
+      const minJ = Math.floor((q0 - reach - colOffset) / lenStep) - 1;
+      const maxJ = Math.ceil((q0 + reach - colOffset) / lenStep) + 1;
+      for (let j = minJ; j <= maxJ; j++) {
+        const pTarget = (i + 0.5) * step;
+        const qTarget = j * lenStep + colOffset + lenStep / 2;
+        const across = pTarget / sqrt5;
+        const along = qTarget / sqrt5;
+        const cx = across * dirWid.x + along * dirLen.x;
+        const cy = across * dirWid.y + along * dirLen.y;
+        const halfWidth = step / (2 * sqrt5);
+        const halfLength = lenStep / (2 * sqrt5);
+        const lx = dirLen.x * halfLength;
+        const ly = dirLen.y * halfLength;
+        const wx = dirWid.x * halfWidth;
+        const wy = dirWid.y * halfWidth;
+        polys.push({
+          points: [
+            { x: cx - lx - wx, y: cy - ly - wy },
+            { x: cx + lx - wx, y: cy + ly - wy },
+            { x: cx + lx + wx, y: cy + ly + wy },
+            { x: cx - lx + wx, y: cy - ly + wy },
+          ],
+          fill: hexToCss(pickPlankColorPure(pattern, i, j)),
+          stroke: lineColor,
+        });
+      }
+    }
   } else {
-    // ripa/tábua de 2 cores (comportamento original) -- alterna
-    // colorA/colorB em faixas do tamanho de plankWidthPx.
-    const a = hexToCss(pattern.colorA);
-    const b = hexToCss(pattern.colorB);
-    baseLayer = `repeating-linear-gradient(${FLOOR_BASE_ANGLE_DEG}deg, ${a} 0, ${a} ${widStep}px, ${b} ${widStep}px, ${b} ${widStep * 2}px)`;
+    const halfLength = ISO_TILE_WIDTH; // mesmo exagero de MainScene.ts -- sobra de propósito, cobre o tile inteiro
+    for (let i = minIndex; i <= maxIndex; i++) {
+      const pTarget = (i + 0.5) * step;
+      const dist = (pTarget - p0) / sqrt5;
+      const cx = pos.x + dirWid.x * dist;
+      const cy = pos.y + dirWid.y * dist;
+      const halfWidth = step / (2 * sqrt5);
+      const lx = dirLen.x * halfLength;
+      const ly = dirLen.y * halfLength;
+      const wx = dirWid.x * halfWidth;
+      const wy = dirWid.y * halfWidth;
+      polys.push({
+        points: [
+          { x: cx - lx - wx, y: cy - ly - wy },
+          { x: cx + lx - wx, y: cy + ly - wy },
+          { x: cx + lx + wx, y: cy + ly + wy },
+          { x: cx - lx + wx, y: cy - ly + wy },
+        ],
+        fill: hexToCss(pickPlankColorPure(pattern, i, 0)),
+      });
+    }
   }
-  if (!pattern.plankLengthPx) return baseLayer;
-  // camada de LINHA DE JUNTA -- separada da base, em CIMA dela (2
-  // background-image empilhados, o de trás é a base, ver ordem no
-  // `return` abaixo), no eixo FLOOR_JOINT_ANGLE_DEG (perpendicular ao
-  // eixo da base, ver comentário grande acima), com ciclo em
-  // plankLengthPx (o campo "Comprimento da tábua"
-  // -- antes esse valor não aparecia em LUGAR NENHUM da prévia, por
-  // isso o Douglas via a mesma imagem não importava o que digitasse
-  // ali). Maioria transparente, só uma faixa fina de lineColor a cada
-  // plankLengthPx -- é isso que cria o efeito de "linha cruzando" por
-  // cima da base, tipo a junta de verdade entre tábuas.
-  const lenStep = Math.max(4, pattern.plankLengthPx);
-  const line = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
-  const jointLayer = `repeating-linear-gradient(${FLOOR_JOINT_ANGLE_DEG}deg, ${line} 0, ${line} 3px, transparent 3px, transparent ${lenStep}px)`;
-  return `${jointLayer}, ${baseLayer}`;
+  return polys;
+}
+
+/** Cantos do losango de UM tile, centrado na origem -- reexportado aqui
+ * (mesmos pontos de tileDiamondCorners(0,0) em game/iso.ts) só pra quem
+ * usa floorPatternPolygons (o preview em SVG) não precisar de mais um
+ * import separado pra recortar o resultado no formato do tile. */
+export function floorPatternDiamondCorners(): Point[] {
+  return tileDiamondCorners(0, 0);
 }

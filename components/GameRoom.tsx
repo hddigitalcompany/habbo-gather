@@ -52,7 +52,8 @@ import {
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
 } from "@/game/furniture";
-import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorPatternCssGradient, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
+import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
+import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
 import type { Direction } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
@@ -4335,20 +4336,16 @@ function EditPanel({
                 key={entry.id}
                 className={selectedFloorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
                 // piso "padrão" (ver FloorPatternConfig em game/floor.ts)
-                // não tem imagem nenhuma pra usar de miniatura -- usa
-                // floorPatternCssGradient (mesma função do preview ao
-                // vivo em ItemEditor.tsx, ver comentário grande lá) pra
-                // dar uma prévia razoável sem precisar desenhar a
-                // matemática exata da tábua (isso só o Phaser faz, ver
-                // createFloorPatternGraphics em MainScene.ts).
-                style={
-                  entry.pattern
-                    ? { backgroundImage: floorPatternCssGradient(entry.pattern) }
-                    : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }
-                }
+                // não tem imagem nenhuma pra usar de miniatura -- desenha
+                // os MESMOS polígonos do jogo de verdade via
+                // <FloorPatternSwatch> (ver floorPatternPolygons em
+                // game/floor.ts), não uma aproximação.
+                style={entry.pattern ? undefined : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }}
                 onClick={() => onSelectFloorPaint(entry)}
                 title={entry.label}
-              />
+              >
+                {entry.pattern && <FloorPatternSwatch pattern={entry.pattern} />}
+              </button>
             ))}
           </div>
           {filteredFloorCatalog.length === 0 && (

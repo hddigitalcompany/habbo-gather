@@ -19,7 +19,8 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { CUSTOM_ITEM_TARGET_WIDTH, SEAT_X_LADO, SEAT_Y_LADO } from "@/game/furniture";
 import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
-import { FLOOR_CATEGORIES, FloorCategory, floorPatternCssGradient } from "@/game/floor";
+import { FLOOR_CATEGORIES, FloorCategory } from "@/game/floor";
+import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
   HAIR_CATALOG,
@@ -3056,8 +3057,8 @@ export default function ItemEditor({
   const [floorError, setFloorError] = useState<string | null>(null);
   const floorFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  /** "#rrggbb" -> número hex (o que floorPatternCssGradient/
-   * FloorPatternConfig esperam, ver game/floor.ts) -- <input
+  /** "#rrggbb" -> número hex (o que FloorPatternConfig/
+   * <FloorPatternSwatch> esperam, ver game/floor.ts) -- <input
    * type="color"> só devolve string. */
   function parseHexColor(css: string): number {
     return parseInt(css.replace("#", ""), 16) || 0;
@@ -3964,23 +3965,24 @@ export default function ItemEditor({
                       o piso na paleta da sala), só que centralizado e
                       maior aqui, por ser o preview em destaque do
                       formulário, não um botão pequeno numa grade.
-                      floorPatternCssGradient é a MESMA função usada no
+                      <FloorPatternSwatch> desenha os MESMOS polígonos
+                      do jogo de verdade (ver floorPatternPolygons em
+                      game/floor.ts) -- é o MESMO componente usado no
                       losango da paleta da sala (GameRoom.tsx) -- os dois
                       lugares sempre mostram a mesma coisa. */}
                   <div className="floor-pattern-preview-wrap">
-                    <div
-                      className="floor-pattern-preview-tile"
-                      style={{
-                        backgroundImage: floorPatternCssGradient({
+                    <div className="floor-pattern-preview-tile">
+                      <FloorPatternSwatch
+                        pattern={{
                           plankWidthPx: floorPlankWidth,
                           colorA: parseHexColor(floorColors[0]),
                           colorB: parseHexColor(floorColors[1] ?? floorColors[0]),
                           plankLengthPx: floorPlankLength.trim() !== "" ? Number(floorPlankLength) : undefined,
                           lineColor: floorPlankLength.trim() !== "" ? parseHexColor(floorLineColor) : undefined,
                           colors: floorColors.length > 2 ? floorColors.map(parseHexColor) : undefined,
-                        }),
-                      }}
-                    />
+                        }}
+                      />
+                    </div>
                   </div>
                 </>
               )}
@@ -4011,19 +4013,18 @@ export default function ItemEditor({
                     <li key={item.id} className="items-panel-row-wrap">
                       <div className="items-panel-row">
                         {item.kind === "pattern" && item.color_a && item.color_b ? (
-                          <div
-                            className="items-panel-thumb"
-                            style={{
-                              backgroundImage: floorPatternCssGradient({
+                          <div className="items-panel-thumb">
+                            <FloorPatternSwatch
+                              pattern={{
                                 plankWidthPx: item.plank_width_px ?? 24,
                                 colorA: parseHexColor(item.color_a),
                                 colorB: parseHexColor(item.color_b),
                                 plankLengthPx: item.plank_length_px ?? undefined,
                                 lineColor: item.line_color ? parseHexColor(item.line_color) : undefined,
                                 colors: item.colors && item.colors.length > 0 ? item.colors.map(parseHexColor) : undefined,
-                              }),
-                            }}
-                          />
+                              }}
+                            />
+                          </div>
                         ) : (
                           <img className="items-panel-thumb" src={item.file_url ?? undefined} alt={item.label} />
                         )}
