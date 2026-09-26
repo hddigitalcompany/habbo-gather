@@ -288,37 +288,70 @@ export function woodGrainShapesForPlank(
 ): FloorPatternPolygon[] {
   const count = halfWidth * 2 < 24 ? 2 : halfWidth * 2 < 48 ? 3 : 4;
   const shapes: FloorPatternPolygon[] = [];
+  const toWorld = (along: number, across: number): Point => ({
+    x: cx + rowAxis.x * along + colAxis.x * across,
+    y: cy + rowAxis.y * along + colAxis.y * across,
+  });
+  // 6 amostras (5 segmentos) por veio -- é a onda que faz o risco
+  // parecer um VEIO de madeira de verdade (curvo, como as fotos de
+  // referência) em vez de um traço reto de régua. Correção do Douglas:
+  // "so consegue esse veio como uma linha? nao deu o resultado visual
+  // esperado de veios de madeira" -- a versão anterior desenhava só um
+  // retângulo fino reto por veio, o que de longe realmente lê como "uma
+  // linha", não madeira. Poucos segmentos de sobra (não pesa: o piso é
+  // desenhado 1 vez por tile pintado, não por frame).
+  const SEGMENTS = 6;
   for (let k = 0; k < count; k++) {
-    // posição através da tábua -- fica dentro de ~80% da largura, senão
-    // o risco "vaza" visualmente por cima da linha de junta longa.
-    const acrossT = (grainHashPure(i, j, k, 1) * 2 - 1) * halfWidth * 0.8;
-    // espessura bem fina (6% a 13% da largura da tábua)
-    const halfThick = halfWidth * (0.06 + grainHashPure(i, j, k, 2) * 0.07);
+    // posição BASE através da tábua (mais perto do centro que antes --
+    // sobra espaço pra amplitude da onda abaixo sem vazar por cima da
+    // linha de junta longa).
+    const baseAcross = (grainHashPure(i, j, k, 1) * 2 - 1) * halfWidth * 0.5;
+    // amplitude/frequência/fase da onda -- cada veio ondula um pouco
+    // diferente do vizinho, pra não parecer repetido/artificial.
+    const amplitude = halfWidth * (0.08 + grainHashPure(i, j, k, 2) * 0.14);
+    const cycles = 0.8 + grainHashPure(i, j, k, 3) * 1.6;
+    const phase = grainHashPure(i, j, k, 4) * Math.PI * 2;
+    // espessura bem fina (4.5% a 9.5% da largura da tábua)
+    const halfThick = halfWidth * (0.045 + grainHashPure(i, j, k, 5) * 0.05);
     // a maior parte do comprimento (55% a 90%), com um leve
     // deslocamento ao longo -- pontas recuadas em vez de sempre
     // encostar exatamente na linha de junta, e nem todo veio
     // centralizado igual (senão fica repetitivo/artificial).
-    const segHalfLen = halfLength * (0.55 + grainHashPure(i, j, k, 3) * 0.35);
-    const alongOffset = (grainHashPure(i, j, k, 4) * 2 - 1) * (halfLength - segHalfLen);
-    const lighten = grainHashPure(i, j, k, 5) < 0.5;
+    const segHalfLen = halfLength * (0.55 + grainHashPure(i, j, k, 6) * 0.35);
+    const alongOffset = (grainHashPure(i, j, k, 7) * 2 - 1) * (halfLength - segHalfLen);
+    const lighten = grainHashPure(i, j, k, 8) < 0.5;
     const shade = lighten
-      ? lightenHex(baseColor, 0.16 + grainHashPure(i, j, k, 6) * 0.22)
-      : darkenHex(baseColor, 0.55 + grainHashPure(i, j, k, 6) * 0.3);
-    const opacity = 0.16 + grainHashPure(i, j, k, 7) * 0.22;
+      ? lightenHex(baseColor, 0.16 + grainHashPure(i, j, k, 9) * 0.22)
+      : darkenHex(baseColor, 0.55 + grainHashPure(i, j, k, 9) * 0.3);
+    const opacity = 0.18 + grainHashPure(i, j, k, 10) * 0.24;
+    const fill = hexToCss(shade);
 
     const alongMin = alongOffset - segHalfLen;
     const alongMax = alongOffset + segHalfLen;
-    const acrossMin = acrossT - halfThick;
-    const acrossMax = acrossT + halfThick;
-    const toWorld = (along: number, across: number): Point => ({
-      x: cx + rowAxis.x * along + colAxis.x * across,
-      y: cy + rowAxis.y * along + colAxis.y * across,
-    });
-    shapes.push({
-      points: [toWorld(alongMin, acrossMin), toWorld(alongMax, acrossMin), toWorld(alongMax, acrossMax), toWorld(alongMin, acrossMax)],
-      fill: hexToCss(shade),
-      opacity,
-    });
+    const acrossAt = (t: number) => baseAcross + amplitude * Math.sin(t * Math.PI * cycles + phase);
+
+    // a "fita" ondulada vira vários quadriláteros finos emendados (um
+    // por segmento da amostra), cada um ligando o ponto anterior ao
+    // próximo -- é isso que faz a curva de verdade, em vez de um
+    // retângulo reto só.
+    for (let s = 0; s < SEGMENTS; s++) {
+      const t0 = s / SEGMENTS;
+      const t1 = (s + 1) / SEGMENTS;
+      const along0 = alongMin + (alongMax - alongMin) * t0;
+      const along1 = alongMin + (alongMax - alongMin) * t1;
+      const across0 = acrossAt(t0);
+      const across1 = acrossAt(t1);
+      shapes.push({
+        points: [
+          toWorld(along0, across0 - halfThick),
+          toWorld(along1, across1 - halfThick),
+          toWorld(along1, across1 + halfThick),
+          toWorld(along0, across0 + halfThick),
+        ],
+        fill,
+        opacity,
+      });
+    }
   }
   return shapes;
 }
@@ -360,7 +393,26 @@ export interface FloorPatternPolygon {
    * FloorPatternConfig.woodGrain/woodGrainShapesForPlank acima).
    * Ausente/undefined nas tábuas/ripas normais (opacas, 1 implícito). */
   opacity?: number;
+  /** opacidade (0..1) SÓ do contorno (linha de junta) -- separado de
+   * `opacity` acima porque o PREENCHIMENTO da tábua continua 100% opaco,
+   * só a linha fica semitransparente. Ver JOINT_LINE_WIDTH/ALPHA no
+   * comentário grande de createFloorPatternGraphics (MainScene.ts):
+   * antes a "linha fina" vinha só de encolher a ESPESSURA (chegou em
+   * 0.4px), o que o WebGL não consegue anti-serrilhar direito (linha
+   * sub-pixel em ângulo diagonal sai picotada/pixelizada -- reportado
+   * pelo Douglas: "as linhas das reguas no piso tao pixelizada"). Agora
+   * a espessura volta pra um valor seguro (0.75px) e o efeito "fio fino"
+   * vem da opacidade reduzida em vez da geometria sub-pixel. */
+  strokeOpacity?: number;
 }
+
+/** Espessura (px) e opacidade (0..1) da linha de junta entre tábuas --
+ * usadas tanto aqui (floorPatternPolygons, preview) quanto em
+ * MainScene.createFloorPatternGraphics (jogo de verdade), pra nunca
+ * dessincronizar. Ver comentário grande de FloorPatternPolygon.strokeOpacity
+ * acima pro motivo de não ir mais fino que isso na ESPESSURA. */
+export const JOINT_LINE_WIDTH = 0.75;
+export const JOINT_LINE_ALPHA = 0.65;
 
 /**
  * Calcula os polígonos de como um FloorPatternConfig fica desenhado
@@ -438,6 +490,7 @@ export function floorPatternPolygons(pattern: FloorPatternConfig): FloorPatternP
           ],
           fill: hexToCss(plankColor),
           stroke: lineColor,
+          strokeOpacity: JOINT_LINE_ALPHA,
         });
         // veios de madeira (ver comentário grande em
         // FloorPatternConfig.woodGrain acima) -- desenhados POR CIMA da

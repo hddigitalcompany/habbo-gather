@@ -1,4 +1,4 @@
-import { FloorPatternConfig, floorPatternPolygons } from "@/game/floor";
+import { FloorPatternConfig, floorPatternPolygons, JOINT_LINE_WIDTH } from "@/game/floor";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 
 /**
@@ -38,7 +38,8 @@ export function FloorPatternSwatch({ pattern }: { pattern: FloorPatternConfig })
           fill={poly.fill}
           fillOpacity={poly.opacity}
           stroke={poly.stroke}
-          strokeWidth={poly.stroke ? 0.4 : undefined}
+          strokeOpacity={poly.strokeOpacity}
+          strokeWidth={poly.stroke ? JOINT_LINE_WIDTH : undefined}
           strokeLinejoin="round"
         />
       ))}

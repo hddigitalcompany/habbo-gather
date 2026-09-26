@@ -64,6 +64,8 @@ import {
   floorWorldPos,
   floorEntryById,
   woodGrainShapesForPlank,
+  JOINT_LINE_WIDTH,
+  JOINT_LINE_ALPHA,
 } from "./floor";
 import {
   AreaDef,
@@ -1440,12 +1442,19 @@ export default class MainScene extends Phaser.Scene {
           const plankColor = this.pickPlankColor(pattern, i, j);
           gfx.fillStyle(plankColor, 1);
           gfx.fillPoints(points, true);
-          // linha bem fina (era 1.5, depois 0.75) -- pedido do Douglas:
-          // "afine a linha ficando o mais parecido possivel da imagem
-          // anexada", depois "afine ainda mais as linhas" (referência:
-          // tábuas de madeira com junta bem fina, quase um fio, não uma
-          // borda grossa).
-          gfx.lineStyle(0.4, lineColor, 1);
+          // linha fina, mas NÃO sub-pixel -- pedido do Douglas: "afine a
+          // linha", depois "afine ainda mais as linhas" (foi de 1.5 até
+          // 0.4px de espessura), só que 0.4px é fino DEMAIS pro WebGL
+          // desenhar limpo numa diagonal (a linha do losango nunca é
+          // reta na tela) -- sai picotada/pixelizada em vez de contínua
+          // (reportado pelo Douglas: "as linhas das reguas no piso tao
+          // pixelizada... nao da pr ser continua??"). JOINT_LINE_WIDTH
+          // (game/floor.ts) volta pra 0.75px -- valor onde ainda ficava
+          // contínua antes de afinar de mais -- e o efeito "fio fino"
+          // agora vem da OPACIDADE reduzida (JOINT_LINE_ALPHA), não da
+          // espessura sub-pixel. Mesmas 2 constantes usadas no preview
+          // (FloorPatternSwatch.tsx), pra nunca dessincronizar.
+          gfx.lineStyle(JOINT_LINE_WIDTH, lineColor, JOINT_LINE_ALPHA);
           gfx.strokePoints(points, true, true);
           // veios de madeira (pedido do Douglas: "agora eu quero esse
           // efeito laminado... de veios de madeira", depois "no sentido
