@@ -223,38 +223,51 @@ function darkenHex(hex: number, factor = 0.55): number {
  * across/along/plankColorIndex aqui.
  */
 export function floorPatternCssGradient(pattern: {
+  plankWidthPx: number;
   colorA: number;
   colorB: number;
   plankLengthPx?: number;
   lineColor?: number;
   colors?: number[];
 }): string {
+  // camada de BASE (as ripas/tábuas em si, na direção da largura) --
+  // ciclo em px de verdade (plankWidthPx), não mais um número fixo, pra
+  // essa prévia reagir de verdade ao valor que o usuário digitou (era um
+  // dos problemas que o Douglas apontou: "nao intercala" -- o gradiente
+  // antigo usava sempre o mesmo ciclo fixo de 6px/12px, ignorando o
+  // campo "Largura da ripa" por completo).
+  const widStep = Math.max(4, pattern.plankWidthPx);
+  let baseLayer: string;
   if (pattern.colors && pattern.colors.length > 0) {
     // várias tábuas de tons diferentes (ver FloorPatternConfig.colors)
     // -- gradiente cíclico com TODAS as cores da paleta, uma prévia da
     // mescla sem sortear tábua por tábua feito o jogo faz de verdade.
-    const stepPct = 100 / pattern.colors.length;
     const stops = pattern.colors
       .map((c, i) => {
         const css = hexToCss(c);
-        return `${css} ${(i * stepPct).toFixed(2)}%, ${css} ${((i + 1) * stepPct).toFixed(2)}%`;
+        return `${css} ${i * widStep}px, ${css} ${(i + 1) * widStep}px`;
       })
       .join(", ");
-    return `repeating-linear-gradient(63deg, ${stops})`;
+    baseLayer = `repeating-linear-gradient(63deg, ${stops})`;
+  } else {
+    // ripa/tábua de 2 cores (comportamento original) -- alterna
+    // colorA/colorB em faixas do tamanho de plankWidthPx.
+    const a = hexToCss(pattern.colorA);
+    const b = hexToCss(pattern.colorB);
+    baseLayer = `repeating-linear-gradient(63deg, ${a} 0, ${a} ${widStep}px, ${b} ${widStep}px, ${b} ${widStep * 2}px)`;
   }
-  if (pattern.plankLengthPx) {
-    // tábua emendada de tom só (colorA === colorB no caso mais comum,
-    // ex: "tábua corrida") -- um gradiente colorA/colorB sólido não
-    // mostraria NENHUMA linha de junta quando as duas cores são iguais,
-    // por isso aqui usa listras finas de lineColor por cima do tom
-    // base, só pra indicar visualmente que tem tábua ali.
-    const base = hexToCss(pattern.colorA);
-    const line = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
-    return `repeating-linear-gradient(63deg, ${line} 0, ${line} 2px, ${base} 2px, ${base} 16px)`;
-  }
-  // ripa contínua de 2 cores (comportamento original) -- alterna
-  // colorA/colorB em faixas iguais.
-  const a = hexToCss(pattern.colorA);
-  const b = hexToCss(pattern.colorB);
-  return `repeating-linear-gradient(63deg, ${a} 0, ${a} 6px, ${b} 6px, ${b} 12px)`;
+  if (!pattern.plankLengthPx) return baseLayer;
+  // camada de LINHA DE JUNTA -- separada da base, em CIMA dela (2
+  // background-image empilhados, o de trás é a base, ver ordem no
+  // `return` abaixo), numa direção PERPENDICULAR (63-90 = -27deg) à das
+  // ripas, com ciclo em plankLengthPx (o campo "Comprimento da tábua"
+  // -- antes esse valor não aparecia em LUGAR NENHUM da prévia, por
+  // isso o Douglas via a mesma imagem não importava o que digitasse
+  // ali). Maioria transparente, só uma faixa fina de lineColor a cada
+  // plankLengthPx -- é isso que cria o efeito de "linha cruzando" por
+  // cima da base, tipo a junta de verdade entre tábuas.
+  const lenStep = Math.max(4, pattern.plankLengthPx);
+  const line = hexToCss(pattern.lineColor ?? darkenHex(pattern.colorA));
+  const jointLayer = `repeating-linear-gradient(${63 - 90}deg, ${line} 0, ${line} 3px, transparent 3px, transparent ${lenStep}px)`;
+  return `${jointLayer}, ${baseLayer}`;
 }

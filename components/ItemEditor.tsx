@@ -3972,6 +3972,7 @@ export default function ItemEditor({
                       className="floor-pattern-preview-tile"
                       style={{
                         backgroundImage: floorPatternCssGradient({
+                          plankWidthPx: floorPlankWidth,
                           colorA: parseHexColor(floorColors[0]),
                           colorB: parseHexColor(floorColors[1] ?? floorColors[0]),
                           plankLengthPx: floorPlankLength.trim() !== "" ? Number(floorPlankLength) : undefined,
@@ -4014,6 +4015,7 @@ export default function ItemEditor({
                             className="items-panel-thumb"
                             style={{
                               backgroundImage: floorPatternCssGradient({
+                                plankWidthPx: item.plank_width_px ?? 24,
                                 colorA: parseHexColor(item.color_a),
                                 colorB: parseHexColor(item.color_b),
                                 plankLengthPx: item.plank_length_px ?? undefined,
