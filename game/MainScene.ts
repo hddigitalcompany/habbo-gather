@@ -997,19 +997,33 @@ export default class MainScene extends Phaser.Scene {
     // pontinho onde ele "toca o chão", alinhado ao tile dele
     const pos = furnitureWorldPos(f);
     const key = furnitureTextureKeyFor(f);
-    // só um alerta (não muda nada no desenho) -- mesma ideia do guard em
-    // addFloorSprite: se a textura ainda não tiver carregado por algum
-    // motivo, o Phaser desenha o quadriculado preto/verde de "textura
-    // faltando" sozinho, e esse warn pelo menos deixa rastro de qual
-    // item/chave foi.
-    if (!this.textures.exists(key)) {
-      console.warn(`[móvel] textura "${key}" (item "${f.id}", tipo "${f.type}") não estava carregada ainda.`);
+    // Douglas: "oq e esse quadrado de erro embaixo?" -- o quadriculado
+    // preto/verde de "textura faltando" do Phaser, bem discreto (~1
+    // tile) perto de onde o boneco tava. Esse guard já existia (só o
+    // console.warn), mas SÓ avisava -- continuava desenhando a imagem
+    // com a `key` quebrada de qualquer jeito, e o Phaser preenchia com o
+    // próprio quadriculado dele. addFloorSprite (logo abaixo) já tinha
+    // sido corrigido faz tempo pra esse MESMO tipo de corrida (preload()
+    // da cena x carregamento do que foi salvo) simplesmente NÃO
+    // desenhando nada em vez de mostrar isso -- aqui nunca tinha
+    // ganhado o mesmo tratamento. Mobília precisa continuar OCUPANDO um
+    // Phaser.GameObjects.Image de verdade (Map de sprites, clique pra
+    // apagar/mover, etc -- diferente do piso, que é só visual), então em
+    // vez de não criar nada, cria mas deixa INVISÍVEL até a textura
+    // certa estar pronta (mesma ideia de "melhor nada do que o
+    // quadriculado feio").
+    const textureMissing = !this.textures.exists(key);
+    if (textureMissing) {
+      console.warn(
+        `[móvel] textura "${key}" (item "${f.id}", tipo "${f.type}") não estava carregada ainda -- item não desenhado (em vez do quadriculado de textura faltando do Phaser). Se isso aparecer toda vez que recarregar a página, é sinal de uma corrida entre o preload() da cena e o carregamento da mobília salva/custom.`
+      );
     }
     const image = this.add
       .image(pos.x, pos.y, key)
       .setOrigin(0.5, 1)
       .setDepth(f.flat ? DEPTH_FLAT_FURNITURE : furnitureDepthForTile(f.col, f.row))
-      .setAlpha(f.transparent ? GLASS_ALPHA : 1);
+      .setAlpha(f.transparent ? GLASS_ALPHA : 1)
+      .setVisible(!textureMissing);
 
     // item CUSTOM (Editor de Itens, ver FurnitureModelDef.custom em
     // game/furniture.ts) -- pedido do Douglas: subir a imagem na
