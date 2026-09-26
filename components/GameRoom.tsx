@@ -1988,7 +1988,36 @@ export default function GameRoom({
       game.events.once(Phaser.Core.Events.READY, () => {
         const scene = game.scene.getScene("main") as MainScene;
         sceneRef.current = scene;
-        // nome/status do card de perfil (ver useEffect logo abaixo, que
+
+        // ACHADO investigando o "quadrado de erro"/item sumido que o
+        // Douglas reportou ("oq e esse quadrado de erro embaixo?" /
+        // "continua la", mesmo depois de uma correção anterior que só
+        // escondia o sintoma -- ver addFloorSprite/addFurnitureSprite em
+        // MainScene.ts): Phaser.Core.Events.READY é do JOGO, não da CENA
+        // -- conferindo o código-fonte do Phaser (node_modules/phaser/src/
+        // core/Game.js, texturesReady()), esse evento dispara ANTES até
+        // do game LOOP começar a rodar (this.start() só é chamado DEPOIS
+        // de emitir "ready"), ou seja, ANTES da cena "main" começar o
+        // preload() dela -- que é quem carrega TODO o catálogo de
+        // piso/mobília de fábrica. Só que esse bloco inteiro (aparência
+        // salva + as buscas de piso/mobília/área salvos, GET /room/*)
+        // rodava direto AQUI, no "ready" do jogo -- disparando as buscas
+        // ANTES do catálogo terminar de carregar. Como o servidor de
+        // tempo real é local (bem mais rápido que o Loader do Phaser
+        // buscando/decodificando as imagens), essas buscas quase sempre
+        // respondiam primeiro, e loadSavedFloor/loadSavedFurniture
+        // desenhavam com textura de catálogo ainda faltando -- por isso o
+        // bug acontecia TODA vez que a página carregava, não só às vezes.
+        //
+        // Fix: espera scene.sceneReady (ver comentário grande nele/no fim
+        // de create(), MainScene.ts) -- só vira true na ÚLTIMA linha de
+        // create(), que o Phaser garante rodar depois do Loader terminar
+        // 100%. runWhenSceneReady roda na hora se já tiver passado
+        // (raça teórica: create() terminar ANTES desse callback do
+        // "ready" do jogo rodar), senão espera o evento "scene-ready" que
+        // create() emite -- funciona nas duas ordens possíveis.
+        const runWhenSceneReady = () => {
+          // nome/status do card de perfil (ver useEffect logo abaixo, que
         // cobre trocas DEPOIS que a cena já tá pronta) -- aqui só o
         // valor inicial, pra não esperar o próximo render pra aparecer.
         scene.setLocalProfile(
@@ -2179,6 +2208,12 @@ export default function GameRoom({
           setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
           setEditingCharacter(false);
         };
+        };
+        // ver comentário grande logo acima (runWhenSceneReady) -- cobre as
+        // duas ordens possíveis entre o "ready" do jogo e o create() da
+        // cena terminar.
+        if (scene.sceneReady) runWhenSceneReady();
+        else scene.events.once("scene-ready", runWhenSceneReady);
       });
 
       const socket = new PartySocket({ host: REALTIME_HOST, room: "sala-principal" });

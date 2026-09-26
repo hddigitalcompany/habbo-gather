@@ -477,6 +477,21 @@ export default class MainScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
 
+  /**
+   * true só a partir da ÚLTIMA linha de create() (ver comentário grande lá)
+   * -- diferente de `game.events.once(Phaser.Core.Events.READY, ...)`, que
+   * GameRoom.tsx usava antes e dispara ANTES até do preload() da cena
+   * começar (checado direto no código-fonte do Phaser). GameRoom.tsx lê
+   * isso (mais o evento "scene-ready" que create() emite na mesma hora)
+   * pra só buscar/aplicar o piso, a mobília e a área salvos DEPOIS que o
+   * catálogo inteiro (preload()) já carregou de verdade -- sem isso, a
+   * corrida com o servidor de tempo real (mais rápido, local) fazia
+   * loadSavedFloor/loadSavedFurniture rodarem com textura de catálogo
+   * ainda faltando, toda vez que a página carregava (bug do "quadrado
+   * preto"/item sumido reportado pelo Douglas).
+   */
+  sceneReady = false;
+
   // trava o movimento por teclado enquanto um campo de texto do React
   // (nome/bio/instagram/chat) está focado -- ver setMovementLocked,
   // chamado pelo listener focusin/focusout em GameRoom.tsx. Ignora o
@@ -946,6 +961,35 @@ export default class MainScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown-RIGHT", (e: KeyboardEvent) => this.nudgeSeatOffset(1, 0, e.shiftKey));
     this.input.keyboard!.on("keydown-UP", (e: KeyboardEvent) => this.nudgeSeatOffset(0, -1, e.shiftKey));
     this.input.keyboard!.on("keydown-DOWN", (e: KeyboardEvent) => this.nudgeSeatOffset(0, 1, e.shiftKey));
+
+    // ACHADO da corrida "[piso]/[móvel] textura não estava carregada
+    // ainda" (Douglas: "oq e esse quadrado de erro embaixo?" / "continua
+    // la" mesmo depois da correção anterior, que só escondia o sintoma
+    // sem consertar a causa -- ver addFloorSprite/addFurnitureSprite):
+    // GameRoom.tsx disparava a busca do piso/mobília/área salvos (GET
+    // /room/floor etc) dentro de `game.events.once(Phaser.Core.Events.
+    // READY, ...)`. Conferindo o código-fonte do Phaser (node_modules/
+    // phaser/src/core/Game.js, texturesReady()): esse evento "ready" do
+    // GAME dispara ANTES até do game LOOP começar (this.start() só roda
+    // DEPOIS de emitir "ready") -- ou seja, a cena "main" nem começou o
+    // preload() ainda nesse momento, e SÓ o preload() já carrega TODAS as
+    // texturas de catálogo (piso/mobília de fábrica, ver preload() logo
+    // acima). Como as buscas ao servidor de tempo real (bem mais rápido,
+    // rodando local) quase sempre respondem ANTES do Phaser terminar de
+    // baixar/decodificar essas imagens, loadSavedFloor/loadSavedFurniture
+    // rodavam com o catálogo ainda incompleto -- corrida de verdade, não
+    // só "às vezes": acontecia TODA vez, exatamente como o Douglas
+    // reportou.
+    //
+    // sceneReady (+ o evento "scene-ready" abaixo) resolve isso: só vira
+    // true bem AQUI, na ÚLTIMA linha de create() -- e create() só roda
+    // depois que o Loader termina 100% (garantia do próprio Phaser), ou
+    // seja, com TODO o catálogo de piso/mobília já carregado de verdade.
+    // GameRoom.tsx passou a esperar por isso (ver comentário grande no
+    // useEffect do Phaser.Game) em vez de sair buscando o estado salvo
+    // direto no "ready" do jogo.
+    this.sceneReady = true;
+    this.events.emit("scene-ready");
   }
 
   /**
