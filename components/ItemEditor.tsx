@@ -4810,15 +4810,22 @@ export default function ItemEditor({
                   "baixo" (ex.: tentar digitar "750" começa em "7",
                   que já seria empurrado pra 60 antes do resto entrar).
                   Enquanto digita aceita qualquer número (até vazio =
-                  0), só arruma (clamp + arredonda pro step) quando o
-                  campo perde o foco. */}
+                  0), só arruma (clamp) quando o campo perde o foco.
+                  SEM `step` aqui de propósito (diferente do slider
+                  acima, que pula de 8 em 8) -- é bug encontrado ao
+                  vivo: com step=8 e min=60 o Safari rejeitava digitar
+                  valores como 155 ("os dois valores válidos mais
+                  próximos são 148 e 156"), já que 155 não bate num
+                  múltiplo de 8 a partir de 60. O digitável é
+                  justamente pra digitar QUALQUER pixel exato, driblando
+                  os pulos do slider -- passo 8 só faz sentido
+                  arrastando. */}
               <span className="settings-slider-value-field">
                 <input
                   type="number"
                   className="settings-slider-value-input"
                   min={DISPLAY_WIDTH_MIN}
                   max={DISPLAY_WIDTH_MAX}
-                  step={DISPLAY_WIDTH_STEP}
                   value={displayWidth}
                   onChange={(e) => setDisplayWidth(Number(e.target.value) || 0)}
                   onBlur={() => setDisplayWidth((prev) => clamp(Math.round(prev), DISPLAY_WIDTH_MIN, DISPLAY_WIDTH_MAX))}
