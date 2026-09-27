@@ -91,11 +91,19 @@ export function cleanExtraSeats(raw: unknown): { dCol: number; dRow: number; x: 
   return cleaned;
 }
 
-/** Direções que aceitam override em direction_offsets (ver
+/** Direções que aceitam override em direction_offsets/
+ * direction_display_width/seat_direction_offsets (ver
  * supabase/migrations/0007_room_items_direction_offsets_seat.sql) --
  * "down" fica de fora de propósito (usa offset_x/offset_y direto, ver
- * comentário na migration). */
-const OVERRIDABLE_DIRECTIONS = ["left", "right", "up"] as const;
+ * comentário na migration). "cornerTop"/"cornerBottom" (pedido do
+ * Douglas: "nas paredes adicione mais duas posicoes, quina de cima,
+ * quina de baixo") só existem de verdade em item de parede (ver
+ * WALL_DIRECTION_FIELDS em ItemEditor.tsx) -- mesmo raciocínio de
+ * ALLOWED_DIRECTIONS em app/api/items/route.ts: mais simples valer pra
+ * qualquer categoria do que bifurcar a validação, um mobi comum nunca
+ * manda override pra essas 2 chaves (o formulário só mostra esses
+ * campos em "Criar Parede"). */
+const OVERRIDABLE_DIRECTIONS = ["left", "right", "up", "cornerTop", "cornerBottom"] as const;
 
 /** Valida/limpa o formato de direction_offsets vindo do corpo da
  * requisição -- só aceita left/right/up, cada um com x/y numéricos

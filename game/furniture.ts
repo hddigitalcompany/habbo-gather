@@ -1,6 +1,27 @@
 import { tileToWorld, Direction, ISO_TILE_HEIGHT } from "./grid";
 
 /**
+ * Facing de MÓVEL -- superset de Direction (acima, o mesmo tipo usado
+ * pro ANDAR do avatar, ver walkQueue/playWalk em MainScene.ts) com 2
+ * posições EXTRAS só pra parede/divisória: "cornerTop"/"cornerBottom"
+ * ("quina de cima"/"quina de baixo", pedido do Douglas: "nas paredes
+ * adicione mais duas posicoes, quina de cima, quina de baixo" -- depois
+ * de já ter "quina esquerda"/"quina direita", que reaproveitam left/up
+ * de Direction, ver WALL_DIRECTION_FIELDS em ItemEditor.tsx).
+ *
+ * Fica SEPARADO de Direction de propósito, em vez de simplesmente
+ * adicionar as 2 quinas nele: Direction também é o tipo do walkQueue/
+ * playWalk do avatar (MainScene.ts) -- o boneco só tem sprite/animação
+ * pras 4 direções de sempre, então widening Direction quebraria (ou, na
+ * melhor hipótese, deixaria "válidos" mas sem sentido) o andar do
+ * avatar. FurnitureFacing entra só onde já era Direction MAS falando de
+ * MÓVEL colocado/catálogo (FurnitureDef.facing, FurnitureCatalogEntry.facing,
+ * FurnitureModelColorOption.art e os 3 overrides por direção
+ * logo abaixo) -- nunca no que é do avatar.
+ */
+export type FurnitureFacing = Direction | "cornerTop" | "cornerBottom";
+
+/**
  * Móveis da sala, posicionados em coordenada de TILE (não pixel) pra
  * ficarem sempre alinhados com a grade que o avatar anda. Cada item tem
  * um "tipo" (a peça de mobília) e uma "facing" (pra que lado ela olha na
@@ -29,8 +50,11 @@ export interface FurnitureDef {
   /** posição em tiles (não pixel) -- ver game/grid.ts */
   col: number;
   row: number;
-  /** direção que o avatar (e a arte do móvel) fica "olhando" */
-  facing: Direction;
+  /** direção que o avatar (e a arte do móvel) fica "olhando" -- ver
+   * FurnitureFacing (acima) pro porquê desse tipo não ser Direction
+   * puro: item de parede pode usar as 2 quinas extras (cornerTop/
+   * cornerBottom), que não existem pro avatar. */
+  facing: FurnitureFacing;
   /** qual MODELO desse tipo (ver FurnitureModelDef/FURNITURE_MODELS
    * abaixo) -- só tipos com modelo cadastrado usam isso (hoje só
    * "poltrona", ver Gamer/Poltrona Lecce). undefined = design único do
@@ -81,7 +105,7 @@ export interface FurnitureDef {
  * `public/assets/`. Se uma direção não tiver arquivo, cai pra "down"
  * como fallback (ver furnitureArtFile).
  */
-export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, string>>> = {
+export const FURNITURE_ART: Record<FurnitureType, Partial<Record<FurnitureFacing, string>>> = {
   poltrona: {
     down: "poltrona_frente.png",
     left: "poltrona_lado_esq.png",
@@ -122,7 +146,7 @@ export const FURNITURE_ART: Record<FurnitureType, Partial<Record<Direction, stri
 export interface FurnitureColorOption {
   id: string;
   label: string;
-  art: Partial<Record<Direction, string>>;
+  art: Partial<Record<FurnitureFacing, string>>;
 }
 
 /**
@@ -136,7 +160,7 @@ export interface FurnitureColorOption {
 export const FURNITURE_COLORS: Partial<Record<FurnitureType, FurnitureColorOption[]>> = {};
 
 /** Nome do arquivo em public/assets pra uma COR+direção (com fallback pra "down"), mesma lógica de furnitureArtFile. */
-export function furnitureColorArtFile(color: FurnitureColorOption, facing: Direction): string | null {
+export function furnitureColorArtFile(color: FurnitureColorOption, facing: FurnitureFacing): string | null {
   return color.art[facing] ?? color.art.down ?? null;
 }
 
@@ -158,7 +182,10 @@ export interface FurnitureModelColorOption {
   // item CUSTOM (Editor de Itens, ver registerCustomFurnitureModels)
   // só exige "down" (frente) -- as outras 3 caem no fallback pra
   // "down" já usado em resolveFurnitureArt/furnitureModelCatalogEntries.
-  art: Partial<Record<Direction, string>>;
+  // Partial<Record<FurnitureFacing,...>> em vez de Direction puro: item
+  // de PAREDE (categoria divisória) pode ter arte nas 2 quinas extras
+  // também (cornerTop/cornerBottom, ver FurnitureFacing acima).
+  art: Partial<Record<FurnitureFacing, string>>;
 }
 
 export interface FurnitureModelDef {
@@ -202,7 +229,7 @@ export interface FurnitureModelDef {
    * displayWidth de "down" (comportamento de sempre, sem regressão pros
    * itens já cadastrados). Útil pra parede, por exemplo: a "quina" pode
    * precisar de uma largura bem diferente da "frente". */
-  directionDisplayWidth?: Partial<Record<Exclude<Direction, "down">, number>>;
+  directionDisplayWidth?: Partial<Record<Exclude<FurnitureFacing, "down">, number>>;
   /** Ícone PRÓPRIO pro botão do catálogo (URL do Storage) -- pedido do
    * Douglas: "escolher o favicon que aparece no catálogo", separado das
    * 4 fotos de direção (a arte da peça pode não ficar boa cortada em
@@ -230,7 +257,7 @@ export interface FurnitureModelDef {
    * Avatar", ver AvatarCreatorPanel em ItemEditor.tsx). Direção sem
    * entrada aqui cai no offsetX/offsetY de "down" -- útil quando o item
    * é simétrico o bastante pra não precisar de ajuste por lado. */
-  directionOffsets?: Partial<Record<Exclude<Direction, "down">, { x: number; y: number }>>;
+  directionOffsets?: Partial<Record<Exclude<FurnitureFacing, "down">, { x: number; y: number }>>;
   /** Se ESSE modelo senta (ver isFurnitureSittable acima) -- pedido do
    * Douglas: seletor "Tem interação? Sentar/Nenhuma" no Editor de
    * Itens. undefined = sem escolha feita ainda (modelo "de fábrica" ou
@@ -274,7 +301,7 @@ export interface FurnitureModelDef {
    * genérico de lado (SEAT_Y_LADO/SEAT_X_LADO, ver resolveSeatOffset),
    * que já é uma aproximação bem melhor que aplicar um valor pensado
    * pra frente/costas de lado. */
-  seatDirectionOffsets?: Partial<Record<Exclude<Direction, "down">, { x: number; y: number }>>;
+  seatDirectionOffsets?: Partial<Record<Exclude<FurnitureFacing, "down">, { x: number; y: number }>>;
   /** Tamanho do FOOTPRINT (em tiles do grid col/row) desse modelo --
    * pedido do Douglas: "tenho mobis que ocupam mais tiles doq um ou
    * dois, entao preciso selecionar pra que nao se suba em um item". Até
@@ -436,7 +463,7 @@ export function furnitureTextureKeyFor(f: FurnitureDef): string {
 }
 
 /** Chave da textura no Phaser pra um modelo+cor+direção (ex: "gamer"+"rosa"+"left" -> "furniture-variant-gamer-rosa-left"). */
-export function furnitureVariantTextureKey(modelId: string, colorId: string, facing: Direction): string {
+export function furnitureVariantTextureKey(modelId: string, colorId: string, facing: FurnitureFacing): string {
   return `furniture-variant-${modelId}-${colorId}-${facing}`;
 }
 
@@ -544,12 +571,12 @@ export function isFurnitureSittable(f: FurnitureDef): boolean {
 }
 
 /** Chave da textura no Phaser pra um móvel numa direção (ex: "poltrona" + "left" -> "furniture-poltrona-left"). */
-export function furnitureTextureKey(type: FurnitureType, facing: Direction): string {
+export function furnitureTextureKey(type: FurnitureType, facing: FurnitureFacing): string {
   return `furniture-${type}-${facing}`;
 }
 
 /** Nome do arquivo em public/assets pra essa peça+direção (com fallback pra "down"). */
-export function furnitureArtFile(type: FurnitureType, facing: Direction): string | null {
+export function furnitureArtFile(type: FurnitureType, facing: FurnitureFacing): string | null {
   const art = FURNITURE_ART[type];
   return art[facing] ?? art.down ?? null;
 }
@@ -601,7 +628,7 @@ export const VIDRO_BASE_OFFSET_Y = -ISO_TILE_HEIGHT / 2;
  */
 export interface FurnitureCatalogEntry {
   type: FurnitureType;
-  facing: Direction;
+  facing: FurnitureFacing;
   label: string;
   seatOffsetY?: number;
   seatOffsetX?: number;
@@ -622,8 +649,19 @@ export interface FurnitureCatalogEntry {
  * catalogIndicesForGroup abaixo. Precisa vir ANTES de FURNITURE_CATALOG
  * (usada por furnitureModelCatalogEntries logo abaixo, que roda na hora
  * que o módulo carrega).
+ *
+ * "cornerTop"/"cornerBottom" no fim (pedido do Douglas: "nas paredes
+ * adicione mais duas posicoes, quina de cima, quina de baixo") --
+ * seguro adicionar aqui pra QUALQUER móvel, não só parede: o loop que
+ * usa essa ordem (furnitureModelCatalogEntries/registerCustomFurnitureModels
+ * logo abaixo) já pula direção sem arte cadastrada
+ * (`if (!defaultColor.art[facing]) continue`), e só item de parede
+ * (categoria divisória, ver WALL_DIRECTION_FIELDS em ItemEditor.tsx)
+ * chega a ter arte nessas 2 chaves -- um mobi comum simplesmente nunca
+ * gera entrada de catálogo pra elas, sem precisar bifurcar essa lista
+ * por categoria.
  */
-export const FURNITURE_ROTATE_ORDER: Direction[] = ["down", "right", "up", "left"];
+export const FURNITURE_ROTATE_ORDER: FurnitureFacing[] = ["down", "right", "up", "left", "cornerTop", "cornerBottom"];
 
 // entradas do design ÚNICO por tipo (sem modelo) -- hoje só o vidro
 // (divisória); poltrona deixou de ter entrada fixa aqui desde que ganhou
@@ -839,7 +877,7 @@ export function seatOffsetGroupKey(f: FurnitureDef): string {
 }
 
 /** { grupo (ver seatOffsetGroupKey): { direção: {x,y} } } -- só guarda os que JÁ foram ajustados manualmente (ver "Assento"); um modelo nunca ajustado nem entra aqui, cai direto no padrão (ver resolveSeatOffset). Persistido no servidor junto com os móveis colocados (ver GET/POST /room/furniture em server/index.js). */
-export type FurnitureSeatOffsetsMap = Record<string, Partial<Record<Direction, { x: number; y: number }>>>;
+export type FurnitureSeatOffsetsMap = Record<string, Partial<Record<FurnitureFacing, { x: number; y: number }>>>;
 
 /**
  * Deslocamento (px) de onde o boneco aparece sentado num móvel -- ordem
@@ -925,7 +963,7 @@ export function seatOffsetGroupLabel(f: FurnitureDef): string {
 export interface SeatTuningInfo {
   groupKey: string;
   label: string;
-  facing: Direction;
+  facing: FurnitureFacing;
   x: number;
   y: number;
 }

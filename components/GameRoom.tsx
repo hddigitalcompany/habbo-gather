@@ -48,6 +48,7 @@ import {
   FurnitureCategoryId,
   FurnitureCatalogEntry,
   FurnitureDef,
+  FurnitureFacing,
   FurnitureModelDef,
   FurnitureSeatOffsetsMap,
   SeatTuningInfo,
@@ -886,18 +887,18 @@ export default function GameRoom({
           id: string;
           label: string;
           category: string;
-          art: Partial<Record<Direction, string>>;
+          art: Partial<Record<FurnitureFacing, string>>;
           display_width: number | null;
           icon_url: string | null;
           offset_x: number | null;
           offset_y: number | null;
-          direction_offsets: Partial<Record<Direction, { x: number; y: number }>> | null;
-          direction_display_width: Partial<Record<Direction, number>> | null;
+          direction_offsets: Partial<Record<FurnitureFacing, { x: number; y: number }>> | null;
+          direction_display_width: Partial<Record<FurnitureFacing, number>> | null;
           sittable: boolean | null;
           seat_offset_x: number | null;
           seat_offset_y: number | null;
-          seat_direction_offsets: Partial<Record<Direction, { x: number; y: number }>> | null;
-          colors: { id: string; label: string; art: Partial<Record<Direction, string>> }[] | null;
+          seat_direction_offsets: Partial<Record<FurnitureFacing, { x: number; y: number }>> | null;
+          colors: { id: string; label: string; art: Partial<Record<FurnitureFacing, string>> }[] | null;
           footprint_cols: number | null;
           footprint_rows: number | null;
           extra_seats: { dCol: number; dRow: number; x: number; y: number }[] | null;
@@ -4144,11 +4145,17 @@ export default function GameRoom({
 // rótulo em português de cada direção -- usado no painel "Assento" (ver
 // seatTuningInfo.facing) pra mostrar qual lado da peça tá sendo
 // ajustado agora.
-const FACING_LABEL: Record<Direction, string> = {
+// FurnitureFacing (não Direction puro) só por causa do tipo de
+// seatTuningInfo.facing (ver game/furniture.ts) -- na prática nunca
+// chega "quina de cima/baixo" aqui, parede não senta, mas o tipo
+// precisa aceitar pra indexar sem erro de compilação.
+const FACING_LABEL: Record<FurnitureFacing, string> = {
   down: "frente",
   left: "lado esq.",
   right: "lado dir.",
   up: "costas",
+  cornerTop: "quina de cima",
+  cornerBottom: "quina de baixo",
 };
 
 const EDIT_CATEGORY_TABS: {

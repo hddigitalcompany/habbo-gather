@@ -6,6 +6,7 @@ import {
   FurnitureDef,
   FurnitureType,
   FurnitureCatalogEntry,
+  FurnitureFacing,
   FURNITURE_ART,
   FURNITURE_MODELS,
   FURNITURE_TYPE_CATEGORY,
@@ -182,6 +183,23 @@ const SENTADO_FRAMES: Record<Direction, number> = {
   right: 14,
   up: WALK_FRAMES.up[0],
 };
+
+/**
+ * FurnitureFacing (game/furniture.ts) -> Direction "de verdade" do
+ * boneco -- o avatar só tem sprite/pose pras 4 direções de sempre (ver
+ * WALK_FRAMES/SENTADO_FRAMES acima), nunca pras 2 quinas extras de
+ * parede (cornerTop/cornerBottom, pedido do Douglas: "quina de cima,
+ * quina de baixo"). Usado em sitAt/setRemoteSeat, que indexam
+ * SENTADO_FRAMES[furniture.facing] -- na prática NUNCA recebe uma
+ * quina de verdade (parede não senta, "Tem interação?" fica sempre
+ * desmarcado nela), mas o tipo de FurnitureDef.facing é largo o
+ * bastante pra aceitar, então esse fallback pra "down" é só defensivo
+ * (evita um frame inválido se algum dia um item de parede virar
+ * sentável por engano).
+ */
+function avatarFacingFor(facing: FurnitureFacing): Direction {
+  return facing === "cornerTop" || facing === "cornerBottom" ? "down" : facing;
+}
 
 /**
  * Camadas de customização, na ordem em que são desenhadas (primeiro =
@@ -676,9 +694,9 @@ export default class MainScene extends Phaser.Scene {
   /** Definido de fora (GameRoom.tsx) -- emitido toda vez que o estado do ajuste de assento muda (sentou/levantou/nudge), null quando não há nada pra ajustar agora (não sentado, ou modo desligado). */
   onSeatTuningChange?: (info: SeatTuningInfo | null) => void;
   /** Definido de fora (GameRoom.tsx) -- emitido só pelo botão "Redefinir" (ver resetSeatOffset), separado do onSeatTuningChange acima porque aqui o React precisa APAGAR a entrada (não só atualizar x/y): sem isso o valor salvo continuaria "travado" no que já era o padrão, em vez de voltar a acompanhar o padrão se ele mudar depois. */
-  onSeatOffsetReset?: (groupKey: string, facing: Direction) => void;
+  onSeatOffsetReset?: (groupKey: string, facing: FurnitureFacing) => void;
   /** Definido de fora (GameRoom.tsx) -- emitido só por um NUDGE de verdade (ver nudgeSeatOffset), nunca só por sentar/levantar/ligar o modo (isso é só onSeatTuningChange, puramente de EXIBIÇÃO). É esse aqui que o React usa pra atualizar o mapa que autosalva -- sentar numa cadeira com o modo ligado não pode sozinho "gravar" o valor default como se fosse um ajuste manual. */
-  onSeatOffsetChange?: (groupKey: string, facing: Direction, x: number, y: number) => void;
+  onSeatOffsetChange?: (groupKey: string, facing: FurnitureFacing, x: number, y: number) => void;
 
   // --- piso do editor de espaço (aba "Piso", ver selectFloorTool) --
   // draftFloor/draftFloorSprites guardam TODO o piso da sala (tanto o já
@@ -905,7 +923,7 @@ export default class MainScene extends Phaser.Scene {
     // apareça em nenhum móvel fixo da sala.
     for (const type of Object.keys(FURNITURE_ART) as FurnitureType[]) {
       const artByFacing = FURNITURE_ART[type];
-      for (const facing of Object.keys(artByFacing) as Direction[]) {
+      for (const facing of Object.keys(artByFacing) as FurnitureFacing[]) {
         const file = artByFacing[facing];
         if (!file) continue;
         this.load.image(furnitureTextureKey(type, facing), `/assets/${file}`);
@@ -918,7 +936,7 @@ export default class MainScene extends Phaser.Scene {
     // furnitureTextureKeyFor, usadas em addFurnitureSprite).
     for (const model of FURNITURE_MODELS) {
       for (const color of model.colors) {
-        for (const facing of Object.keys(color.art) as Direction[]) {
+        for (const facing of Object.keys(color.art) as FurnitureFacing[]) {
           const file = color.art[facing];
           if (!file) continue;
           this.load.image(furnitureVariantTextureKey(model.id, color.id, facing), `/assets/${file}`);
@@ -2408,8 +2426,8 @@ export default class MainScene extends Phaser.Scene {
     this.applySeatVisualPosition(furniture, dCol, dRow);
     // a pose sentada segue a direção que o móvel "olha" (facing), não a
     // direção que o jogador estava andando antes de sentar
-    this.localContainer.setData("dir", furniture.facing);
-    this.setPoseFrame(this.localContainer, SENTADO_FRAMES[furniture.facing]);
+    this.localContainer.setData("dir", avatarFacingFor(furniture.facing));
+    this.setPoseFrame(this.localContainer, SENTADO_FRAMES[avatarFacingFor(furniture.facing)]);
     // profundidade já aplicada por applySeatVisualPosition acima (ver
     // seatDepth) -- inclui a exceção do "up" (móvel NA FRENTE do
     // boneco, só a cabeça aparece por cima do encosto).
@@ -3189,8 +3207,8 @@ export default class MainScene extends Phaser.Scene {
       const furniture = this.furnitureById(furnitureId);
       const container = this.remoteContainers.get(id);
       if (furniture && container) {
-        container.setData("dir", furniture.facing);
-        this.setPoseFrame(container, SENTADO_FRAMES[furniture.facing]);
+        container.setData("dir", avatarFacingFor(furniture.facing));
+        this.setPoseFrame(container, SENTADO_FRAMES[avatarFacingFor(furniture.facing)]);
         // mesma correção de seatDepth (ver comentário grande dela) --
         // baseada no tile do ASSENTO (âncora + dCol/dRow), não no Y (já
         // deslocado pelo assento) da posição que chegou pelo "move".

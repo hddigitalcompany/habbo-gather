@@ -1652,6 +1652,7 @@ body {
    nível de hierarquia. */
 .edit-section-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
 }

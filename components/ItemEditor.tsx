@@ -39,6 +39,22 @@ import FurnitureColorZoneTool from "@/components/FurnitureColorZoneTool";
 
 type CategoryId = "poltrona" | "divisoria" | "sofa" | "mesa" | "planta" | "computador";
 type DirectionKey = "down" | "left" | "right" | "up";
+/** Facing de MOBI/PAREDE -- superset de DirectionKey com 2 posições
+ * EXTRAS só pra parede/divisória: "cornerTop"/"cornerBottom" ("quina de
+ * cima"/"quina de baixo", pedido do Douglas: "nas paredes adicione mais
+ * duas posicoes, quina de cima, quina de baixo" -- depois de já ter
+ * "quina esquerda"/"quina direita", que reaproveitam left/up de
+ * DirectionKey, ver WALL_DIRECTION_FIELDS abaixo). Fica SEPARADO de
+ * DirectionKey de propósito: esse tipo aqui também é usado pro Avatar/
+ * traje/cabelo/pele neste mesmo arquivo, sempre travado nas 4 direções
+ * de sempre (o boneco não tem sprite pras quinas extras, ver
+ * SENTADO_FRAMES/playWalk em MainScene.ts) -- só o formulário de Mobi/
+ * Parede (files/existingArt/direction_offsets/direction_display_width/
+ * activeMobiDirection) usa esse tipo mais largo, pra não arriscar
+ * quebrar nada do editor de avatar. Mesmo tipo de game/furniture.ts
+ * (FurnitureFacing) -- ver comentário lá pro porquê de NÃO ser o mesmo
+ * Direction usado pro andar do avatar (game/grid.ts). */
+type MobiFacing = DirectionKey | "cornerTop" | "cornerBottom";
 
 // múltiplo de folga acima do tamanho que o item aparece no jogo (ver
 // CUSTOM_ITEM_TARGET_WIDTH em game/furniture.ts) -- pedido do Douglas:
@@ -358,25 +374,39 @@ const DIRECTION_FIELDS: { key: DirectionKey; label: string; required: boolean }[
 // na sala, canRotate etc. em GameRoom.tsx) continua funcionando sem
 // nenhuma mudança lá, já que pra ele é só mais uma "direção" com arte
 // cadastrada.
-const WALL_DIRECTION_FIELDS: typeof DIRECTION_FIELDS = DIRECTION_FIELDS.map((f) =>
-  f.key === "left" ? { ...f, label: "Quina esquerda" } : f.key === "up" ? { ...f, label: "Quina direita" } : f
-);
+//
+// Rodada seguinte, Douglas pediu mais 2: "nas paredes adicione mais
+// duas posicoes, quina de cima, quina de baixo". Dessa vez NÃO tem
+// slot sobrando pra reaproveitar (down/left/right/up já usados todos) --
+// precisou de 2 chaves NOVAS de verdade ("cornerTop"/"cornerBottom",
+// fora de DirectionKey, ver MobiFacing acima), por isso essa lista
+// deixou de ser um .map() em cima de DIRECTION_FIELDS (só trocava
+// rótulo) e virou uma lista PRÓPRIA, com os 4 slots de sempre + 2
+// novos no fim.
+const WALL_DIRECTION_FIELDS: { key: MobiFacing; label: string; required: boolean }[] = [
+  { key: "down", label: "Frente esquerda", required: true },
+  { key: "left", label: "Quina esquerda", required: false },
+  { key: "right", label: "Frente direita", required: false },
+  { key: "up", label: "Quina direita", required: false },
+  { key: "cornerTop", label: "Quina de cima", required: false },
+  { key: "cornerBottom", label: "Quina de baixo", required: false },
+];
 
 type CustomItemRow = {
   id: string;
   label: string;
   category: CategoryId;
-  art: Partial<Record<DirectionKey, string>>;
+  art: Partial<Record<MobiFacing, string>>;
   icon_url: string | null;
   display_width: number | null;
   offset_x: number | null;
   offset_y: number | null;
-  direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
-  direction_display_width: Partial<Record<Exclude<DirectionKey, "down">, number>> | null;
+  direction_offsets: Partial<Record<Exclude<MobiFacing, "down">, { x: number; y: number }>> | null;
+  direction_display_width: Partial<Record<Exclude<MobiFacing, "down">, number>> | null;
   sittable: boolean | null;
   seat_offset_x: number | null;
   seat_offset_y: number | null;
-  seat_direction_offsets: Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>> | null;
+  seat_direction_offsets: Partial<Record<Exclude<MobiFacing, "down">, { x: number; y: number }>> | null;
   colors: FurnitureModelColorOption[] | null;
   footprint_cols: number | null;
   footprint_rows: number | null;
@@ -3060,7 +3090,7 @@ export default function ItemEditor({
   const [items, setItems] = useState<CustomItemRow[] | null>(null);
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<CategoryId>("poltrona");
-  const [files, setFiles] = useState<Partial<Record<DirectionKey, File>>>({});
+  const [files, setFiles] = useState<Partial<Record<MobiFacing, File>>>({});
   // "Corrigir ângulo (PixelLab)" -- pedido do Douglas: "ele vai
   // corrigir automaticamente? pode fazer". Marcado por padrão (hoje
   // toda a arte de mobi vem de lá) -- aplica fixPixellabIsometricAngle
@@ -3099,7 +3129,7 @@ export default function ItemEditor({
   // URLs que JÁ estavam salvas -- mostradas como preview/miniatura
   // mesmo sem reenviar arquivo novo (só troca o que for re-upload).
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [existingArt, setExistingArt] = useState<Partial<Record<DirectionKey, string>>>({});
+  const [existingArt, setExistingArt] = useState<Partial<Record<MobiFacing, string>>>({});
 
   // tamanho de exibição ajustado à mão (ver DISPLAY_WIDTH_MIN/MAX/
   // PREVIEW_SCALE acima) -- começa no alvo padrão da categoria escolhida
@@ -3145,7 +3175,7 @@ export default function ItemEditor({
   // game/furniture.ts). Qual direção tá sendo ajustada agora no preview
   // -- ver activeMobiDirection/DIRECTION_FIELDS.
   const [directionOffsets, setDirectionOffsets] = useState<
-    Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>>
+    Partial<Record<Exclude<MobiFacing, "down">, { x: number; y: number }>>
   >({});
   // override de displayWidth por direção (pedido do Douglas, testando o
   // campo digitável de "Tamanho no jogo" recém adicionado: "se eu mudar
@@ -3156,9 +3186,9 @@ export default function ItemEditor({
   // entrada numa direção = continua reaproveitando o displayWidth de
   // "down" (comportamento de sempre, sem regressão).
   const [directionDisplayWidth, setDirectionDisplayWidth] = useState<
-    Partial<Record<Exclude<DirectionKey, "down">, number>>
+    Partial<Record<Exclude<MobiFacing, "down">, number>>
   >({});
-  const [activeMobiDirection, setActiveMobiDirection] = useState<DirectionKey>("down");
+  const [activeMobiDirection, setActiveMobiDirection] = useState<MobiFacing>("down");
 
   // "Tem interação?" (pedido do Douglas: "se vai ter interação, e qual
   // interação -- por enquanto só temos sentar") -- desacopla "senta" da
@@ -3185,7 +3215,7 @@ export default function ItemEditor({
   // de um seletor à parte -- menos controle na tela, e o boneco já muda
   // de pose junto com a aba mesmo.
   const [seatDirectionOffsets, setSeatDirectionOffsets] = useState<
-    Partial<Record<Exclude<DirectionKey, "down">, { x: number; y: number }>>
+    Partial<Record<Exclude<MobiFacing, "down">, { x: number; y: number }>>
   >({});
 
   // URL (blob local, nunca sobe pra lugar nenhum) da imagem de FRENTE
@@ -3804,7 +3834,7 @@ export default function ItemEditor({
     if (activeMobiDirection === "down") {
       setDisplayWidth(value);
     } else {
-      const dir = activeMobiDirection as Exclude<DirectionKey, "down">;
+      const dir = activeMobiDirection as Exclude<MobiFacing, "down">;
       setDirectionDisplayWidth((prev) => ({ ...prev, [dir]: value }));
     }
   }
@@ -3827,8 +3857,16 @@ export default function ItemEditor({
 
   // boneco de referência NA POSE da direção ativa (mesmo esquema do
   // "Criar Avatar", ver DIRECTION_FIRST_FRAME_INDEX/frameOffsetXPx em
-  // AvatarCreatorPanel acima).
-  const activeMobiFrameIndex = DIRECTION_FIRST_FRAME_INDEX[activeMobiDirection];
+  // AvatarCreatorPanel acima). O boneco não tem pose de "quina" (só as 4
+  // de sempre, ver DIRECTION_FIRST_FRAME_INDEX/SEAT_FRAME_INDEX logo
+  // abaixo) -- nas 2 quinas extras de parede (cornerTop/cornerBottom,
+  // pedido do Douglas: "quina de cima, quina de baixo") o boneco de
+  // referência cai na pose de frente ("down"), só pra continuar servindo
+  // de escala/referência de tamanho no preview (não representa a peça
+  // em si, que não senta nem anda).
+  const avatarPoseDirection: DirectionKey =
+    activeMobiDirection === "cornerTop" || activeMobiDirection === "cornerBottom" ? "down" : activeMobiDirection;
+  const activeMobiFrameIndex = DIRECTION_FIRST_FRAME_INDEX[avatarPoseDirection];
   const mobiFrameCol = activeMobiFrameIndex % SKIN_SHEET_COLS;
   const mobiFrameRow = Math.floor(activeMobiFrameIndex / SKIN_SHEET_COLS);
   const mobiFrameOffsetXPx = mobiFrameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
@@ -3837,7 +3875,7 @@ export default function ItemEditor({
   // mesma ideia, mas pra pose SENTADO da direção ativa (usado no boneco
   // arrastável do marcador de assento logo abaixo, no lugar da bolinha
   // antiga -- pedido do Douglas).
-  const activeSeatFrameIndex = SEAT_FRAME_INDEX[activeMobiDirection];
+  const activeSeatFrameIndex = SEAT_FRAME_INDEX[avatarPoseDirection];
   const seatFrameCol = activeSeatFrameIndex % SKIN_SHEET_COLS;
   const seatFrameRow = Math.floor(activeSeatFrameIndex / SKIN_SHEET_COLS);
   const seatFrameOffsetXPx = seatFrameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
@@ -3961,7 +3999,16 @@ export default function ItemEditor({
       // ângulo).
       const maxUploadWidth = displayWidth * UPLOAD_SUPERSAMPLE;
       const art: Record<string, string> = {};
-      for (const field of DIRECTION_FIELDS) {
+      // achado corrigindo "quina de cima/quina de baixo": esse loop
+      // sempre rodou em cima de DIRECTION_FIELDS fixo (só os 4 de
+      // sempre), mesmo em modo parede -- então as 2 quinas NOVAS
+      // (cornerTop/cornerBottom, só existem em WALL_DIRECTION_FIELDS)
+      // nunca eram sequer OLHADAS aqui, o arquivo escolhido na aba delas
+      // ia pro upload e sumia (nunca subia, nunca entrava no `art`
+      // mandado pro servidor). Mesma condição usada em todo canto que já
+      // decide entre as duas listas (DIRECTION_FIELDS.find/WALL_DIRECTION_FIELDS.find
+      // logo abaixo, no JSX).
+      for (const field of mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS) {
         const rawFile = files[field.key];
         if (!rawFile) continue; // editando: direção não reenviada mantém a URL antiga (merge no servidor)
         const file = await resizeImageForUpload(rawFile, maxUploadWidth);
@@ -4552,11 +4599,12 @@ export default function ItemEditor({
           </label>
 
           <div className="items-panel-uploads">
-            {/* parede usa WALL_DIRECTION_FIELDS (mesmas 4 chaves de
-                sempre, só com "left"/"up" relabeladas pra "Quina
-                esquerda/direita" -- ver comentário grande onde
-                WALL_DIRECTION_FIELDS é definida, perto de
-                DIRECTION_FIELDS). */}
+            {/* parede usa WALL_DIRECTION_FIELDS -- os 4 slots de sempre
+                (down/right retos, left/up relabelados "Quina esquerda/
+                direita") + 2 EXTRAS (cornerTop/cornerBottom, "Quina de
+                cima/baixo", pedido do Douglas) -- ver comentário grande
+                onde WALL_DIRECTION_FIELDS é definida, perto de
+                DIRECTION_FIELDS. */}
             {(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).map((field) => {
               const existingSrc = existingArt[field.key];
               return (
@@ -4899,7 +4947,7 @@ export default function ItemEditor({
                   onClick={() => {
                     setDirectionDisplayWidth((prev) => {
                       const next = { ...prev };
-                      delete next[activeMobiDirection as Exclude<DirectionKey, "down">];
+                      delete next[activeMobiDirection as Exclude<MobiFacing, "down">];
                       return next;
                     });
                   }}
@@ -5037,7 +5085,7 @@ export default function ItemEditor({
                     } else {
                       setDirectionOffsets((prev) => {
                         const next = { ...prev };
-                        delete next[activeMobiDirection as Exclude<DirectionKey, "down">];
+                        delete next[activeMobiDirection as Exclude<MobiFacing, "down">];
                         return next;
                       });
                     }
@@ -5061,7 +5109,7 @@ export default function ItemEditor({
                       if (isActiveSeatSide) {
                         setSeatDirectionOffsets((prev) => {
                           const next = { ...prev };
-                          delete next[activeMobiDirection as Exclude<DirectionKey, "down">];
+                          delete next[activeMobiDirection as Exclude<MobiFacing, "down">];
                           return next;
                         });
                       } else {

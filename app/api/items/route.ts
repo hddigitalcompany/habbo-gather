@@ -21,7 +21,16 @@ import {
 export const dynamic = "force-dynamic";
 
 const ALLOWED_CATEGORIES = ["poltrona", "divisoria", "sofa", "mesa", "planta", "computador"];
-const ALLOWED_DIRECTIONS = ["down", "left", "right", "up"];
+// "cornerTop"/"cornerBottom" (pedido do Douglas: "nas paredes adicione
+// mais duas posicoes, quina de cima, quina de baixo") só existem de
+// verdade em item de parede (categoria "divisoria", ver
+// WALL_DIRECTION_FIELDS em ItemEditor.tsx) -- ficam aqui na lista GERAL
+// (valendo pra qualquer categoria) pelo mesmo motivo de down/left/right/up
+// sempre terem valido pra tudo: mais simples que bifurcar a validação por
+// categoria, e um mobi comum nunca vai ter arquivo de verdade mandado
+// pra essas 2 chaves (o formulário só mostra esses campos em "Criar
+// Parede").
+const ALLOWED_DIRECTIONS = ["down", "left", "right", "up", "cornerTop", "cornerBottom"];
 
 export async function POST(req: NextRequest) {
   const callerId = await getVerifiedUserId(req);

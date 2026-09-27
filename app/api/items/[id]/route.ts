@@ -26,7 +26,10 @@ import {
 export const dynamic = "force-dynamic";
 
 const ALLOWED_CATEGORIES = ["poltrona", "divisoria", "sofa", "mesa", "planta", "computador"];
-const ALLOWED_DIRECTIONS = ["down", "left", "right", "up"];
+// ver comentário equivalente em app/api/items/route.ts pro porquê de
+// cornerTop/cornerBottom (pedido do Douglas: "quina de cima, quina de
+// baixo") entrarem aqui na lista geral em vez de só pra parede.
+const ALLOWED_DIRECTIONS = ["down", "left", "right", "up", "cornerTop", "cornerBottom"];
 
 /** Extrai o caminho DENTRO do bucket a partir da URL pública do Storage (.../object/public/<bucket>/<path>) -- null se não bater com o formato esperado. */
 function storagePathFromPublicUrl(url: string, bucket: string): string | null {
