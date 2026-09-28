@@ -1,0 +1,23 @@
+-- Footprint desenhado À MÃO, tile por tile, por direção -- pedido do
+-- Douglas depois de brigar com o retângulo cego (footprint_cols x
+-- footprint_rows, migration 0013): "quero selecionar os tiles que ele
+-- ocupa, CLICANDO, e preenchendo, do jeito que ta eu nao consigo decidir
+-- rumo nem nada! E isso pra CADA POSICAO, pois o movel gira e muda o
+-- bloqueio pela perspectiva!!!" (ex: uma peça em L trava tiles
+-- diferentes virada pra baixo do que virada pro lado).
+--
+-- footprint_by_direction: jsonb, formato { "down": [{dCol,dRow}, ...],
+-- "left": [...], "right": [...], "up": [...] } -- cada direção só
+-- aparece se o Douglas realmente customizou ela no Editor de Itens
+-- (clicou em algum tile daquela aba); direção ausente cai no retângulo
+-- cego de sempre (footprint_cols x footprint_rows), então TODO item já
+-- cadastrado continua funcionando idêntico, sem migrar nada (ver
+-- furnitureFootprintTiles em game/furniture.ts e
+-- cleanFootprintByDirection em lib/supabase/itemFields.ts). Mesmo
+-- esquema de jsonb solto (sem "check" por elemento) de direction_offsets
+-- (migration 0007) -- validação de verdade fica na API
+-- (cleanFootprintByDirection), o banco só guarda.
+--
+-- Rode isso no SQL Editor do Supabase.
+alter table public.room_items
+  add column if not exists footprint_by_direction jsonb;

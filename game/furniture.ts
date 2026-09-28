@@ -321,6 +321,24 @@ export interface FurnitureModelDef {
    * que normalmente fica na sala. */
   footprintCols?: number;
   footprintRows?: number;
+  /** Footprint desenhado À MÃO, tile por tile, por direção -- pedido do
+   * Douglas depois de brigar com o retângulo cego acima: "quero
+   * selecionar os tiles que ele ocupa, CLICANDO, e preenchendo, do jeito
+   * que ta eu nao consigo decidir rumo nem nada! E isso pra CADA
+   * POSICAO, pois o movel gira e muda o bloqueio pela perspectiva!!!"
+   * (ex: uma peça em L trava tiles diferentes virada pra baixo do que
+   * virada pro lado). Cada chave é uma direção-base (down/left/right/up,
+   * MESMA Direction de directionOffsets/seatDirectionOffsets -- quina de
+   * parede não tem footprint próprio, sempre cai em "down", ver
+   * ItemEditor.tsx); cada entrada da lista é UM tile (dCol,dRow, OFFSET
+   * a partir da âncora, mesma convenção de extraSeats) marcado no
+   * clique-a-clique do Editor de Itens -- a âncora (0,0) nunca entra
+   * aqui, ela trava SEMPRE, implícita. undefined pra uma direção = ainda
+   * não foi customizada NESSA direção -- cai no retângulo cego de sempre
+   * (footprintCols x footprintRows acima, ver furnitureFootprintTiles
+   * abaixo), o que mantém TODO item já cadastrado funcionando idêntico
+   * sem precisar migrar nada. */
+  footprintByDirection?: Partial<Record<Direction, { dCol: number; dRow: number }[]>>;
   /** Assentos EXTRAS (além do assento padrão da âncora, ver
    * seatOffsetX/Y/seatDirectionOffsets acima) -- pedido do Douglas: "um
    * sofa ex, que ocupa mais de um tile, e mais de um tile se senta,
@@ -338,6 +356,30 @@ export interface FurnitureModelDef {
    * é sentável, não sólido, mesmo dentro do footprint. undefined/[] =
    * comportamento de sempre, só o assento da âncora. */
   extraSeats?: FurnitureExtraSeat[];
+  /** Altura (px) da SUPERFÍCIE desse modelo -- pedido do Douglas: "cada
+   * item, ex: mesa mesinha de centro, eu teria que configurar, a altura
+   * de um segundo item, adicionado ao tile dele". Só faz sentido em
+   * móvel "de base" (mesa, mesinha de centro): quando outro item
+   * marcado `stackable` (ver abaixo) é colocado na MESMA âncora, esse
+   * valor vira o deslocamento vertical dele (soma no offsetY próprio,
+   * ver addFurnitureSprite em MainScene.ts) -- empurra pra CIMA pra
+   * parecer que tá em cima da mesa, não flutuando/enterrado nela.
+   * undefined/0 = mesa sem superfície configurada ainda (item em cima
+   * cai na própria posição normal, sem levantar). Unidade/sinal igual
+   * offsetY: negativo sobe. */
+  stackSurfaceOffsetY?: number;
+  /** Esse modelo pode ser colocado em cima de OUTRO item já ancorado no
+   * mesmo tile (ver anyFurnitureAt em MainScene.ts, que hoje bloqueia
+   * qualquer tile já ocupado) -- pedido do Douglas pro caso do notebook
+   * em cima da mesa: "eles não conseguem posicionar o item" (dono da
+   * sala só arrasta pro catálogo, não ajusta nada na hora) então quem
+   * garante que fica certo é essa flag + stackSurfaceOffsetY da mesa,
+   * automático, não importa em cima de qual mesa o dono colocar. Falso/
+   * undefined = comportamento de sempre, tile ocupado bloqueia. Só
+   * empilha UM item em cima de outro NÃO-stackable (ver
+   * addFurnitureSprite/anyFurnitureAt) -- evita torre de 3+ itens por
+   * enquanto, sem caso de uso ainda. */
+  stackable?: boolean;
 }
 
 /** Um assento EXTRA (ver FurnitureModelDef.extraSeats acima) -- tile
@@ -360,16 +402,34 @@ export function furnitureExtraSeats(f: FurnitureDef): FurnitureExtraSeat[] {
 
 /**
  * Tiles (col,row) que ESSE item ocupa -- a âncora (f.col,f.row) sempre,
- * mais o retângulo footprintCols x footprintRows do modelo (se tiver,
- * ver FurnitureModelDef.footprintCols acima), crescendo em col/row a
- * partir da âncora. Sem modelo ou footprint 1x1 (padrão de sempre),
- * devolve só a âncora.
+ * mais:
+ *  1) o footprint DESENHADO À MÃO da direção atual (f.facing, ver
+ *     FurnitureModelDef.footprintByDirection acima), se essa direção já
+ *     foi customizada no Editor de Itens; quina de parede (cornerTop/
+ *     cornerBottom) sempre olha a entrada "down" (footprint não muda por
+ *     quina, só pelas 4 direções-base); OU, sem customização NESSA
+ *     direção --
+ *  2) o retângulo cego de sempre (footprintCols x footprintRows,
+ *     crescendo em col/row a partir da âncora) -- mantém TODO item já
+ *     cadastrado (sem footprintByDirection nenhum) funcionando idêntico.
+ * Sem modelo ou footprint 1x1 (padrão de sempre), devolve só a âncora.
  */
 export function furnitureFootprintTiles(f: FurnitureDef): { col: number; row: number }[] {
   const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+  const anchor = { col: f.col, row: f.row };
+  const dir: Direction = f.facing === "cornerTop" || f.facing === "cornerBottom" ? "down" : f.facing;
+  const custom = model?.footprintByDirection?.[dir];
+  if (custom) {
+    const tiles = [anchor];
+    for (const t of custom) {
+      if (t.dCol === 0 && t.dRow === 0) continue; // âncora já entra sempre, evita duplicar
+      tiles.push({ col: f.col + t.dCol, row: f.row + t.dRow });
+    }
+    return tiles;
+  }
   const cols = Math.max(1, Math.round(model?.footprintCols ?? 1));
   const rows = Math.max(1, Math.round(model?.footprintRows ?? 1));
-  if (cols <= 1 && rows <= 1) return [{ col: f.col, row: f.row }];
+  if (cols <= 1 && rows <= 1) return [anchor];
   const tiles: { col: number; row: number }[] = [];
   for (let dc = 0; dc < cols; dc++) {
     for (let dr = 0; dr < rows; dr++) {

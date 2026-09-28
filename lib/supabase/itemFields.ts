@@ -146,6 +146,69 @@ export function cleanDirectionDisplayWidth(raw: unknown): Record<string, number>
   return Object.keys(cleaned).length > 0 ? cleaned : null;
 }
 
+/** Direções que aceitam footprint DESENHADO À MÃO (ver
+ * footprint_by_direction em supabase/migrations/0023_room_items_footprint_by_direction.sql
+ * e o comentário grande em FurnitureModelDef.footprintByDirection,
+ * game/furniture.ts) -- pedido do Douglas: "quero selecionar os tiles
+ * que ele ocupa, CLICANDO... E isso pra CADA POSICAO, pois o movel gira
+ * e muda o bloqueio pela perspectiva!!!". DIFERENTE de
+ * OVERRIDABLE_DIRECTIONS acima (que exclui "down"): aqui "down" TAMBÉM
+ * aceita lista própria, porque é a partir dela que o Douglas desenha o
+ * footprint pela primeira vez (as outras 3 só ganham lista própria se
+ * ele trocar de aba e mexer -- sem isso, herdam o retângulo cego de
+ * sempre, ver furnitureFootprintTiles). */
+const FOOTPRINT_DIRECTIONS = ["down", "left", "right", "up"] as const;
+
+/** Mesma faixa de dCol/dRow de cleanExtraSeats acima (-6..6) -- não tem
+ * constraint própria no banco pra isso (é um array dentro de jsonb, não
+ * dá pra "check" cada elemento fácil), então o clamp AQUI é a única
+ * trava contra alguém mandar um valor absurdo direto pra API. */
+const FOOTPRINT_TILE_RANGE = 6;
+
+/**
+ * Valida/limpa o footprint desenhado à mão (ver footprintByDirection
+ * acima) -- cada direção (down/left/right/up) é uma lista de
+ * {dCol, dRow} (offset a partir da âncora, mesma convenção de
+ * cleanExtraSeats). A âncora (0,0) nunca é gravada -- ela trava sempre,
+ * implícita (ver furnitureFootprintTiles) -- qualquer entrada 0,0
+ * recebida é descartada em silêncio. null explícito ou objeto vazio =
+ * nenhuma direção customizada (todo item cai no retângulo cego de
+ * sempre, footprintCols x footprintRows) -- retrocompatível, não regride
+ * nenhum item já cadastrado.
+ */
+export function cleanFootprintByDirection(raw: unknown): Record<string, { dCol: number; dRow: number }[]> | null {
+  if (raw === null) return null;
+  if (!raw || typeof raw !== "object") return null;
+  const cleaned: Record<string, { dCol: number; dRow: number }[]> = {};
+  for (const dir of FOOTPRINT_DIRECTIONS) {
+    const list = (raw as Record<string, unknown>)[dir];
+    if (!Array.isArray(list)) continue;
+    const tiles: { dCol: number; dRow: number }[] = [];
+    for (const entry of list) {
+      if (!entry || typeof entry !== "object") continue;
+      const dColRaw = (entry as Record<string, unknown>).dCol;
+      const dRowRaw = (entry as Record<string, unknown>).dRow;
+      if (
+        typeof dColRaw !== "number" ||
+        typeof dRowRaw !== "number" ||
+        !Number.isFinite(dColRaw) ||
+        !Number.isFinite(dRowRaw)
+      ) {
+        continue;
+      }
+      const dCol = Math.round(Math.max(-FOOTPRINT_TILE_RANGE, Math.min(FOOTPRINT_TILE_RANGE, dColRaw)));
+      const dRow = Math.round(Math.max(-FOOTPRINT_TILE_RANGE, Math.min(FOOTPRINT_TILE_RANGE, dRowRaw)));
+      if (dCol === 0 && dRow === 0) continue; // âncora nunca entra na lista, sempre implícita
+      tiles.push({ dCol, dRow });
+    }
+    // [] é uma customização válida (ex: Douglas desmarcou TUDO menos a
+    // âncora nessa direção -- item vira 1x1 ali) -- grava mesmo vazia,
+    // só descarta a direção inteira se o corpo nem mandou um array.
+    cleaned[dir] = tiles;
+  }
+  return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
+
 /** Mesma ideia de cleanDirectionOffsets acima, só que pro ASSENTO (ver
  * seat_direction_offsets em supabase/migrations/
  * 0008_room_items_seat_direction_offsets.sql e o comentário grande em
