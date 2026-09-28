@@ -7769,8 +7769,15 @@ function ChatDrawer({
   }, [messages.length, roomChatLog.length, view]);
 
   // dedupe por userId -- se alguém tiver 2 abas abertas, ainda aparece
-  // uma vez só na lista de "quem tá na sala" (ver onlinePlayers).
-  const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values());
+  // uma vez só na lista de "quem tá na sala" (ver onlinePlayers) -- e
+  // nunca inclui você mesmo: o servidor ignora silenciosamente um
+  // chat:create_direct com targetUserId igual ao seu (ver
+  // server/index.js), então sem esse filtro "Iniciar conversa" clicado
+  // na sua própria segunda aba não fazia nada, sem erro nenhum (achado
+  // 28/set testando com 2 abas da mesma conta).
+  const pickable = Array.from(new Map(onlinePlayers.map((p) => [p.userId, p])).values()).filter(
+    (p) => p.userId !== myUserId
+  );
 
   return (
     <div
