@@ -3743,28 +3743,285 @@ body {
 
 /* pedido do Douglas (28/set): "chat, agenda, configuracoes nao ficam
    presas apenas a sala, acompanha cada pessoa por toda plataforma" --
-   prévia de chat/agenda já visível no Lobby, antes de "Entrar na
-   sala" (ver comentário grande no topo de components/Lobby.tsx). */
-.lobby-status {
+   depois, vendo só a prévia em texto: "cade o botao das conversas e
+   da agenda? mantenha igual de dentro da sala". Botões de verdade
+   (reaproveita .av-btn/.av-btn.on, MESMA classe da av-bar de dentro da
+   sala) + painel flutuante (ver comentário grande no topo de
+   components/Lobby.tsx). */
+.lobby-icon-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  justify-content: center;
+  gap: 14px;
   margin: 0 0 20px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(124, 92, 255, 0.1);
-  border: 1px solid rgba(124, 92, 255, 0.25);
 }
 
-.lobby-status-line {
+.lobby-icon-row .av-btn {
+  position: relative;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lobby-icon-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff4545;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.lobby-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 16, 0.55);
+}
+
+.lobby-panel {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: min(520px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(28, 22, 42, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.lobby-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.lobby-panel-header h3 {
+  flex: 1;
   margin: 0;
-  font-size: 12.5px;
-  line-height: 1.4;
-  color: #cfc4e6;
-  text-align: left;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #f5f0ff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lobby-panel-back,
+.lobby-panel-close {
+  background: transparent;
+  border: none;
+  color: #cfc4e6;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.lobby-panel-back:hover,
+.lobby-panel-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.lobby-panel-empty {
+  margin: 0;
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #a89cc4;
+}
+
+.lobby-conv-list,
+.lobby-call-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.lobby-conv-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.lobby-conv-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lobby-conv-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #f5f0ff;
+}
+
+.lobby-conv-preview {
+  font-size: 12px;
+  color: #a89cc4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.lobby-message-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lobby-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 86%;
+}
+
+.lobby-message-own {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.lobby-message-sender {
+  font-size: 10.5px;
+  color: #a89cc4;
+}
+
+.lobby-message-text {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f0ff;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.lobby-message-own .lobby-message-text {
+  background: #7c5cff;
+}
+
+.lobby-compose {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.lobby-compose input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #f5f0ff;
+  font-size: 13px;
+}
+
+.lobby-compose input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.lobby-compose button {
+  background: #7c5cff;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  padding: 0 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-compose button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lobby-call-item {
+  padding: 10px 10px;
+  border-radius: 10px;
+}
+
+.lobby-call-item + .lobby-call-item {
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lobby-call-title {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f5f0ff;
+}
+
+.lobby-call-when {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #a89cc4;
+}
+
+.lobby-call-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.lobby-call-accept,
+.lobby-call-decline {
+  flex: 1;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-call-accept {
+  background: #29c46a;
+  color: #fff;
+}
+
+.lobby-call-decline {
+  background: rgba(255, 69, 69, 0.85);
+  color: #fff;
+}
+
+.lobby-call-accept:disabled,
+.lobby-call-decline:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lobby-call-status {
+  margin: 0;
+  font-size: 12px;
+  color: #a89cc4;
 }
 
 .lobby-enter-btn {

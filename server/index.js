@@ -826,6 +826,151 @@ async function handleGetPresence(req, res, url) {
   res.end(JSON.stringify(payload));
 }
 
+/** Lê e faz JSON.parse do corpo de um POST pequeno (chat/agenda daqui
+ * pra baixo -- texto curto, nunca upload de arquivo, ver MAX_LOBBY_BODY_BYTES),
+ * mesmo padrão chunk-a-chunk de handlePostFloor/handlePostWalls/etc (só
+ * que fatorado -- esses dois endpoints novos não precisam репetir as
+ * ~25 linhas de novo). Resolve null e JÁ escreve a resposta de erro
+ * (400/413) quando o corpo vem grande/inválido demais -- quem chamou só
+ * precisa checar `if (!body) return`. */
+const MAX_LOBBY_BODY_BYTES = 8_000;
+function readJsonBody(req, res) {
+  return new Promise((resolve) => {
+    const contentLength = Number(req.headers["content-length"] || 0);
+    if (contentLength > MAX_LOBBY_BODY_BYTES) {
+      res.writeHead(413, corsHeaders());
+      res.end("Corpo grande demais");
+      resolve(null);
+      return;
+    }
+    const chunks = [];
+    let received = 0;
+    let aborted = false;
+    req.on("data", (chunk) => {
+      received += chunk.length;
+      if (received > MAX_LOBBY_BODY_BYTES && !aborted) {
+        aborted = true;
+        if (!res.headersSent) {
+          res.writeHead(413, corsHeaders());
+          res.end("Corpo grande demais");
+        }
+        req.destroy();
+        resolve(null);
+      } else {
+        chunks.push(chunk);
+      }
+    });
+    req.on("end", () => {
+      if (aborted) return;
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        res.writeHead(400, corsHeaders());
+        res.end("JSON inválido");
+        resolve(null);
+      }
+    });
+    req.on("error", () => {
+      aborted = true;
+      resolve(null);
+    });
+  });
+}
+
+/** GET /chat/messages?conversationId=X&userId=Y -- histórico de UMA
+ * conversa, pro Lobby mostrar ao clicar numa conversa da prévia (ver
+ * handleGetChatSummary acima). Só devolve se userId for participante de
+ * verdade (mesma trava de chatStore.isParticipant usada pelo
+ * WebSocket) -- sem isso, qualquer um adivinhando um conversationId
+ * leria mensagem de conversa alheia. */
+function handleGetChatMessages(req, res, url) {
+  const userId = url.searchParams.get("userId");
+  const conversationId = url.searchParams.get("conversationId");
+  if (!userId || !conversationId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Falta "userId"/"conversationId"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ messages: chatStore.getMessages(conversationId) }));
+}
+
+/** POST /chat/send -- manda mensagem de TEXTO numa conversa já
+ * existente, sem precisar abrir WebSocket -- pedido do Douglas: os
+ * botões de chat/agenda do Lobby "mantenha igual de dentro da sala"
+ * (28/set). MESMA trava/lógica do case "chat:send" no WebSocket (ver
+ * comentário grande no topo do arquivo) -- só sem anexo (áudio/imagem/
+ * arquivo continuam precisando abrir a sala de verdade, ver
+ * ChatDrawer). Empurra a mensagem em tempo real (sendToUser) pra quem
+ * JÁ tiver uma conexão WebSocket aberta (ex: a outra pessoa já tá
+ * dentro da sala) -- quem também tiver só o Lobby aberto vê ao reabrir
+ * a conversa (sem socket lá, sem como empurrar). */
+async function handlePostChatSend(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId, userName } = body;
+  if (typeof conversationId !== "string" || typeof userId !== "string" || !userId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  const text = typeof body.text === "string" ? body.text.slice(0, 2000) : "";
+  if (!text.trim()) {
+    res.writeHead(400, corsHeaders());
+    res.end('Falta "text"');
+    return;
+  }
+  const msg = chatStore.addMessage(conversationId, {
+    senderId: userId,
+    senderName: typeof userName === "string" ? userName.slice(0, 80) : "",
+    kind: "text",
+    text,
+  });
+  const conv = chatStore.getConversation(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:message", conversationId, message: msg });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, message: msg }));
+}
+
+/** POST /agenda/respond -- aceita/recusa um compromisso sem precisar
+ * abrir WebSocket, mesma ideia de handlePostChatSend acima (pedido do
+ * Douglas: botões do Lobby "igual de dentro da sala"). MESMA
+ * função/trava de dentro do case "agenda:respond" no WebSocket
+ * (agendaStore.respondToCall já confere que userId é participante). */
+async function handlePostAgendaRespond(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { callId, userId, status } = body;
+  if (typeof callId !== "string" || typeof userId !== "string" || typeof status !== "string") {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "callId"/"userId"/"status"');
+    return;
+  }
+  const call = agendaStore.respondToCall(callId, userId, status);
+  if (!call) {
+    res.writeHead(400, corsHeaders());
+    res.end("Compromisso não encontrado, ou status inválido, ou userId não é participante.");
+    return;
+  }
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, call }));
+}
+
 /** GET /chat/summary?userId=X -- resumo LEVE das conversas de um
  * usuário, sem precisar abrir WebSocket/"identify" -- pedido do
  * Douglas: chat "acompanha a pessoa por toda a plataforma", não só
@@ -1173,6 +1318,21 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/agenda/summary") {
     handleGetAgendaSummary(req, res, url);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/chat/messages") {
+    handleGetChatMessages(req, res, url);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/chat/send") {
+    handlePostChatSend(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agenda/respond") {
+    handlePostAgendaRespond(req, res);
     return;
   }
 

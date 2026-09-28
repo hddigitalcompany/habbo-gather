@@ -25,20 +25,27 @@
 //
 // Chat/agenda (28/set, pedido do Douglas: "chat, agenda, configuracoes
 // nao ficam presas apenas a sala, acompanha cada pessoa por toda
-// plataforma") -- resumo buscado por GET /chat/summary e
-// GET /agenda/summary (novos, ver server/index.js), MESMOS dados que
-// o GameRoom pede por WebSocket ("chat:list"/"agenda:list"), só que
-// sem precisar abrir o socket/entrar na sala pra ver que já tem
-// conversa ou compromisso marcado -- é o que fazia essas duas coisas
-// PARECEREM presas à sala (só apareciam depois de "Entrar"). Usa o
-// MESMO userId que o GameRoom usa (ver lib/identity.ts) pra ser
-// literalmente a mesma pessoa/histórico dos dois lados. Responder
-// mensagem, criar/editar compromisso e abrir chamada continuam só
-// dentro da sala (dependem do WebSocket/WebRTC de verdade, ver
-// ChatDrawer/AgendaDrawer em GameRoom.tsx) -- aqui é só "prévia",
-// igual o RoomPreview abaixo.
+// plataforma" -- depois, vendo só o resumo em texto: "cade o botao das
+// conversas e da agenda? mantenha igual de dentro da sala") -- os
+// ícones aqui são os MESMOS ChatIcon/AgendaIcon da av-bar do GameRoom
+// (copiados, ver comentário deles abaixo) e abrem um painel de verdade
+// (ler mensagens, RESPONDER, aceitar/recusar compromisso), não só
+// texto. A diferença de "dentro da sala": aqui NÃO existe WebSocket
+// (entrar no Lobby não pode virar presença fantasma na sala pra quem
+// já tá lá dentro, ver comentário grande em server/index.js sobre
+// broadcast de "join" assim que uma conexão abre) -- então tudo aqui
+// usa REST simples (GET /chat/summary, /chat/messages, POST
+// /chat/send, GET /agenda/summary, POST /agenda/respond, todos novos
+// em server/index.js, reaproveitando as MESMAS funções de
+// chatStore/agendaStore que o WebSocket usa). Quem estiver com a sala
+// aberta em outra aba recebe a mensagem/resposta em tempo real do
+// mesmo jeito (o servidor empurra por sendToUser); só quem só tem o
+// Lobby aberto não recebe push -- teria que reabrir a conversa. Criar
+// conversa nova, anexo e chamada de voz/vídeo continuam só dentro da
+// sala (dependem de WebRTC/WebSocket de verdade, ver ChatDrawer em
+// GameRoom.tsx).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 
@@ -54,14 +61,26 @@ type ConversationSummary = {
   name: string;
   kind: "direct" | "group";
   participants: { id: string; name?: string }[];
-  lastMessage: { senderName: string; kind: string; text: string; ts: number } | null;
+  lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
 };
 
+type ChatMessage = {
+  id: string;
+  senderId: string;
+  senderName: string;
+  kind: string;
+  text: string;
+  ts: number;
+  deleted?: boolean;
+};
+
+type CallParticipant = { id: string; name: string; status: string };
 type CallSummary = {
   id: string;
   title: string;
   startTs: number;
-  participants: { id: string; status: string }[];
+  durationMinutes: number;
+  participants: CallParticipant[];
 };
 
 type FloorTile = { col: number; row: number; styleId: string };
@@ -177,6 +196,293 @@ function RoomPreview({ room, loading }: { room: RoomShape; loading: boolean }) {
   );
 }
 
+// MESMOS ícones da av-bar de dentro da sala (copiados de GameRoom.tsx
+// -- ChatIcon/AgendaIcon lá são funções locais, não exportadas, sem
+// como importar direto sem virar dependência cruzada esquisita) --
+// pedido do Douglas: "mantenha igual de dentro da sala".
+function ChatIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H9l-4.2 3.2a.5.5 0 0 1-.8-.4V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function AgendaIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 9.5h17" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M7.5 13.5h3M7.5 16.5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function formatCallWhen(startTs: number): string {
+  return new Date(startTs).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Painel de chat do Lobby -- lista de conversas -> clicar abre o
+ * histórico + campo de resposta. Ver comentário grande no topo do
+ * arquivo pra entender o porquê de tudo aqui ser REST (sem WebSocket,
+ * sem virar presença fantasma na sala). */
+function LobbyChatPanel({
+  myUserId,
+  myName,
+  conversations,
+  onClose,
+  onSent,
+}: {
+  myUserId: string;
+  myName: string;
+  conversations: ConversationSummary[] | null;
+  onClose: () => void;
+  onSent: (conversationId: string, message: ChatMessage) => void;
+}) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!activeId) {
+      setMessages(null);
+      return;
+    }
+    let cancelled = false;
+    setMessages(null);
+    fetch(
+      `${REALTIME_HTTP_BASE}/chat/messages?conversationId=${encodeURIComponent(activeId)}&userId=${encodeURIComponent(myUserId)}`
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setMessages(Array.isArray(data?.messages) ? data.messages : []);
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, myUserId]);
+
+  const activeConversation = conversations?.find((c) => c.id === activeId) ?? null;
+
+  async function sendMessage() {
+    const text = draft.trim();
+    if (!text || !activeId || sending) return;
+    setSending(true);
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: activeId, userId: myUserId, userName: myName, text }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.message) {
+          setMessages((prev) => (prev ? [...prev, data.message] : [data.message]));
+          onSent(activeId, data.message);
+          setDraft("");
+        }
+      }
+    } catch {
+      // rede caiu no meio -- deixa o texto no campo pra pessoa tentar de novo
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="lobby-panel-backdrop" onClick={onClose}>
+      <div className="lobby-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="lobby-panel-header">
+          {activeId && (
+            <button type="button" className="lobby-panel-back" onClick={() => setActiveId(null)} title="Voltar">
+              ←
+            </button>
+          )}
+          <h3>{activeId ? conversationTitle(activeConversation) : "Conversas"}</h3>
+          <button type="button" className="lobby-panel-close" onClick={onClose} title="Fechar">
+            ✕
+          </button>
+        </div>
+
+        {!activeId ? (
+          !conversations || conversations.length === 0 ? (
+            <p className="lobby-panel-empty">Nenhuma conversa ainda. Entre na sala pra começar uma.</p>
+          ) : (
+            <ul className="lobby-conv-list">
+              {conversations.map((c) => (
+                <li key={c.id}>
+                  <button type="button" className="lobby-conv-item" onClick={() => setActiveId(c.id)}>
+                    <span className="lobby-conv-name">{conversationTitle(c)}</span>
+                    {c.lastMessage && (
+                      <span className="lobby-conv-preview">
+                        {c.lastMessage.senderId === myUserId ? "Você: " : ""}
+                        {c.lastMessage.kind === "text" ? c.lastMessage.text : "anexo enviado"}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          <>
+            <div className="lobby-message-list">
+              {messages === null ? (
+                <p className="lobby-panel-empty">Carregando…</p>
+              ) : messages.length === 0 ? (
+                <p className="lobby-panel-empty">Nenhuma mensagem ainda.</p>
+              ) : (
+                messages.map((m) => (
+                  <div key={m.id} className={`lobby-message${m.senderId === myUserId ? " lobby-message-own" : ""}`}>
+                    {m.senderId !== myUserId && <span className="lobby-message-sender">{m.senderName}</span>}
+                    <span className="lobby-message-text">
+                      {m.deleted ? "Mensagem apagada" : m.kind === "text" ? m.text : "anexo enviado"}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="lobby-compose">
+              <input
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") sendMessage();
+                }}
+                placeholder="Escreva uma mensagem…"
+                maxLength={2000}
+              />
+              <button type="button" onClick={sendMessage} disabled={!draft.trim() || sending}>
+                Enviar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function conversationTitle(c: ConversationSummary | null | undefined): string {
+  if (!c) return "Conversa";
+  if (c.kind === "group") return c.name || "Grupo";
+  return c.participants[0]?.name || "Conversa";
+}
+
+/** Painel de agenda do Lobby -- lista de compromissos, com Aceitar/
+ * Recusar pra quem ainda tá pendente (mesma trava de participante do
+ * agendaStore, ver POST /agenda/respond em server/index.js). */
+function LobbyAgendaPanel({
+  myUserId,
+  calls,
+  onClose,
+  onResponded,
+}: {
+  myUserId: string;
+  calls: CallSummary[] | null;
+  onClose: () => void;
+  onResponded: (call: CallSummary) => void;
+}) {
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+
+  async function respond(callId: string, status: "approved" | "declined") {
+    if (respondingId) return;
+    setRespondingId(callId);
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, userId: myUserId, status }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.call) onResponded(data.call);
+      }
+    } catch {
+      // rede caiu -- pessoa tenta de novo, botão volta a ficar clicável
+    } finally {
+      setRespondingId(null);
+    }
+  }
+
+  const sorted = calls ? [...calls].sort((a, b) => a.startTs - b.startTs) : null;
+
+  return (
+    <div className="lobby-panel-backdrop" onClick={onClose}>
+      <div className="lobby-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="lobby-panel-header">
+          <h3>Agenda</h3>
+          <button type="button" className="lobby-panel-close" onClick={onClose} title="Fechar">
+            ✕
+          </button>
+        </div>
+
+        {!sorted || sorted.length === 0 ? (
+          <p className="lobby-panel-empty">Nenhum compromisso agendado.</p>
+        ) : (
+          <ul className="lobby-call-list">
+            {sorted.map((call) => {
+              const mine = call.participants.find((p) => p.id === myUserId);
+              return (
+                <li key={call.id} className="lobby-call-item">
+                  <p className="lobby-call-title">{call.title}</p>
+                  <p className="lobby-call-when">
+                    {formatCallWhen(call.startTs)} · {call.durationMinutes} min
+                  </p>
+                  {mine?.status === "pending" ? (
+                    <div className="lobby-call-actions">
+                      <button
+                        type="button"
+                        className="lobby-call-accept"
+                        disabled={respondingId === call.id}
+                        onClick={() => respond(call.id, "approved")}
+                      >
+                        Aceitar
+                      </button>
+                      <button
+                        type="button"
+                        className="lobby-call-decline"
+                        disabled={respondingId === call.id}
+                        onClick={() => respond(call.id, "declined")}
+                      >
+                        Recusar
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="lobby-call-status">
+                      {mine?.status === "declined"
+                        ? "Você recusou"
+                        : mine?.status === "approved"
+                          ? "Confirmado"
+                          : ""}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Lobby({
   accountUserId,
   accountProfile,
@@ -192,7 +498,12 @@ export default function Lobby({
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
-  const [nextCall, setNextCall] = useState<CallSummary | null | undefined>(undefined);
+  const [calls, setCalls] = useState<CallSummary[] | null>(null);
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
+
+  const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
+  const myName = accountProfile?.name?.trim() || "Visitante";
 
   useEffect(() => {
     let cancelled = false;
@@ -235,13 +546,12 @@ export default function Lobby({
 
   useEffect(() => {
     let cancelled = false;
-    const userId = resolveUserId(accountUserId);
-    if (!userId) {
+    if (!myUserId) {
       setConversations([]);
-      setNextCall(null);
+      setCalls([]);
       return;
     }
-    fetch(`${REALTIME_HTTP_BASE}/chat/summary?userId=${encodeURIComponent(userId)}`)
+    fetch(`${REALTIME_HTTP_BASE}/chat/summary?userId=${encodeURIComponent(myUserId)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
@@ -249,25 +559,48 @@ export default function Lobby({
       .catch(() => {
         if (!cancelled) setConversations([]);
       });
-    fetch(`${REALTIME_HTTP_BASE}/agenda/summary?userId=${encodeURIComponent(userId)}`)
+    fetch(`${REALTIME_HTTP_BASE}/agenda/summary?userId=${encodeURIComponent(myUserId)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled) return;
-        const calls: CallSummary[] = Array.isArray(data?.calls) ? data.calls : [];
-        const now = Date.now();
-        const upcoming = calls
-          .filter((c) => c.startTs >= now)
-          .filter((c) => c.participants.find((p) => p.id === userId)?.status !== "declined")
-          .sort((a, b) => a.startTs - b.startTs);
-        setNextCall(upcoming[0] ?? null);
+        if (!cancelled) setCalls(Array.isArray(data?.calls) ? data.calls : []);
       })
       .catch(() => {
-        if (!cancelled) setNextCall(null);
+        if (!cancelled) setCalls([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [accountUserId]);
+  }, [myUserId]);
+
+  // atualiza a prévia da conversa na lista (lastMessage) na hora,
+  // sem esperar reabrir o painel -- mesma ideia do "chat:conversation"
+  // que o WebSocket manda de dentro da sala.
+  function handleMessageSent(conversationId: string, message: ChatMessage) {
+    setConversations((prev) =>
+      prev
+        ? prev
+            .map((c) =>
+              c.id === conversationId
+                ? {
+                    ...c,
+                    lastMessage: {
+                      senderId: message.senderId,
+                      senderName: message.senderName,
+                      kind: message.kind,
+                      text: message.text,
+                      ts: message.ts,
+                    },
+                  }
+                : c
+            )
+            .sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0))
+        : prev
+    );
+  }
+
+  function handleCallResponded(updated: CallSummary) {
+    setCalls((prev) => (prev ? prev.map((c) => (c.id === updated.id ? updated : c)) : prev));
+  }
 
   const displayName = accountProfile?.name?.trim() || "visitante";
   const presenceText =
@@ -279,40 +612,10 @@ export default function Lobby({
           ? "1 pessoa na sala agora."
           : `${presence.totalOnline} pessoas na sala agora.`;
 
-  // "prévia" de chat/agenda -- ver comentário grande no topo do arquivo.
-  // conversations null = ainda buscando; [] = já sabe que não tem
-  // nenhuma (não mostra a linha à toa). Ordena por updatedAt (já vem
-  // assim do servidor, ver chatStore.listConversationsForUser) e pega
-  // só a mais recente pra caber numa linha.
-  const latestConversation = conversations && conversations.length > 0 ? conversations[0] : null;
-  const chatText =
-    conversations === null
-      ? null
-      : conversations.length === 0
-        ? "Nenhuma conversa ainda."
-        : latestConversation?.lastMessage
-          ? `${conversations.length === 1 ? "1 conversa" : `${conversations.length} conversas`} · última de ${
-              latestConversation.lastMessage.senderName || "alguém"
-            }: ${
-              latestConversation.lastMessage.kind === "text"
-                ? latestConversation.lastMessage.text.slice(0, 60)
-                : "anexo enviado"
-            }`
-          : `${conversations.length === 1 ? "1 conversa" : `${conversations.length} conversas`} salva${
-              conversations.length === 1 ? "" : "s"
-            }.`;
-
-  const agendaText =
-    nextCall === undefined
-      ? null
-      : nextCall === null
-        ? "Nenhum compromisso agendado."
-        : `Próximo compromisso: "${nextCall.title}" em ${new Date(nextCall.startTs).toLocaleString("pt-BR", {
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}.`;
+  const pendingCallCount = useMemo(
+    () => (calls ?? []).filter((c) => c.participants.find((p) => p.id === myUserId)?.status === "pending").length,
+    [calls, myUserId]
+  );
 
   return (
     <div className="lobby-backdrop">
@@ -326,12 +629,32 @@ export default function Lobby({
           <span className={`lobby-presence-dot${presence && presence.totalOnline > 0 ? " lobby-presence-dot-active" : ""}`} />
           {presenceText}
         </p>
-        {(chatText || agendaText) && (
-          <div className="lobby-status">
-            {chatText && <p className="lobby-status-line">💬 {chatText}</p>}
-            {agendaText && <p className="lobby-status-line">📅 {agendaText}</p>}
-          </div>
-        )}
+
+        <div className="lobby-icon-row">
+          <button
+            type="button"
+            className={chatPanelOpen ? "av-btn on" : "av-btn"}
+            onClick={() => setChatPanelOpen((v) => !v)}
+            aria-label={chatPanelOpen ? "Fechar chat" : "Abrir chat"}
+            data-tooltip={chatPanelOpen ? "Fechar chat" : "Chat"}
+          >
+            <ChatIcon />
+            {conversations && conversations.length > 0 && (
+              <span className="lobby-icon-badge">{conversations.length}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={agendaPanelOpen ? "av-btn on" : "av-btn"}
+            onClick={() => setAgendaPanelOpen((v) => !v)}
+            aria-label={agendaPanelOpen ? "Fechar agenda" : "Abrir agenda"}
+            data-tooltip={agendaPanelOpen ? "Fechar agenda" : "Agenda"}
+          >
+            <AgendaIcon />
+            {pendingCallCount > 0 && <span className="lobby-icon-badge">{pendingCallCount}</span>}
+          </button>
+        </div>
+
         <button type="button" className="lobby-enter-btn" onClick={onEnter}>
           Entrar na sala
         </button>
@@ -341,6 +664,24 @@ export default function Lobby({
           </button>
         )}
       </div>
+
+      {chatPanelOpen && (
+        <LobbyChatPanel
+          myUserId={myUserId}
+          myName={myName}
+          conversations={conversations}
+          onClose={() => setChatPanelOpen(false)}
+          onSent={handleMessageSent}
+        />
+      )}
+      {agendaPanelOpen && (
+        <LobbyAgendaPanel
+          myUserId={myUserId}
+          calls={calls}
+          onClose={() => setAgendaPanelOpen(false)}
+          onResponded={handleCallResponded}
+        />
+      )}
     </div>
   );
 }
