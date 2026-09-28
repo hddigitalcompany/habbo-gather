@@ -1,12 +1,34 @@
 // Persistência do PISO, das ÁREAS e da MOBÍLIA da sala (ver "Editar
 // espaço" -> abas "Piso"/"Área"/móvel em GameRoom.tsx/MainScene.ts) --
-// mesmo esquema simples de chatStore.js/agendaStore.js: um arquivo JSON
-// em disco (data/room.json), sem banco de dados de verdade. Antes o
-// editor só gerava um texto pra Douglas colar à mão em game/floor.ts ou
-// game/furniture.ts (ROOM_FLOOR/ROOM_FURNITURE); agora ele coloca/pinta
-// e já fica salvo sozinho aqui (ver POST /room/floor, /room/areas e
-// /room/furniture em server/index.js). Área e móvel usam o MESMO
-// arquivo do piso (só mais campos na store), não um arquivo separado --
+// ANTES vivia num arquivo JSON no disco local do servidor
+// (data/room.json); MUDOU pro Supabase (tabela public.room_layout_state,
+// ver supabase/migrations/0034_room_layout_state.sql) em 28/set depois
+// de achar na prática que disco local não serve pra isso: criar um
+// serviço novo no Render (ex: montar o ambiente de staging) nasce SEM
+// esse arquivo, e mesmo em produção o disco não é garantidamente
+// persistente entre deploys no Render free tier -- Douglas viu a sala
+// nascer vazia no staging e teve que decorar tudo de novo. Continua
+// sendo um blob JSON simples (mesmo formato de sempre: floor, walls,
+// doors, areaDefs, areaTiles, areaOwners, furniture,
+// furnitureSeatOffsets), só troca ONDE mora -- não virou um schema
+// relacional de verdade de propósito (menor risco, migração
+// praticamente igual ao formato antigo). Chaveado por ROOM_SLUG (hoje
+// sempre "sala-principal", mesmo valor hardcoded no PartySocket do
+// cliente) em vez de public.rooms.id porque o servidor ainda não foi
+// migrado pra multi-tenant de verdade (Task #63 maior, ainda
+// pendente) -- essa mudança resolve só a DURABILIDADE.
+//
+// Se SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não estiverem configurados
+// nesse processo (mesmo esquema de fallback de server/roomAuth.js),
+// cai pro arquivo local de sempre (data/room.json) em vez de travar --
+// só afeta ambiente sem Supabase configurado (não devia acontecer em
+// produção/staging, os dois já têm essas variáveis, ver README).
+//
+// Antes o editor só gerava um texto pra Douglas colar à mão em
+// game/floor.ts ou game/furniture.ts (ROOM_FLOOR/ROOM_FURNITURE); agora
+// ele coloca/pinta e já fica salvo sozinho aqui (ver POST /room/floor,
+// /room/areas e /room/furniture em server/index.js). Área e móvel usam
+// o MESMO registro do piso (só mais campos na store), não um separado --
 // ver game/areas.ts pro conceito de área NOMEADA (AreaDef, a lista) +
 // tile pintado apontando pra ela por id (AreaTileDef), e game/furniture.ts
 // pra FurnitureDef (item colocado) + FurnitureSeatOffsetsMap (ajuste de
@@ -17,32 +39,36 @@
 // sem precisar editar código nenhum.
 //
 // A POSSE de mesa privada (quem clicou "Assumir mesa", campo
-// `areaOwners` abaixo) TAMBÉM persiste aqui, no MESMO arquivo -- pedido
+// `areaOwners` abaixo) TAMBÉM persiste aqui, no MESMO registro -- pedido
 // do Douglas: "quando voce assume a mesa, ela e sua, ate apagarem o
-// espaco, se nao nao troca". (Comentário antigo dizia o contrário --
-// "NÃO entra aqui, só em memória, não sobrevive a um restart" -- ficou
-// desatualizado depois que a persistência foi adicionada; ver
-// setAreaOwner/getAreaOwners/removeAreaOwner abaixo e o comentário
-// grande de "areaOwners" em emptyStore. `roomAreaOwners` citado ali NÃO
-// existe mais em server/index.js, era o Map só-em-memória de ANTES
-// dessa migração.) NA PRÁTICA: server/index.js e este arquivo são
-// módulos Node carregados uma vez só no processo do servidor -- ao
-// contrário do front-end Next.js (que recompila sozinho a cada save),
-// uma mudança AQUI só entra em vigor depois de reiniciar o processo
-// `node server/index.js` de verdade. Rodar com código velho ainda em
-// memória é a explicação mais comum pra "assumi a mesa e depois de
-// atualizar a página ela pede pra assumir de novo" -- o claim aconteceu
-// de verdade na tela (broadcast confirmado pelo servidor), mas o
-// processo rodando não tinha esse persist() ainda, então nunca foi pro
-// disco.
+// espaco, se nao nao troca" -- ver setAreaOwner/getAreaOwners/
+// removeAreaOwner abaixo.
+//
+// getFloor/getWalls/getDoors/getAreaState/getAreaOwners/
+// getFurnitureState continuam SÍNCRONOS de propósito (leem de um cache
+// em memória, `store`, carregado uma vez no boot) -- nenhum call site
+// em server/index.js precisou mudar. Só o carregamento inicial
+// (bootStore, chamado com top-level await lá embaixo) e persist() (que
+// grava no Supabase) viraram assíncronos -- persist() é best-effort,
+// chamado sem await pelos setters (mesmo comportamento de antes: a
+// escrita em disco também não era esperada por quem chamava).
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
 const STORE_PATH = path.join(DATA_DIR, "room.json");
+
+const ROOM_SLUG = "sala-principal";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const admin =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+    : null;
 
 // limites bem folgados (a sala tem só 12x7 quadrados hoje) -- só pra
 // impedir um payload absurdo de travar o servidor ou inchar o arquivo,
@@ -136,50 +162,104 @@ function emptyStore() {
   };
 }
 
-function loadStore() {
+/** Normaliza um blob cru (vindo do arquivo local OU do Supabase) pro
+ * formato de sempre -- mesmos fallbacks de campo "novo" que faltava em
+ * sala salva antes de alguma feature (walls/doors/areaOwners), agora
+ * reaproveitado nos dois carregadores abaixo em vez de duplicado. */
+function normalizeStore(parsed) {
+  if (!parsed || typeof parsed !== "object") return emptyStore();
+  return {
+    floor: Array.isArray(parsed.floor) ? parsed.floor : [],
+    walls: Array.isArray(parsed.walls) ? parsed.walls : [],
+    doors: Array.isArray(parsed.doors) ? parsed.doors : [],
+    areaDefs: Array.isArray(parsed.areaDefs) ? parsed.areaDefs : [],
+    areaTiles: Array.isArray(parsed.areaTiles) ? parsed.areaTiles : [],
+    areaOwners:
+      parsed.areaOwners && typeof parsed.areaOwners === "object" && !Array.isArray(parsed.areaOwners)
+        ? parsed.areaOwners
+        : {},
+    furniture: Array.isArray(parsed.furniture) ? parsed.furniture : [],
+    furnitureSeatOffsets:
+      parsed.furnitureSeatOffsets && typeof parsed.furnitureSeatOffsets === "object"
+        ? parsed.furnitureSeatOffsets
+        : {},
+  };
+}
+
+/** Fallback de sempre (arquivo local) -- usado quando o Supabase não tá
+ * configurado nesse processo, ou se a leitura no Supabase falhar. */
+function loadStoreFromFile() {
   try {
     if (!existsSync(STORE_PATH)) return emptyStore();
     const raw = readFileSync(STORE_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      floor: Array.isArray(parsed.floor) ? parsed.floor : [],
-      // "walls" é campo NOVO -- sala salva antes desta feature não tem
-      // essa chave no room.json ainda, por isso o fallback pra [] (senão
-      // toda sala existente quebraria o GET /room/walls no primeiro
-      // load depois do deploy).
-      walls: Array.isArray(parsed.walls) ? parsed.walls : [],
-      // "doors" é campo NOVO, mesmo motivo/fallback de "walls" acima
-      // (sala salva antes desta feature não tem essa chave ainda).
-      doors: Array.isArray(parsed.doors) ? parsed.doors : [],
-      areaDefs: Array.isArray(parsed.areaDefs) ? parsed.areaDefs : [],
-      areaTiles: Array.isArray(parsed.areaTiles) ? parsed.areaTiles : [],
-      // "areaOwners" é campo NOVO, mesmo motivo/fallback de "walls"/
-      // "doors" acima (sala salva antes desta feature não tem essa
-      // chave ainda).
-      areaOwners:
-        parsed.areaOwners && typeof parsed.areaOwners === "object" && !Array.isArray(parsed.areaOwners)
-          ? parsed.areaOwners
-          : {},
-      furniture: Array.isArray(parsed.furniture) ? parsed.furniture : [],
-      furnitureSeatOffsets:
-        parsed.furnitureSeatOffsets && typeof parsed.furnitureSeatOffsets === "object"
-          ? parsed.furnitureSeatOffsets
-          : {},
-    };
+    return normalizeStore(JSON.parse(raw));
   } catch (e) {
     console.error("Não deu pra ler data/room.json, começando do zero.", e);
     return emptyStore();
   }
 }
 
-const store = loadStore();
-
-function persist() {
+function persistToFile(snapshot) {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(STORE_PATH, JSON.stringify(store), "utf8");
+    writeFileSync(STORE_PATH, JSON.stringify(snapshot), "utf8");
   } catch (e) {
     console.error("Não deu pra salvar data/room.json", e);
+  }
+}
+
+/** Carrega o estado inicial da sala -- Supabase quando configurado
+ * (tabela room_layout_state, ver migration 0034), senão cai pro
+ * arquivo local de sempre. Se o Supabase estiver configurado mas AINDA
+ * não tiver linha pra ROOM_SLUG (primeiro boot depois desse deploy), e
+ * existir um data/room.json local (sala decorada antes dessa
+ * migração, ainda no disco DESSE boot), usa ele como ponto de partida
+ * e já sobe pro Supabase na hora -- migração automática, sem passo
+ * manual, só funciona nesse primeiro boot (disco local não sobrevive
+ * a um serviço recriado do zero, por isso a pressa em subir assim que
+ * possível). */
+async function bootStore() {
+  if (!admin) return loadStoreFromFile();
+  try {
+    const { data, error } = await admin
+      .from("room_layout_state")
+      .select("data")
+      .eq("room_slug", ROOM_SLUG)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.data) return normalizeStore(data.data);
+    // sem linha ainda no Supabase -- tenta herdar do arquivo local
+    // desse boot (pode não existir, tudo bem, emptyStore() nesse caso).
+    const fromFile = loadStoreFromFile();
+    await admin
+      .from("room_layout_state")
+      .upsert({ room_slug: ROOM_SLUG, data: fromFile, updated_at: new Date().toISOString() });
+    return fromFile;
+  } catch (e) {
+    console.error("Não deu pra carregar a sala do Supabase, caindo pro arquivo local.", e);
+    return loadStoreFromFile();
+  }
+}
+
+const store = await bootStore();
+
+/** Grava o estado atual -- Supabase quando configurado, senão o
+ * arquivo local de sempre. Best-effort/assíncrono (mesmo contrato de
+ * antes: quem chama não espera a escrita terminar) -- erro só vai pro
+ * log, nunca derruba a chamada que gerou a mudança (o dado já está
+ * certo em memória, é só a gravação que pode falhar). */
+async function persist() {
+  if (!admin) {
+    persistToFile(store);
+    return;
+  }
+  try {
+    const { error } = await admin
+      .from("room_layout_state")
+      .upsert({ room_slug: ROOM_SLUG, data: store, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  } catch (e) {
+    console.error("Não deu pra salvar a sala no Supabase.", e);
   }
 }
 
