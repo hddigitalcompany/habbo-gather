@@ -22,9 +22,25 @@
 // server/index.js) -- endpoint HTTP público que já existia pro painel
 // de membros, escolhido de propósito por não precisar abrir o
 // WebSocket só pra mostrar um número no lobby.
+//
+// Chat/agenda (28/set, pedido do Douglas: "chat, agenda, configuracoes
+// nao ficam presas apenas a sala, acompanha cada pessoa por toda
+// plataforma") -- resumo buscado por GET /chat/summary e
+// GET /agenda/summary (novos, ver server/index.js), MESMOS dados que
+// o GameRoom pede por WebSocket ("chat:list"/"agenda:list"), só que
+// sem precisar abrir o socket/entrar na sala pra ver que já tem
+// conversa ou compromisso marcado -- é o que fazia essas duas coisas
+// PARECEREM presas à sala (só apareciam depois de "Entrar"). Usa o
+// MESMO userId que o GameRoom usa (ver lib/identity.ts) pra ser
+// literalmente a mesma pessoa/histórico dos dois lados. Responder
+// mensagem, criar/editar compromisso e abrir chamada continuam só
+// dentro da sala (dependem do WebSocket/WebRTC de verdade, ver
+// ChatDrawer/AgendaDrawer em GameRoom.tsx) -- aqui é só "prévia",
+// igual o RoomPreview abaixo.
 
 import { useEffect, useState } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
+import { resolveUserId } from "@/lib/identity";
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
 const REALTIME_HTTP_BASE =
@@ -32,6 +48,21 @@ const REALTIME_HTTP_BASE =
   `://${REALTIME_HOST}`;
 
 type PresenceInfo = { totalOnline: number } | null;
+
+type ConversationSummary = {
+  id: string;
+  name: string;
+  kind: "direct" | "group";
+  participants: { id: string; name?: string }[];
+  lastMessage: { senderName: string; kind: string; text: string; ts: number } | null;
+};
+
+type CallSummary = {
+  id: string;
+  title: string;
+  startTs: number;
+  participants: { id: string; status: string }[];
+};
 
 type FloorTile = { col: number; row: number; styleId: string };
 type FurnitureItem = { col: number; row: number; type: string };
@@ -147,10 +178,12 @@ function RoomPreview({ room, loading }: { room: RoomShape; loading: boolean }) {
 }
 
 export default function Lobby({
+  accountUserId,
   accountProfile,
   onEnter,
   onSignOut,
 }: {
+  accountUserId: string | null;
   accountProfile: Partial<AccountProfile> | null;
   onEnter: () => void;
   onSignOut: (() => void) | null;
@@ -158,6 +191,8 @@ export default function Lobby({
   const [presence, setPresence] = useState<PresenceInfo>(null);
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
+  const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
+  const [nextCall, setNextCall] = useState<CallSummary | null | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +233,42 @@ export default function Lobby({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const userId = resolveUserId(accountUserId);
+    if (!userId) {
+      setConversations([]);
+      setNextCall(null);
+      return;
+    }
+    fetch(`${REALTIME_HTTP_BASE}/chat/summary?userId=${encodeURIComponent(userId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
+      })
+      .catch(() => {
+        if (!cancelled) setConversations([]);
+      });
+    fetch(`${REALTIME_HTTP_BASE}/agenda/summary?userId=${encodeURIComponent(userId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const calls: CallSummary[] = Array.isArray(data?.calls) ? data.calls : [];
+        const now = Date.now();
+        const upcoming = calls
+          .filter((c) => c.startTs >= now)
+          .filter((c) => c.participants.find((p) => p.id === userId)?.status !== "declined")
+          .sort((a, b) => a.startTs - b.startTs);
+        setNextCall(upcoming[0] ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setNextCall(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountUserId]);
+
   const displayName = accountProfile?.name?.trim() || "visitante";
   const presenceText =
     presence === null
@@ -207,6 +278,41 @@ export default function Lobby({
         : presence.totalOnline === 1
           ? "1 pessoa na sala agora."
           : `${presence.totalOnline} pessoas na sala agora.`;
+
+  // "prévia" de chat/agenda -- ver comentário grande no topo do arquivo.
+  // conversations null = ainda buscando; [] = já sabe que não tem
+  // nenhuma (não mostra a linha à toa). Ordena por updatedAt (já vem
+  // assim do servidor, ver chatStore.listConversationsForUser) e pega
+  // só a mais recente pra caber numa linha.
+  const latestConversation = conversations && conversations.length > 0 ? conversations[0] : null;
+  const chatText =
+    conversations === null
+      ? null
+      : conversations.length === 0
+        ? "Nenhuma conversa ainda."
+        : latestConversation?.lastMessage
+          ? `${conversations.length === 1 ? "1 conversa" : `${conversations.length} conversas`} · última de ${
+              latestConversation.lastMessage.senderName || "alguém"
+            }: ${
+              latestConversation.lastMessage.kind === "text"
+                ? latestConversation.lastMessage.text.slice(0, 60)
+                : "anexo enviado"
+            }`
+          : `${conversations.length === 1 ? "1 conversa" : `${conversations.length} conversas`} salva${
+              conversations.length === 1 ? "" : "s"
+            }.`;
+
+  const agendaText =
+    nextCall === undefined
+      ? null
+      : nextCall === null
+        ? "Nenhum compromisso agendado."
+        : `Próximo compromisso: "${nextCall.title}" em ${new Date(nextCall.startTs).toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}.`;
 
   return (
     <div className="lobby-backdrop">
@@ -220,6 +326,12 @@ export default function Lobby({
           <span className={`lobby-presence-dot${presence && presence.totalOnline > 0 ? " lobby-presence-dot-active" : ""}`} />
           {presenceText}
         </p>
+        {(chatText || agendaText) && (
+          <div className="lobby-status">
+            {chatText && <p className="lobby-status-line">💬 {chatText}</p>}
+            {agendaText && <p className="lobby-status-line">📅 {agendaText}</p>}
+          </div>
+        )}
         <button type="button" className="lobby-enter-btn" onClick={onEnter}>
           Entrar na sala
         </button>

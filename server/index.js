@@ -826,6 +826,47 @@ async function handleGetPresence(req, res, url) {
   res.end(JSON.stringify(payload));
 }
 
+/** GET /chat/summary?userId=X -- resumo LEVE das conversas de um
+ * usuário, sem precisar abrir WebSocket/"identify" -- pedido do
+ * Douglas: chat "acompanha a pessoa por toda a plataforma", não só
+ * depois de entrar na sala (ver Lobby.tsx, mostrado ANTES do usuário
+ * clicar "Entrar na sala"). Reaproveita a mesma
+ * chatStore.listConversationsForUser usada pelo WebSocket
+ * ("chat:list") -- mesmos dados, só um jeito de pedir mais barato
+ * (sem socket) pra tela do lobby. Só leitura, mesmo nível de
+ * confiança que o resto do fallback anônimo (userId vem do
+ * localStorage do navegador, ver getOrCreateUserId em lib/identity.ts
+ * -- não autentica nada, só filtra); enviar/editar mensagem continua
+ * exigindo o WebSocket de verdade. */
+function handleGetChatSummary(req, res, url) {
+  const userId = url.searchParams.get("userId");
+  if (!userId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Falta "userId"');
+    return;
+  }
+  const conversations = chatStore.listConversationsForUser(userId);
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ conversations }));
+}
+
+/** GET /agenda/summary?userId=X -- mesma ideia de handleGetChatSummary
+ * acima, só que pra agenda (ver agendaStore.listCallsForUser, mesma
+ * função usada pelo WebSocket em "agenda:list"). Devolve TODAS as
+ * calls do usuário (passadas e futuras); quem chama decide o que
+ * mostrar (ver Lobby.tsx, que pega só a próxima futura). */
+function handleGetAgendaSummary(req, res, url) {
+  const userId = url.searchParams.get("userId");
+  if (!userId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Falta "userId"');
+    return;
+  }
+  const calls = agendaStore.listCallsForUser(userId);
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ calls }));
+}
+
 /** GET /room/areas -- mesma ideia do handleGetFloor acima, ver
  * loadSavedAreas/setAreaDefs em MainScene.ts. Devolve lista + tiles
  * juntos (ver getAreaState em roomStore.js) -- posse (quem clicou
@@ -1122,6 +1163,16 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/room/presence") {
     handleGetPresence(req, res, url);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/chat/summary") {
+    handleGetChatSummary(req, res, url);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/agenda/summary") {
+    handleGetAgendaSummary(req, res, url);
     return;
   }
 

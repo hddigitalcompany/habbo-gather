@@ -3741,6 +3741,32 @@ body {
   box-shadow: 0 0 6px rgba(41, 196, 106, 0.8);
 }
 
+/* pedido do Douglas (28/set): "chat, agenda, configuracoes nao ficam
+   presas apenas a sala, acompanha cada pessoa por toda plataforma" --
+   prévia de chat/agenda já visível no Lobby, antes de "Entrar na
+   sala" (ver comentário grande no topo de components/Lobby.tsx). */
+.lobby-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(124, 92, 255, 0.1);
+  border: 1px solid rgba(124, 92, 255, 0.25);
+}
+
+.lobby-status-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #cfc4e6;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lobby-enter-btn {
   background: #7c5cff;
   border: none;

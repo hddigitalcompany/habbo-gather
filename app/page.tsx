@@ -33,6 +33,7 @@ export default function Home() {
             />
           ) : (
             <Lobby
+              accountUserId={auth.accountUserId}
               accountProfile={auth.accountProfile}
               onEnter={() => setEntered(true)}
               onSignOut={

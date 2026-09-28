@@ -29,6 +29,7 @@ import MainScene, {
 } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { resolveUserId } from "@/lib/identity";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
@@ -407,7 +408,10 @@ function loadSavedAvatar(): SavedAvatar {
 // histórico de conversa direta/grupo sobreviver a um F5 -- sem isso,
 // cada reconexão pro servidor pareceria uma pessoa nova (ver "userId"
 // vs "id" de conexão no comentário grande em server/index.js).
-const USER_ID_STORAGE_KEY = "habbo-gather-user-id";
+// USER_ID_STORAGE_KEY/getOrCreateUserId MOVERAM pra lib/identity.ts
+// (28/set) -- Lobby.tsx precisa do MESMO id pra buscar chat/agenda
+// ANTES da pessoa entrar na sala (ver comentário grande lá), então
+// virou um módulo compartilhado em vez de só existir aqui.
 // lembrar se a gaveta de chat tá "fixada" como barra lateral (ver estado
 // chatPinMode em GameRoom) -- só "float" (flutuando, padrão) ou "side"
 // (barra lateral). Formato antigo guardava só "1"/"0", migrado na
@@ -418,20 +422,6 @@ type PinMode = "float" | "side";
 function parsePinMode(raw: string | null): PinMode {
   if (raw === "side" || raw === "1") return "side"; // "1" = formato antigo
   return "float";
-}
-
-function getOrCreateUserId(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    let id = window.localStorage.getItem(USER_ID_STORAGE_KEY);
-    if (!id) {
-      id = crypto.randomUUID?.() ?? `u-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      window.localStorage.setItem(USER_ID_STORAGE_KEY, id);
-    }
-    return id;
-  } catch {
-    return `u-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  }
 }
 
 // redimensiona/comprime a foto ANTES de mandar -- vai como data-URL pela
@@ -733,7 +723,7 @@ export default function GameRoom({
   // server/roomAuth.js); quem entra sem conta (Supabase não
   // configurado, ou clicou "Continuar como visitante") segue no mesmo
   // fluxo anônimo de sempre.
-  const myUserId = useMemo(() => accountUserId || getOrCreateUserId(), [accountUserId]);
+  const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
   // ref pro token de acesso ATUAL (renovado sozinho pelo Supabase de
   // tempos em tempos, ver onAuthStateChange em AuthGate.tsx -- por
   // isso é ref e não só a prop direto: o handler de "identify" abaixo
