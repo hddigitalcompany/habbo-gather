@@ -630,31 +630,6 @@ export default function Lobby({
           {presenceText}
         </p>
 
-        <div className="lobby-icon-row">
-          <button
-            type="button"
-            className={chatPanelOpen ? "av-btn on" : "av-btn"}
-            onClick={() => setChatPanelOpen((v) => !v)}
-            aria-label={chatPanelOpen ? "Fechar chat" : "Abrir chat"}
-            data-tooltip={chatPanelOpen ? "Fechar chat" : "Chat"}
-          >
-            <ChatIcon />
-            {conversations && conversations.length > 0 && (
-              <span className="lobby-icon-badge">{conversations.length}</span>
-            )}
-          </button>
-          <button
-            type="button"
-            className={agendaPanelOpen ? "av-btn on" : "av-btn"}
-            onClick={() => setAgendaPanelOpen((v) => !v)}
-            aria-label={agendaPanelOpen ? "Fechar agenda" : "Abrir agenda"}
-            data-tooltip={agendaPanelOpen ? "Fechar agenda" : "Agenda"}
-          >
-            <AgendaIcon />
-            {pendingCallCount > 0 && <span className="lobby-icon-badge">{pendingCallCount}</span>}
-          </button>
-        </div>
-
         <button type="button" className="lobby-enter-btn" onClick={onEnter}>
           Entrar na sala
         </button>
@@ -663,6 +638,43 @@ export default function Lobby({
             Sair da conta
           </button>
         )}
+      </div>
+
+      {/* pedido do Douglas (28/set, com print da av-bar de dentro da
+          sala): "quero em balao assim, no canto esquerdo mesmo lugar
+          que esta" -- MESMA classe .av-bar (pilula de vidro fosco,
+          canto inferior esquerdo) que a barra de dentro da sala usa,
+          não uma cópia -- fica igual de verdade, não só parecido. Fora
+          do .lobby-card de propósito (esse aqui é "absolute" relativo
+          à tela inteira, igual dentro da sala; dentro do card ficaria
+          preso ao centro). */}
+      <div className="av-bar">
+        <button
+          type="button"
+          className={chatPanelOpen ? "av-btn on" : "av-btn"}
+          onClick={() => setChatPanelOpen((v) => !v)}
+          aria-label={chatPanelOpen ? "Fechar chat" : "Abrir chat"}
+          data-tooltip={chatPanelOpen ? "Fechar chat" : "Chat"}
+        >
+          <span className="lobby-badge-wrap">
+            <ChatIcon />
+            {conversations && conversations.length > 0 && (
+              <span className="lobby-icon-badge">{conversations.length}</span>
+            )}
+          </span>
+        </button>
+        <button
+          type="button"
+          className={agendaPanelOpen ? "av-btn on" : "av-btn"}
+          onClick={() => setAgendaPanelOpen((v) => !v)}
+          aria-label={agendaPanelOpen ? "Fechar agenda" : "Abrir agenda"}
+          data-tooltip={agendaPanelOpen ? "Fechar agenda" : "Agenda"}
+        >
+          <span className="lobby-badge-wrap">
+            <AgendaIcon />
+            {pendingCallCount > 0 && <span className="lobby-icon-badge">{pendingCallCount}</span>}
+          </span>
+        </button>
       </div>
 
       {chatPanelOpen && (

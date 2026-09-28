@@ -3744,26 +3744,24 @@ body {
 /* pedido do Douglas (28/set): "chat, agenda, configuracoes nao ficam
    presas apenas a sala, acompanha cada pessoa por toda plataforma" --
    depois, vendo só a prévia em texto: "cade o botao das conversas e
-   da agenda? mantenha igual de dentro da sala". Botões de verdade
-   (reaproveita .av-btn/.av-btn.on, MESMA classe da av-bar de dentro da
-   sala) + painel flutuante (ver comentário grande no topo de
-   components/Lobby.tsx). */
-.lobby-icon-row {
-  display: flex;
-  justify-content: center;
-  gap: 14px;
-  margin: 0 0 20px;
-}
-
-.lobby-icon-row .av-btn {
+   da agenda? mantenha igual de dentro da sala" -- depois, com print da
+   av-bar de dentro da sala: "quero em balao assim, no canto esquerdo
+   mesmo lugar que esta". Os botões do Lobby usam a MESMA .av-bar/
+   .av-btn de dentro da sala (ver components/Lobby.tsx) -- só o badge
+   de contagem é exclusivo do Lobby (a barra de dentro da sala não tem
+   esse número). .lobby-badge-wrap é só um `position:relative` num
+   `<span>` ENVOLVENDO ícone+badge dentro do botão, de propósito pra
+   não mexer em `.av-btn` (classe compartilhada com a sala de
+   verdade). */
+.lobby-badge-wrap {
   position: relative;
-  background: rgba(255, 255, 255, 0.08);
+  display: inline-flex;
 }
 
 .lobby-icon-badge {
   position: absolute;
-  top: -3px;
-  right: -3px;
+  top: -7px;
+  right: -8px;
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
