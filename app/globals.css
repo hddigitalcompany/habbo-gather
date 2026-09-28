@@ -3753,46 +3753,6 @@ body {
    `<span>` ENVOLVENDO ícone+badge dentro do botão, de propósito pra
    não mexer em `.av-btn` (classe compartilhada com a sala de
    verdade). */
-/* prévia de câmera do Lobby -- pedido do Douglas: "cade o restante,
-   configuracoes, audio, video, tela" (vendo a av-bar de dentro da
-   sala). Mesmo espelhamento (scaleX(-1)) do .local-video de dentro da
-   sala, ver app/globals.css mais acima. */
-.lobby-cam-preview {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #0d0a16;
-  margin: 0 0 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.lobby-cam-preview video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1);
-}
-
-.lobby-cam-preview video.lobby-cam-off {
-  display: none;
-}
-
-.lobby-cam-denied {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 0 16px;
-  text-align: center;
-  font-size: 12.5px;
-  color: #a89cc4;
-}
 
 /* botão "Tela" do Lobby -- sem função aqui de propósito (ver
    comentário grande onde é usado em components/Lobby.tsx), só visual
@@ -4293,6 +4253,57 @@ body {
 .members-panel-row button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Painel de Contatos (components/ContactsPanel.tsx) -- reaproveita
+   .members-panel-* pro fundo/borda/lista, só a busca e o avatarzinho
+   redondo são próprios daqui. */
+.contacts-panel-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f5f0ff;
+  font-size: 13px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+}
+
+.contacts-panel-search::placeholder {
+  color: #8c7fae;
+}
+
+.contacts-panel-search:focus {
+  outline: none;
+  border-color: rgba(154, 130, 255, 0.6);
+}
+
+.contacts-panel-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.contacts-panel-avatar {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.contacts-panel-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* Editor de Itens (components/ItemEditor.tsx) -- mesmo padrão visual do

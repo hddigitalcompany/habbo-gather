@@ -49,6 +49,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 import SettingsPanel from "@/components/SettingsPanel";
+import ContactsPanel, { type ContactUser } from "@/components/ContactsPanel";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -237,6 +238,20 @@ function AgendaIcon() {
   );
 }
 
+// Ícone do botão "Contatos" -- pedido do Douglas: "quero agora, mais
+// um icone de contatos" (28/set), MESMO ícone/mesma ideia do botão
+// "Contatos" de dentro da sala (copiado de GameRoom.tsx).
+function ContactsIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="8.5" cy="11" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5.5 16c.4-1.8 1.6-2.7 3-2.7s2.6.9 3 2.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M13.5 9.5h5M13.5 12.5h5M13.5 15.5h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // MESMOS ícones de mic/câmera/tela/engrenagem da av-bar de dentro da
 // sala (copiados de GameRoom.tsx, mesmo motivo do ChatIcon/AgendaIcon
 // acima) -- pedido do Douglas vendo a av-bar de dentro da sala: "cade
@@ -316,14 +331,24 @@ function LobbyChatPanel({
   conversations,
   onClose,
   onSent,
+  initialActiveId,
 }: {
   myUserId: string;
   myName: string;
   conversations: ConversationSummary[] | null;
   onClose: () => void;
   onSent: (conversationId: string, message: ChatMessage) => void;
+  // pré-seleciona uma conversa ao abrir -- pedido do Douglas: "quero
+  // agora, mais um icone de contatos" (28/set), clicar em "Conversar"
+  // no painel de Contatos já abre DIRETO a conversa com a pessoa, sem
+  // passar pela lista. Só lido no useState inicial (ver abaixo) porque
+  // esse painel inteiro só existe montado enquanto chatPanelOpen é
+  // true (desmonta ao fechar, ver componente Lobby mais abaixo) --
+  // cada abertura é um mount novo, então dá pra usar como valor
+  // inicial sem precisar sincronizar com um efeito.
+  initialActiveId?: string | null;
 }) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -573,76 +598,54 @@ export default function Lobby({
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [calls, setCalls] = useState<CallSummary[] | null>(null);
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  // Contatos (28/set, pedido do Douglas: "quero agora, mais um icone
+  // de contatos") -- diretório platform-wide via GET /users/directory
+  // (mesma fonte de chatStore.listAllUsers que o WS manda como
+  // "users:list" de dentro da sala, ver comentário grande em
+  // ContactsPanel.tsx). openChatConversationId é a "ponte" pra abrir o
+  // LobbyChatPanel JÁ na conversa certa ao clicar "Conversar" (ver
+  // handleStartConversation mais abaixo).
+  const [directory, setDirectory] = useState<ContactUser[] | null>(null);
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const [contactsBusy, setContactsBusy] = useState(false);
+  const [openChatConversationId, setOpenChatConversationId] = useState<string | null>(null);
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
   // de dentro da sala: "cade o restante, configuracoes, audio, video,
-  // tela") -- testa/ajusta ANTES de entrar, igual Gather/Zoom/Meet.
-  // Mesma escolha (ligado/desligado, qual aparelho) vale quando entra
-  // de verdade na sala (ver lib/mediaPrefs.ts + requestMedia em
-  // GameRoom.tsx), pra não "destravar" tudo de novo sozinho ao clicar
-  // "Entrar na sala". ---
+  // tela") -- os botões aqui só guardam a PREFERÊNCIA (localStorage,
+  // ver lib/mediaPrefs.ts), sem pedir câmera/mic de verdade -- Douglas
+  // pediu pra tirar a prévia de vídeo do Lobby ("tira isso do lobby",
+  // reagindo à caixa "Sem acesso à câmera/microfone"), então voltamos
+  // ao princípio original: só pede permissão quando a pessoa entra na
+  // sala de verdade (ver requestMedia em GameRoom.tsx), que aplica essa
+  // mesma preferência salva aqui. Trocar de aparelho em "Configurações"
+  // ainda pede stream (só naquele clique, ação explícita). ---
   const [micOn, setMicOn] = useState(() => getStoredMicOn());
   const [camOn, setCamOn] = useState(() => getStoredCamOn());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedMicId, setSelectedMicId] = useState(() => getStoredMicDeviceId());
   const [selectedCamId, setSelectedCamId] = useState(() => getStoredCamDeviceId());
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(() => getStoredSpeakerDeviceId());
-  const [mediaDenied, setMediaDenied] = useState(false);
-  const localVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
   const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
   const myName = accountProfile?.name?.trim() || "Visitante";
 
   useEffect(() => {
-    let destroyed = false;
-    async function requestMedia() {
-      const micDeviceId = getStoredMicDeviceId();
-      const camDeviceId = getStoredCamDeviceId();
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: camDeviceId ? { deviceId: { exact: camDeviceId } } : true,
-          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-        });
-      } catch {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        } catch (e) {
-          if (!destroyed) setMediaDenied(true);
-          console.warn("Sem acesso a câmera/microfone no Lobby.", e);
-          return;
-        }
-      }
-      if (destroyed) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      stream.getAudioTracks().forEach((t) => (t.enabled = getStoredMicOn()));
-      stream.getVideoTracks().forEach((t) => (t.enabled = getStoredCamOn()));
-      localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-      const gotMicId = stream.getAudioTracks()[0]?.getSettings().deviceId;
-      const gotCamId = stream.getVideoTracks()[0]?.getSettings().deviceId;
-      if (gotMicId) setSelectedMicId(gotMicId);
-      if (gotCamId) setSelectedCamId(gotCamId);
-    }
-    requestMedia();
     return () => {
-      destroyed = true;
-      // solta a câmera/mic ao sair do Lobby de QUALQUER jeito (entrou
-      // na sala -- que pede a dela própria, ver GameRoom.tsx --, saiu
-      // da conta, fechou a aba) -- nunca deixa os dois lados com o
-      // dispositivo aberto ao mesmo tempo.
+      // solta qualquer stream aberta (só existe se a pessoa mexeu em
+      // "Configurações" pra testar um aparelho, ver switchMicDevice/
+      // switchCamDevice) ao sair do Lobby de qualquer jeito.
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
+  // Sem stream ativa no Lobby por padrão -- os botões só trocam a
+  // preferência salva (aplicada de verdade quando entra na sala, ver
+  // requestMedia em GameRoom.tsx).
   function toggleMic() {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    stream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
+    localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !micOn));
     setMicOn((v) => {
       setStoredMicOn(!v);
       return !v;
@@ -650,9 +653,7 @@ export default function Lobby({
   }
 
   function toggleCam() {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
+    localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = !camOn));
     setCamOn((v) => {
       setStoredCamOn(!v);
       return !v;
@@ -701,7 +702,6 @@ export default function Lobby({
       } else {
         localStreamRef.current = fresh;
       }
-      if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
       setSelectedCamId(deviceId);
       setStoredCamDeviceId(deviceId);
     } catch (e) {
@@ -789,6 +789,57 @@ export default function Lobby({
     };
   }, [myUserId]);
 
+  // Diretório de Contatos -- não depende de myUserId pra listar (todo
+  // mundo cadastrado), só pra filtrar "eu mesmo" (ver ContactsPanel.tsx).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${REALTIME_HTTP_BASE}/users/directory`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setDirectory(Array.isArray(data?.users) ? data.users : []);
+      })
+      .catch(() => {
+        if (!cancelled) setDirectory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // "Conversar" no painel de Contatos -- cria (ou acha) a conversa
+  // direta via POST /chat/direct (sem WebSocket, mesma arquitetura do
+  // resto do Lobby, ver comentário grande no topo do arquivo), soma o
+  // resultado na lista de conversas (upsert por id, pra não duplicar
+  // se já existia) e manda o LobbyChatPanel abrir JÁ nela.
+  async function handleStartConversation(targetUserId: string) {
+    if (!myUserId || contactsBusy) return;
+    setContactsBusy(true);
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/direct`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: myUserId, userName: myName, targetUserId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const conv = data?.conversation as ConversationSummary | undefined;
+        if (conv) {
+          setConversations((prev) => {
+            const rest = (prev ?? []).filter((c) => c.id !== conv.id);
+            return [conv, ...rest];
+          });
+          setOpenChatConversationId(conv.id);
+          setContactsOpen(false);
+          setChatPanelOpen(true);
+        }
+      }
+    } catch {
+      // rede caiu -- painel de Contatos continua aberto, pessoa tenta de novo
+    } finally {
+      setContactsBusy(false);
+    }
+  }
+
   // atualiza a prévia da conversa na lista (lastMessage) na hora,
   // sem esperar reabrir o painel -- mesma ideia do "chat:conversation"
   // que o WebSocket manda de dentro da sala.
@@ -842,16 +893,6 @@ export default function Lobby({
         </div>
         <p className="lobby-greeting">Bem-vindo(a), {displayName}!</p>
         <RoomPreview room={room} loading={roomLoading} />
-
-        {/* prévia de câmera -- pedido do Douglas: "cade o restante,
-            configuracoes, audio, video, tela" (vendo a av-bar de dentro
-            da sala) -- testa/ajusta mic e câmera aqui, igual
-            Gather/Zoom/Meet, antes de entrar. */}
-        <div className="lobby-cam-preview">
-          <video ref={localVideoRef} autoPlay muted playsInline className={camOn ? "" : "lobby-cam-off"} />
-          {mediaDenied && <p className="lobby-cam-denied">Sem acesso à câmera/microfone.</p>}
-          {!camOn && !mediaDenied && <p className="lobby-cam-denied">Câmera desligada</p>}
-        </div>
 
         <p className="lobby-presence">
           <span className={`lobby-presence-dot${presence && presence.totalOnline > 0 ? " lobby-presence-dot-active" : ""}`} />
@@ -938,6 +979,15 @@ export default function Lobby({
         </button>
         <button
           type="button"
+          className={contactsOpen ? "av-btn on" : "av-btn"}
+          onClick={() => setContactsOpen((v) => !v)}
+          aria-label={contactsOpen ? "Fechar contatos" : "Abrir contatos"}
+          data-tooltip={contactsOpen ? "Fechar contatos" : "Contatos"}
+        >
+          <ContactsIcon />
+        </button>
+        <button
+          type="button"
           className={settingsOpen ? "av-btn on" : "av-btn"}
           onClick={() => setSettingsOpen((v) => !v)}
           aria-label={settingsOpen ? "Fechar configurações" : "Configurações"}
@@ -971,8 +1021,21 @@ export default function Lobby({
           myUserId={myUserId}
           myName={myName}
           conversations={conversations}
-          onClose={() => setChatPanelOpen(false)}
+          onClose={() => {
+            setChatPanelOpen(false);
+            setOpenChatConversationId(null);
+          }}
           onSent={handleMessageSent}
+          initialActiveId={openChatConversationId}
+        />
+      )}
+      {contactsOpen && (
+        <ContactsPanel
+          users={directory ?? []}
+          myUserId={myUserId}
+          onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
+          onClose={() => setContactsOpen(false)}
+          loading={directory === null}
         />
       )}
       {agendaPanelOpen && (

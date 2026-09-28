@@ -930,9 +930,15 @@ async function handlePostChatSend(req, res) {
     res.end('Falta "text"');
     return;
   }
+  const senderName = typeof userName === "string" ? userName.slice(0, 80) : "";
+  // registra/atualiza o nome no diretório (ver chatStore.upsertUser,
+  // MESMA função que o WebSocket chama no "identify" -- syncChatUser
+  // aqui em cima) -- sem isso, alguém que só usa o Lobby (nunca abriu
+  // a sala/nunca mandou "identify") apareceria sem nome pros outros.
+  if (senderName) chatStore.upsertUser(userId, { name: senderName });
   const msg = chatStore.addMessage(conversationId, {
     senderId: userId,
-    senderName: typeof userName === "string" ? userName.slice(0, 80) : "",
+    senderName,
     kind: "text",
     text,
   });
@@ -942,6 +948,52 @@ async function handlePostChatSend(req, res) {
   }
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
   res.end(JSON.stringify({ ok: true, message: msg }));
+}
+
+/** GET /users/directory -- "todo mundo já cadastrado no ambiente"
+ * (MESMA lista que o WebSocket manda em "users:list", ver
+ * chatStore.listAllUsers) sem precisar abrir socket -- pedido do
+ * Douglas: "quero agora, mais um icone de contatos" no Lobby (28/set).
+ * Pública/sem filtro por sala de propósito, mesma regra de sempre
+ * (catálogo/diretório de chat não é por sala, ver comentário grande em
+ * chatStore.js). */
+function handleGetUsersDirectory(req, res) {
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ users: chatStore.listAllUsers() }));
+}
+
+/** POST /chat/direct -- cria (ou acha) a conversa direta com um
+ * contato e devolve ela já no formato "enriquecido" de
+ * listConversationsForUser (participantes com nome, lastMessage) --
+ * pra Lobby.tsx poder abrir ela direto no painel de chat, mesmo fluxo
+ * de startDirectWith em GameRoom.tsx, só que sem WebSocket (ver
+ * comentário grande no topo de components/Lobby.tsx). */
+function handlePostChatDirect(req, res) {
+  readJsonBody(req, res).then((body) => {
+    if (!body) return;
+    const { userId, userName, targetUserId } = body;
+    if (typeof userId !== "string" || !userId || typeof targetUserId !== "string" || !targetUserId) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "userId"/"targetUserId"');
+      return;
+    }
+    if (userId === targetUserId) {
+      res.writeHead(400, corsHeaders());
+      res.end("Não dá pra conversar com você mesmo.");
+      return;
+    }
+    const senderName = typeof userName === "string" ? userName.slice(0, 80) : "";
+    if (senderName) chatStore.upsertUser(userId, { name: senderName });
+    const conv = chatStore.getOrCreateDirectConversation(userId, targetUserId);
+    const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conv.id);
+    // avisa o OUTRO participante em tempo real, se ele já tiver a sala
+    // aberta em outra aba (mesmo "chat:conversation" que o WebSocket
+    // manda ao criar, ver case "chat:create_direct").
+    const otherEnriched = chatStore.listConversationsForUser(targetUserId).find((c) => c.id === conv.id);
+    if (otherEnriched) sendToUser(targetUserId, { type: "chat:conversation", conversation: otherEnriched });
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, conversation: enriched }));
+  });
 }
 
 /** POST /agenda/respond -- aceita/recusa um compromisso sem precisar
@@ -1333,6 +1385,16 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/agenda/respond") {
     handlePostAgendaRespond(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/users/directory") {
+    handleGetUsersDirectory(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/chat/direct") {
+    handlePostChatDirect(req, res);
     return;
   }
 

@@ -43,6 +43,7 @@ import {
   setStoredSpeakerDeviceId,
 } from "@/lib/mediaPrefs";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
+import ContactsPanel from "@/components/ContactsPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
 import {
@@ -814,6 +815,11 @@ export default function GameRoom({
   // de chat (ver agendaOpen/AgendaDrawer), com seu próprio botão na
   // av-bar. ---
   const [agendaOpen, setAgendaOpen] = useState(false);
+  // Painel "Contatos" -- pedido do Douglas: "quero agora, mais um
+  // icone de contatos" (28/set). Usa allUsers (mesmo diretório
+  // platform-wide de "users:list", ver mais acima) -- não precisa de
+  // fetch próprio, só abrir/fechar (ver ContactsPanel.tsx).
+  const [contactsOpen, setContactsOpen] = useState(false);
   const [calls, setCalls] = useState<CallEvent[]>([]);
   // quem, dos candidatos a convidado, já tá ocupado no horário sendo
   // escolhido AGORA no formulário -- atualizado ao vivo (ver o useEffect
@@ -4466,6 +4472,17 @@ export default function GameRoom({
     closeProfileCard();
   }
 
+  // "Conversar" no painel de Contatos -- mesma ideia de sendMessageTo
+  // acima (abre/cria a conversa direta e já mostra a gaveta de chat),
+  // só que a pessoa já vem com o userId PERSISTENTE certinho (não
+  // precisa resolver via remotePlayersRef, o diretório allUsers já é
+  // indexado por userId) e fecha o painel de Contatos ao entrar no chat.
+  function startConversationFromContacts(targetUserId: string) {
+    startDirectWith(targetUserId);
+    setChatOpen(true);
+    setContactsOpen(false);
+  }
+
   /** "Deixar um recado" no card de outro jogador -- pedido do Douglas:
    * "deixar um recado, igual o gather". DIFERENTE de sendMessageTo acima
    * (que abre a conversa de verdade, persistente): aqui é um aviso avulso
@@ -4933,6 +4950,14 @@ export default function GameRoom({
             <AgendaIcon />
           </button>
           <button
+            className={contactsOpen ? "av-btn on" : "av-btn"}
+            onClick={() => setContactsOpen((v) => !v)}
+            aria-label={contactsOpen ? "Fechar contatos" : "Abrir contatos"}
+            data-tooltip={contactsOpen ? "Fechar contatos" : "Contatos"}
+          >
+            <ContactsIcon />
+          </button>
+          <button
             className={settingsOpen ? "av-btn on" : "av-btn"}
             onClick={() => setSettingsOpen((v) => !v)}
             aria-label={settingsOpen ? "Fechar configurações" : "Configurações"}
@@ -4944,6 +4969,14 @@ export default function GameRoom({
 
         {chatOpen && chatPinMode !== "side" && <ChatDrawer {...chatDrawerProps} />}
         {agendaOpen && <AgendaDrawer {...agendaDrawerProps} />}
+        {contactsOpen && (
+          <ContactsPanel
+            users={allUsers}
+            myUserId={myUserId}
+            onStartConversation={(targetUserId) => startConversationFromContacts(targetUserId)}
+            onClose={() => setContactsOpen(false)}
+          />
+        )}
         {settingsOpen && (
           <SettingsPanel
             onClose={() => setSettingsOpen(false)}
@@ -8839,6 +8872,21 @@ function ChatIcon() {
         strokeWidth="1.7"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+// Ícone do botão "Contatos" -- pedido do Douglas: "quero agora, mais
+// um icone de contatos" (28/set). Carteirinha/crachá com uma "foto"
+// redonda + duas linhas de texto, pra não confundir com UsersIcon
+// (esse aqui é "duas pessoas", já usado no botão "Membros" da sala).
+function ContactsIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="8.5" cy="11" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5.5 16c.4-1.8 1.6-2.7 3-2.7s2.6.9 3 2.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M13.5 9.5h5M13.5 12.5h5M13.5 15.5h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
