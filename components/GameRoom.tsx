@@ -4937,6 +4937,7 @@ export default function GameRoom({
         <EditPanel
           activeCategory={activeCategory}
           onChangeCategory={changeCategory}
+          isPlatformAdmin={isPlatformAdmin}
           selectedCatalogIndex={selectedCatalogIndex}
           onSelectCatalog={selectCatalog}
           selectedColorId={selectedColorId}
@@ -5109,6 +5110,7 @@ const CATEGORY_SECTION: Record<
 function EditPanel({
   activeCategory,
   onChangeCategory,
+  isPlatformAdmin,
   selectedCatalogIndex,
   onSelectCatalog,
   selectedColorId,
@@ -5152,6 +5154,14 @@ function EditPanel({
 }: {
   activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
   onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta") => void;
+  // Douglas (28/set): "retire essa opcao do catalogo, nao quero que os
+  // clientes mexam nisso" -- ver comentário grande em EDIT_CATEGORY_TABS
+  // (a aba "Assento" ajusta o MODELO inteiro no catálogo GLOBAL, não só
+  // a peça dessa sala; servidor já travava isso em app/api/items/[id]
+  // via isPlatformAdmin, só a ABA continuava visível pra qualquer dono
+  // de sala). Some da lista de categorias pra quem não é admin da
+  // plataforma.
+  isPlatformAdmin: boolean;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   selectedColorId: string | null;
@@ -5199,7 +5209,9 @@ function EditPanel({
   // CATEGORY_SECTION acima) -- nunca vira estado próprio, então não tem
   // como desincronizar da aba de categoria de fato selecionada.
   const activeSection = CATEGORY_SECTION[activeCategory];
-  const categoryTabsInSection = EDIT_CATEGORY_TABS.filter((cat) => CATEGORY_SECTION[cat.id] === activeSection);
+  const categoryTabsInSection = EDIT_CATEGORY_TABS.filter(
+    (cat) => CATEGORY_SECTION[cat.id] === activeSection && (cat.id !== "assento" || isPlatformAdmin)
+  );
 
   // busca por texto (pedido do Douglas, ver print de referência
   // "Pesquisar objetos") -- filtra a paleta de móveis E a de piso
@@ -5720,7 +5732,7 @@ function EditPanel({
             </button>
           )}
         </>
-      ) : activeCategory === "assento" ? (
+      ) : activeCategory === "assento" && isPlatformAdmin ? (
         <>
           <p className="edit-hint">
             Coloque uma peça sentável (aba de móvel, ex: "Poltrona") e sente
