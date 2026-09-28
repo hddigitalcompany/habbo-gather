@@ -3753,6 +3753,61 @@ body {
    `<span>` ENVOLVENDO ícone+badge dentro do botão, de propósito pra
    não mexer em `.av-btn` (classe compartilhada com a sala de
    verdade). */
+/* prévia de câmera do Lobby -- pedido do Douglas: "cade o restante,
+   configuracoes, audio, video, tela" (vendo a av-bar de dentro da
+   sala). Mesmo espelhamento (scaleX(-1)) do .local-video de dentro da
+   sala, ver app/globals.css mais acima. */
+.lobby-cam-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0d0a16;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lobby-cam-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.lobby-cam-preview video.lobby-cam-off {
+  display: none;
+}
+
+.lobby-cam-denied {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #a89cc4;
+}
+
+/* botão "Tela" do Lobby -- sem função aqui de propósito (ver
+   comentário grande onde é usado em components/Lobby.tsx), só visual
+   pra bater com a barra de dentro da sala. Sem usar o atributo
+   `disabled` nativo (alguns navegadores também bloqueiam :hover nele,
+   sumindo com o tooltip) -- só embaçado + onClick vazio. */
+.lobby-av-btn-inert {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lobby-av-btn-inert:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .lobby-badge-wrap {
   position: relative;
   display: inline-flex;

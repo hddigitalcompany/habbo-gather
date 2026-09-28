@@ -45,9 +45,22 @@
 // sala (dependem de WebRTC/WebSocket de verdade, ver ChatDrawer em
 // GameRoom.tsx).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
+import SettingsPanel from "@/components/SettingsPanel";
+import {
+  getStoredMicOn,
+  getStoredCamOn,
+  getStoredMicDeviceId,
+  getStoredCamDeviceId,
+  getStoredSpeakerDeviceId,
+  setStoredMicOn,
+  setStoredCamOn,
+  setStoredMicDeviceId,
+  setStoredCamDeviceId,
+  setStoredSpeakerDeviceId,
+} from "@/lib/mediaPrefs";
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
 const REALTIME_HTTP_BASE =
@@ -220,6 +233,66 @@ function AgendaIcon() {
       <path d="M3.5 9.5h17" stroke="currentColor" strokeWidth="1.7" />
       <path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
       <path d="M7.5 13.5h3M7.5 16.5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// MESMOS ícones de mic/câmera/tela/engrenagem da av-bar de dentro da
+// sala (copiados de GameRoom.tsx, mesmo motivo do ChatIcon/AgendaIcon
+// acima) -- pedido do Douglas vendo a av-bar de dentro da sala: "cade
+// o restante, configuracoes, audio, video, tela".
+function MicIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      {off && <line x1="4.5" y1="4" x2="19.5" y2="20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
+function CamIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="6.5" width="12.5" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="m15.5 10.8 4.4-2.6a.8.8 0 0 1 1.2.7v6.2a.8.8 0 0 1-1.2.7l-4.4-2.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      {off && <line x1="4.5" y1="4" x2="19.5" y2="20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
+// "tela" (compartilhar tela) -- SEM função aqui no Lobby de propósito
+// (ver comentário grande onde o botão é usado): não tem ninguém pra
+// ver a tela compartilhada antes de entrar na sala, então o ícone
+// aparece pra bater com a barra de dentro da sala, mas fica desligado.
+function ScreenIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4.5" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8.5 20h7M12 16.5V20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -502,8 +575,152 @@ export default function Lobby({
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
+  // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
+  // de dentro da sala: "cade o restante, configuracoes, audio, video,
+  // tela") -- testa/ajusta ANTES de entrar, igual Gather/Zoom/Meet.
+  // Mesma escolha (ligado/desligado, qual aparelho) vale quando entra
+  // de verdade na sala (ver lib/mediaPrefs.ts + requestMedia em
+  // GameRoom.tsx), pra não "destravar" tudo de novo sozinho ao clicar
+  // "Entrar na sala". ---
+  const [micOn, setMicOn] = useState(() => getStoredMicOn());
+  const [camOn, setCamOn] = useState(() => getStoredCamOn());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedMicId, setSelectedMicId] = useState(() => getStoredMicDeviceId());
+  const [selectedCamId, setSelectedCamId] = useState(() => getStoredCamDeviceId());
+  const [selectedSpeakerId, setSelectedSpeakerId] = useState(() => getStoredSpeakerDeviceId());
+  const [mediaDenied, setMediaDenied] = useState(false);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+
   const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
   const myName = accountProfile?.name?.trim() || "Visitante";
+
+  useEffect(() => {
+    let destroyed = false;
+    async function requestMedia() {
+      const micDeviceId = getStoredMicDeviceId();
+      const camDeviceId = getStoredCamDeviceId();
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: camDeviceId ? { deviceId: { exact: camDeviceId } } : true,
+          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
+        });
+      } catch {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (e) {
+          if (!destroyed) setMediaDenied(true);
+          console.warn("Sem acesso a câmera/microfone no Lobby.", e);
+          return;
+        }
+      }
+      if (destroyed) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      stream.getAudioTracks().forEach((t) => (t.enabled = getStoredMicOn()));
+      stream.getVideoTracks().forEach((t) => (t.enabled = getStoredCamOn()));
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      const gotMicId = stream.getAudioTracks()[0]?.getSettings().deviceId;
+      const gotCamId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      if (gotMicId) setSelectedMicId(gotMicId);
+      if (gotCamId) setSelectedCamId(gotCamId);
+    }
+    requestMedia();
+    return () => {
+      destroyed = true;
+      // solta a câmera/mic ao sair do Lobby de QUALQUER jeito (entrou
+      // na sala -- que pede a dela própria, ver GameRoom.tsx --, saiu
+      // da conta, fechou a aba) -- nunca deixa os dois lados com o
+      // dispositivo aberto ao mesmo tempo.
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  function toggleMic() {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
+    setMicOn((v) => {
+      setStoredMicOn(!v);
+      return !v;
+    });
+  }
+
+  function toggleCam() {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
+    setCamOn((v) => {
+      setStoredCamOn(!v);
+      return !v;
+    });
+  }
+
+  // MESMA ideia de switchMicDevice/switchCamDevice em GameRoom.tsx, só
+  // que bem mais simples: sem peers/WebRTC nenhum aqui pra reencaminhar
+  // a track nova, é só trocar o preview local mesmo.
+  async function switchMicDevice(deviceId: string) {
+    if (!deviceId || deviceId === selectedMicId) return;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+      const newTrack = fresh.getAudioTracks()[0];
+      if (!newTrack) return;
+      newTrack.enabled = micOn;
+      const stream = localStreamRef.current;
+      const oldTrack = stream?.getAudioTracks()[0];
+      if (stream && oldTrack) {
+        stream.removeTrack(oldTrack);
+        oldTrack.stop();
+        stream.addTrack(newTrack);
+      } else {
+        localStreamRef.current = fresh;
+      }
+      setSelectedMicId(deviceId);
+      setStoredMicDeviceId(deviceId);
+    } catch (e) {
+      console.warn("Não deu pra trocar de microfone", e);
+    }
+  }
+
+  async function switchCamDevice(deviceId: string) {
+    if (!deviceId || deviceId === selectedCamId) return;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+      const newTrack = fresh.getVideoTracks()[0];
+      if (!newTrack) return;
+      newTrack.enabled = camOn;
+      const stream = localStreamRef.current;
+      const oldTrack = stream?.getVideoTracks()[0];
+      if (stream && oldTrack) {
+        stream.removeTrack(oldTrack);
+        oldTrack.stop();
+        stream.addTrack(newTrack);
+      } else {
+        localStreamRef.current = fresh;
+      }
+      if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+      setSelectedCamId(deviceId);
+      setStoredCamDeviceId(deviceId);
+    } catch (e) {
+      console.warn("Não deu pra trocar de câmera", e);
+    }
+  }
+
+  function switchSpeakerDevice(deviceId: string) {
+    setSelectedSpeakerId(deviceId);
+    setStoredSpeakerDeviceId(deviceId);
+  }
+
+  function handleEnter() {
+    // solta a câmera/mic do Lobby ANTES de entrar -- o GameRoom pede a
+    // dele própria (ver requestMedia lá), sem isso os dois ficariam
+    // segurando o mesmo dispositivo ao mesmo tempo por um instante.
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    onEnter();
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -625,12 +842,23 @@ export default function Lobby({
         </div>
         <p className="lobby-greeting">Bem-vindo(a), {displayName}!</p>
         <RoomPreview room={room} loading={roomLoading} />
+
+        {/* prévia de câmera -- pedido do Douglas: "cade o restante,
+            configuracoes, audio, video, tela" (vendo a av-bar de dentro
+            da sala) -- testa/ajusta mic e câmera aqui, igual
+            Gather/Zoom/Meet, antes de entrar. */}
+        <div className="lobby-cam-preview">
+          <video ref={localVideoRef} autoPlay muted playsInline className={camOn ? "" : "lobby-cam-off"} />
+          {mediaDenied && <p className="lobby-cam-denied">Sem acesso à câmera/microfone.</p>}
+          {!camOn && !mediaDenied && <p className="lobby-cam-denied">Câmera desligada</p>}
+        </div>
+
         <p className="lobby-presence">
           <span className={`lobby-presence-dot${presence && presence.totalOnline > 0 ? " lobby-presence-dot-active" : ""}`} />
           {presenceText}
         </p>
 
-        <button type="button" className="lobby-enter-btn" onClick={onEnter}>
+        <button type="button" className="lobby-enter-btn" onClick={handleEnter}>
           Entrar na sala
         </button>
         {onSignOut && (
@@ -649,6 +877,39 @@ export default function Lobby({
           à tela inteira, igual dentro da sala; dentro do card ficaria
           preso ao centro). */}
       <div className="av-bar">
+        <button
+          type="button"
+          className={micOn ? "av-btn" : "av-btn off"}
+          onClick={toggleMic}
+          aria-label={micOn ? "Desligar microfone" : "Ligar microfone"}
+          data-tooltip={micOn ? "Desligar mic" : "Ligar mic"}
+        >
+          <MicIcon off={!micOn} />
+        </button>
+        <button
+          type="button"
+          className={camOn ? "av-btn" : "av-btn off"}
+          onClick={toggleCam}
+          aria-label={camOn ? "Desligar câmera" : "Ligar câmera"}
+          data-tooltip={camOn ? "Desligar câmera" : "Ligar câmera"}
+        >
+          <CamIcon off={!camOn} />
+        </button>
+        {/* "tela" -- pedido do Douglas: "cade o restante... tela",
+            mas compartilhar tela SÓ FAZ SENTIDO com alguém do outro
+            lado pra ver (WebRTC de verdade, ver toggleScreenShare em
+            GameRoom.tsx) -- não existe isso no Lobby. Ícone fica pra
+            bater com a barra de dentro da sala, desabilitado com
+            tooltip explicando em vez de fingir que funciona. */}
+        <button
+          type="button"
+          className="av-btn lobby-av-btn-inert"
+          onClick={(e) => e.preventDefault()}
+          aria-disabled="true"
+          data-tooltip="Compartilhar tela só dentro da sala"
+        >
+          <ScreenIcon />
+        </button>
         <button
           type="button"
           className={chatPanelOpen ? "av-btn on" : "av-btn"}
@@ -675,7 +936,35 @@ export default function Lobby({
             {pendingCallCount > 0 && <span className="lobby-icon-badge">{pendingCallCount}</span>}
           </span>
         </button>
+        <button
+          type="button"
+          className={settingsOpen ? "av-btn on" : "av-btn"}
+          onClick={() => setSettingsOpen((v) => !v)}
+          aria-label={settingsOpen ? "Fechar configurações" : "Configurações"}
+          data-tooltip={settingsOpen ? "Fechar configurações" : "Configurações"}
+        >
+          <GearIcon />
+        </button>
       </div>
+
+      {settingsOpen && (
+        <SettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          micOn={micOn}
+          camOn={camOn}
+          selectedMicId={selectedMicId}
+          selectedCamId={selectedCamId}
+          selectedSpeakerId={selectedSpeakerId}
+          onSelectMic={switchMicDevice}
+          onSelectCam={switchCamDevice}
+          onSelectSpeaker={switchSpeakerDevice}
+          spaceVolume={1}
+          onChangeSpaceVolume={() => {}}
+          remoteUsers={[]}
+          remoteVolumes={{}}
+          onChangeRemoteVolume={() => {}}
+        />
+      )}
 
       {chatPanelOpen && (
         <LobbyChatPanel

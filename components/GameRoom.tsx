@@ -30,6 +30,18 @@ import MainScene, {
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { resolveUserId } from "@/lib/identity";
+import {
+  getStoredMicOn,
+  getStoredCamOn,
+  getStoredMicDeviceId,
+  getStoredCamDeviceId,
+  getStoredSpeakerDeviceId,
+  setStoredMicOn,
+  setStoredCamOn,
+  setStoredMicDeviceId,
+  setStoredCamDeviceId,
+  setStoredSpeakerDeviceId,
+} from "@/lib/mediaPrefs";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
@@ -672,22 +684,29 @@ export default function GameRoom({
   const callPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const myCallConversationIdRef = useRef<string | null>(null);
 
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
+  // valor inicial vem do que a pessoa já tinha escolhido no LOBBY (ver
+  // lib/mediaPrefs.ts, pedido do Douglas: "cade o restante,
+  // configuracoes, audio, video, tela") -- sem isso, mutar o mic no
+  // Lobby e entrar na sala destravaria ele de novo sozinho.
+  const [micOn, setMicOn] = useState(() => getStoredMicOn());
+  const [camOn, setCamOn] = useState(() => getStoredCamOn());
   const [screenOn, setScreenOn] = useState(false);
 
   // --- Configurações (ver SettingsPanel/botão de engrenagem na av-bar)
   // -- deviceId ESCOLHIDO de cada aparelho ("" = padrão do navegador,
-  // não mexeu ainda), e o volume: "som do espaço" é um multiplicador
-  // GERAL (afeta todo mundo de uma vez, pedido do Douglas), remoteVolumes
-  // é o ajuste fino POR PESSOA (id de dentro de remoteStreams -> 0..1)
-  // -- os dois se multiplicam na hora de aplicar (ver RemoteVideoTile
-  // mais abaixo). Nenhum dos dois persiste entre sessões por enquanto
-  // (reseta ao recarregar a página).
+  // não mexeu ainda, ou escolha vinda do Lobby, ver acima), e o
+  // volume: "som do espaço" é um multiplicador GERAL (afeta todo mundo
+  // de uma vez, pedido do Douglas), remoteVolumes é o ajuste fino POR
+  // PESSOA (id de dentro de remoteStreams -> 0..1) -- os dois se
+  // multiplicam na hora de aplicar (ver RemoteVideoTile mais abaixo).
+  // Volume nenhum dos dois persiste entre sessões (reseta ao
+  // recarregar a página) -- só mic/câmera/saída de áudio persistem
+  // (ver lib/mediaPrefs.ts), volume não faz sentido "lembrar" antes de
+  // ter alguém na sala pra ouvir.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [selectedMicId, setSelectedMicId] = useState("");
-  const [selectedCamId, setSelectedCamId] = useState("");
-  const [selectedSpeakerId, setSelectedSpeakerId] = useState("");
+  const [selectedMicId, setSelectedMicId] = useState(() => getStoredMicDeviceId());
+  const [selectedCamId, setSelectedCamId] = useState(() => getStoredCamDeviceId());
+  const [selectedSpeakerId, setSelectedSpeakerId] = useState(() => getStoredSpeakerDeviceId());
   const [spaceVolume, setSpaceVolume] = useState(1);
   const [remoteVolumes, setRemoteVolumes] = useState<Record<string, number>>({});
 
@@ -2648,29 +2667,57 @@ export default function GameRoom({
     // navegador liberar a permissão — mesmo que a pessoa demore ou nunca
     // responda ao aviso.
     async function requestMedia() {
+      // dispositivo/mudo já escolhido no LOBBY (ver lib/mediaPrefs.ts,
+      // pedido do Douglas: "cade o restante, configuracoes, audio,
+      // video, tela") -- pede JÁ com esse aparelho; se ele não existir
+      // mais (desconectou o headset entre o Lobby e agora), cai pro
+      // padrão do navegador em vez de falhar tudo (getUserMedia com
+      // deviceId inválido dá OverconstrainedError na constraint INTEIRA,
+      // não só nessa track).
+      const micDeviceId = getStoredMicDeviceId();
+      const camDeviceId = getStoredCamDeviceId();
+      let stream: MediaStream;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: camDeviceId ? { deviceId: { exact: camDeviceId } } : true,
+          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
         });
-        if (destroyed) {
-          stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (e) {
+          console.warn("Sem acesso a câmera/microfone — seguindo só com posição/chat.", e);
           return;
         }
-        localStreamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
-        // se algum peer já tinha conectado por proximidade antes da câmera
-        // liberar, adiciona as tracks agora nas conexões já abertas.
-        peersRef.current.forEach((pc) => {
-          stream.getTracks().forEach((track) => {
-            const alreadyAdded = pc.getSenders().some((s) => s.track === track);
-            if (!alreadyAdded) pc.addTrack(track, stream);
-          });
-        });
-      } catch (e) {
-        console.warn("Sem acesso a câmera/microfone — seguindo só com posição/chat.", e);
       }
+      if (destroyed) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      // mudo/câmera desligada escolhidos no Lobby também valem aqui --
+      // sem isso, mutar lá e entrar destravaria o mic sozinho (o
+      // getUserMedia sempre devolve a track LIGADA, ver toggleMic).
+      const wantMicOn = getStoredMicOn();
+      const wantCamOn = getStoredCamOn();
+      stream.getAudioTracks().forEach((t) => (t.enabled = wantMicOn));
+      stream.getVideoTracks().forEach((t) => (t.enabled = wantCamOn));
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      if (stream.getAudioTracks()[0]?.getSettings().deviceId) {
+        setSelectedMicId(stream.getAudioTracks()[0].getSettings().deviceId as string);
+      }
+      if (stream.getVideoTracks()[0]?.getSettings().deviceId) {
+        setSelectedCamId(stream.getVideoTracks()[0].getSettings().deviceId as string);
+      }
+
+      // se algum peer já tinha conectado por proximidade antes da câmera
+      // liberar, adiciona as tracks agora nas conexões já abertas.
+      peersRef.current.forEach((pc) => {
+        stream.getTracks().forEach((track) => {
+          const alreadyAdded = pc.getSenders().some((s) => s.track === track);
+          if (!alreadyAdded) pc.addTrack(track, stream);
+        });
+      });
     }
 
     function init() {
@@ -3130,14 +3177,20 @@ export default function GameRoom({
     const stream = localStreamRef.current;
     if (!stream) return;
     stream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
-    setMicOn((v) => !v);
+    setMicOn((v) => {
+      setStoredMicOn(!v); // persiste (ver lib/mediaPrefs.ts) -- próxima visita ao Lobby já abre mutado/desmutado igual deixou aqui
+      return !v;
+    });
   }
 
   function toggleCam() {
     const stream = localStreamRef.current;
     if (!stream) return;
     stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
-    setCamOn((v) => !v);
+    setCamOn((v) => {
+      setStoredCamOn(!v);
+      return !v;
+    });
   }
 
   // --- troca de aparelho (mic/câmera), ver SettingsPanel > "Áudio e
@@ -3170,6 +3223,7 @@ export default function GameRoom({
         sender?.replaceTrack(newTrack);
       });
       setSelectedMicId(deviceId);
+      setStoredMicDeviceId(deviceId);
     } catch (e) {
       console.warn("Não deu pra trocar de microfone", e);
     }
@@ -3203,6 +3257,7 @@ export default function GameRoom({
         if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
       }
       setSelectedCamId(deviceId);
+      setStoredCamDeviceId(deviceId);
     } catch (e) {
       console.warn("Não deu pra trocar de câmera", e);
     }
@@ -3214,6 +3269,7 @@ export default function GameRoom({
   // RemoteVideoTile). Só guarda a escolha aqui.
   function switchSpeakerDevice(deviceId: string) {
     setSelectedSpeakerId(deviceId);
+    setStoredSpeakerDeviceId(deviceId);
   }
 
   function changeRemoteVolume(id: string, volume: number) {
