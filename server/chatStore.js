@@ -1,10 +1,18 @@
 // Persistência do chat (conversas diretas + grupo, histórico de
-// mensagens) -- um arquivo JSON simples (data/chat.json), sem banco de
-// dados de verdade: dá conta do tamanho de uma sala de amigos, e não
-// depende de instalar/compilar nenhum pacote novo (só fs/crypto/path,
-// que já vêm com o Node). Carrega tudo em memória uma vez no boot e
-// GRAVA no disco a cada mutação (mensagem nova, conversa criada,
-// grupo renomeado) -- escreve pouco, então isso é rápido o bastante.
+// mensagens) -- ANTES vivia num arquivo JSON local (data/chat.json);
+// MUDOU pro Supabase (tabela public.chat_store_state, ver
+// supabase/migrations/0035_chat_and_agenda_state.sql) em 28/set, mesmo
+// motivo/mesmo esquema de server/roomStore.js (ver comentário grande
+// lá): disco local do Render não sobrevive a um serviço recriado, e
+// não é garantido persistir nem entre deploys no free tier -- Douglas:
+// "chat tem que salvar historico", e é justamente isso que esse
+// arquivo guarda, então merecia a mesma correção. Continua um blob
+// JSON simples ({ users, conversations, messages }), só troca ONDE
+// mora. getUser/getOrCreateDirectConversation/etc continuam SÍNCRONOS
+// (leem do cache em memória, `store`) -- nenhum call site mudou. Se
+// SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não estiverem configurados
+// nesse processo, cai pro arquivo local de sempre (mesmo fallback de
+// roomStore.js/roomAuth.js).
 //
 // IMPORTANTE (identidade): tudo aqui é indexado pelo userId PERSISTENTE
 // que o cliente manda na mensagem "identify" (gerado e salvo no
@@ -17,10 +25,19 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { randomUUID } from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
 const STORE_PATH = path.join(DATA_DIR, "chat.json");
+
+const STORE_SLUG = "sala-principal";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const admin =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+    : null;
 
 // quantas mensagens guarda por conversa -- limite generoso, só pra não
 // deixar o arquivo crescer sem fim numa sala que fica anos no ar.
@@ -30,30 +47,73 @@ function emptyStore() {
   return { users: {}, conversations: {}, messages: {} };
 }
 
-function loadStore() {
+function normalizeStore(parsed) {
+  if (!parsed || typeof parsed !== "object") return emptyStore();
+  return {
+    users: parsed.users ?? {},
+    conversations: parsed.conversations ?? {},
+    messages: parsed.messages ?? {},
+  };
+}
+
+function loadStoreFromFile() {
   try {
     if (!existsSync(STORE_PATH)) return emptyStore();
     const raw = readFileSync(STORE_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      users: parsed.users ?? {},
-      conversations: parsed.conversations ?? {},
-      messages: parsed.messages ?? {},
-    };
+    return normalizeStore(JSON.parse(raw));
   } catch (e) {
     console.error("Não deu pra ler data/chat.json, começando do zero.", e);
     return emptyStore();
   }
 }
 
-const store = loadStore();
-
-function persist() {
+function persistToFile(snapshot) {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(STORE_PATH, JSON.stringify(store), "utf8");
+    writeFileSync(STORE_PATH, JSON.stringify(snapshot), "utf8");
   } catch (e) {
     console.error("Não deu pra salvar data/chat.json", e);
+  }
+}
+
+/** Mesma ideia de bootStore em roomStore.js: Supabase quando
+ * configurado, com migração automática do arquivo local (se existir)
+ * no primeiro boot depois desse deploy; senão cai pro arquivo. */
+async function bootStore() {
+  if (!admin) return loadStoreFromFile();
+  try {
+    const { data, error } = await admin
+      .from("chat_store_state")
+      .select("data")
+      .eq("store_slug", STORE_SLUG)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.data) return normalizeStore(data.data);
+    const fromFile = loadStoreFromFile();
+    await admin
+      .from("chat_store_state")
+      .upsert({ store_slug: STORE_SLUG, data: fromFile, updated_at: new Date().toISOString() });
+    return fromFile;
+  } catch (e) {
+    console.error("Não deu pra carregar o chat do Supabase, caindo pro arquivo local.", e);
+    return loadStoreFromFile();
+  }
+}
+
+const store = await bootStore();
+
+async function persist() {
+  if (!admin) {
+    persistToFile(store);
+    return;
+  }
+  try {
+    const { error } = await admin
+      .from("chat_store_state")
+      .upsert({ store_slug: STORE_SLUG, data: store, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  } catch (e) {
+    console.error("Não deu pra salvar o chat no Supabase.", e);
   }
 }
 

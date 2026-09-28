@@ -1,44 +1,98 @@
 // Persistência da Agenda (marcar call: data/horário/participantes,
-// necessidades de câmera/áudio/tela, aprovação dos convidados) -- mesmo
-// esquema do chatStore.js: um arquivo JSON simples (data/agenda.json),
-// sem banco de dados de verdade. Indexado pelo userId PERSISTENTE (ver
-// comentário grande em chatStore.js sobre por que não usa o id de
-// conexão).
+// necessidades de câmera/áudio/tela, aprovação dos convidados) -- ANTES
+// vivia num arquivo JSON local (data/agenda.json); MUDOU pro Supabase
+// (tabela public.agenda_store_state, ver
+// supabase/migrations/0035_chat_and_agenda_state.sql) em 28/set, mesmo
+// motivo/esquema de server/chatStore.js e server/roomStore.js (ver
+// comentário grande em roomStore.js): disco local do Render não
+// sobrevive a um serviço recriado. Indexado pelo userId PERSISTENTE
+// (ver comentário grande em chatStore.js sobre por que não usa o id de
+// conexão). Se SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não estiverem
+// configurados nesse processo, cai pro arquivo local de sempre.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { randomUUID } from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
 import { getUser } from "./chatStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
 const STORE_PATH = path.join(DATA_DIR, "agenda.json");
 
+const STORE_SLUG = "sala-principal";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const admin =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+    : null;
+
 function emptyStore() {
   return { calls: {} };
 }
 
-function loadStore() {
+function normalizeStore(parsed) {
+  if (!parsed || typeof parsed !== "object") return emptyStore();
+  return { calls: parsed.calls ?? {} };
+}
+
+function loadStoreFromFile() {
   try {
     if (!existsSync(STORE_PATH)) return emptyStore();
     const raw = readFileSync(STORE_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    return { calls: parsed.calls ?? {} };
+    return normalizeStore(JSON.parse(raw));
   } catch (e) {
     console.error("Não deu pra ler data/agenda.json, começando do zero.", e);
     return emptyStore();
   }
 }
 
-const store = loadStore();
-
-function persist() {
+function persistToFile(snapshot) {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(STORE_PATH, JSON.stringify(store), "utf8");
+    writeFileSync(STORE_PATH, JSON.stringify(snapshot), "utf8");
   } catch (e) {
     console.error("Não deu pra salvar data/agenda.json", e);
+  }
+}
+
+async function bootStore() {
+  if (!admin) return loadStoreFromFile();
+  try {
+    const { data, error } = await admin
+      .from("agenda_store_state")
+      .select("data")
+      .eq("store_slug", STORE_SLUG)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.data) return normalizeStore(data.data);
+    const fromFile = loadStoreFromFile();
+    await admin
+      .from("agenda_store_state")
+      .upsert({ store_slug: STORE_SLUG, data: fromFile, updated_at: new Date().toISOString() });
+    return fromFile;
+  } catch (e) {
+    console.error("Não deu pra carregar a agenda do Supabase, caindo pro arquivo local.", e);
+    return loadStoreFromFile();
+  }
+}
+
+const store = await bootStore();
+
+async function persist() {
+  if (!admin) {
+    persistToFile(store);
+    return;
+  }
+  try {
+    const { error } = await admin
+      .from("agenda_store_state")
+      .upsert({ store_slug: STORE_SLUG, data: store, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  } catch (e) {
+    console.error("Não deu pra salvar a agenda no Supabase.", e);
   }
 }
 
