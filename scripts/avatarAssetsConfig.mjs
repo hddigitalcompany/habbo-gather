@@ -17,7 +17,8 @@
 //     "acessorioSourceRoot": "/caminho/completo/pra/pasta/Acessório",
 //     "trajeSourceRoot": "/caminho/completo/pra/pasta/Trajes",
 //     "pisoSourceRoot": "/caminho/completo/pra/pasta/Piso",
-//     "poltronasSourceRoot": "/caminho/completo/pra/pasta/Poltronas"
+//     "poltronasSourceRoot": "/caminho/completo/pra/pasta/Poltronas",
+//     "paredesSourceRoot": "/caminho/completo/pra/pasta/Paredes"
 //   }
 //
 // Esse arquivo fica de fora do git (ver .gitignore) porque o caminho é
@@ -106,3 +107,12 @@ export const PISO_SRC_ROOT = cfg.pisoSourceRoot
 export const POLTRONAS_SRC_ROOT = cfg.poltronasSourceRoot
   ? cfg.poltronasSourceRoot
   : path.join(ROOT, "assets-source", "poltronas");
+
+// pasta de PAREDE de sistema -- esquema mais simples ainda que o de piso:
+// uma pasta só, sem subpasta nenhuma, um arquivo de imagem por ESTILO de
+// parede (ver scripts/syncWallAssets.mjs). Chave "paredesSourceRoot" no
+// avatar-assets.local.json (mesmo esquema das outras acima) pra apontar
+// pra fora do projeto.
+export const PAREDES_SRC_ROOT = cfg.paredesSourceRoot
+  ? cfg.paredesSourceRoot
+  : path.join(ROOT, "assets-source", "paredes");
