@@ -20,14 +20,21 @@ import { tileToWorld } from "./grid";
  * Mesa privada / sala aberta" -- viraram 3 em vez de 2; só
  * "mesa-privada" tem dono, os outros dois só diferem no nome/cor pra
  * organizar o mapa):
- * - "mesa-privada" ("Mesa privada"): tem um botão "Tomar posse" (ver
- *   onClaimArea/onReleaseArea em MainScene.ts) que só aparece enquanto
- *   NINGUÉM for dono -- clicar toma posse (some o botão, aparece o nome
- *   do dono ao passar o mouse; clicar no nome de outra pessoa abre o
- *   card dela, clicar no PRÓPRIO nome solta a posse). Áudio/vídeo de
- *   quem tá numa mesa privada fica isolado do resto da sala (só ouve/é
- *   ouvido por quem também tá na MESMA área) -- ver areaZoneAt/
- *   checkProximity em GameRoom.tsx.
+ * - "mesa-privada" ("Mesa privada"): tem um botão "Assumir mesa"
+ *   (ex-"Tomar posse", renomeado a pedido do Douglas -- ver onClaimArea
+ *   em MainScene.ts) que só aparece ao passar o mouse, enquanto NINGUÉM
+ *   for dono -- clicar abre uma confirmação "Assumir essa mesa?" (ver
+ *   showAreaClaimPrompt), só manda onClaimArea de verdade se
+ *   confirmado. Posse PERSISTE no servidor até a área ser apagada (ver
+ *   areaOwnerByAreaId em MainScene.ts) -- clicar na PRÓPRIA mesa não
+ *   solta mais nada. Clicar na mesa de outra pessoa abre o card dela
+ *   (onAreaOwnerClick); o "CEO" (dono da sala, ver isRoomOwner/
+ *   setRoomOwner em MainScene.ts) pode "destituir" a mesa de OUTRA
+ *   pessoa à força em vez disso (protocolo "force-release-area" em
+ *   server/index.js, ver showDestituirPrompt). Áudio/vídeo de quem tá
+ *   numa mesa privada fica isolado do resto da sala (só ouve/é ouvido
+ *   por quem também tá na MESMA área) -- ver areaZoneAt/checkProximity
+ *   em GameRoom.tsx.
  * - "sala-privada" ("Sala privada"): mesma isolação de áudio/vídeo,
  *   sem dono/botão de posse -- pra área de reunião compartilhada que
  *   não pertence a ninguém.

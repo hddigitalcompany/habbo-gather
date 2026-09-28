@@ -1,5 +1,5 @@
 // Cadastra um modelo de PISO customizado (Editor de Itens, aba "Criar
-// Piso", ver components/ItemEditor.tsx) -- só o dono da sala pode.
+// Piso", ver components/ItemEditor.tsx) -- só o admin da plataforma pode.
 // Mesmo esquema de app/api/items/route.ts (móvel), bem mais simples:
 // piso não tem direção/footprint/assento/interação.
 //
@@ -21,7 +21,7 @@
 // cores que ELE escolher no formulário.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -52,10 +52,8 @@ export async function POST(req: NextRequest) {
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  await bootstrapOwnerIfEmpty(callerId);
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode cadastrar piso" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode cadastrar piso" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);

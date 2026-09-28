@@ -4,15 +4,17 @@
 // pela tela (upload de imagem), sem precisar organizar pasta local nem
 // rodar `npm run sync-assets`, e sem ficar salvo só no computador dele
 // -- guardado no Supabase (Storage + tabela room_items, ver
-// supabase/migrations/0002_room_items.sql). Só aparece pro DONO da
-// sala (ver isOwner/roomRole em GameRoom.tsx, mesmo gate do painel de
-// membros).
+// supabase/migrations/0002_room_items.sql). Só aparece pro admin da
+// PLATAFORMA (tabela platform_admins, ver isPlatformAdmin em
+// GameRoom.tsx / supabase/migrations/0031_platform_admins.sql) -- NÃO
+// é o mesmo gate do painel de membros (isso é dono de SALA, gente
+// diferente a partir de quando cada empresa tiver seu próprio dono).
 //
 // Upload vai DIRETO do navegador pro Storage (usa o token da própria
-// pessoa -- a policy do bucket confere "é owner?" no banco, ver a
-// migration) -- só os METADADOS (nome/categoria/URLs já prontas) vão
-// pro nosso servidor (POST /api/items, PATCH /api/items/[id]), que
-// confere de novo antes de gravar.
+// pessoa -- a policy do bucket confere "é admin da plataforma?" no
+// banco, ver 0031_platform_admins.sql) -- só os METADADOS (nome/
+// categoria/URLs já prontas) vão pro nosso servidor (POST /api/items,
+// PATCH /api/items/[id]), que confere de novo antes de gravar.
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -21,6 +23,9 @@ import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 import { FLOOR_CATEGORIES, FloorCategory, TILE_SIZED_PLANK_PX } from "@/game/floor";
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
+import { wallEdgeLengthPx } from "@/game/wall";
+import { DOOR_KINDS, DoorKind, doorEdgeLengthPx } from "@/game/door";
+import { WallPatternSwatch } from "@/components/WallPatternSwatch";
 import { ColorPickerField } from "@/components/ColorPickerField";
 import { FRAME_W, FRAME_H, AVATAR_SCALE, AVATAR_FOOT_OFFSET_Y } from "@/game/MainScene";
 import {
@@ -152,6 +157,21 @@ const STAGE_BASELINE_PAD = 70;
 // exatamente onde estava, só sobra mais espaço vazio acima dele agora.
 const STAGE_TOP_PAD = 160;
 const STAGE_HEIGHT = Math.ceil(STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM + AVATAR_DISPLAY_H + STAGE_TOP_PAD);
+// grade de footprint CLICÁVEL (ver mobiFootprintTiles/isFootprintTileSelected
+// mais abaixo) -- pedido do Douglas: "nao tem como a grande ja vir
+// aberta, com a insersao no meio?? 2 pra cada lado da insercao". Antes
+// crescia só pra baixo-direita a partir da âncora (0..footprintCols-1,
+// 0..footprintRows-1, IGUAL o retângulo cego de sempre) -- sem dar pra
+// marcar bloqueio nos outros 2 quadrantes (acima/à esquerda da âncora),
+// que é exatamente onde uma peça precisa travar quando vira de lado
+// (rotaciona). Agora é uma grade FIXA (sempre a mesma, não depende mais
+// de "Ocupa (tiles)"), N tiles pra CADA lado da âncora nas 2 direções
+// (dCol/dRow de -N a N, âncora bem no meio) -- sempre visível de cara,
+// sem precisar digitar um tamanho antes de poder clicar. Baixado de 2
+// pra 1 (3x3 em vez de 5x5) -- pedido do Douglas: "pode diminuir, apenas
+// um pra cada lado do tile de insersao" (5x5 era grade demais pra maioria
+// dos móveis).
+const FOOTPRINT_GRID_RADIUS = 1;
 // card menor só na aba Avatar (pedido do Douglas: "esse espaco do
 // editor em avatar ta mt grande" -- e depois "você não consegue cortar
 // a janela ao invés de tirar zoom?", recusando a ideia de encolher via
@@ -410,6 +430,9 @@ type CustomItemRow = {
   colors: FurnitureModelColorOption[] | null;
   footprint_cols: number | null;
   footprint_rows: number | null;
+  footprint_by_direction: Partial<Record<"down" | "left" | "right" | "up", { dCol: number; dRow: number }[]>> | null;
+  stackable: boolean | null;
+  stack_surface_offset_y: number | null;
   extra_seats: ExtraSeatRow[] | null;
 };
 
@@ -467,59 +490,14 @@ async function resizeImageForUpload(file: File, maxWidth: number): Promise<File>
   }
 }
 
-// Fator de correção medido em peças reais geradas no PixelLab (pedido
-// do Douglas: "ele vai corrigir automaticamente? pode fazer") -- ele
-// gera sempre nas mesmas configurações de câmera lá (um ângulo mais
-// raso, ~19°, batendo com o preset "low top-down" do PixelLab), sempre
-// mais raso que o ângulo de verdade do jogo (2:1, ~26.57°, ver
-// ISO_TILE_WIDTH/ISO_TILE_HEIGHT em game/grid.ts) -- por isso os móveis
-// saem meio "tortos"/achatados quando colocados na sala. Medido
-// direto em 2 peças reais que ele mandou (poltrona de costas e de
-// frente, régua do encosto/frame): 1.435 e 1.472 -- usa a média das
-// duas. Se ele trocar as configs de câmera no PixelLab, esse número
-// precisa ser remedido (manda uma peça crua nova pra eu recalibrar).
-const PIXELLAB_VERTICAL_FIX = 1.45;
-
-/**
- * Estica a imagem NA VERTICAL (largura intacta, ver PIXELLAB_VERTICAL_FIX
- * acima) -- corrige o ângulo isométrico raso de sempre do PixelLab pro
- * ângulo real do jogo ANTES de entrar no formulário, então tanto o
- * preview quanto o arquivo final já saem certos, sem precisar mandar
- * pra remedir toda vez. Chamada no `apply` do recorte (ver pendingCrop/
- * ImageCropModal mais abaixo), só quando o checkbox "Corrigir ângulo
- * (PixelLab)" está marcado -- NUNCA em cima de uma imagem que já não
- * veio de lá (esticaria errado uma arte que já tava na proporção
- * certa). Mesmo padrão createImageBitmap+canvas de resizeImageForUpload
- * acima; se falhar (formato exótico, navegador antigo), devolve o
- * arquivo ORIGINAL sem a correção -- upload continua funcionando, só
- * sem o ajuste.
- */
-async function fixPixellabIsometricAngle(file: File): Promise<File> {
-  if (typeof createImageBitmap !== "function") return file;
-  try {
-    const bitmap = await createImageBitmap(file);
-    const targetW = bitmap.width;
-    const targetH = Math.max(1, Math.round(bitmap.height * PIXELLAB_VERTICAL_FIX));
-    const canvas = document.createElement("canvas");
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      bitmap.close?.();
-      return file;
-    }
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-    bitmap.close?.();
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) return file;
-    return new File([blob], file.name.replace(/\.\w+$/, ".png"), { type: "image/png" });
-  } catch (e) {
-    console.warn("Não deu pra corrigir o ângulo isométrico da imagem do PixelLab, mandando original", e);
-    return file;
-  }
-}
+// Correção automática de ângulo isométrico (PixelLab), ligada por
+// padrão -- REMOVIDA. Pedido do Douglas: "remova o seu corretor de
+// angulo, ele nao funciona". Era um esticamento fixo (1.45x na
+// vertical) calibrado em só 2 peças de exemplo -- não generalizava bem
+// pra toda peça nova, esticando errado com frequência. O ajuste fino
+// MANUAL de rotação/cisalhamento no recorte (rotationDeg/shearDeg, ver
+// ImageCropModal mais abaixo) continua existindo -- esse aqui era só o
+// automático, aplicado sem o Douglas olhar antes.
 
 function slugify(text: string): string {
   return (
@@ -960,17 +938,15 @@ function ImageCropModal({
   // "sem cortar".
   const [flipped, setFlipped] = useState(false);
   // ajuste fino de rotação (graus, -10 a +10) -- pedido do Douglas depois
-  // que a correção automática de ângulo (fixPixellabIsometricAngle,
-  // esticar só na VERTICAL, ver mais acima) não bastou pra uma poltrona
-  // específica ("ta deixando torto ainda", com print mostrando a perna
-  // fora do centro da régua/losango de referência): esse esticamento só
-  // corrige o ACHATAMENTO da câmera do PixelLab (inclinação), não uma
-  // eventual leve ROTAÇÃO/torção da peça em si, que varia de geração pra
-  // geração (a calibração original já mediu 1.435 e 1.472 em só 2 peças
-  // -- um desvio a mais nessa direção não tem como "consertar" esticando
-  // mais ou menos). Em vez de tentar medir uma constante nova toda vez
-  // que uma peça sair torta de um jeito diferente, dá pra corrigir na
-  // hora, olhando, direto aqui.
+  // que a correção automática de ângulo (esticar só na VERTICAL, um fator
+  // fixo calibrado em 2 peças de exemplo -- REMOVIDA depois, ver
+  // comentário perto de slugify: "remova o seu corretor de angulo, ele
+  // nao funciona") não bastou pra uma poltrona específica ("ta deixando
+  // torto ainda", com print mostrando a perna fora do centro da régua/
+  // losango de referência): esse esticamento só corrigia o ACHATAMENTO
+  // da câmera do PixelLab (inclinação), não uma eventual leve
+  // ROTAÇÃO/torção da peça em si, que varia de geração pra geração. Esse
+  // ajuste MANUAL continua aqui -- só o automático que saiu.
   const [rotationDeg, setRotationDeg] = useState(0);
   // cisalhamento (graus, -30 a +30) -- pedido do Douglas depois de testar
   // só a rotação acima: "ele so gira a imagem, nao faz aquela torcao...
@@ -978,12 +954,11 @@ function ImageCropModal({
   // ela bater as linhas". ROTAÇÃO sozinha só corrige um desalinhamento
   // de ângulo UNIFORME (a peça inteira girada); quando o problema é a
   // câmera do PixelLab olhando de uma ROTAÇÃO (azimute) levemente
-  // diferente da do jogo -- não só uma inclinação (elevação) diferente,
-  // que é o que PIXELLAB_VERTICAL_FIX já corrige -- o resultado é mais
-  // parecido com um efeito "keystone"/paralelogramo (um lado da peça
-  // "puxado" em relação ao outro), que rotação NENHUMA consegue desfazer
-  // (rotacionar só muda a ORIENTAÇÃO do erro, nunca o formato dele).
-  // Cisalhamento (shear) é a ferramenta certa pra isso -- inclina linhas
+  // diferente da do jogo -- não só uma inclinação (elevação) diferente --
+  // o resultado é mais parecido com um efeito "keystone"/paralelogramo
+  // (um lado da peça "puxado" em relação ao outro), que rotação NENHUMA
+  // consegue desfazer (rotacionar só muda a ORIENTAÇÃO do erro, nunca o
+  // formato dele). Cisalhamento (shear) é a ferramenta certa pra isso -- inclina linhas
   // verticais em diagonais sem mexer nas horizontais, exatamente a
   // "torção" que dá pra fazer uma perna que tá saindo pro lado errado
   // bater na linha-guia.
@@ -1248,8 +1223,8 @@ function ImageCropModal({
             Espelhar
           </button>
           {/* ajuste fino de rotação -- ver comentário grande no state
-              rotationDeg acima (peça saindo torta mesmo depois da
-              correção automática de ângulo do PixelLab). */}
+              rotationDeg acima (peça saindo torta; a correção
+              automática que existia foi removida). */}
           <label className="crop-modal-rotate">
             <span>Ajuste fino de ângulo: {rotationDeg}°</span>
             <input
@@ -3047,6 +3022,660 @@ function AvatarCreatorPanel({ accessToken, onChanged }: { accessToken: string; o
   );
 }
 
+// Um estilo de PADRÃO de parede de sistema (sem imagem, ver
+// WallPatternConfig em game/wall.ts) já cadastrado -- formato da linha de
+// room_wall_items (ver supabase/migrations/0024_room_wall_items.sql e
+// 0026_room_wall_items_thickness_brick.sql).
+type CustomWallRow = {
+  id: string;
+  label: string;
+  height_px: number;
+  thickness_px: number;
+  brick_width_px: number;
+  brick_height_px: number;
+  brick_color: string;
+  mortar_color: string;
+  mortar_width_px: number;
+  top_color: string;
+};
+
+// comprimento (px) de UMA aresta da grade, usado só pro PREVIEW ao vivo
+// abaixo -- constante hoje (grade uniforme, ver comentário de
+// wallEdgeLengthPx em game/wall.ts), calculado a partir de uma aresta
+// qualquer (0,0,"colPlus") em vez de fixo à mão, por clareza.
+const WALL_PREVIEW_EDGE_LENGTH_PX = wallEdgeLengthPx(0, 0, "colPlus");
+
+/**
+ * "Criar Parede" (aba NOVA, distinta da antiga "Criar Parede" -- ver
+ * comentário grande na barra de abas mais abaixo) -- pedido do Douglas:
+ * primeiro perguntou se dava pra criar uma "geometria" de parede igual o
+ * piso "padrão", sem precisar de imagem feita fora ("a gente não
+ * consegue criar uma geometria seguindo a mesma ideia de piso, algo
+ * criado aqui, sem que seja feito fora?"), depois confirmou o formato:
+ * "a gente cria uma nova aba la no criar pra configurar os padroes
+ * dela". Componente à parte (mesma ideia de AvatarCreatorPanel acima),
+ * já que o formulário/tabela (room_wall_items, ver
+ * supabase/migrations/0024_room_wall_items.sql e app/api/wall-items/**)
+ * não tem nada a ver com o de móvel/piso.
+ *
+ * Só cobre o tipo "padrão" (tijolo desenhado por código, ver
+ * WallPatternConfig em game/wall.ts) -- parede com ARTE continua vindo
+ * só da pasta local (scripts/syncWallAssets.mjs), sem upload por aqui
+ * ainda (o Douglas não pediu isso, só o padrão).
+ *
+ * Espessura editável adicionada depois do Douglas testar ao vivo a
+ * primeira versão (folha 2D encostada na linha da divisa): "voce ficou
+ * ela na divisa, eu quero ela no meio do tile... com espessura de
+ * parede, inclusive quero editar isso na criacao" (ver comentário grande
+ * de WallPatternConfig em game/wall.ts pro motivo/geometria) -- o tijolo
+ * continua igual, só ganhou volume.
+ *
+ * Cor do topo: teve ida e volta (ver 0027/0028_room_wall_items_*top_color*.sql
+ * e comentário grande de WallPatternConfig em game/wall.ts) -- chegou a
+ * virar campo próprio, voltou a ser CALCULADA (escurecendo brickColor)
+ * depois do Douglas testar ao vivo com uma cor destoando do tijolo, e
+ * agora voltou a ser campo próprio (0029_room_wall_items_top_color_v2.sql)
+ * com o escopo esclarecido por ele: "a cor encima da parede eu quero
+ * escolher" (só a face de CIMA/topo, plana) + "a cor da face na
+ * espessura vertical é a cor que segue da parede" (as faces de PONTA/
+ * lateral do jogo de verdade continuam calculadas, sem campo próprio --
+ * ver createWallPatternGraphics em MainScene.ts).
+ *
+ * O modo de inserção "Centro do tile" (pedido do Douglas: "eu quero
+ * tambem a opcao de inserir ela no centro do tile", que TRAVA passagem
+ * ao contrário da parede de aresta -- ver WallSide em game/wall.ts) NÃO
+ * mora aqui -- é um jeito de INSERIR a parede na sala (toggle "Borda"/
+ * "Centro do tile" no painel de pintura de parede, GameRoom.tsx), não
+ * uma propriedade do estilo cadastrado nesta aba.
+ */
+function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: string; onChanged: () => void }) {
+  const [wallItems, setWallItems] = useState<CustomWallRow[] | null>(null);
+  const [wallLabel, setWallLabel] = useState("");
+  const [wallHeight, setWallHeight] = useState(100);
+  const [wallThickness, setWallThickness] = useState(10);
+  const [wallBrickWidth, setWallBrickWidth] = useState(24);
+  const [wallBrickHeight, setWallBrickHeight] = useState(14);
+  const [wallBrickColor, setWallBrickColor] = useState("#b5502e");
+  const [wallMortarColor, setWallMortarColor] = useState("#d9d2c8");
+  const [wallMortarWidth, setWallMortarWidth] = useState(2);
+  const [wallTopColor, setWallTopColor] = useState("#914025");
+  const [wallEditingId, setWallEditingId] = useState<string | null>(null);
+  const [wallSubmitting, setWallSubmitting] = useState(false);
+  const [wallBusyId, setWallBusyId] = useState<string | null>(null);
+  const [wallError, setWallError] = useState<string | null>(null);
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  // "#rrggbb" -> número hex (o que WallPatternConfig/<WallPatternSwatch>
+  // esperam, ver game/wall.ts) -- cópia pequena da MESMA função dentro do
+  // componente ItemEditor mais abaixo (não dá pra chamar ela direto daqui
+  // -- é local a outro componente -- e não vale a pena promover pra fora
+  // só por uma conta de 1 linha).
+  function parseHexColor(css: string): number {
+    return parseInt(css.replace("#", ""), 16) || 0;
+  }
+
+  async function loadWallItems() {
+    setWallError(null);
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data, error: fetchError } = await supabase
+      .from("room_wall_items")
+      .select(
+        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color"
+      );
+    if (fetchError) {
+      setWallError(fetchError.message);
+      return;
+    }
+    setWallItems((data ?? []) as CustomWallRow[]);
+  }
+
+  function resetWallForm() {
+    setWallEditingId(null);
+    setWallLabel("");
+    setWallHeight(100);
+    setWallThickness(10);
+    setWallBrickWidth(24);
+    setWallBrickHeight(14);
+    setWallBrickColor("#b5502e");
+    setWallMortarColor("#d9d2c8");
+    setWallMortarWidth(2);
+    setWallTopColor("#914025");
+  }
+
+  function startEditWallItem(item: CustomWallRow) {
+    setWallEditingId(item.id);
+    setWallLabel(item.label);
+    setWallHeight(item.height_px);
+    setWallThickness(item.thickness_px);
+    setWallBrickWidth(item.brick_width_px);
+    setWallBrickHeight(item.brick_height_px);
+    setWallBrickColor(item.brick_color);
+    setWallMortarColor(item.mortar_color);
+    setWallMortarWidth(item.mortar_width_px);
+    setWallTopColor(item.top_color);
+  }
+
+  async function handleWallSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setWallError(null);
+    if (!wallLabel.trim()) {
+      setWallError("Dá um nome pra parede.");
+      return;
+    }
+    setWallSubmitting(true);
+    try {
+      const payload = {
+        label: wallLabel.trim(),
+        height_px: wallHeight,
+        thickness_px: wallThickness,
+        brick_width_px: wallBrickWidth,
+        brick_height_px: wallBrickHeight,
+        brick_color: wallBrickColor,
+        mortar_color: wallMortarColor,
+        mortar_width_px: wallMortarWidth,
+        top_color: wallTopColor,
+      };
+      const res = await fetch(wallEditingId ? `/api/wall-items/${wallEditingId}` : "/api/wall-items", {
+        method: wallEditingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao salvar parede");
+
+      resetWallForm();
+      await loadWallItems();
+      onChanged();
+    } catch (err) {
+      setWallError(err instanceof Error ? err.message : "erro ao salvar parede");
+    } finally {
+      setWallSubmitting(false);
+    }
+  }
+
+  async function handleWallDelete(id: string) {
+    setWallBusyId(id);
+    setWallError(null);
+    try {
+      const res = await fetch(`/api/wall-items/${id}`, { method: "DELETE", headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao apagar parede");
+      if (wallEditingId === id) resetWallForm();
+      await loadWallItems();
+      onChanged();
+    } catch (err) {
+      setWallError(err instanceof Error ? err.message : "erro ao apagar parede");
+    } finally {
+      setWallBusyId(null);
+    }
+  }
+
+  useEffect(() => {
+    loadWallItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <>
+      <form className="items-panel-form" onSubmit={handleWallSubmit}>
+        <input
+          className="items-panel-input"
+          type="text"
+          placeholder="Nome da parede"
+          value={wallLabel}
+          maxLength={40}
+          onChange={(e) => setWallLabel(e.target.value)}
+        />
+
+        <p className="settings-hint">
+          Sem imagem nenhuma -- o jogo desenha tijolos em fileiras (padrão "amarração", desencontradas uma da outra)
+          num painel com espessura de verdade, centrado na divisa entre os 2 quadrados (metade da espessura pra cada
+          lado), do jeito que você configurar abaixo.
+        </p>
+
+        <label className="items-panel-upload-field">
+          <span>Altura da parede (px)</span>
+          <input
+            className="items-panel-input"
+            type="number"
+            min={20}
+            max={400}
+            value={wallHeight}
+            onChange={(e) => setWallHeight(Number(e.target.value))}
+          />
+        </label>
+        <label className="items-panel-upload-field">
+          <span>Espessura da parede (px)</span>
+          <input
+            className="items-panel-input"
+            type="number"
+            min={1}
+            max={60}
+            value={wallThickness}
+            onChange={(e) => setWallThickness(Number(e.target.value))}
+          />
+        </label>
+        <label className="items-panel-upload-field">
+          <span>Largura do tijolo (px)</span>
+          <input
+            className="items-panel-input"
+            type="number"
+            min={4}
+            max={200}
+            value={wallBrickWidth}
+            onChange={(e) => setWallBrickWidth(Number(e.target.value))}
+          />
+        </label>
+        <label className="items-panel-upload-field">
+          <span>Altura do tijolo (px)</span>
+          <input
+            className="items-panel-input"
+            type="number"
+            min={4}
+            max={100}
+            value={wallBrickHeight}
+            onChange={(e) => setWallBrickHeight(Number(e.target.value))}
+          />
+        </label>
+        <label className="items-panel-upload-field">
+          <span>Espessura da junta (px)</span>
+          <input
+            className="items-panel-input"
+            type="number"
+            min={0}
+            max={20}
+            value={wallMortarWidth}
+            onChange={(e) => setWallMortarWidth(Number(e.target.value))}
+          />
+        </label>
+
+        <div className="items-panel-submit-row">
+          <div className="items-panel-upload-field">
+            <span>Cor do tijolo</span>
+            <ColorPickerField value={wallBrickColor} onChange={setWallBrickColor} />
+          </div>
+          <div className="items-panel-upload-field">
+            <span>Cor da argamassa</span>
+            <ColorPickerField value={wallMortarColor} onChange={setWallMortarColor} />
+          </div>
+          <div className="items-panel-upload-field">
+            <span>Cor do topo</span>
+            <ColorPickerField value={wallTopColor} onChange={setWallTopColor} />
+          </div>
+        </div>
+
+        {/* preview ao vivo -- os MESMOS retângulos que
+            createWallPatternGraphics desenha de verdade no jogo (ver
+            wallBrickRects em game/wall.ts), com a tira de cima
+            representando a espessura (ver WallPatternSwatch.tsx), num
+            painel retangular (a parede é uma face plana/vertical, sem
+            losango pra recortar feito o piso). */}
+        <div className="wall-pattern-preview-wrap">
+          <div className="wall-pattern-preview-tile" style={{ aspectRatio: `${WALL_PREVIEW_EDGE_LENGTH_PX} / ${wallHeight}` }}>
+            <WallPatternSwatch
+              pattern={{
+                heightPx: wallHeight,
+                thicknessPx: wallThickness,
+                brickWidthPx: wallBrickWidth,
+                brickHeightPx: wallBrickHeight,
+                brickColor: parseHexColor(wallBrickColor),
+                mortarColor: parseHexColor(wallMortarColor),
+                mortarWidthPx: wallMortarWidth,
+                topColor: parseHexColor(wallTopColor),
+              }}
+              edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
+            />
+          </div>
+        </div>
+
+        {wallError && <p className="items-panel-error">{wallError}</p>}
+
+        <div className="items-panel-submit-row">
+          <button type="submit" className="items-panel-submit" disabled={wallSubmitting}>
+            {wallSubmitting ? "Enviando..." : wallEditingId ? "Salvar alterações" : "Cadastrar parede"}
+          </button>
+          {wallEditingId && (
+            <button type="button" className="clear-btn" onClick={resetWallForm} disabled={wallSubmitting}>
+              Cancelar edição
+            </button>
+          )}
+        </div>
+      </form>
+
+      <section className="items-panel-section">
+        <h3>Paredes cadastradas ({wallItems?.length ?? 0})</h3>
+        {!wallItems ? (
+          <p className="items-panel-loading">Carregando...</p>
+        ) : wallItems.length === 0 ? (
+          <p className="items-panel-loading">Nenhuma parede custom ainda.</p>
+        ) : (
+          <ul className="items-panel-list">
+            {wallItems.map((item) => (
+              <li key={item.id} className="items-panel-row-wrap">
+                <div className="items-panel-row">
+                  <div className="items-panel-thumb">
+                    <WallPatternSwatch
+                      pattern={{
+                        heightPx: item.height_px,
+                        thicknessPx: item.thickness_px,
+                        brickWidthPx: item.brick_width_px,
+                        brickHeightPx: item.brick_height_px,
+                        brickColor: parseHexColor(item.brick_color),
+                        mortarColor: parseHexColor(item.mortar_color),
+                        mortarWidthPx: item.mortar_width_px,
+                        topColor: parseHexColor(item.top_color),
+                      }}
+                      edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
+                    />
+                  </div>
+                  <span className="items-panel-name">{item.label}</span>
+                  <button type="button" disabled={wallBusyId === item.id} onClick={() => startEditWallItem(item)}>
+                    Editar
+                  </button>
+                  <button type="button" disabled={wallBusyId === item.id} onClick={() => handleWallDelete(item.id)}>
+                    Excluir
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
+// comprimento (px) de UMA aresta da grade -- mesma ideia de
+// WALL_PREVIEW_EDGE_LENGTH_PX acima, usado como TETO de redimensionamento
+// do upload de arte de porta (ver resizeImageForUpload/UPLOAD_SUPERSAMPLE
+// no topo do arquivo): a porta é exibida EXATAMENTE nessa largura no jogo
+// (ver setDisplaySize em addDoorSprite, MainScene.ts), então não faz
+// sentido guardar um arquivo muito maior que isso vezes a folga de
+// nitidez de sempre.
+const DOOR_ART_MAX_UPLOAD_WIDTH = doorEdgeLengthPx(0, 0, "colPlus") * UPLOAD_SUPERSAMPLE;
+
+/** Um dos 4 campos de arte de UMA porta -- "left"/"right" é o `facing`
+ * (ver DoorFacing em game/door.ts, escolhido como o resto do jogo faz
+ * pra móvel/direção -- Douglas desenha os 2 lados à mão, sem espelhar
+ * nada em código), "Closed"/"Open" é o estado (ver DoorArtSet). Só os 2
+ * de "left" são obrigatórios (ver POST /api/door-items) -- "right" cai
+ * pro fallback de "left" enquanto não for enviado (ver
+ * resolveDoorTextureKey em MainScene.ts). */
+type DoorArtField = "leftClosed" | "leftOpen" | "rightClosed" | "rightOpen";
+
+const DOOR_ART_FIELDS: { key: DoorArtField; label: string; payloadKey: string; required: boolean }[] = [
+  { key: "leftClosed", label: "Fechada -- lado esquerdo", payloadKey: "art_left_closed", required: true },
+  { key: "leftOpen", label: "Aberta -- lado esquerdo", payloadKey: "art_left_open", required: true },
+  { key: "rightClosed", label: "Fechada -- lado direito (opcional)", payloadKey: "art_right_closed", required: false },
+  { key: "rightOpen", label: "Aberta -- lado direito (opcional)", payloadKey: "art_right_open", required: false },
+];
+
+// Uma porta já cadastrada (ver supabase/migrations/0030_room_door_items.sql
+// e app/api/door-items/**) -- art_right_* pode vir null (fallback pro
+// lado esquerdo, ver comentário de DoorArtField acima).
+type CustomDoorRow = {
+  id: string;
+  label: string;
+  kind: DoorKind;
+  art_left_closed: string;
+  art_left_open: string;
+  art_right_closed: string | null;
+  art_right_open: string | null;
+};
+
+/**
+ * "Criar Porta" -- pedido do Douglas: "vamos criar uma nova categoria
+ * 'porta'... por enquanto, so terá porta de correr... eu subirei a
+ * arte. frete esq, frente dir, mesma coisa". Componente à parte (mesma
+ * ideia de WallPatternCreatorPanel acima), tabela própria
+ * (room_door_items) -- diferente da parede "padrão" (sem imagem
+ * nenhuma), porta é SEMPRE imagem (4 arquivos possíveis: aberta/fechada
+ * x esquerda/direita, ver DOOR_ART_FIELDS acima), então o
+ * formulário/upload segue mais perto do de "Criar Mobi"/"Criar Piso"
+ * (sobe pro Storage primeiro, some com upload órfão se o cadastro
+ * falhar depois -- ver comentário grande no handleSubmit de mobi).
+ */
+function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onChanged: () => void }) {
+  const [doorItems, setDoorItems] = useState<CustomDoorRow[] | null>(null);
+  const [doorLabel, setDoorLabel] = useState("");
+  const [doorKind, setDoorKind] = useState<DoorKind>(DOOR_KINDS[0].id);
+  const [doorFiles, setDoorFiles] = useState<Partial<Record<DoorArtField, File>>>({});
+  const [doorPreviews, setDoorPreviews] = useState<Partial<Record<DoorArtField, string>>>({});
+  const [doorExisting, setDoorExisting] = useState<Partial<Record<DoorArtField, string>>>({});
+  const [doorEditingId, setDoorEditingId] = useState<string | null>(null);
+  const [doorSubmitting, setDoorSubmitting] = useState(false);
+  const [doorBusyId, setDoorBusyId] = useState<string | null>(null);
+  const [doorError, setDoorError] = useState<string | null>(null);
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  async function loadDoorItems() {
+    setDoorError(null);
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data, error: fetchError } = await supabase
+      .from("room_door_items")
+      .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open");
+    if (fetchError) {
+      setDoorError(fetchError.message);
+      return;
+    }
+    setDoorItems((data ?? []) as CustomDoorRow[]);
+  }
+
+  function resetDoorForm() {
+    setDoorEditingId(null);
+    setDoorLabel("");
+    setDoorKind(DOOR_KINDS[0].id);
+    setDoorFiles({});
+    setDoorPreviews((prev) => {
+      for (const url of Object.values(prev)) if (url) URL.revokeObjectURL(url);
+      return {};
+    });
+    setDoorExisting({});
+  }
+
+  function startEditDoorItem(item: CustomDoorRow) {
+    setDoorEditingId(item.id);
+    setDoorLabel(item.label);
+    setDoorKind(item.kind);
+    setDoorFiles({});
+    setDoorPreviews((prev) => {
+      for (const url of Object.values(prev)) if (url) URL.revokeObjectURL(url);
+      return {};
+    });
+    setDoorExisting({
+      leftClosed: item.art_left_closed,
+      leftOpen: item.art_left_open,
+      rightClosed: item.art_right_closed ?? undefined,
+      rightOpen: item.art_right_open ?? undefined,
+    });
+  }
+
+  function handleDoorFileChange(field: DoorArtField, file: File | undefined) {
+    setDoorFiles((prev) => ({ ...prev, [field]: file }));
+    setDoorPreviews((prev) => {
+      const prevUrl = prev[field];
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return { ...prev, [field]: file ? URL.createObjectURL(file) : undefined };
+    });
+  }
+
+  async function handleDoorSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setDoorError(null);
+    if (!doorLabel.trim()) {
+      setDoorError("Dá um nome pra porta.");
+      return;
+    }
+    if (!doorEditingId && (!doorFiles.leftClosed || !doorFiles.leftOpen)) {
+      setDoorError("As imagens fechada/aberta do lado esquerdo são obrigatórias.");
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    setDoorSubmitting(true);
+    // mesma cautela de handleSubmit (mobi)/handleFloorSubmit acima: sobe
+    // pro Storage PRIMEIRO, só depois grava o cadastro -- desfaz upload
+    // órfão no catch se o cadastro final falhar.
+    const uploadedPaths: string[] = [];
+    try {
+      const slug = slugify(doorLabel);
+      const payload: Record<string, unknown> = { label: doorLabel.trim() };
+      if (!doorEditingId) payload.kind = doorKind;
+      for (const field of DOOR_ART_FIELDS) {
+        const rawFile = doorFiles[field.key];
+        if (!rawFile) continue; // editando: campo não reenviado mantém a URL antiga
+        const resized = await resizeImageForUpload(rawFile, DOOR_ART_MAX_UPLOAD_WIDTH);
+        const ext = resized.name.split(".").pop() || "png";
+        const path = `porta/${slug}-${Date.now()}-${field.key}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("room-items").upload(path, resized, {
+          upsert: false,
+          contentType: resized.type || "image/png",
+        });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+        const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
+        payload[field.payloadKey] = publicUrlData.publicUrl;
+      }
+
+      const res = await fetch(doorEditingId ? `/api/door-items/${doorEditingId}` : "/api/door-items", {
+        method: doorEditingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao salvar porta");
+
+      resetDoorForm();
+      await loadDoorItems();
+      onChanged();
+    } catch (err) {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("room-items").remove(uploadedPaths).catch(() => null);
+      }
+      setDoorError(err instanceof Error ? err.message : "erro ao salvar porta");
+    } finally {
+      setDoorSubmitting(false);
+    }
+  }
+
+  async function handleDoorDelete(id: string) {
+    setDoorBusyId(id);
+    setDoorError(null);
+    try {
+      const res = await fetch(`/api/door-items/${id}`, { method: "DELETE", headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "erro ao apagar porta");
+      if (doorEditingId === id) resetDoorForm();
+      await loadDoorItems();
+      onChanged();
+    } catch (err) {
+      setDoorError(err instanceof Error ? err.message : "erro ao apagar porta");
+    } finally {
+      setDoorBusyId(null);
+    }
+  }
+
+  useEffect(() => {
+    loadDoorItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <>
+      <form className="items-panel-form" onSubmit={handleDoorSubmit}>
+        <input
+          className="items-panel-input"
+          type="text"
+          placeholder="Nome da porta"
+          value={doorLabel}
+          maxLength={40}
+          onChange={(e) => setDoorLabel(e.target.value)}
+        />
+
+        {!doorEditingId && (
+          <select className="items-panel-input" value={doorKind} onChange={(e) => setDoorKind(e.target.value as DoorKind)}>
+            {DOOR_KINDS.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <p className="settings-hint">
+          Só de correr por enquanto -- 2 posições (aberta/fechada), sem quadro de animação no meio. "Tipo" muda só o
+          NOME/organização (1 ou 2 folhas na imagem) -- o jogo trata as duas exatamente igual.
+          {doorEditingId ? " Só reenvie uma imagem se quiser TROCAR -- senão continua com a de antes." : ""}
+        </p>
+
+        {DOOR_ART_FIELDS.map((field) => (
+          <label key={field.key} className="items-panel-upload-field">
+            <span>
+              {field.label}
+              {field.required && !doorEditingId ? " *" : ""}
+            </span>
+            {(doorPreviews[field.key] || doorExisting[field.key]) && (
+              <img
+                className="items-panel-upload-existing"
+                src={doorPreviews[field.key] ?? doorExisting[field.key]}
+                alt={field.label}
+              />
+            )}
+            <input
+              type="file"
+              accept="image/png,image/webp,image/jpeg"
+              onChange={(e) => handleDoorFileChange(field.key, e.target.files?.[0])}
+            />
+          </label>
+        ))}
+
+        {doorError && <p className="items-panel-error">{doorError}</p>}
+
+        <div className="items-panel-submit-row">
+          <button type="submit" className="items-panel-submit" disabled={doorSubmitting}>
+            {doorSubmitting ? "Enviando..." : doorEditingId ? "Salvar alterações" : "Cadastrar porta"}
+          </button>
+          {doorEditingId && (
+            <button type="button" className="clear-btn" onClick={resetDoorForm} disabled={doorSubmitting}>
+              Cancelar edição
+            </button>
+          )}
+        </div>
+      </form>
+
+      <section className="items-panel-section">
+        <h3>Portas cadastradas ({doorItems?.length ?? 0})</h3>
+        {!doorItems ? (
+          <p className="items-panel-loading">Carregando...</p>
+        ) : doorItems.length === 0 ? (
+          <p className="items-panel-loading">Nenhuma porta custom ainda.</p>
+        ) : (
+          <ul className="items-panel-list">
+            {doorItems.map((item) => (
+              <li key={item.id} className="items-panel-row-wrap">
+                <div className="items-panel-row">
+                  <div className="items-panel-thumb">
+                    <img src={item.art_left_closed} alt={item.label} />
+                  </div>
+                  <span className="items-panel-name">{item.label}</span>
+                  <button type="button" disabled={doorBusyId === item.id} onClick={() => startEditDoorItem(item)}>
+                    Editar
+                  </button>
+                  <button type="button" disabled={doorBusyId === item.id} onClick={() => handleDoorDelete(item.id)}>
+                    Excluir
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
 export default function ItemEditor({
   accessToken,
   onClose,
@@ -3086,19 +3715,11 @@ export default function ItemEditor({
   // JSX dele é um bloco separado (ver {mode === "piso" && (...)} mais
   // abaixo), guardado numa tabela própria (room_floor_items, ver
   // supabase/migrations/0015_room_floor_items.sql) em vez de room_items.
-  const [mode, setMode] = useState<"mobi" | "parede" | "piso" | "avatar">("mobi");
+  const [mode, setMode] = useState<"mobi" | "parede" | "parede-sistema" | "piso" | "porta" | "avatar">("mobi");
   const [items, setItems] = useState<CustomItemRow[] | null>(null);
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<CategoryId>("poltrona");
   const [files, setFiles] = useState<Partial<Record<MobiFacing, File>>>({});
-  // "Corrigir ângulo (PixelLab)" -- pedido do Douglas: "ele vai
-  // corrigir automaticamente? pode fazer". Marcado por padrão (hoje
-  // toda a arte de mobi vem de lá) -- aplica fixPixellabIsometricAngle
-  // (ver acima) em CADA foto de direção assim que ela é escolhida, e
-  // some depois de virar o padrão de todo mundo... por ora dá pra
-  // desmarcar se a imagem já vier de outro lugar (já corrigida, feita
-  // à mão, etc.) pra não esticar ela errado.
-  const [fixPixellabAngle, setFixPixellabAngle] = useState(true);
   // zoom do preview -- mesma ideia do zoom em AvatarCreatorPanel acima
   // (pedido do Douglas: "tem como eu dar zoom nesse editor? ta mt
   // longe"), estado próprio aqui porque "Criar Mobi" é um componente
@@ -3150,6 +3771,37 @@ export default function ItemEditor({
   // blockingFurnitureAt).
   const [footprintCols, setFootprintCols] = useState(1);
   const [footprintRows, setFootprintRows] = useState(1);
+  // footprint DESENHADO À MÃO, por direção -- pedido do Douglas: "quero
+  // selecionar os tiles que ele ocupa, CLICANDO, e preenchendo, do jeito
+  // que ta eu nao consigo decidir rumo nem nada! E isso pra CADA
+  // POSICAO, pois o movel gira e muda o bloqueio pela perspectiva!!!"
+  // (footprintCols/Rows acima virou só o TAMANHO da grade clicável --
+  // ver mobiFootprintTiles abaixo; o que trava passagem de verdade agora
+  // é esse aqui). Cada chave é down/left/right/up (âncora de quina de
+  // parede sempre cai em "down", ver footprintDirectionKey abaixo);
+  // ausente = ainda não customizado NESSA direção, mostra/edita a partir
+  // do retângulo cheio (footprintCols x footprintRows), MESMO
+  // comportamento de sempre até o Douglas clicar em algo -- ver
+  // FurnitureModelDef.footprintByDirection, game/furniture.ts.
+  const [footprintByDirection, setFootprintByDirection] = useState<
+    Partial<Record<"down" | "left" | "right" | "up", { dCol: number; dRow: number }[]>>
+  >({});
+  // "Sobrepor" -- pedido do Douglas: "cada item, ex: mesa mesinha de
+  // centro, eu teria que configurar, a altura de um segundo item,
+  // adicionado ao tile dele" + "esse item que eu não tickar a opção de
+  // sobrepor, continua igual tá agora, ele não deixa por outro item no
+  // mesmo quadrado". Dois campos NOVOS, independentes (o mesmo item pode
+  // usar um, o outro, os dois, ou nenhum):
+  //  - stackable: ESSE item (ex: notebook) pode ser colocado em cima de
+  //    OUTRO já ancorado no mesmo tile (ver anyFurnitureAt, MainScene.ts)
+  //    -- falso (padrão) = tile ocupado bloqueia igual sempre bloqueou.
+  //  - stackSurfaceOffsetY: altura (px) da SUPERFÍCIE desse item (ex: a
+  //    mesa) -- some no deslocamento de quem for colocado "Sobrepor" em
+  //    cima dela (ver stackSurfaceOffsetYFor, MainScene.ts). 0 = sem
+  //    superfície configurada (item em cima cai na posição normal, no
+  //    chão).
+  const [stackable, setStackable] = useState(false);
+  const [stackSurfaceOffsetY, setStackSurfaceOffsetY] = useState(0);
   // assentos EXTRA (pedido do Douglas: "preciso... configurar dois
   // avatares no caso em que tenha mais de um assento", ex: sofá com 2
   // lugares) -- fora a âncora (que já senta do jeito de sempre, ver
@@ -3397,6 +4049,42 @@ export default function ItemEditor({
     return parseInt(css.replace("#", ""), 16) || 0;
   }
 
+  /**
+   * Ajusta um valor de largura/comprimento de tábua (px) pro DIVISOR
+   * EXATO mais próximo de TILE_SIZED_PLANK_PX -- pedido do Douglas:
+   * "nao tem como travar as divisões encima do limite do tile? fica
+   * cortado assim, tentei fazer um deck" (com print de um piso de
+   * madeira em várias tábuas por tile, cujas juntas cortavam no meio do
+   * losango em vez de bater na borda dele).
+   *
+   * Causa raiz (ver createFloorPatternGraphics/acrossColOf/alongRowOf em
+   * MainScene.ts): a faixa de cada tábua é calculada em coordenada
+   * ABSOLUTA da tela (não por tile, é isso que faz o piso "correr" de um
+   * tile pro vizinho sem emenda visível), e o CENTRO de cada tile cai
+   * exatamente em múltiplos de TILE_SIZED_PLANK_PX nessa mesma base
+   * (colAxis pra largura, rowAxis pro comprimento -- ver comentário
+   * grande de TILE_SIZED_PLANK_PX em game/floor.ts). Isso já dava
+   * "Placa do tamanho do tile" (1 tábua = 1 tile inteiro, sem corte),
+   * mas pra um DECK de verdade (várias tábuas mais estreitas por tile)
+   * faltava um jeito de garantir que save espaçamento também bata na
+   * borda -- só acontece quando o tamanho da tábua é um divisor EXATO
+   * de TILE_SIZED_PLANK_PX (N tábuas cabendo certinho de ponta a ponta
+   * do tile, N inteiro). Qualquer outro valor (como os 24px padrão)
+   * deixa uma tábua "cortada" bem no meio do losango, sem bater com a
+   * borda -- exatamente o print que o Douglas mandou.
+   *
+   * Em vez de forçar um tamanho fixo (como o porcelanato), aqui só
+   * ARREDONDA o valor que o Douglas já digitou pro divisor mais
+   * PRÓXIMO (N = tábuas por tile mais perto do que ele tinha, mínimo 1)
+   * -- o visual do deck continua quase idêntico ao que ele tentou fazer
+   * (24px vira ~23,85px, por exemplo), só que agora sem corte no meio.
+   */
+  function snapPlankSizeToTileDivisor(px: number): number {
+    if (!Number.isFinite(px) || px <= 0) return px;
+    const divisions = Math.max(1, Math.round(TILE_SIZED_PLANK_PX / px));
+    return Math.round((TILE_SIZED_PLANK_PX / divisions) * 100) / 100;
+  }
+
   /** Adiciona uma cor no fim da lista (máximo 6, mesmo teto validado em
    * app/api/floor-items/route.ts) -- cor de partida genérica, o usuário
    * troca depois pelo <input type="color"> dela. */
@@ -3637,7 +4325,14 @@ export default function ItemEditor({
     const { data, error: fetchError } = await supabase
       .from("room_items")
       .select(
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
+        // stackable/stack_surface_offset_y/footprint_by_direction
+        // faltavam aqui (só existiam no tipo CustomItemRow acima e no
+        // startEditItem abaixo) -- sem vir nessa query, SEMPRE caíam no
+        // "?? false"/"?? undefined" do startEditItem, então reabrir um
+        // item pra editar nunca mostrava "Sobrepor"/altura/footprint
+        // customizado que já tinha sido salvo. Corrigido junto do
+        // footprint por direção (mesmo bug, mesma causa).
+        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -3667,6 +4362,9 @@ export default function ItemEditor({
     setDisplayWidth(CUSTOM_ITEM_TARGET_WIDTH[defaultCategory]);
     setFootprintCols(1);
     setFootprintRows(1);
+    setFootprintByDirection({});
+    setStackable(false);
+    setStackSurfaceOffsetY(0);
     setExtraSeats([]);
     setOffsetX(0);
     setOffsetY(0);
@@ -3707,6 +4405,9 @@ export default function ItemEditor({
     setDisplayWidth(item.display_width ?? CUSTOM_ITEM_TARGET_WIDTH[item.category]);
     setFootprintCols(clamp(item.footprint_cols ?? 1, 1, 6));
     setFootprintRows(clamp(item.footprint_rows ?? 1, 1, 6));
+    setFootprintByDirection(item.footprint_by_direction ?? {});
+    setStackable(item.stackable ?? false);
+    setStackSurfaceOffsetY(item.stack_surface_offset_y ?? 0);
     setExtraSeats(
       (item.extra_seats ?? []).map((s) => ({
         dCol: clamp(s.dCol ?? 0, -6, 6),
@@ -3826,6 +4527,88 @@ export default function ItemEditor({
   const activeDisplayWidth =
     activeMobiDirection === "down" ? displayWidth : directionDisplayWidth[activeMobiDirection] ?? displayWidth;
   const hasDisplayWidthOverride = activeMobiDirection !== "down" && activeMobiDirection in directionDisplayWidth;
+
+  // grade de footprint CLICÁVEL, SEMPRE ABERTA -- pedido do Douglas:
+  // "nao tem como a grande ja vir aberta, com a insersao no meio?? 2 pra
+  // cada lado da insercao" (ver FOOTPRINT_GRID_RADIUS acima). FIXA (não
+  // depende mais de footprintCols/footprintRows, que viraram só o
+  // default de exibição pra item ANTIGO, ver isFootprintTileSelected
+  // abaixo) -- dCol/dRow de -RADIUS a +RADIUS nos 2 eixos, âncora (0,0)
+  // no meio da grade, MESMA conta isométrica de tileToWorld
+  // (game/grid.ts) pra cada deslocamento.
+  const mobiFootprintTiles: { dCol: number; dRow: number }[] = [];
+  for (let dRow = -FOOTPRINT_GRID_RADIUS; dRow <= FOOTPRINT_GRID_RADIUS; dRow++) {
+    for (let dCol = -FOOTPRINT_GRID_RADIUS; dCol <= FOOTPRINT_GRID_RADIUS; dCol++) {
+      mobiFootprintTiles.push({ dCol, dRow });
+    }
+  }
+  // espaço extra pra grade CABER inteira no stage -- diferente de antes
+  // (só crescia pra baixo-direita, só precisava de espaço EMBAIXO), essa
+  // grade cresce nos 4 quadrantes a partir da âncora, então precisa de
+  // espaço ACIMA (quadrantes de dCol+dRow negativo, sobem na tela, ver
+  // conta isométrica de tileToWorld) e ABAIXO (quadrantes positivos) em
+  // volta do losango-âncora de sempre -- senão o resto da grade sai
+  // cortado pelo overflow-y:hidden do ".item-stage" (achado já visto
+  // antes nessa mesma tela: "cade os tiles"). Fixo (não muda mais com
+  // footprintCols/Rows) -- todo item mobi agora ganha essa folga, é o
+  // preço de a grade já vir aberta de cara.
+  const mobiFootprintExtraPad = FOOTPRINT_GRID_RADIUS * 2 * (TILE_HEIGHT_PX / 2);
+  const mobiStageBaseline = STAGE_BASELINE_PAD + mobiFootprintExtraPad;
+  const mobiStageHeight = STAGE_HEIGHT + mobiFootprintExtraPad * 2;
+
+  /** Quina de parede (cornerTop/cornerBottom) não tem footprint próprio
+   * -- footprint só existe pras 4 direções-base (down/left/right/up,
+   * MESMA Direction de directionOffsets), então as 2 quinas sempre
+   * editam/mostram a entrada "down" (ver mesmo raciocínio em
+   * furnitureFootprintTiles, game/furniture.ts). */
+  function footprintDirectionKey(dir: MobiFacing): "down" | "left" | "right" | "up" {
+    return dir === "cornerTop" || dir === "cornerBottom" ? "down" : dir;
+  }
+  const activeFootprintDir = footprintDirectionKey(activeMobiDirection);
+  // customização da direção ATIVA -- undefined = ainda não mexeu nessa
+  // direção, cai no retângulo cego de ANTES (footprintCols x
+  // footprintRows, só pra decidir o que já vem marcado por padrão na
+  // grade nova, ver isFootprintTileSelected abaixo) -- item cadastrado
+  // antes dessa grade existir continua mostrando o footprint de sempre.
+  const activeFootprintCustom = footprintByDirection[activeFootprintDir];
+  /** Esse tile (dCol,dRow, DENTRO da grade fixa -RADIUS..+RADIUS, ver
+   * FOOTPRINT_GRID_RADIUS/mobiFootprintTiles acima) trava passagem na
+   * direção ATIVA -- a âncora (0,0) trava sempre (não é opcional,
+   * ninguém clica pra desmarcar ela). Sem customização ainda nessa
+   * direção, cai no retângulo cego de ANTES (0<=dCol<footprintCols,
+   * 0<=dRow<footprintRows) -- item já cadastrado com footprintCols/Rows
+   * >1x1 continua mostrando esse footprint marcado de cara (em vez de
+   * "resetar" pra só a âncora só porque a grade agora é maior/fixa). */
+  function isFootprintTileSelected(dCol: number, dRow: number): boolean {
+    if (dCol === 0 && dRow === 0) return true;
+    if (activeFootprintCustom) return activeFootprintCustom.some((t) => t.dCol === dCol && t.dRow === dRow);
+    return dCol >= 0 && dCol < footprintCols && dRow >= 0 && dRow < footprintRows;
+  }
+  /** Clique num quadrado do preview (ver item-stage-footprint-tile mais
+   * abaixo) -- pedido do Douglas depois de brigar com o retângulo cego:
+   * "quero selecionar os tiles que ele ocupa, CLICANDO, e preenchendo,
+   * do jeito que ta eu nao consigo decidir rumo nem nada! E isso pra
+   * CADA POSICAO, pois o movel gira e muda o bloqueio pela
+   * perspectiva!!!". Só afeta a direção ATIVA (activeMobiDirection,
+   * mesma aba usada pra posição/tamanho por direção mais acima) -- na
+   * PRIMEIRA vez que mexe numa direção, parte do retângulo cego de ANTES
+   * já marcado (mesmo estado visual de antes do clique, ver
+   * isFootprintTileSelected acima), só aí risca/soma o tile clicado.
+   * Âncora (0,0) nunca entra aqui, sempre trava, sem opção de
+   * desmarcar. */
+  function toggleFootprintTile(dCol: number, dRow: number) {
+    if (dCol === 0 && dRow === 0) return;
+    setFootprintByDirection((prev) => {
+      const base =
+        prev[activeFootprintDir] ??
+        mobiFootprintTiles.filter(
+          (t) => !(t.dCol === 0 && t.dRow === 0) && t.dCol >= 0 && t.dCol < footprintCols && t.dRow >= 0 && t.dRow < footprintRows
+        );
+      const exists = base.some((t) => t.dCol === dCol && t.dRow === dRow);
+      const next = exists ? base.filter((t) => !(t.dCol === dCol && t.dRow === dRow)) : [...base, { dCol, dRow }];
+      return { ...prev, [activeFootprintDir]: next };
+    });
+  }
   /** Grava o tamanho na direção ATIVA -- "down" ajusta displayWidth
    * direto (base, reaproveitada por qualquer direção sem override
    * próprio), as outras 3 gravam SÓ o override daquela direção em
@@ -3880,6 +4663,13 @@ export default function ItemEditor({
   const seatFrameRow = Math.floor(activeSeatFrameIndex / SKIN_SHEET_COLS);
   const seatFrameOffsetXPx = seatFrameCol * (FRAME_W + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
   const seatFrameOffsetYPx = seatFrameRow * (FRAME_H + SKIN_SHEET_SPACING) * AVATAR_SCALE * PREVIEW_SCALE;
+
+  // Douglas pediu (depois de ver o resultado ao vivo, "remova esses
+  // quadrados roxo do fundo") pra voltar atrás na ideia de mostrar um
+  // "piso de referência" com vários losangos no palco -- ficou poluído
+  // demais mesmo depois de deixar mais marcado. Removido: voltou a ser
+  // só o tile ÂNCORA de sempre (ver item-stage-tile no JSX abaixo), sem
+  // a grade extra nem o respiro/base ajustados por footprint.
 
   // --- arrastar o item em cima do quadrado/boneco de referência
   // (pedido do Douglas: "delimitar ali no editor a posição do mobi no
@@ -3952,6 +4742,39 @@ export default function ItemEditor({
         setSeatOffsetX(nextX);
         setSeatOffsetY(nextY);
       }
+    }
+    function onUp(ev: PointerEvent) {
+      target.releasePointerCapture(ev.pointerId);
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+    }
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+  }
+
+  // --- arrastar o TILE de "Sobrepor" (altura da superfície, ver
+  // stackSurfaceOffsetY/stackable acima) -- pedido do Douglas: "voce
+  // errou a ordem... entao o que eu quero? uma nova camada de tiles no
+  // editor, que é ativada na opcao de sobrepor... eu vou subindo a
+  // altura do tile ate chegar na superficie dela". Antes era um campo
+  // numérico cru ("Altura da superfície (px)") -- sem preview nenhum,
+  // só chute. Agora, igual offsetX/Y (handleItemPointerDown acima) e o
+  // assento (handleSeatMarkerPointerDown acima): arrasta o PRÓPRIO tile
+  // no preview até ele bater visualmente com o topo da mesa, MESMA
+  // conta de dy/PREVIEW_SCALE das outras duas, sem separar por direção
+  // (stackSurfaceOffsetY é UM valor só, não muda com a direção -- a
+  // "altura da superfície" de uma mesa é a mesma não importa pra que
+  // lado ela olha).
+  function handleStackSurfacePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startClientY = e.clientY;
+    const startY = stackSurfaceOffsetY;
+
+    function onMove(ev: PointerEvent) {
+      const dy = (ev.clientY - startClientY) / PREVIEW_SCALE;
+      setStackSurfaceOffsetY(clamp(Math.round(startY + dy), -OFFSET_LIMIT, OFFSET_LIMIT));
     }
     function onUp(ev: PointerEvent) {
       target.releasePointerCapture(ev.pointerId);
@@ -4060,6 +4883,20 @@ export default function ItemEditor({
         // 0013_room_items_footprint.sql.
         footprint_cols: footprintCols,
         footprint_rows: footprintRows,
+        // footprint DESENHADO À MÃO, por direção (pedido do Douglas:
+        // "quero selecionar os tiles que ele ocupa, CLICANDO... pra CADA
+        // POSICAO") -- ver cleanFootprintByDirection em lib/supabase/
+        // itemFields.ts e a migration
+        // 0023_room_items_footprint_by_direction.sql. Vazio (nenhuma
+        // direção customizada) manda null de propósito, mesma regra de
+        // direction_offsets logo abaixo -- limpa qualquer customização
+        // antiga em vez de deixar lixo pra trás.
+        footprint_by_direction: Object.keys(footprintByDirection).length > 0 ? footprintByDirection : null,
+        // "Sobrepor" (ver comentário grande no useState de
+        // stackable/stackSurfaceOffsetY mais acima) -- pedido do
+        // Douglas: notebook em cima da mesa.
+        stackable,
+        stack_surface_offset_y: stackSurfaceOffsetY,
         offset_x: offsetX,
         offset_y: offsetY,
         // ajuste por direção + interação/assento (pedido do Douglas:
@@ -4204,6 +5041,17 @@ export default function ItemEditor({
               setActiveMobiDirection("down");
             }}
           >
+            {/* rebatizado de "Criar Parede" -- esse modo cadastra o vidro
+                divisório antigo (item de móvel comum, 1 tile), agora que
+                "Parede" virou o nome da aba NOVA logo abaixo (a parede de
+                sistema de verdade, ver game/wall.ts) */}
+            Criar Divisória
+          </button>
+          <button
+            type="button"
+            className={mode === "parede-sistema" ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => setMode("parede-sistema")}
+          >
             Criar Parede
           </button>
           <button
@@ -4215,6 +5063,13 @@ export default function ItemEditor({
           </button>
           <button
             type="button"
+            className={mode === "porta" ? "edit-section-tab selected" : "edit-section-tab"}
+            onClick={() => setMode("porta")}
+          >
+            Criar Porta
+          </button>
+          <button
+            type="button"
             className={mode === "avatar" ? "edit-section-tab selected" : "edit-section-tab"}
             onClick={() => setMode("avatar")}
           >
@@ -4223,6 +5078,12 @@ export default function ItemEditor({
         </div>
 
         {mode === "avatar" && <AvatarCreatorPanel accessToken={accessToken} onChanged={onItemsChanged} />}
+
+        {mode === "parede-sistema" && (
+          <WallPatternCreatorPanel accessToken={accessToken} onChanged={onItemsChanged} />
+        )}
+
+        {mode === "porta" && <DoorCreatorPanel accessToken={accessToken} onChanged={onItemsChanged} />}
 
         {mode === "piso" && (
           <>
@@ -4325,6 +5186,14 @@ export default function ItemEditor({
                     </p>
                   ) : (
                     <>
+                      {/* step=0.01 nos 2 campos abaixo -- sem isso, o
+                          <input type="number"> assume passo inteiro (1) e
+                          rejeita ("insira um valor válido") os números
+                          quebrados que "Travar tábuas na grade do tile"
+                          calcula (ex: 8,94), já que TILE_SIZED_PLANK_PX
+                          raramente divide num inteiro exato. Bug relatado
+                          pelo Douglas com print do aviso do navegador
+                          bloqueando o campo. */}
                       <label className="items-panel-upload-field">
                         <span>Largura da ripa (px)</span>
                         <input
@@ -4332,6 +5201,7 @@ export default function ItemEditor({
                           type="number"
                           min={4}
                           max={200}
+                          step={0.01}
                           value={floorPlankWidth}
                           onChange={(e) => setFloorPlankWidth(Number(e.target.value))}
                         />
@@ -4349,6 +5219,7 @@ export default function ItemEditor({
                           type="number"
                           min={4}
                           max={400}
+                          step={0.01}
                           placeholder="Em branco = ripa contínua, sem emenda"
                           value={floorPlankLength}
                           onChange={(e) => setFloorPlankLength(e.target.value)}
@@ -4373,6 +5244,37 @@ export default function ItemEditor({
                       >
                         Placa do tamanho do tile
                       </button>
+                      {/* pedido do Douglas: "nao tem como travar as
+                          divisões encima do limite do tile? fica
+                          cortado assim, tentei fazer um deck" -- ao
+                          contrário do botão acima (1 tábua = 1 tile
+                          inteiro), este AJUSTA a largura/comprimento
+                          que ele já digitou pro divisor exato mais
+                          próximo de TILE_SIZED_PLANK_PX, pra várias
+                          tábuas normais por tile ainda assim baterem
+                          certinho na borda do losango (ver
+                          snapPlankSizeToTileDivisor acima). Liga
+                          "emenda alinhada à grade" junto -- senão o
+                          desalinhamento entre colunas ("amarração")
+                          quebraria o encaixe que acabou de travar. */}
+                      <button
+                        type="button"
+                        className="clear-btn"
+                        onClick={() => {
+                          setFloorPlankWidth((w) => snapPlankSizeToTileDivisor(w));
+                          if (floorPlankLength.trim() !== "") {
+                            setFloorPlankLength((len) => String(snapPlankSizeToTileDivisor(Number(len))));
+                          }
+                          setFloorTileAligned(true);
+                        }}
+                      >
+                        Travar tábuas na grade do tile
+                      </button>
+                      <p className="settings-hint">
+                        Ajusta a largura/comprimento que você digitou pro valor mais próximo que encaixa um número
+                        inteiro de tábuas dentro do tile -- assim a junta sempre bate na borda do losango, sem cortar
+                        tábua no meio.
+                      </p>
                     </>
                   )}
                   {floorPlankLength.trim() !== "" && (
@@ -4581,23 +5483,6 @@ export default function ItemEditor({
             {editingId ? " Só reenvie a foto da direção que quiser TROCAR -- as outras continuam com a arte já salva." : ""}
           </p>
 
-          {/* pedido do Douglas: "ele vai corrigir automaticamente? pode
-              fazer" -- corrige sozinho o ângulo isométrico raso de
-              sempre do PixelLab (ver fixPixellabIsometricAngle acima)
-              em CADA foto de direção assim que ela é escolhida, antes
-              de entrar no formulário. Ligado por padrão (hoje é o fluxo
-              normal de toda arte nova de mobi/parede) -- desmarca só se
-              a imagem vier de outro lugar (já corrigida, feita à mão,
-              etc.), senão estica ela errado. */}
-          <label className="settings-hint settings-hint-check">
-            <input
-              type="checkbox"
-              checked={fixPixellabAngle}
-              onChange={(e) => setFixPixellabAngle(e.target.checked)}
-            />
-            Corrigir ângulo isométrico (PixelLab) -- deixa marcado se a arte de cada direção veio de lá
-          </label>
-
           <div className="items-panel-uploads">
             {/* parede usa WALL_DIRECTION_FIELDS -- os 4 slots de sempre
                 (down/right retos, left/up relabelados "Quina esquerda/
@@ -4631,15 +5516,9 @@ export default function ItemEditor({
                       setPendingCrop({
                         file,
                         inputKey: field.key,
-                        // "apply" é async aqui (ver fixPixellabIsometricAngle
-                        // acima) -- TS aceita normal numa posição de função
-                        // que devolve void (a Promise só não é esperada por
-                        // quem chama, mas a UI já reage certo assim que ela
-                        // resolve, via os setState lá dentro).
-                        apply: async (result) => {
-                          const finalFile = fixPixellabAngle ? await fixPixellabIsometricAngle(result) : result;
-                          if (field.key === "down") handleDownFileChange(finalFile);
-                          else setFiles((prev) => ({ ...prev, [field.key]: finalFile }));
+                        apply: (result) => {
+                          if (field.key === "down") handleDownFileChange(result);
+                          else setFiles((prev) => ({ ...prev, [field.key]: result }));
                           // pula o preview pra direção que acabou de
                           // receber arquivo -- assim dá pra ajustar a
                           // posição dela na hora, sem precisar clicar na
@@ -4753,11 +5632,11 @@ export default function ItemEditor({
           </div>
 
           <div className="item-size-card">
-            <div className="item-stage" style={{ height: STAGE_HEIGHT, zoom }}>
+            <div className="item-stage" style={{ height: mobiStageHeight, zoom }}>
               <div
                 className="item-stage-avatar"
                 style={{
-                  bottom: STAGE_BASELINE_PAD + AVATAR_FOOT_FROM_TILE_BOTTOM,
+                  bottom: mobiStageBaseline + AVATAR_FOOT_FROM_TILE_BOTTOM,
                   width: AVATAR_DISPLAY_W,
                   height: AVATAR_DISPLAY_H,
                 }}
@@ -4830,7 +5709,7 @@ export default function ItemEditor({
                 <div
                   className="item-stage-seat-avatar"
                   style={{
-                    bottom: STAGE_BASELINE_PAD - activeSeatOffset.y * PREVIEW_SCALE,
+                    bottom: mobiStageBaseline - activeSeatOffset.y * PREVIEW_SCALE,
                     width: AVATAR_DISPLAY_W,
                     height: AVATAR_DISPLAY_H,
                     transform: `translate(calc(-50% + ${activeSeatOffset.x * PREVIEW_SCALE}px), 0)`,
@@ -4856,10 +5735,53 @@ export default function ItemEditor({
                 </div>
               )}
 
-              <div
-                className="item-stage-tile"
-                style={{ bottom: STAGE_BASELINE_PAD, width: TILE_WIDTH_PX, height: TILE_HEIGHT_PX }}
-              />
+              {/* footprint CLICÁVEL, quadrado a quadrado -- pedido do
+                  Douglas: "quero os quadrados ali, com essas linhas
+                  VISIVEIS... quero selecionar os tiles que ele ocupa,
+                  CLICANDO, e preenchendo, do jeito que ta eu nao consigo
+                  decidir rumo nem nada! E isso pra CADA POSICAO, pois o
+                  movel gira e muda o bloqueio pela perspectiva!!!".
+                  footprintCols x footprintRows (Ocupa (tiles), mais
+                  abaixo) definem só o TAMANHO da grade que aparece aqui
+                  pra clicar -- mobiFootprintTiles (ver acima) traz a
+                  lista dCol/dRow de CADA quadrado dessa grade, cada um
+                  desloca na MESMA conta isométrica de tileToWorld
+                  (game/grid.ts). Clique (ver toggleFootprintTile acima)
+                  risca/desmarca um quadrado na direção ATIVA
+                  (activeMobiDirection, mesma aba de posição/tamanho por
+                  direção) -- verde (.selected) = trava passagem, só
+                  contorno = livre; a âncora (0,0, roxa/.anchor) nunca
+                  desmarca, trava sempre. Sem clicar em nada ainda numa
+                  direção, o retângulo inteiro aparece marcado (mesmo
+                  comportamento de sempre, ver isFootprintTileSelected). */}
+              {mobiFootprintTiles.map(({ dCol, dRow }) => {
+                const isAnchor = dCol === 0 && dRow === 0;
+                const selected = isFootprintTileSelected(dCol, dRow);
+                return (
+                  <div
+                    key={`${dCol}-${dRow}`}
+                    className={
+                      "item-stage-footprint-tile" +
+                      (selected ? " selected" : "") +
+                      (isAnchor ? " anchor" : "")
+                    }
+                    style={{
+                      bottom: mobiStageBaseline - (dCol + dRow) * (TILE_HEIGHT_PX / 2),
+                      width: TILE_WIDTH_PX,
+                      height: TILE_HEIGHT_PX,
+                      transform: `translateX(calc(-50% + ${(dCol - dRow) * (TILE_WIDTH_PX / 2)}px))`,
+                    }}
+                    onClick={() => toggleFootprintTile(dCol, dRow)}
+                    title={
+                      isAnchor
+                        ? "Âncora -- sempre trava passagem"
+                        : selected
+                          ? "Clique pra liberar esse quadrado"
+                          : "Clique pra travar esse quadrado"
+                    }
+                  />
+                );
+              })}
 
               {stageArtSrc ? (
                 <img
@@ -4869,7 +5791,7 @@ export default function ItemEditor({
                   onPointerDown={handleItemPointerDown}
                   style={{
                     width: activeDisplayWidth * PREVIEW_SCALE,
-                    bottom: STAGE_BASELINE_PAD - activeMobiOffset.y * PREVIEW_SCALE,
+                    bottom: mobiStageBaseline - activeMobiOffset.y * PREVIEW_SCALE,
                     transform: `translate(calc(-50% + ${activeMobiOffset.x * PREVIEW_SCALE}px), 0)`,
                   }}
                   title="Arraste pra ajustar a posição no tile"
@@ -4880,7 +5802,51 @@ export default function ItemEditor({
                 </p>
               )}
 
-              <StageRuler anchorBottomPx={STAGE_BASELINE_PAD} />
+              {/* tile ARRASTÁVEL da altura da superfície (ver
+                  stackSurfaceOffsetY/handleStackSurfacePointerDown acima)
+                  -- SEMPRE aparece, independente do "Sobrepor: Sim/Não"
+                  logo abaixo (pedido original do Douglas: "Dois campos
+                  NOVOS, independentes... o mesmo item pode usar um, o
+                  outro, os dois, ou nenhum" -- ver comentário grande no
+                  useState de stackable/stackSurfaceOffsetY mais acima).
+                  ANTES esse tile só aparecia com stackable=true, o que
+                  obrigava marcar "Sobrepor: Sim" numa mesa só pra poder
+                  arrastar a altura da superfície dela -- só que
+                  stackable=true significa "ESSE item pode ir em cima de
+                  outro", o CONTRÁRIO do que uma mesa precisa (pedido do
+                  Douglas: "o tile que eu defini ali na mesa, nao e a
+                  altura que outro item fica nela, é ela em outro item...
+                  eu queria justamente o contrario"), e de quebra fazia
+                  anyFurnitureAt (MainScene.ts) achar que a mesa JÁ TINHA
+                  um item "Sobrepor" ancorado nela, bloqueando colocar o
+                  notebook de verdade. Cor DIFERENTE do losango roxo do
+                  footprint (item-stage-tile-surface, ver globals.css) --
+                  pedido do Douglas "mantem esse roxo ali": os losangos do
+                  footprint continuam roxos, só esse aqui (conceito
+                  diferente -- é a ALTURA, não uma tile do chão) ganha cor
+                  própria pra não confundir os dois. Mesma âncora
+                  horizontal do tile 0,0 (sem deslocamento em dCol/dRow --
+                  a altura da superfície não muda com footprint), só o
+                  "bottom" muda com o arraste. Renderiza DEPOIS da <img>
+                  de propósito (pedido do Douglas: "quando eu coloco o
+                  item nao consigo clicar no tile de sobrepor") -- antes
+                  vinha ANTES da imagem, então em item grande (ex: mesa) a
+                  própria arte cobria esse losango e roubava o
+                  clique/arraste; ficando depois, esse losango sempre
+                  pinta por CIMA da imagem e continua clicável não importa
+                  o tamanho do item. */}
+              <div
+                className="item-stage-tile item-stage-tile-surface"
+                style={{
+                  bottom: mobiStageBaseline - stackSurfaceOffsetY * PREVIEW_SCALE,
+                  width: TILE_WIDTH_PX,
+                  height: TILE_HEIGHT_PX,
+                }}
+                onPointerDown={handleStackSurfacePointerDown}
+                title="Arraste pra ajustar a altura da superfície -- onde um item 'Sobrepor' vai sentar em cima (independente do 'Sobrepor: Sim/Não' logo abaixo, que é sobre ESSE item ir em cima de OUTRO)"
+              />
+
+              <StageRuler anchorBottomPx={mobiStageBaseline} />
             </div>
 
             {/* tamanho -- POR DIREÇÃO desde o pedido do Douglas: "se eu
@@ -4959,34 +5925,90 @@ export default function ItemEditor({
 
             {/* footprint (pedido do Douglas: "tenho mobis que ocupam mais
                 tiles doq um ou dois, entao preciso selecionar pra que nao
-                se suba em um item") -- em TILES do grid (não em px), 1x1
-                de sempre = só a própria âncora trava passagem; acima
-                disso o resto do retângulo trava SEMPRE (ver
-                furnitureFootprintTiles/blockingFurnitureAt, game/furniture.ts),
-                mesmo pra item que senta (poltrona/sofá) -- só a âncora
-                mantém "anda até aqui e senta". */}
-            <div className="settings-slider-row">
-              <span className="settings-slider-name">Ocupa (tiles)</span>
-              <input
-                type="number"
-                min={1}
-                max={6}
-                value={footprintCols}
-                onChange={(e) => setFootprintCols(clamp(Math.round(Number(e.target.value) || 1), 1, 6))}
-                style={{ width: 48 }}
-              />
-              <span className="settings-slider-name">×</span>
-              <input
-                type="number"
-                min={1}
-                max={6}
-                value={footprintRows}
-                onChange={(e) => setFootprintRows(clamp(Math.round(Number(e.target.value) || 1), 1, 6))}
-                style={{ width: 48 }}
-              />
-              <span className="edit-hint">
-                colunas × linhas a partir da âncora -- 1×1 é só o próprio tile (padrão de sempre)
+                se suba em um item", depois "quero selecionar os tiles
+                que ele ocupa, CLICANDO", depois "nao tem como a grande ja
+                vir aberta, com a insersao no meio?? 2 pra cada lado da
+                insercao") -- a grade JÁ vem aberta no preview acima (ver
+                FOOTPRINT_GRID_RADIUS), sem precisar digitar tamanho
+                nenhum antes; footprintCols/footprintRows (os campos
+                numéricos de "Ocupa (tiles)" que existiam aqui) saíram da
+                tela -- só ficam guardados por baixo dos panos pra item
+                JÁ cadastrado antes dessa grade existir continuar
+                mostrando o footprint de sempre (ver isFootprintTileSelected
+                acima), Douglas não precisa mais mexer nesse número, só
+                clicar. */}
+            {/* bloqueio É POR DIREÇÃO (pedido do Douglas: "isso pra CADA
+                POSICAO, pois o movel gira e muda o bloqueio pela
+                perspectiva!!!") -- troca de aba lá em cima (mesma de
+                "Tamanho no jogo"/"posição no tile") edita uma forma
+                DIFERENTE por direção. "Redefinir" só aparece depois que
+                essa direção específica foi customizada (senão já tá
+                mostrando o padrão, nada pra redefinir). */}
+            <div className="item-stage-offset-row">
+              <span>
+                bloqueio de passagem ({(mode === "parede" ? WALL_DIRECTION_FIELDS : DIRECTION_FIELDS).find((f) => f.key === activeMobiDirection)?.label}) -- clique nos quadrados do preview pra marcar/desmarcar
               </span>
+              {activeFootprintCustom && (
+                <button
+                  type="button"
+                  className="clear-btn"
+                  onClick={() =>
+                    setFootprintByDirection((prev) => {
+                      const next = { ...prev };
+                      delete next[activeFootprintDir];
+                      return next;
+                    })
+                  }
+                >
+                  Redefinir bloqueio
+                </button>
+              )}
+            </div>
+
+            {/* "Sobrepor" (ver comentário grande no useState de
+                stackable/stackSurfaceOffsetY mais acima) -- pedido do
+                Douglas: notebook em cima da mesa, sem travar a posição
+                de nenhum dos dois. "Sim" deixa ESSE item (o de cima, ex:
+                notebook) ser colocado em cima de outro já ancorado no
+                mesmo tile -- sem marcar, comportamento de sempre (tile
+                ocupado bloqueia). "Altura da superfície" é o OUTRO lado
+                (ex: a mesa): quanto o item marcado "Sobrepor" que cair
+                nesse tile sobe -- 0 = sem efeito (só faz sentido
+                preencher num item de base tipo mesa/mesinha, mas o campo
+                fica disponível em qualquer item pra não precisar
+                bifurcar por categoria). */}
+            <p className="settings-hint">
+              Sobrepor? (deixa colocar ESSE item, ex: um notebook, em cima de outro já colocado no mesmo quadrado -- pra configurar a mesa que RECEBE outro item em cima, não precisa marcar "Sim" aqui, só ajustar a altura da superfície logo abaixo)
+            </p>
+            <div className="gender-switch">
+              <button type="button" className={!stackable ? "gender-btn selected" : "gender-btn"} onClick={() => setStackable(false)}>
+                Não
+              </button>
+              <button type="button" className={stackable ? "gender-btn selected" : "gender-btn"} onClick={() => setStackable(true)}>
+                Sim
+              </button>
+            </div>
+            {/* pedido do Douglas ("voce errou a ordem... eu vou subindo
+                a altura do tile ate chegar na superficie dela"): trocado
+                o campo numérico cru por um tile ARRASTÁVEL no preview
+                (ver item-stage-tile-surface/handleStackSurfacePointerDown
+                mais acima). SEMPRE aparece agora, independente do
+                "Sobrepor: Sim/Não" acima (mesmo motivo do tile no stage
+                acima ficar independente -- ver comentário grande lá:
+                esse número é a altura da SUPERFÍCIE desse item pra quem
+                cai "Sobrepor" nele, ex: a mesa; o Sim/Não acima é sobre
+                ESSE item ir em cima de OUTRO, ex: o notebook -- são os
+                "dois campos independentes" que o Douglas pediu desde o
+                início, não um depender do outro). MESMO padrão de
+                "posição no tile" logo abaixo (offsetX/Y): número só de
+                leitura + "Redefinir" quando não tá mais em 0. */}
+            <div className="item-stage-offset-row">
+              <span>altura da superfície pra quem cai "Sobrepor" aqui (ex: a mesa) -- {stackSurfaceOffsetY}px (arraste o losango laranja no preview acima)</span>
+              {stackSurfaceOffsetY !== 0 && (
+                <button type="button" className="clear-btn" onClick={() => setStackSurfaceOffsetY(0)}>
+                  Redefinir altura
+                </button>
+              )}
             </div>
 
             {/* assentos EXTRA (pedido do Douglas: "preciso... configurar
@@ -5065,9 +6087,6 @@ export default function ItemEditor({
                   + assento extra
                 </button>
               </div>
-              <span className="edit-hint">
-                fora a âncora -- col/lin: tile a partir da âncora · x/y: posição (px) fixa de onde o boneco senta (sem arrastar no jogo, ajuste aqui de novo pra afinar)
-              </span>
             </div>
 
             <div className="item-stage-offset-row">

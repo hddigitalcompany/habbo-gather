@@ -1961,6 +1961,39 @@ body {
   color: #1c1430;
 }
 
+/* Toggle "Borda"/"Centro do tile" do painel de parede (ver EditPanel em
+   GameRoom.tsx -- pedido do Douglas: "eu quero tambem a opcao de
+   inserir ela no centro do tile"), mesma pegada visual/paleta do
+   .floor-erase-standalone-btn acima, só que lado a lado em vez de
+   empilhado (2 opções mutuamente exclusivas, não uma ação única). */
+.wall-placement-mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wall-placement-mode-btn {
+  flex: 1;
+  border-radius: 10px;
+  border: 1px solid #5c4420;
+  background: #3a2a15;
+  color: #ffd28a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 6px;
+  cursor: pointer;
+}
+
+.wall-placement-mode-btn:hover {
+  background: #4a3620;
+}
+
+.wall-placement-mode-btn.selected {
+  background: #c98a2e;
+  border-color: #ffbf5c;
+  color: #1c1430;
+}
+
 /* Campo de busca do catálogo (móveis/piso, ver EditPanel em
    GameRoom.tsx -- pedido do Douglas, print de referência "Pesquisar
    objetos") -- mesma pegada visual do .area-create-input, mas com
@@ -2491,6 +2524,41 @@ body {
 
 .profile-action-btn:hover {
   background: rgba(255, 255, 255, 0.18);
+}
+
+.profile-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.profile-action-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* composer inline de "Deixar um recado" -- ver recadoOpen/onSendNote em
+   GameRoom.tsx. Mesma receita visual dos campos de perfil (.profile-field
+   textarea logo acima), só que vive fora daquele bloco (esse aqui
+   substitui a fileira de botões, não é um campo editável do perfil). */
+.profile-recado-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-recado-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f5f0ff;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+}
+
+.profile-recado-input:focus {
+  outline: none;
+  border-color: #7c5cff;
 }
 
 /* azul iOS, igual ao botão "Share Profile" da referência */
@@ -3130,6 +3198,293 @@ body {
   backdrop-filter: blur(16px);
 }
 
+/* Balão flutuante "deseja assumir essa mesa?"/"destituir mesa de
+   fulano?" (ver AreaConfirmBalloon/areaClaimPrompt/areaDestituirPrompt
+   em GameRoom.tsx) -- terceira rodada de estilo pedida pelo Douglas nas
+   referências (card "squircle" azul-marinho bem escuro, painel interno
+   mais escuro com o texto, botão pílula azul sólido), mas dessa vez
+   como elemento de DOM/CSS de VERDADE por cima do canvas, não mais
+   desenhado pelo Phaser -- pedido explícito: "nao tem como ele ficar
+   como as coisas de fora? afinal ele e um balao com botao" (o Phaser
+   desenha em Graphics/WebGL, sem anti-aliasing nem desfoque de verdade,
+   e chegou a ter um bug real de triangulação de gradiente criando um
+   vinco visível cortando o card -- ver histórico em MainScene.ts;
+   nenhum ajuste de cor/borda ali resolvia isso, só sair do Phaser
+   resolve).
+
+   .area-confirm-anchor é só o "ponto de encaixe": position:absolute
+   dentro de .room-wrapper (NÃO dentro de .phaser-container, que tem
+   overflow:hidden e cortaria o balão -- ele cresce pra CIMA a partir da
+   mesa), left/top sempre 0 aqui porque quem posiciona de verdade é o
+   `transform: translate(...)` escrito via JS a cada frame (ver o efeito
+   de requestAnimationFrame em GameRoom.tsx), seguido de
+   `translate(-50%,-100%)` (ancora pela base/centro, cresce pra cima e
+   pros dois lados -- não precisa saber a própria altura de antemão).
+   O visual (fundo/blur/sombra/pulso) fica no DIV de DENTRO
+   (.area-confirm-balloon) DE PROPÓSITO: uma `animation` do CSS assume o
+   controle da propriedade `transform` do elemento por inteiro, então se
+   fosse o MESMO elemento que recebe o transform de posição via JS, o
+   pulso ia apagar a posição a cada frame (balão pulando pra 0,0). */
+.area-confirm-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 32;
+  will-change: transform;
+}
+
+.area-confirm-balloon {
+  width: 200px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(20, 26, 44, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  animation: area-confirm-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes area-confirm-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+.area-confirm-inner {
+  background: rgba(17, 24, 44, 0.95);
+  border-radius: 13px;
+  padding: 12px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.35;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.55);
+}
+
+.area-confirm-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.area-confirm-btn {
+  flex: 1;
+  height: 34px;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.09s ease-out;
+}
+
+.area-confirm-btn:hover {
+  transform: scale(1.05);
+}
+
+.area-confirm-btn:active {
+  transform: scale(0.97);
+}
+
+.area-confirm-btn-yes {
+  background: #3a72f2;
+  box-shadow: 0 6px 16px rgba(58, 114, 242, 0.45);
+}
+
+.area-confirm-btn-no {
+  background: #2e3446;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+}
+
+/* Card "quem é o dono dessa mesa" ao passar o mouse numa mesa JÁ
+   assumida (ver AreaOwnerHoverCard/areaOwnerHoverCard em GameRoom.tsx)
+   -- pedido do Douglas com print de referência ("nesse estilo"). MESMO
+   esquema de âncora dos balões acima (.area-confirm-anchor):
+   .area-owner-hover-anchor só recebe a posição via transform escrito em
+   JS a cada frame, o visual de verdade fica em .area-owner-hover-card
+   por dentro -- aqui não tem animação de pulso (não é confirmação),
+   então dava pra ser o mesmo elemento, mas mantém a separação pelo
+   mesmo motivo/consistência dos outros dois.
+
+   .area-owner-hover-avatar fica ABSOLUTO, saindo pra cima da borda do
+   card (top negativo = metade da própria altura) -- por isso o card
+   tem padding-top maior que os outros lados, deixando espaço pra
+   metade de baixo do círculo entrar no conteúdo normal. */
+.area-owner-hover-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 31;
+  will-change: transform;
+}
+
+.area-owner-hover-card {
+  position: relative;
+  width: 168px;
+  padding: 30px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: rgba(20, 26, 44, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+.area-owner-hover-avatar {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #2a1d40 center/cover no-repeat;
+  border: 3px solid rgba(20, 26, 44, 0.94);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.area-owner-hover-avatar-fallback {
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  opacity: 0.6;
+}
+
+.area-owner-hover-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.area-owner-hover-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+
+.area-owner-hover-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+.area-owner-hover-role {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e8d7c3;
+  text-align: center;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.area-owner-hover-divider {
+  width: 100%;
+  height: 1px;
+  margin: 8px 0 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.area-owner-hover-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.area-owner-hover-action-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  color: #f5f0ff;
+  cursor: pointer;
+  transition: transform 0.09s ease-out, background 0.12s ease-out;
+}
+
+.area-owner-hover-action-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.08);
+}
+
+.area-owner-hover-action-btn:active {
+  transform: scale(0.95);
+}
+
+/* Legendinha ("Perfil"/"Chamar até você"/...) dos botões de ícone acima
+   -- pedido do Douglas: "a mensagenzinha quando passa o mouse nos
+   icones, ta com delay, as vezes aparece as vezes nao". Isso era o
+   `title` nativo do navegador (tooltip do sistema operacional) -- tem
+   atraso/consistência que o NAVEGADOR decide sozinho, sem controle
+   nenhum daqui, conhecido por ser "aparece/não aparece" assim, ainda
+   mais numa fileira apertada de ícones pequenos onde o mouse passa
+   rápido de um pro outro sem "descansar" tempo suficiente pra ele
+   disparar. Trocado por um tooltip de CSS de verdade (::after +
+   data-tooltip no JSX, ver GameRoom.tsx) -- atraso FIXO e previsível
+   (250ms) só pra aparecer (evita piscar num hover rápido "de
+   passagem"), some na hora ao tirar o mouse (sem atraso nenhum nesse
+   sentido, ver transition SEM delay na regra base abaixo). */
+.area-owner-hover-action-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  transform: translate(-50%, 4px);
+  background: rgba(10, 13, 24, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border-radius: 8px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 5;
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out, visibility 0s linear 0.12s;
+}
+
+.area-owner-hover-action-btn:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition: opacity 0.12s ease-out 0.25s, transform 0.12s ease-out 0.25s, visibility 0s linear 0.25s;
+}
+
 .loading {
   display: flex;
   align-items: center;
@@ -3581,6 +3936,28 @@ body {
   width: 160px;
   height: 80px;
   clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  border: 2px solid #2f2245;
+  background-color: #0d0715;
+}
+
+/* preview do padrão de parede (aba "Criar Parede" NOVA, ver
+   WallPatternCreatorPanel em ItemEditor.tsx) -- RETANGULAR, sem
+   clip-path nenhum (diferente do piso, que fica DEITADO no losango do
+   tile, a parede é uma face plana/vertical, ver comentário grande em
+   game/wall.ts). Largura fixa, altura calculada por `aspect-ratio`
+   (definido no `style` do JSX, a partir da altura/comprimento de aresta
+   configurados no formulário) -- `max-height`+`overflow` seguram o caso
+   raro de uma altura de parede bem maior que a largura do painel. */
+.wall-pattern-preview-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.wall-pattern-preview-tile {
+  width: 220px;
+  max-height: 320px;
+  overflow: hidden;
   border: 2px solid #2f2245;
   background-color: #0d0715;
 }
@@ -4148,20 +4525,29 @@ body {
   background: rgba(20, 16, 32, 0.4);
 }
 
-/* Editor de Itens (ver ItemEditor.tsx) -- pedido do Douglas: "seria
-   mais interessante essa aba de criar mobis/avatar, ser maior, ocupar
-   a tela toda quando abre ela, porque vao ter muitas opcoes ali
-   dentro" -- ocupa quase a tela toda (era 640px fixo) ao abrir, tanto
-   no modo "Criar Avatar" quanto no modo mobi/item (mesmo modal, ver
-   comentário grande no JSX -- .items-panel-editor é a MESMA div pros
-   dois, só o formulário de dentro muda com `mode`). max-height/height
-   sobrescrevem os 84vh padrão de .items-panel (que ainda vale pros
-   outros painéis menores, tipo membros -- essa classe só entra aqui). */
+/* Editor de Itens (ver ItemEditor.tsx) -- ERA quase a tela toda (96vw/
+   1400px/92vh), pedido antigo do Douglas: "seria mais interessante essa
+   aba de criar mobis/avatar, ser maior, ocupar a tela toda quando abre
+   ela, porque vao ter muitas opcoes ali dentro". Com o formulário bem
+   maior desde então (Sobrepor, footprint clicável, assentos extra...),
+   92vh de altura + conteúdo que já passa disso virava uma caixa GIGANTE
+   (quase sem borda de fundo visível) que AINDA por cima precisava rolar
+   por dentro -- Douglas, irritado, voltou atrás: "porque que essa janela
+   de edicao BRANCA ocupa a minha tela toda? diminui ela ta gigante, eu
+   tenho que rolar a tela pr caramba pra chegar la embaixo, nao to
+   falando do conteudo, to falando do espaco que ela ocupa" (mesma queixa
+   de antes -- "voce so mudava no zoom" -- dessa vez é o TAMANHO DA
+   JANELA em si, não o zoom do preview). 82vh/1200px: ainda espaçosa pro
+   formulário grande, mas com fundo escurecido (.items-panel-backdrop)
+   visível ao redor, uma caixa com limite claro em vez de tomar a tela
+   inteira. max-height/height sobrescrevem os 70vh padrão de
+   .items-panel (que ainda vale pros outros painéis menores, tipo
+   membros -- essa classe só entra aqui). */
 .items-panel-editor {
-  width: 96vw;
-  max-width: 1400px;
-  height: 92vh;
-  max-height: 92vh;
+  width: 92vw;
+  max-width: 1200px;
+  height: 82vh;
+  max-height: 82vh;
 }
 
 /* Preview grande do Editor de Itens -- pedido do Douglas: "preciso
@@ -4224,15 +4610,119 @@ body {
    ItemEditor.tsx) -- só uma referência visual (borda + leve
    preenchimento), não precisa de textura de piso de verdade. Era um
    quadrado (border-radius); virou losango via clip-path -- grade
-   isométrica, ver game/grid.ts. */
+   isométrica, ver game/grid.ts.
+   ACHADO (Douglas: "esse tile da edicao faz ele bem marcado, todo ele
+   com borda, nao da de ver direito" -- print mostrando só uns tracinhos
+   roxos nas 4 pontas do losango, sem contorno nenhum entre elas): border
+   normal NÃO desenha direito em cima de um clip-path -- o navegador
+   recorta a CAIXA (quadrada) pro formato de losango DEPOIS de já ter
+   desenhado a borda ao redor da caixa, então quase toda borda desenhada
+   fica for a do recorte, sobrevivendo só nos 4 pontos onde a borda da
+   caixa encosta exatamente na ponta do losango (as pontinhas do print).
+   Sem dar pra usar border com clip-path, o contorno agora é um SEGUNDO
+   losango (::after) por CIMA do preenchimento, vazado por dentro
+   (mesma técnica de "moldura"): a caixa de fora (esse elemento) fica
+   INTEIRA na cor do contorno, e o ::after -- um pouco menor (INSET_PX
+   pra dentro dos 4 lados) -- cobre o miolo com o preenchimento fraco de
+   sempre, sobrando só um anel fino na cor forte ao redor do losango
+   inteiro. Douglas mandou print de um piso de referência (grade de
+   losangos com linha FININHA entre eles, tipo costura de piso de
+   verdade) -- inset baixado de 3px pra 1px, só que 1px sumiu de vez
+   (Douglas: "essa linha quase nao da de ver cara!!!"): esse losango aqui
+   é ENORME (TILE_WIDTH_PX/TILE_HEIGHT_PX, ItemEditor.tsx -- 320x160px,
+   bem maior que um tile de textura de piso normal), então 1px de anel
+   vira quase invisível NESSA escala, mesmo sendo a mesma ideia do print
+   de referência (lá os tiles eram pequenos, a borda fina só parecia
+   "fina" por ser pequena PERTO do tile). Assentado em 5px -- dá pra
+   enxergar de verdade num losango desse tamanho, e ainda fica bem mais
+   fino/proporcional que a moldura grossa original (que não tinha
+   inset nenhum, a borda ocupava a largura toda do `border: 2px`
+   ao redor da caixa inteira, não só um anel). */
 .item-stage-tile {
+  --tile-border-color: rgba(124, 92, 255, 0.85);
+  --tile-fill-color: rgba(124, 92, 255, 0.1);
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  border: 2px dashed rgba(124, 92, 255, 0.55);
-  background: rgba(124, 92, 255, 0.08);
+  background: var(--tile-border-color);
   clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
   pointer-events: none;
+}
+.item-stage-tile::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  background: var(--tile-fill-color);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+/* Tile ARRASTÁVEL da "Altura da superfície" (ver stackSurfaceOffsetY/
+   handleStackSurfacePointerDown, ItemEditor.tsx) -- pedido do Douglas:
+   "eu vou subindo a altura do tile ate chegar na superficie dela", em
+   vez de digitar um número cru às cegas. Reaproveita a MESMA técnica de
+   moldura de .item-stage-tile (só troca as variáveis de cor via
+   --tile-border-color/--tile-fill-color) -- cor diferente (laranja, não
+   roxo) de propósito: "mantem esse roxo ali" (Douglas) -- os losangos do
+   footprint continuam roxos/fixos no chão, esse aqui é a ALTURA (sobe/
+   desce arrastando), precisa ser reconhecível à primeira vista como uma
+   coisa DIFERENTE. pointer-events:auto sobrescrevendo o "none" de
+   .item-stage-tile (que existe pra loasngo do footprint não atrapalhar
+   clique em nada) -- esse aqui PRECISA capturar o pointer pra arrastar. */
+.item-stage-tile-surface {
+  --tile-border-color: rgba(255, 176, 59, 0.9);
+  --tile-fill-color: rgba(255, 176, 59, 0.14);
+  pointer-events: auto;
+  cursor: ns-resize;
+}
+
+/* Footprint CLICÁVEL, quadrado a quadrado (Editor de Itens) -- o losango
+   roxo CHEIO acima (.item-stage-tile) virava uma mancha sólida só quando
+   vários tiles ficavam vizinhos (fill+borda da mesma cor claro/opaco se
+   confundindo com o vizinho) -- pedido do Douglas, bem irritado com
+   isso: "oq vc fez aqui nao entendi" + "primeiro, eu quero ele assim,
+   como no editar itens, quero os quadrados ali, com essas linhas
+   VISIVEIS ASSIM o que voce fez ali naoda de ver!!!!" + "quero
+   selecionar os tiles que ele ocupa, CLICANDO, e preenchendo, do jeito
+   que ta eu nao consigo decidir rumo nem nada!". MESMA técnica de
+   moldura (borda cheia + ::after inset) só que o MIOLO fica TRANSPARENTE
+   por padrão -- sem fill nenhum, só a linha da borda aparece, então
+   vários tiles vizinhos viram um LADRILHO de linhas finas (bate com a
+   grade "papel quadriculado" que ele mandou de referência), nunca uma
+   mancha. Cor de linha ESCURA (diferente do roxo claro de sempre) porque
+   o fundo do card é branco (.item-size-card) -- roxo clarinho sumia
+   igual a régua sumia antes de escurecer (ver comentário em
+   .stage-ruler-line). .selected preenche o miolo de VERDE -- mesma cor
+   do destaque de tile livre no jogo (roomHoverGraphics em
+   MainScene.ts), pra bater com a referência que ele mandou ("ta vendo o
+   verde ali quando eu passo o mouse?"). .anchor fica roxo (não verde,
+   não é uma escolha -- é a âncora, trava sempre) e sem cursor de clique:
+   ver toggleFootprintTile em ItemEditor.tsx, que já ignora clique em
+   0,0. */
+.item-stage-footprint-tile {
+  --tile-border-color: rgba(90, 70, 160, 0.55);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--tile-border-color);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  cursor: pointer;
+}
+.item-stage-footprint-tile::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: transparent;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+.item-stage-footprint-tile.selected::after {
+  background: rgba(64, 196, 118, 0.55);
+}
+.item-stage-footprint-tile.anchor {
+  --tile-border-color: rgba(124, 92, 255, 0.9);
+  cursor: default;
+}
+.item-stage-footprint-tile.anchor::after {
+  background: rgba(124, 92, 255, 0.4);
 }
 
 /* Réguas de medida (ver StageRuler em ItemEditor.tsx -- pedido do
@@ -4274,7 +4764,10 @@ body {
 }
 
 .stage-ruler-line-zero {
-  background: rgba(255, 214, 90, 0.75);
+  /* era rgba(255, 214, 90, 0.75) (amarelo/laranja) -- sumia em cima de
+     item de madeira marrom (pedido do Douglas: "deixa o demonio dessa
+     linha branco!"). */
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .stage-ruler-label {

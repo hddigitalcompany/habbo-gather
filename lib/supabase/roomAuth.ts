@@ -46,3 +46,22 @@ export async function bootstrapOwnerIfEmpty(userId: string): Promise<void> {
   if (count && count > 0) return;
   await admin.from("room_members").insert({ user_id: userId, role: "owner", status: "active", added_by: userId });
 }
+
+/**
+ * Admin da PLATAFORMA (tabela platform_admins, ver migration
+ * 0031_platform_admins.sql) -- NÃO é a mesma coisa que "dono da sala"
+ * (room_members.role='owner', acima). Dono de sala só manda na sala
+ * dele (Editar espaço); admin da plataforma é quem pode cadastrar
+ * item NOVO no catálogo compartilhado (Editor de Itens / "+Criar"),
+ * que vale pra TODAS as salas. Hoje, na prática, só o Douglas.
+ */
+export async function isPlatformAdmin(userId: string): Promise<boolean> {
+  const admin = getSupabaseAdminClient();
+  if (!admin) return false;
+  const { data } = await admin
+    .from("platform_admins")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return !!data;
+}

@@ -103,3 +103,72 @@ Observação: as pastas `party/` e o arquivo `partykit.json` são de uma
 tentativa anterior (usando PartyKit/Cloudflare) que esbarrou numa
 incompatibilidade recente da própria Cloudflare com contas gratuitas. Não
 são mais usados — o servidor atual é o `server/index.js`.
+
+### Staging (ambiente de teste, separado de produção)
+
+Pedido do Douglas: "quero um ambiente de teste... pra que as alterações
+que a gente vai fazendo não caia direto pro cliente... deu certo no
+teste? joga pros usuários" -- dois AMBIENTES completos e isolados, cada
+um com seu próprio banco/dados, rodando o MESMO código, só que
+apontando pra branches diferentes do git.
+
+**Estratégia de branch:** `main` = produção (como já é hoje). Uma
+branch nova, `staging`, criada a partir da `main` = staging. Toda
+mudança vai primeiro pra `staging` (Vercel/Render publicam sozinhos ao
+receber o push), o Douglas testa lá, e só quando validar dá merge de
+`staging` pra `main` (aí sim vai pro cliente de verdade). A criação da
+branch/push é sempre o Douglas (ver regra de nunca dar `git push`
+sozinho) -- aqui só documento o fluxo.
+
+**Vercel -- 1 projeto só, os 2 ambientes já vêm de graça:**
+- Ao importar o repositório, configura `main` como Production Branch.
+- Toda branch DIFERENTE de `main` (inclusive `staging`) já vira uma
+  Preview Deployment automática, com uma URL ESTÁVEL só dela (não muda
+  a cada commit) -- algo como
+  `https://habbo-gather-git-staging-<sua-conta>.vercel.app`. Não
+  precisa de um segundo projeto Vercel.
+- Em Project Settings -> Environment Variables, cada variável pode ter
+  um valor DIFERENTE por ambiente (Production vs Preview) -- é assim
+  que staging aponta pro Supabase/Render de teste, e produção pro de
+  verdade, com o mesmo projeto Vercel.
+
+**Render -- 2 serviços (o free tier não tem preview por branch):**
+- `habbo-gather-realtime` (produção) -- já documentado acima, segue a
+  branch `main`.
+- `habbo-gather-realtime-staging` (staging) -- mesmo repositório, mesmo
+  build/start command (`npm run start:server`, porta via `$PORT`), só
+  que apontando pra branch `staging` e com as env vars do Supabase de
+  TESTE (ver abaixo).
+
+**Supabase -- 2 projetos separados (staging tem seus próprios dados,
+sem risco de misturar com o cliente de verdade):**
+- O projeto atual (`Habbo-gather` / branch `principal`, já em uso)
+  continua sendo produção.
+- Cria um projeto NOVO no Supabase (nome sugerido: `habbo-gather-staging`),
+  roda TODAS as migrations de `supabase/migrations/` nele do zero (na
+  ordem, 0001 até a mais recente) -- é um banco em branco, começa do
+  zero mesmo, não precisa restaurar nada de produção.
+- (Se o seu plano do Supabase já tiver "Branching" liberado -- vi um
+  seletor de branch no seu dashboard -- dá pra usar uma branch do MESMO
+  projeto em vez de um projeto separado; funciona parecido, mas envolve
+  billing, então fica a seu critério.)
+
+**Checklist do que só você consegue fazer (login/conta):**
+1. No GitHub: nada a fazer agora, só confirmar que a branch `staging`
+   existe depois que eu (ou você) criar e você der o push.
+2. Na Vercel: `Settings -> Environment Variables`, adicionar
+   `NEXT_PUBLIC_REALTIME_HOST`, `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` com
+   escopo "Preview" apontando pro Render/Supabase de STAGING (os de
+   "Production" continuam apontando pra produção).
+3. No Render: criar o segundo serviço (`habbo-gather-realtime-staging`),
+   branch `staging`, com as env vars do Supabase de staging.
+4. No Supabase: criar o projeto novo `habbo-gather-staging` e rodar as
+   migrations nele (posso te mandar tudo junto numa pasta, ou você roda
+   uma por uma como já vem fazendo).
+
+Assim que você tiver essas 4 coisas prontas (ou mesmo só o projeto novo
+do Supabase, pra eu já poder rodar as migrations de teste nele), me
+avisa o `NEXT_PUBLIC_SUPABASE_URL`/`ANON_KEY`/`SERVICE_ROLE_KEY` de
+staging que eu sigo com a Task #63 testando contra esse ambiente, sem
+encostar na produção.

@@ -1,5 +1,5 @@
 // Apaga OU atualiza um item de avatar CUSTOM (cabelo/acessório/barba/
-// traje) -- só o dono. Pedido do Douglas: "faz assim, coloca la nos
+// traje) -- só o admin da plataforma. Pedido do Douglas: "faz assim, coloca la nos
 // itens eles pra eu apagar por la" (em vez de rodar `delete from
 // avatar_items;` na mão, depois de eu ter tirado o cabelo/barba/
 // acessório/traje "de fábrica" do catálogo -- ver customization.ts --
@@ -27,7 +27,7 @@
 //     muda, senão vira lixo órfão no bucket.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +46,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode apagar item de avatar" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode apagar item de avatar" }, { status: 403 });
   }
 
   const admin = getSupabaseAdminClient();
@@ -75,9 +74,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode editar item de avatar" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode editar item de avatar" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);

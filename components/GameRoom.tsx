@@ -54,7 +54,19 @@ import {
   SeatTuningInfo,
 } from "@/game/furniture";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
+import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
+import {
+  DOOR_CATALOG,
+  DOOR_FACING_ROTATE_ORDER,
+  DoorCatalogEntry,
+  DoorFacing,
+  DoorSegmentDef,
+  DoorSide,
+  registerCustomDoorModels,
+  doorTextureKey,
+} from "@/game/door";
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
+import { WallPatternSwatch } from "@/components/WallPatternSwatch";
 import type { Direction } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
@@ -560,6 +572,93 @@ export default function GameRoom({
 
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<MainScene | null>(null);
+
+  // balão "destituir mesa de fulano?" (ver
+  // scene.onAreaDestituirPromptChange logo abaixo) -- pedido do Douglas
+  // depois do resultado ficar "pixelado, meio estilo do jogo" mesmo
+  // depois de várias rodadas de ajuste no Phaser: "nao tem como ele
+  // ficar como as coisas de fora? afinal ele e um balao com botao".
+  // Esse state só guarda SE tem balão aberto e a MENSAGEM/ÂNCORA
+  // (coordenada de MUNDO do Phaser, não de tela) -- a aparência em si
+  // (cor/blur/sombra/fonte) é 100% CSS agora (ver AreaConfirmBalloon
+  // mais abaixo no arquivo), não mais desenhada pelo Phaser.
+  // areaDestituirBalloonRef é o DIV de verdade na tela, reposicionado A
+  // CADA FRAME via requestAnimationFrame (ver efeito logo abaixo) direto
+  // no .style (sem passar por state/re-render -- 60x por segundo é caro
+  // demais pra isso), convertendo mundo -> câmera
+  // (scene.worldToCameraPoint) -> pixel de CSS de verdade
+  // (canvas.getBoundingClientRect() vs game.scale.width/height, já que o
+  // canvas pode estar redimensionado em tela de forma diferente da
+  // resolução interna do jogo, ver Scale.ENVELOP em game/config.ts). Um
+  // balão irmão "deseja assumir essa mesa?" (convite automático ao
+  // entrar andando numa mesa livre) chegou a existir com o MESMO padrão
+  // -- removido por pedido do Douglas ("ainda ta aparecendo pra eu pegar
+  // a mesa toda hora"), mesmo motivo do balão de "soltar mesa" removido
+  // antes ("tira ele"). Depois disso ele tirou a confirmação de assumir
+  // por completo (clique chamava onClaimArea direto) -- e sentiu falta
+  // do CARD: "cade o CARD que a gente tinha criado? em css bem bonitinho
+  // com sim e nao". areaClaimPrompt logo abaixo é o MESMO padrão de
+  // novo, mas só no clique deliberado do botão "Assumir mesa", nunca
+  // sozinho andando (ver showAreaClaimPrompt em MainScene.ts).
+  const [areaDestituirPrompt, setAreaDestituirPrompt] = useState<{
+    areaId: string;
+    message: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const areaDestituirBalloonRef = useRef<HTMLDivElement>(null);
+  // balão "Assumir essa mesa?" (ver scene.onAreaClaimPromptChange logo
+  // abaixo) -- MESMO padrão exato do areaDestituirPrompt acima, campo a
+  // campo (state só com mensagem/âncora, ref reposicionado a cada frame
+  // no mesmo efeito único de ambos os balões).
+  const [areaClaimPrompt, setAreaClaimPrompt] = useState<{
+    areaId: string;
+    message: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const areaClaimBalloonRef = useRef<HTMLDivElement>(null);
+  // card "quem é o dono dessa mesa" ao passar o mouse numa mesa JÁ
+  // assumida (ver scene.onAreaOwnerHoverCardChange logo abaixo) --
+  // pedido do Douglas com print de referência: foto de perfil (moldura
+  // circular), nome+bolinha de status, status embaixo, linha
+  // separadora, fileira de botões só de ÍCONE (Perfil/Chamar/"posso ir
+  // aí?"/abrir conversa). MESMO padrão de posicionamento por
+  // requestAnimationFrame dos balões acima, mas SEM Sim/Não -- é hover
+  // puro, não confirmação -- por isso precisa de um pequeno "atraso pra
+  // esconder" (areaOwnerHoverCardHideTimer): a cena manda null assim
+  // que o mouse sai da hitbox da mesa (Phaser), o que também acontece
+  // ao entrar com o mouse EM CIMA do próprio card (ele fica por cima do
+  // canvas) -- sem esse atraso, o card sumiria na hora que o usuário
+  // tenta clicar num dos botões dele. onMouseEnter/onMouseLeave do
+  // próprio card (ver JSX) cancelam/reagendam esse timer, então ele só
+  // fecha de verdade quando o mouse sai tanto da mesa quanto do card.
+  const [areaOwnerHoverCard, setAreaOwnerHoverCard] = useState<{
+    areaId: string;
+    playerId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const areaOwnerHoverCardRef = useRef<HTMLDivElement>(null);
+  const areaOwnerHoverCardHideTimer = useRef<number | null>(null);
+  function cancelHideAreaOwnerHoverCard() {
+    if (areaOwnerHoverCardHideTimer.current !== null) {
+      window.clearTimeout(areaOwnerHoverCardHideTimer.current);
+      areaOwnerHoverCardHideTimer.current = null;
+    }
+  }
+  function scheduleHideAreaOwnerHoverCard() {
+    if (areaOwnerHoverCardHideTimer.current !== null) return;
+    areaOwnerHoverCardHideTimer.current = window.setTimeout(() => {
+      areaOwnerHoverCardHideTimer.current = null;
+      setAreaOwnerHoverCard(null);
+    }, 200);
+  }
+  /** Fecha o card na hora (sem o atraso de scheduleHideAreaOwnerHoverCard) -- usado ao clicar em qualquer uma das ações dele, pra não ficar flutuando atrás do que abrir em seguida (perfil/chat). */
+  function closeAreaOwnerHoverCardNow() {
+    cancelHideAreaOwnerHoverCard();
+    setAreaOwnerHoverCard(null);
+  }
   const socketRef = useRef<PartySocket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -830,6 +929,18 @@ export default function GameRoom({
   // configuração aparece (só "owner"); presenceCounts é só decorativo
   // (contador na tela), aparece pra todo mundo. ---
   const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
+  // ref sempre em dia (sem precisar de useEffect nenhum pra isso, mesma
+  // ideia de draftAreaDefsRef mais abaixo) -- só pra runWhenSceneReady
+  // (efeito de bootstrap do Phaser.Game, roda uma vez só) conseguir ler
+  // o roomRole MAIS RECENTE na hora de scene.setRoomOwner, mesmo se ele
+  // já tiver chegado do servidor ANTES da cena terminar de carregar
+  // (fetch de /api/room/members é bem mais rápido que o Loader do
+  // Phaser, ver comentário grande em runWhenSceneReady) -- sem isso,
+  // scene.isRoomOwner ficaria travado no valor inicial ("visitor") pro
+  // resto da sessão nesse caso, e só corrigiria sozinho se roomRole
+  // mudasse de novo depois (o que pode nunca acontecer).
+  const roomRoleRef = useRef(roomRole);
+  roomRoleRef.current = roomRole;
   // libera "Editar espaço" (ver IS_ROOM_EDITOR_ENABLED acima) sempre em
   // dev, e em qualquer ambiente pro DONO da sala -- membro/visitante
   // nunca, em lugar nenhum.
@@ -837,11 +948,37 @@ export default function GameRoom({
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
 
-  // --- Editor de Itens (móvel custom cadastrado pelo dono, ver
+  // --- admin da PLATAFORMA (tabela platform_admins, ver GET
+  // /api/admin/me e lib/supabase/roomAuth.ts) -- NÃO é o mesmo que
+  // roomRole==="owner" acima: dono de sala só manda na sala dele
+  // (canEditRoom/"Editar espaço"); isPlatformAdmin é quem pode abrir o
+  // Editor de Itens e cadastrar no catálogo GLOBAL (hoje, só o
+  // Douglas). Só controla se o botão "Itens" aparece -- a permissão de
+  // verdade é sempre reconferida no servidor em cada rota de
+  // door-items/floor-items/items/wall-items/avatar-*/**. ---
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  useEffect(() => {
+    if (!accountAccessToken) return;
+    let cancelled = false;
+    fetch("/api/admin/me", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && typeof data.isPlatformAdmin === "boolean") setIsPlatformAdmin(data.isPlatformAdmin);
+      })
+      .catch(() => {
+        // sem Supabase configurado, ou rota fora do ar -- fica false mesmo, não é crítico
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken]);
+
+  // --- Editor de Itens (item custom do catálogo GLOBAL, ver
   // components/ItemEditor.tsx / supabase/migrations/0002_room_items.sql)
-  // -- itemEditorOpen só abre pro "owner" (mesmo gate do painel de
-  // membros). customItemsVersion não guarda nada -- só existe pra
-  // FORÇAR o EditPanel a re-renderizar depois de registerCustomFurnitureModels
+  // -- itemEditorOpen só abre pro admin da plataforma (isPlatformAdmin
+  // acima), NÃO pro dono de sala (ver comentário de isPlatformAdmin).
+  // customItemsVersion não guarda nada -- só existe pra FORÇAR o
+  // EditPanel a re-renderizar depois de registerCustomFurnitureModels
   // mutar FURNITURE_CATALOG por baixo (React não percebe sozinho que um
   // array importado mudou de conteúdo). ---
   const [itemEditorOpen, setItemEditorOpen] = useState(false);
@@ -855,6 +992,17 @@ export default function GameRoom({
   // uma aba so pra piso tambem... vai ter funcoes totalmente diferentes
   // dos mobis", ver fetchAndRegisterCustomFloor/registerCustomFloorModels).
   const [customFloorVersion, setCustomFloorVersion] = useState(0);
+  // mesma ideia de customItemsVersion acima, só que pro PADRÃO de parede
+  // de sistema custom (Editor de Itens, aba "Criar Parede" -- pedido do
+  // Douglas: "a gente cria uma nova aba la no criar pra configurar os
+  // padroes dela", ver fetchAndRegisterCustomWall/registerCustomWallModels
+  // em game/wall.ts).
+  const [customWallVersion, setCustomWallVersion] = useState(0);
+  // mesma ideia de customItemsVersion acima, só que pra PORTA custom
+  // (Editor de Itens, aba "Criar Porta" -- pedido do Douglas: "vamos
+  // criar uma nova categoria 'porta'... eu subirei a arte", ver
+  // fetchAndRegisterCustomDoor/registerCustomDoorModels em game/door.ts).
+  const [customDoorVersion, setCustomDoorVersion] = useState(0);
 
   /**
    * Busca os itens custom no Supabase (leitura pública, ver policy em
@@ -879,7 +1027,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_items")
         .select(
-          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, extra_seats"
+          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
         );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
@@ -901,6 +1049,9 @@ export default function GameRoom({
           colors: { id: string; label: string; art: Partial<Record<FurnitureFacing, string>> }[] | null;
           footprint_cols: number | null;
           footprint_rows: number | null;
+          footprint_by_direction: Partial<Record<"down" | "left" | "right" | "up", { dCol: number; dRow: number }[]>> | null;
+          stackable: boolean | null;
+          stack_surface_offset_y: number | null;
           extra_seats: { dCol: number; dRow: number; x: number; y: number }[] | null;
         }) => ({
           id: row.id,
@@ -947,6 +1098,20 @@ export default function GameRoom({
           // mento de sempre (só a âncora).
           footprintCols: typeof row.footprint_cols === "number" ? row.footprint_cols : undefined,
           footprintRows: typeof row.footprint_rows === "number" ? row.footprint_rows : undefined,
+          // footprint desenhado à mão, por direção (pedido do Douglas:
+          // "quero selecionar os tiles que ele ocupa, CLICANDO... pra
+          // CADA POSICAO") -- ver supabase/migrations/
+          // 0023_room_items_footprint_by_direction.sql e o comentário
+          // grande em FurnitureModelDef.footprintByDirection,
+          // game/furniture.ts. null/undefined = nenhuma direção
+          // customizada, cai no retângulo footprintCols/Rows acima.
+          footprintByDirection: row.footprint_by_direction ?? undefined,
+          // "Sobrepor" (pedido do Douglas: notebook em cima da mesa) --
+          // ver supabase/migrations/0022_room_items_stack.sql e o
+          // comentário grande em FurnitureModelDef.stackable/
+          // stackSurfaceOffsetY, game/furniture.ts.
+          stackable: row.stackable ?? undefined,
+          stackSurfaceOffsetY: typeof row.stack_surface_offset_y === "number" ? row.stack_surface_offset_y : undefined,
           // assentos EXTRA (pedido do Douglas: "preciso... configurar dois
           // avatares no caso em que tenha mais de um assento") -- ver
           // supabase/migrations/0014_room_items_extra_seats.sql e o
@@ -1101,6 +1266,162 @@ export default function GameRoom({
       for (const id of updatedIds) sceneRef.current?.refreshFloorModel(id);
     } catch {
       // Supabase fora do ar/não configurado -- segue sem piso custom, sala funciona igual
+    }
+  }
+
+  /**
+   * Mesmo esquema de fetchAndRegisterCustomFloor acima, só que pro
+   * PADRÃO de parede de sistema custom (Editor de Itens, aba "Criar
+   * Parede" -- pedido do Douglas: "a gente não consegue criar uma
+   * geometria seguindo a mesma ideia de piso, algo criado aqui, sem que
+   * seja feito fora?", depois "a gente cria uma nova aba la no criar pra
+   * configurar os padroes dela", ver supabase/migrations/
+   * 0024_room_wall_items.sql). Mais simples ainda que piso: só existe o
+   * tipo "padrão" aqui (parede com ARTE continua vindo só da pasta local,
+   * ver scripts/syncWallAssets.mjs) -- nenhuma textura pra carregar (é
+   * vetor puro, ver createWallPatternGraphics em MainScene.ts), então não
+   * tem o loop de removeFurnitureTextures/loadCustomFurnitureTextures que
+   * fetchAndRegisterCustomFloor tem. Chamado nos mesmos lugares (scene-
+   * ready + onItemsChanged do ItemEditor).
+   */
+  async function fetchAndRegisterCustomWall(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("room_wall_items")
+        .select(
+          "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color"
+        );
+      if (error || !data || data.length === 0) return;
+      const entries: WallCatalogEntry[] = data.map(
+        (row: {
+          id: string;
+          label: string;
+          height_px: number;
+          thickness_px: number;
+          brick_width_px: number;
+          brick_height_px: number;
+          brick_color: string;
+          mortar_color: string;
+          mortar_width_px: number;
+          top_color: string;
+        }) => ({
+          id: row.id,
+          label: row.label,
+          file: "",
+          // cor em hex STRING no banco ("#rrggbb") -> número que o Phaser
+          // entende (Graphics.fillStyle quer hex NUMÉRICO, não string) --
+          // mesma conversão de fetchAndRegisterCustomFloor acima.
+          pattern: {
+            heightPx: row.height_px,
+            thicknessPx: row.thickness_px,
+            brickWidthPx: row.brick_width_px,
+            brickHeightPx: row.brick_height_px,
+            brickColor: parseInt(row.brick_color.replace("#", ""), 16),
+            mortarColor: parseInt(row.mortar_color.replace("#", ""), 16),
+            mortarWidthPx: row.mortar_width_px,
+            topColor: parseInt(row.top_color.replace("#", ""), 16),
+          },
+        })
+      );
+      const updatedIds = registerCustomWallModels(entries);
+      setCustomWallVersion((v) => v + 1);
+      // recria na hora o desenho de todo segmento JÁ PINTADO que usa um
+      // estilo que acabou de ser editado -- sem isso, parede editada só
+      // atualizaria visualmente depois de um F5 (mesma ideia de
+      // refreshFloorModel acima).
+      for (const id of updatedIds) sceneRef.current?.refreshWallModel(id);
+    } catch {
+      // Supabase fora do ar/não configurado -- segue sem parede custom, sala funciona igual
+    }
+  }
+
+  /**
+   * Mesmo esquema de fetchAndRegisterCustomFloor acima, só que pra PORTA
+   * (Editor de Itens, aba "Criar Porta" -- pedido do Douglas: "vamos
+   * criar uma nova categoria 'porta'... eu subirei a arte", ver
+   * supabase/migrations/0030_room_door_items.sql). Mais parecido com
+   * piso que com parede: porta é SEMPRE imagem (nunca "padrão" desenhado
+   * por código, ver comentário no topo de game/door.ts), só que com até
+   * 4 texturas por estilo (2 lados x 2 estados, ver doorTextureKey em
+   * game/door.ts) em vez de 1 só -- por isso o loop de textureEntries
+   * abaixo passa por CADA lado presente (`entry.art.left`/
+   * `entry.art.right`, "right" é opcional -- ver comentário grande de
+   * DoorCatalogEntry.art) x os 2 estados (aberta/fechada), em vez de uma
+   * textura única por entrada. Chamado nos mesmos lugares que
+   * fetchAndRegisterCustomFloor (scene-ready + onItemsChanged do
+   * ItemEditor).
+   */
+  async function fetchAndRegisterCustomDoor(): Promise<void> {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("room_door_items")
+        .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open");
+      if (error || !data || data.length === 0) return;
+      const entries: DoorCatalogEntry[] = data.map(
+        (row: {
+          id: string;
+          label: string;
+          kind: string;
+          art_left_closed: string;
+          art_left_open: string;
+          art_right_closed: string | null;
+          art_right_open: string | null;
+        }) => ({
+          id: row.id,
+          label: row.label,
+          kind: row.kind as DoorCatalogEntry["kind"],
+          art: {
+            left: { closed: row.art_left_closed, open: row.art_left_open },
+            // lado direito é OPCIONAL (ver POST /api/door-items) -- só
+            // entra no catálogo quando os 2 estados desse lado existem
+            // (não faz sentido ter só "aberta" ou só "fechada" da
+            // direita); sem ele, resolveDoorTextureKey (MainScene.ts)
+            // cai pro lado esquerdo sozinho.
+            ...(row.art_right_closed && row.art_right_open
+              ? { right: { closed: row.art_right_closed, open: row.art_right_open } }
+              : {}),
+          },
+        })
+      );
+      const updatedIds = registerCustomDoorModels(entries);
+      setCustomDoorVersion((v) => v + 1);
+      const textureEntries: { key: string; url: string }[] = [];
+      for (const entry of entries) {
+        for (const facing of ["left", "right"] as const) {
+          const artSet = entry.art[facing];
+          if (!artSet) continue;
+          textureEntries.push({ key: doorTextureKey(entry.id, facing, false), url: artSet.closed });
+          textureEntries.push({ key: doorTextureKey(entry.id, facing, true), url: artSet.open });
+        }
+      }
+      // item que já existia e mudou (ver "Editar" na aba "Criar Porta") --
+      // limpa as 4 texturas possíveis ANTES de recarregar (mesmo motivo
+      // de removeFurnitureTextures em fetchAndRegisterCustomFloor acima;
+      // sem problema apagar uma chave que nunca existiu, ver comentário
+      // de removeFurnitureTextures em MainScene.ts).
+      for (const id of updatedIds) {
+        sceneRef.current?.removeFurnitureTextures([
+          doorTextureKey(id, "left", false),
+          doorTextureKey(id, "left", true),
+          doorTextureKey(id, "right", false),
+          doorTextureKey(id, "right", true),
+        ]);
+      }
+      await new Promise<void>((resolve) => {
+        if (sceneRef.current) sceneRef.current.loadCustomFurnitureTextures(textureEntries, resolve);
+        else resolve();
+      });
+      // recria na hora a sprite de toda porta JÁ PINTADA que usa um
+      // estilo que acabou de ser editado -- sem isso, porta editada só
+      // atualizaria visualmente depois de um F5 (mesma ideia de
+      // refreshFloorModel/refreshWallModel).
+      for (const id of updatedIds) sceneRef.current?.refreshDoorModel(id);
+    } catch {
+      // Supabase fora do ar/não configurado -- segue sem porta custom, sala funciona igual
     }
   }
 
@@ -1397,6 +1718,19 @@ export default function GameRoom({
     };
   }, [accountAccessToken]);
 
+  // avisa a cena quem é o "CEO" (dono da sala, mesmo roomRole usado em
+  // canEditRoom acima) toda vez que ele mudar -- roomRole só chega
+  // (assíncrono, ver efeito logo acima) DEPOIS da cena já poder existir,
+  // então não dá pra confiar só numa atribuição na hora de criar a cena
+  // (ver scene.onForceReleaseArea mais abaixo); precisa desse efeito à
+  // parte pra propagar uma atualização tardia também. Só decide se o
+  // clique na mesa de outra pessoa oferece "destituir" (ver
+  // updateAreaHoverLabels em MainScene.ts) -- a permissão de verdade é
+  // sempre reconferida no servidor.
+  useEffect(() => {
+    sceneRef.current?.setRoomOwner(roomRole === "owner");
+  }, [roomRole]);
+
   // contador de membro/visitante ONLINE -- reaproveita GET
   // /room/presence do servidor WebSocket (ver handleGetPresence em
   // server/index.js), que já sabe quem tá conectado AGORA; polling
@@ -1454,7 +1788,9 @@ export default function GameRoom({
   // nenhum FurnitureType/arte cadastrado -- aparecem na barra mas com a
   // grade vazia, até subir os arquivos de origem (combinado com o
   // Douglas: estrutura agora, arte depois).
-  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento">("poltrona");
+  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta">(
+    "poltrona"
+  );
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1463,6 +1799,50 @@ export default function GameRoom({
   // useEffect de autosave logo depois, que confere essa flag antes de
   // mandar qualquer POST.
   const floorLoadedRef = useRef(false);
+
+  // --- parede de sistema do editor de espaço (aba "Parede" dentro da
+  // seção "Mapa", ver game/wall.ts) -- MESMO esquema/nomes do piso
+  // acima, só troca "Floor"/"floor" por "Wall"/"wall" e FloorTileDef por
+  // WallSegmentDef (item = uma ARESTA pintada, não um tile inteiro).
+  const [selectedWallToolId, setSelectedWallToolId] = useState<string | "erase" | null>(null);
+  const [draftWallItems, setDraftWallItems] = useState<WallSegmentDef[]>([]);
+  const [wallSaveStatus, setWallSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const wallLoadedRef = useRef(false);
+  // "Borda" (de sempre, aresta entre 2 tiles) ou "Centro do tile" --
+  // pedido do Douglas: "eu quero tambem a opcao de inserir ela no
+  // centro do tile", que TRAVA passagem ao contrário da parede de
+  // aresta ("no centro do tile, ela tem que bloquear o caminhar dai, no
+  // canto nao bloqueia" -- ver isMovementBlockedAt em MainScene.ts).
+  // Só um toggle de UI, não vai pro banco -- a decisão vira parte do
+  // PRÓPRIO segmento salvo (WallSegmentDef.side === "center", ver
+  // paintWallAt em MainScene.ts), então não precisa persistir a escolha
+  // do toggle em si.
+  const [wallPlacementMode, setWallPlacementModeState] = useState<"edge" | "center">("edge");
+  // Orientação usada só dentro do modo "Centro do tile" (ver
+  // setWallCenterOrientation em MainScene.ts) -- pedido posterior do
+  // Douglas: "as paredes de centro de tile precisam poder nas duas
+  // direcoes, so ta em uma". Mesma ideia de wallPlacementMode acima: só
+  // um toggle de UI, a escolha vira parte do PRÓPRIO segmento salvo
+  // (WallSegmentDef.side === "center"/"centerRow"), não precisa
+  // persistir o toggle em si.
+  const [wallCenterOrientation, setWallCenterOrientationState] = useState<"center" | "centerRow">("center");
+
+  // --- porta do editor de espaço (aba "Porta" dentro da seção "Mapa",
+  // ver game/door.ts -- pedido do Douglas: "vamos criar uma nova
+  // categoria 'porta'... porque ela precisa abrir de diferentes
+  // formas") -- MESMO esquema/nomes de parede acima (item = uma ARESTA
+  // pintada), só que sem o modo "Centro do tile" (porta não tem essa
+  // opção, ver DoorSide em game/door.ts) e com um campo A MAIS
+  // (doorFacing): qual lado (esquerda/direita, ver DoorFacing) a
+  // PRÓXIMA porta pintada vai usar -- escolhido ANTES de posicionar,
+  // mesmo mecanismo de girar um móvel antes de colocar
+  // (FURNITURE_ROTATE_ORDER/rotateSelected), ver toggleDoorFacing
+  // abaixo.
+  const [selectedDoorToolId, setSelectedDoorToolId] = useState<string | "erase" | null>(null);
+  const [doorFacing, setDoorFacing] = useState<DoorFacing>(DOOR_FACING_ROTATE_ORDER[0]);
+  const [draftDoorItems, setDraftDoorItems] = useState<DoorSegmentDef[]>([]);
+  const [doorSaveStatus, setDoorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const doorLoadedRef = useRef(false);
 
   // --- área do editor de espaço (aba "Área", ver game/areas.ts) --
   // primeiro cria a área na LISTA (nome + tipo, ver createArea), DEPOIS
@@ -1527,6 +1907,70 @@ export default function GameRoom({
     el.addEventListener("wheel", handleWheelZoom, { passive: false });
     return () => el.removeEventListener("wheel", handleWheelZoom);
   }, []);
+
+  // Reposiciona o(s) balão(ões) de confirmação de área (ver comentário
+  // grande de areaDestituirPrompt lá em cima) A CADA FRAME enquanto
+  // algum estiver aberto -- a câmera do Phaser pode continuar se mexendo
+  // (pan/zoom) com o balão na tela, então a posição em CSS precisa
+  // acompanhar ao vivo, não só recalcular quando abre. useLayoutEffect
+  // (não useEffect) + já chamando o cálculo uma vez SÍNCRONO antes do
+  // primeiro requestAnimationFrame, pra nunca pintar o balão em (0,0)
+  // por um frame ao abrir. Não passa por state/re-render (custo demais
+  // em 60fps) -- escreve direto no .style.transform do próprio DIV via
+  // ref. destituir e "Assumir essa mesa?" (areaClaimPrompt) nunca
+  // acontecem na MESMA área ao mesmo tempo (uma exige dono, a outra
+  // exige área livre), mas nada impede os dois estarem abertos pra
+  // áreas DIFERENTES juntos -- por isso um laço só reposiciona os dois,
+  // em vez de duplicar o efeito inteiro.
+  useLayoutEffect(() => {
+    if (!areaDestituirPrompt && !areaClaimPrompt && !areaOwnerHoverCard) return;
+    let raf = 0;
+    function positionBalloons() {
+      const scene = sceneRef.current;
+      const game = gameRef.current;
+      const canvas = game?.canvas as HTMLCanvasElement | undefined;
+      // o balão vive em .room-wrapper (irmão de .phaser-container, ver
+      // JSX), não DENTRO de .phaser-container -- esse tem overflow:hidden
+      // e cortaria o balão sempre que ele crescesse pra cima da borda do
+      // canvas visível (exatamente o caso comum aqui: balão ancorado
+      // ACIMA da mesa).
+      const wrapper = containerRef.current?.parentElement as HTMLElement | null;
+      if (scene && canvas && game && wrapper) {
+        const canvasRect = canvas.getBoundingClientRect();
+        const wrapperRect = wrapper.getBoundingClientRect();
+        // canvas pode estar em escala DIFERENTE da resolução interna do
+        // jogo (Scale.ENVELOP, ver game/config.ts) -- por isso não dá pra
+        // usar o ponto de worldToCameraPoint direto em pixel de CSS, tem
+        // que escalar pela razão entre o tamanho REAL do canvas em tela
+        // e o tamanho lógico (game.scale.width/height).
+        const scaleX = canvasRect.width / game.scale.width;
+        const scaleY = canvasRect.height / game.scale.height;
+        const baseLeft = canvasRect.left - wrapperRect.left;
+        const baseTop = canvasRect.top - wrapperRect.top;
+        if (areaDestituirPrompt && areaDestituirBalloonRef.current) {
+          const p = scene.worldToCameraPoint(areaDestituirPrompt.x, areaDestituirPrompt.y);
+          areaDestituirBalloonRef.current.style.transform = `translate(${baseLeft + p.x * scaleX}px, ${
+            baseTop + p.y * scaleY
+          }px) translate(-50%, -100%)`;
+        }
+        if (areaClaimPrompt && areaClaimBalloonRef.current) {
+          const p = scene.worldToCameraPoint(areaClaimPrompt.x, areaClaimPrompt.y);
+          areaClaimBalloonRef.current.style.transform = `translate(${baseLeft + p.x * scaleX}px, ${
+            baseTop + p.y * scaleY
+          }px) translate(-50%, -100%)`;
+        }
+        if (areaOwnerHoverCard && areaOwnerHoverCardRef.current) {
+          const p = scene.worldToCameraPoint(areaOwnerHoverCard.x, areaOwnerHoverCard.y);
+          areaOwnerHoverCardRef.current.style.transform = `translate(${baseLeft + p.x * scaleX}px, ${
+            baseTop + p.y * scaleY
+          }px) translate(-50%, -100%)`;
+        }
+      }
+      raf = requestAnimationFrame(positionBalloons);
+    }
+    positionBalloons();
+    return () => cancelAnimationFrame(raf);
+  }, [areaDestituirPrompt, areaClaimPrompt, areaOwnerHoverCard]);
 
   // --- card de perfil / editor de personagem -- abre clicando em
   // QUALQUER avatar (ver onAvatarClick na MainScene); "editar
@@ -1896,12 +2340,32 @@ export default function GameRoom({
         setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
 
         // posse de mesa privada já existente antes de eu entrar (ver
-        // roomAreaOwners em server/index.js) -- sem isso, quem chega
-        // depois nunca saberia quem já é dono de qual mesa.
-        const owners = (data.areaOwners as { areaId: string; playerId: string; name: string }[]) ?? [];
+        // roomStore.getAreaOwners/areaOwnerWireEntry em server/index.js)
+        // -- sem isso, quem chega depois nunca saberia quem já é dono de
+        // qual mesa. playerId pode vir null agora (dono offline, mas a
+        // mesa continua dele -- pedido do Douglas: "ela e sua, ate
+        // apagarem o espaco"), name nesse caso continua vindo preenchido.
+        const owners = (data.areaOwners as { areaId: string; playerId: string | null; name: string }[]) ?? [];
         for (const o of owners) {
           const playerId = o.playerId === data.selfId ? "local" : o.playerId;
           scene?.setAreaOwner(o.areaId, playerId, o.name);
+        }
+
+        // status de cada jogador (parado/ocupado/etc, ver "profile" abaixo)
+        // já vindo no "init" -- sem isso, updateDoorOpenState (MainScene.ts)
+        // só saberia o status do dono de uma mesa privada depois que ele
+        // mudasse de status DE NOVO já com todo mundo conectado.
+        for (const p of players) {
+          if (p.status) scene?.setPlayerStatus(p.id === data.selfId ? "local" : p.id, p.status);
+        }
+
+        // portas travadas manualmente ANTES de eu entrar (ver roomDoorLocks
+        // em server/index.js) -- mesmo motivo de "posse de mesa privada"
+        // logo acima: sem isso quem chega depois nunca saberia quais portas
+        // já estão travadas.
+        const doorLocks = (data.doorLocks as { col: number; row: number; side: DoorSide }[]) ?? [];
+        for (const l of doorLocks) {
+          scene?.setDoorLock(l.col, l.row, l.side, true);
         }
 
         // o servidor me deu um nome/status/etc. PADRÃO (ver server/index.js)
@@ -1940,10 +2404,30 @@ export default function GameRoom({
         scene?.setRemoteSeat(data.id, data.furnitureId, existing?.name ?? "?", data.dCol, data.dRow);
       } else if (data.type === "area-owner") {
         // ver protocolo "claim-area"/"release-area"/"area-owner" em
-        // server/index.js -- alguém tomou posse de uma mesa privada (ou
-        // ela voltou a ficar sem dono, playerId/name null).
+        // server/index.js -- alguém tomou posse de uma mesa privada, OU
+        // ela voltou a ficar sem dono de verdade (playerId/name null,
+        // release/destituir/área apagada), OU o dono continua o mesmo
+        // mas ficou online/offline agora (playerId null COM name
+        // preenchido = offline, mesa continua dele -- pedido do Douglas:
+        // "ela e sua, ate apagarem o espaco", ver
+        // broadcastAreaOwnershipFor no servidor).
         const playerId = data.playerId === selfIdRef.current ? "local" : data.playerId;
         scene?.setAreaOwner(data.areaId, playerId, data.name ?? null);
+      } else if (data.type === "claim-area-denied") {
+        // ver protocolo "claim-area"/"claim-area-denied" em
+        // server/index.js -- pedido do Douglas: "uma pessoa só pode
+        // assumir uma mesa por espaço". A cena já evita mandar
+        // "claim-area" nesse caso (ver localOwnsAnyArea em MainScene.ts),
+        // isso aqui só cobre a corrida rara (dois cliques quase juntos,
+        // ou estado do cliente momentaneamente desatualizado) em que o
+        // pedido chegou a sair mesmo assim.
+        showErrorToast("Você já tem uma mesa nessa sala -- solte ela antes de assumir outra.");
+      } else if (data.type === "door-lock") {
+        // ver protocolo "lock-door"/"unlock-door" em server/index.js --
+        // servidor é quem decide de verdade (mesmo motivo de "area-owner"
+        // acima), nunca aplicado otimista (ver onLockDoor/onUnlockDoor
+        // acima -- só manda o pedido, espera esse broadcast confirmado).
+        scene?.setDoorLock(data.col, data.row, data.side, data.locked);
       } else if (data.type === "profile") {
         const existing = remotePlayersRef.current.get(data.id);
         if (existing) Object.assign(existing, data);
@@ -1961,16 +2445,31 @@ export default function GameRoom({
             statusColorFor(existing.status)
           );
         }
+        // status (parado/ocupado/foco/etc) muda o comportamento da porta
+        // que guarda a mesa privada dele (ver updateDoorOpenState em
+        // MainScene.ts: dono com status "focus" força a porta fechada) --
+        // "local" quando sou eu mesmo, mesma convenção de "area-owner"
+        // acima (setAreaOwner) e do "init" logo mais acima.
+        if (typeof data.status === "string") {
+          scene?.setPlayerStatus(data.id === selfIdRef.current ? "local" : data.id, data.status);
+        }
       } else if (data.type === "poke") {
         const text =
           data.kind === "available"
             ? `${data.fromName} perguntou se você tá disponível`
             : data.kind === "call"
               ? `${data.fromName} te chamou pra ir até lá`
-              : `${data.fromName} quer falar com você no chat`;
+              : data.kind === "note"
+                ? `${data.fromName} deixou um recado: "${typeof data.text === "string" ? data.text : ""}"`
+                : `${data.fromName} quer falar com você no chat`;
         const toastId = `${Date.now()}-${Math.random()}`;
         setToasts((prev) => [...prev.slice(-3), { id: toastId, text }]);
-        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 4500);
+        // recado tem mais texto pra ler que os outros pokes -- fica um
+        // pouco mais de tempo na tela (7s em vez de 4.5s) antes de sumir
+        // sozinho (nenhum poke fica salvo em lugar nenhum, ver comentário
+        // grande do protocolo "poke" em server/index.js).
+        const dismissAfter = data.kind === "note" ? 7000 : 4500;
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), dismissAfter);
       } else if (data.type === "move") {
         const p = remotePlayersRef.current.get(data.id);
         if (p) {
@@ -2230,6 +2729,11 @@ export default function GameRoom({
           myProfileRef.current.name || "Você",
           statusColorFor(myProfileRef.current.status)
         );
+        // idem (ver comentário grande de roomRoleRef acima) -- valor
+        // inicial na hora, o useEffect logo abaixo (dependência
+        // [roomRole]) cobre qualquer troca DEPOIS que a cena já tá
+        // pronta.
+        scene.setRoomOwner(roomRoleRef.current === "owner");
         // aplica a aparência salva/sorteada (cabelo, tom de pele, barba,
         // acessório, traje) já na hora que a cena fica pronta -- sem
         // isso, createAvatar() sempre cria o boneco com DEFAULT_HAIR_ID/
@@ -2256,21 +2760,70 @@ export default function GameRoom({
         scene.onLocalSeatChange = (furnitureId, dCol, dRow) => {
           socketRef.current?.send(JSON.stringify({ type: "seat", furnitureId, dCol, dRow }));
         };
-        // botão "Tomar posse" / soltar posse numa mesa privada (ver
-        // protocolo "claim-area"/"release-area" em server/index.js) --
-        // servidor é quem decide de verdade (primeiro a clicar ganha);
-        // não atualiza nada aqui na hora, espera o broadcast "area-owner"
-        // voltar (ver handlePartyMessage acima), pra nunca dessincronizar
-        // se duas pessoas clicarem quase ao mesmo tempo.
+        // botão "Assumir mesa" (ex-"Tomar posse") numa mesa privada (ver
+        // protocolo "claim-area" em server/index.js) -- servidor é quem
+        // decide de verdade (primeiro a clicar ganha); não atualiza nada
+        // aqui na hora, espera o broadcast "area-owner" voltar (ver
+        // handlePartyMessage acima), pra nunca dessincronizar se duas
+        // pessoas clicarem quase ao mesmo tempo. Clicar na PRÓPRIA mesa
+        // não solta mais nada (pedido do Douglas: "a mesa só solta quando
+        // apago o espaco dela", ver comentário grande de
+        // areaOwnerByAreaId em MainScene.ts) -- "release-area" continua
+        // existindo no protocolo do servidor, só não tem mais nenhum
+        // caminho no cliente que o dispare.
         scene.onClaimArea = (areaId) => {
+          // TEMP debug -- ver comentário em "area-owner"/"claim-area-denied" acima.
           socketRef.current?.send(JSON.stringify({ type: "claim-area", areaId }));
         };
-        scene.onReleaseArea = (areaId) => {
-          socketRef.current?.send(JSON.stringify({ type: "release-area", areaId }));
+        // "destituir mesa de fulano" -- só o CEO (ver scene.setRoomOwner
+        // logo abaixo) consegue de fato disparar isso na tela (o clique
+        // nem chama onForceReleaseArea se não for CEO, ver
+        // updateAreaHoverLabels em MainScene.ts), mas quem decide de
+        // VERDADE é sempre o servidor (protocolo "force-release-area" em
+        // server/index.js, que reconfere o papel de quem mandou antes de
+        // aceitar).
+        scene.onForceReleaseArea = (areaId) => {
+          socketRef.current?.send(JSON.stringify({ type: "force-release-area", areaId }));
         };
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
+        scene.onDraftWallChange = (items) => setDraftWallItems(items);
+        scene.onDraftDoorChange = (items) => setDraftDoorItems(items);
+        // Clique numa porta cuja área guardada é do jogador local (ver
+        // handleRoomPointerDown em MainScene.ts) -- servidor é quem decide
+        // de verdade (mesmo motivo de onClaimArea acima: nunca aplica
+        // otimista, só reage ao broadcast "door-lock" confirmado, ver
+        // handlePartyMessage abaixo e setDoorLock).
+        scene.onLockDoor = (col, row, side) => {
+          socketRef.current?.send(JSON.stringify({ type: "lock-door", col, row, side }));
+        };
+        scene.onUnlockDoor = (col, row, side) => {
+          socketRef.current?.send(JSON.stringify({ type: "unlock-door", col, row, side }));
+        };
         scene.onDraftAreaChange = (items) => setDraftAreaItems(items);
+        // balão "destituir mesa de fulano?" (ver comentário grande de
+        // areaDestituirPrompt acima) -- a cena só avisa QUEM/ONDE (null =
+        // fechar), quem desenha o balão de verdade é este componente, em
+        // DOM/CSS.
+        scene.onAreaDestituirPromptChange = (info) => setAreaDestituirPrompt(info);
+        // balão "Assumir essa mesa?" (ver comentário grande de
+        // areaClaimPrompt acima) -- mesmo padrão exato do destituir logo
+        // acima.
+        scene.onAreaClaimPromptChange = (info) => setAreaClaimPrompt(info);
+        // card "quem é o dono dessa mesa" ao passar o mouse (ver
+        // comentário grande de areaOwnerHoverCard acima) -- info !== null
+        // cancela qualquer "esconder" pendente (troca de mesa/reentrada
+        // rápida), null AGENDA o esconder em vez de fechar na hora (dá
+        // tempo do mouse "atravessar" pro card de verdade sem piscar,
+        // ver scheduleHideAreaOwnerHoverCard).
+        scene.onAreaOwnerHoverCardChange = (info) => {
+          if (info) {
+            cancelHideAreaOwnerHoverCard();
+            setAreaOwnerHoverCard(info);
+          } else {
+            scheduleHideAreaOwnerHoverCard();
+          }
+        };
         // painel "Assento" (ver EditPanel) -- estado ao vivo de
         // sentou/levantou/nudge (ver onSeatTuningChange em
         // MainScene.ts). onSeatOffsetReset é só pro botão "Redefinir":
@@ -2401,6 +2954,47 @@ export default function GameRoom({
             .catch(() => {})
             .finally(() => {
               floorLoadedRef.current = true;
+            });
+        });
+        // parede já salva (ver GET /room/walls em server/index.js) --
+        // mesmo timing/tratamento de falha/trava StrictMode do piso
+        // acima (ver loadSavedWall em MainScene.ts). Agora TEM modelo
+        // CUSTOM (padrão de tijolo, ver fetchAndRegisterCustomWall acima
+        // -- pedido do Douglas: "a gente cria uma nova aba la no criar
+        // pra configurar os padroes dela"), então espera
+        // fetchAndRegisterCustomWall() terminar ANTES, mesma corrida já
+        // corrigida pro piso (ver comentário grande dele logo acima) --
+        // senão uma parede salva usando um estilo CUSTOM cairia no
+        // "textura/estilo não encontrado" de addWallSprite antes do
+        // estilo existir em WALL_CATALOG.
+        fetchAndRegisterCustomWall().finally(() => {
+          fetch(`${REALTIME_HTTP_BASE}/room/walls`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              if (destroyed) return;
+              if (data?.items) sceneRef.current?.loadSavedWall(data.items);
+            })
+            .catch(() => {})
+            .finally(() => {
+              wallLoadedRef.current = true;
+            });
+        });
+        // porta já salva (ver GET /room/doors em server/index.js) -- mesmo
+        // timing/tratamento de falha/trava StrictMode da parede acima
+        // (espera fetchAndRegisterCustomDoor() terminar antes, senão uma
+        // porta salva com estilo custom cairia no "textura não encontrada"
+        // de addDoorSprite antes do estilo existir em DOOR_CATALOG -- porta
+        // é SEMPRE custom hoje, ver comentário grande em game/door.ts).
+        fetchAndRegisterCustomDoor().finally(() => {
+          fetch(`${REALTIME_HTTP_BASE}/room/doors`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              if (destroyed) return;
+              if (data?.items) sceneRef.current?.loadSavedDoor(data.items);
+            })
+            .catch(() => {})
+            .finally(() => {
+              doorLoadedRef.current = true;
             });
         });
         // área já salva (ver GET /room/areas em server/index.js) -- mesmo
@@ -3087,6 +3681,7 @@ export default function GameRoom({
     setSelectedColorId(null);
     setSelectedFloorToolId(null);
     setSelectedAreaToolId(null);
+    setSelectedWallToolId(null);
     setActiveCategory("poltrona");
     setDeleteToolActive(false);
     setMoveToolActive(false);
@@ -3104,6 +3699,7 @@ export default function GameRoom({
       setSelectedCatalogIndex(null);
       setSelectedFloorToolId(null);
       setSelectedAreaToolId(null);
+      setSelectedWallToolId(null);
       setMoveToolActive(false);
     }
     sceneRef.current?.selectDeleteTool(next);
@@ -3122,6 +3718,7 @@ export default function GameRoom({
       setSelectedCatalogIndex(null);
       setSelectedFloorToolId(null);
       setSelectedAreaToolId(null);
+      setSelectedWallToolId(null);
       setDeleteToolActive(false);
     }
     sceneRef.current?.selectMoveTool(next);
@@ -3131,7 +3728,7 @@ export default function GameRoom({
   // direto (era só isso antes) porque "assento" precisa ligar/desligar o
   // modo de ajuste na cena (ver setSeatTuningMode em MainScene.ts, muda o
   // que as setas de direção fazem enquanto sentado).
-  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento") {
+  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta") {
     setActiveCategory(category);
     setDeleteToolActive(false);
     setMoveToolActive(false);
@@ -3160,6 +3757,7 @@ export default function GameRoom({
     if (!sameGroup) setSelectedColorId(null);
     setSelectedCatalogIndex(next);
     setSelectedFloorToolId(null); // móvel e piso são ferramentas exclusivas, ver selectCatalogEntry na cena
+    setSelectedWallToolId(null);
     setDeleteToolActive(false);
     setMoveToolActive(false);
     sceneRef.current?.selectCatalogEntry(nextEntry ? entryWithColor(nextEntry, colorId) : null);
@@ -3204,6 +3802,89 @@ export default function GameRoom({
 
   function clearDraftFloorItems() {
     sceneRef.current?.clearDraftFloor();
+  }
+
+  // MESMO padrão "clica de novo desarma" das duas funções de piso acima,
+  // pra parede de sistema (ver selectWallTool em MainScene.ts).
+  function selectWallPaint(entry: WallCatalogEntry) {
+    const next = selectedWallToolId === entry.id ? null : entry.id;
+    setSelectedWallToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectWallTool(next === null ? null : { kind: "paint", entry });
+  }
+
+  function selectWallEraser() {
+    const next = selectedWallToolId === "erase" ? null : "erase";
+    setSelectedWallToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectWallTool(next === null ? null : { kind: "erase" });
+  }
+
+  function clearDraftWallItems() {
+    sceneRef.current?.clearDraftWall();
+  }
+
+  // Troca o modo de inserção (ver comentário de wallPlacementMode acima)
+  // e já avisa a cena (ver setWallPlacementMode em MainScene.ts) -- não
+  // desarma a ferramenta de parede escolhida, só muda ONDE o próximo
+  // clique planta ela.
+  function selectWallPlacementMode(mode: "edge" | "center") {
+    setWallPlacementModeState(mode);
+    sceneRef.current?.setWallPlacementMode(mode);
+  }
+
+  // Troca a ORIENTAÇÃO usada dentro do modo "Centro do tile" (ver
+  // comentário de wallCenterOrientation acima) e já avisa a cena (ver
+  // setWallCenterOrientation em MainScene.ts) -- mesma ideia de
+  // selectWallPlacementMode acima, não desarma a ferramenta.
+  function selectWallCenterOrientation(orientation: "center" | "centerRow") {
+    setWallCenterOrientationState(orientation);
+    sceneRef.current?.setWallCenterOrientation(orientation);
+  }
+
+  // MESMO padrão "clica de novo desarma" da parede de sistema acima, pra
+  // porta (ver selectDoorTool em MainScene.ts) -- usa o `doorFacing`
+  // escolhido no momento (ver toggleDoorFacing abaixo) igual peça de
+  // móvel gira ANTES de colocar.
+  function selectDoorPaint(entry: DoorCatalogEntry) {
+    const next = selectedDoorToolId === entry.id ? null : entry.id;
+    setSelectedDoorToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectDoorTool(next === null ? null : { kind: "paint", entry, facing: doorFacing });
+  }
+
+  function selectDoorEraser() {
+    const next = selectedDoorToolId === "erase" ? null : "erase";
+    setSelectedDoorToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectDoorTool(next === null ? null : { kind: "erase" });
+  }
+
+  function clearDraftDoorItems() {
+    sceneRef.current?.clearDraftDoor();
+  }
+
+  /** Botão de virar lado ("esquerdo"/"direito") no painel "Porta" -- mesma
+   * mecânica de girar um móvel antes de colocar (FURNITURE_ROTATE_ORDER),
+   * ver DOOR_FACING_ROTATE_ORDER em game/door.ts. Se já tiver uma porta
+   * armada pra pintar, reenvia a ferramenta pra cena já com o novo lado
+   * (senão só o próximo "armar" pegaria o valor certo). */
+  function toggleDoorFacing() {
+    const idx = DOOR_FACING_ROTATE_ORDER.indexOf(doorFacing);
+    const next = DOOR_FACING_ROTATE_ORDER[(idx + 1) % DOOR_FACING_ROTATE_ORDER.length];
+    setDoorFacing(next);
+    if (selectedDoorToolId && selectedDoorToolId !== "erase") {
+      const entry = DOOR_CATALOG.find((e) => e.id === selectedDoorToolId);
+      if (entry) sceneRef.current?.selectDoorTool({ kind: "paint", entry, facing: next });
+    }
   }
 
   // mesmo padrão "clica de novo desarma" das duas funções de piso acima,
@@ -3292,6 +3973,56 @@ export default function GameRoom({
     }, 600);
     return () => clearTimeout(timer);
   }, [draftFloorItems]);
+
+  // autosave da parede -- MESMA lógica/timing do autosave do piso acima
+  // (POST /room/walls, ver server/index.js).
+  useEffect(() => {
+    if (!wallLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setWallSaveStatus("saving");
+      fetch(`${REALTIME_HTTP_BASE}/room/walls`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
+        body: JSON.stringify({ items: draftWallItems }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setWallSaveStatus("saved");
+        })
+        .catch(() => setWallSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftWallItems]);
+
+  // autosave da porta -- MESMA lógica/timing do autosave da parede acima
+  // (POST /room/doors, ver server/index.js).
+  useEffect(() => {
+    if (!doorLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setDoorSaveStatus("saving");
+      fetch(`${REALTIME_HTTP_BASE}/room/doors`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
+        body: JSON.stringify({ items: draftDoorItems }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setDoorSaveStatus("saved");
+        })
+        .catch(() => setDoorSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftDoorItems]);
 
   // mantém a cena em dia com a LISTA de áreas toda vez que ela muda por
   // aqui (criar/apagar, ver createArea/removeArea) -- MainScene.setAreaDefs
@@ -3689,6 +4420,24 @@ export default function GameRoom({
     closeProfileCard();
   }
 
+  /** "Deixar um recado" no card de outro jogador -- pedido do Douglas:
+   * "deixar um recado, igual o gather". DIFERENTE de sendMessageTo acima
+   * (que abre a conversa de verdade, persistente): aqui é um aviso avulso
+   * com texto livre, mesmo espírito de "Disponível?"/"Chamar até você"
+   * (ver sendPoke) -- vira só um toast momentâneo do lado de quem
+   * recebe, nunca fica salvo em lugar nenhum (nem chat, nem banco). Texto
+   * já vem digitado do composer inline do próprio card (ver
+   * ProfileCard/recado-composer no JSX) -- por isso não fecha o card
+   * depois (mesmo comportamento de onAskAvailable/onCallOver, que também
+   * não fecham; só sendMessageTo fecha, porque esse navega pra outro
+   * lugar, o chat).
+   */
+  function sendNote(targetId: string, text: string) {
+    const trimmed = text.trim().slice(0, 200);
+    if (!trimmed) return;
+    socketRef.current?.send(JSON.stringify({ type: "poke", to: targetId, kind: "note", text: trimmed }));
+  }
+
   // props compartilhadas do ChatDrawer -- o MESMO componente é usado em
   // dois lugares do JSX agora (flutuante por cima do jogo, ou fixo como
   // barra lateral à esquerda, ver chatPinned), só a posição/pinned muda.
@@ -3789,6 +4538,50 @@ export default function GameRoom({
       <div className="room-wrapper">
         <div ref={containerRef} className="phaser-container" />
 
+        {areaDestituirPrompt && (
+          <AreaConfirmBalloon
+            innerRef={areaDestituirBalloonRef}
+            message={areaDestituirPrompt.message}
+            onYes={() => sceneRef.current?.confirmDestituir(areaDestituirPrompt.areaId)}
+            onNo={() => sceneRef.current?.cancelDestituir()}
+          />
+        )}
+
+        {areaClaimPrompt && (
+          <AreaConfirmBalloon
+            innerRef={areaClaimBalloonRef}
+            message={areaClaimPrompt.message}
+            onYes={() => sceneRef.current?.confirmAreaClaim(areaClaimPrompt.areaId)}
+            onNo={() => sceneRef.current?.cancelAreaClaim()}
+          />
+        )}
+
+        {areaOwnerHoverCard && (
+          <AreaOwnerHoverCard
+            innerRef={areaOwnerHoverCardRef}
+            remoteProfile={remoteProfiles[areaOwnerHoverCard.playerId]}
+            onMouseEnter={cancelHideAreaOwnerHoverCard}
+            onMouseLeave={scheduleHideAreaOwnerHoverCard}
+            onProfile={() => {
+              const playerId = areaOwnerHoverCard.playerId;
+              closeAreaOwnerHoverCardNow();
+              setProfileCard({ playerId, isLocal: false });
+            }}
+            onCallOver={() => {
+              sendPoke(areaOwnerHoverCard.playerId, "call");
+              closeAreaOwnerHoverCardNow();
+            }}
+            onAskAvailable={() => {
+              sendPoke(areaOwnerHoverCard.playerId, "available");
+              closeAreaOwnerHoverCardNow();
+            }}
+            onSendMessage={() => {
+              sendMessageTo(areaOwnerHoverCard.playerId);
+              closeAreaOwnerHoverCardNow();
+            }}
+          />
+        )}
+
         {profileCard && (
           <ProfileCard
             info={profileCard}
@@ -3827,6 +4620,7 @@ export default function GameRoom({
             onAskAvailable={() => sendPoke(profileCard.playerId, "available")}
             onCallOver={() => sendPoke(profileCard.playerId, "call")}
             onSendMessage={() => sendMessageTo(profileCard.playerId)}
+            onSendNote={(text) => sendNote(profileCard.playerId, text)}
           />
         )}
 
@@ -3868,7 +4662,7 @@ export default function GameRoom({
               <UsersIcon />
             </button>
           )}
-          {roomRole === "owner" && (
+          {isPlatformAdmin && (
             <button
               className="av-btn"
               onClick={() => setItemEditorOpen(true)}
@@ -3903,11 +4697,59 @@ export default function GameRoom({
             accessToken={accountAccessToken}
             onClose={() => setItemEditorOpen(false)}
             onItemsChanged={(seatModelIdToClear) => {
+              // Douglas: "a planta que cadastrei, adicionei varias
+              // posicoes dela em frente esq frente dir, e no catalogo
+              // clicando em girar, nao funciona" -- selectedCatalogIndex
+              // é um ÍNDICE cru dentro de FURNITURE_CATALOG (ver
+              // useState mais acima), mas registerCustomFurnitureModels
+              // (chamado por fetchAndRegisterCustomFurniture logo
+              // abaixo, disparado toda vez que o Editor de Itens salva
+              // algo) RECONSTRÓI do zero as entradas do modelo editado
+              // (splice + push no fim, ver comentário grande em
+              // game/furniture.ts) -- editar um item JÁ selecionado no
+              // catálogo (ex: voltar e subir mais uma direção de arte)
+              // faz o array inteiro deslizar, então o índice antigo
+              // passa a apontar pra OUTRA entrada (ou pra nenhuma). Daí
+              // canRotate/rotateSelected (calculados em cima de
+              // catalogEntryGroupKey(selectedEntry), EditPanel mais
+              // abaixo) passavam a enxergar o grupo errado -- às vezes
+              // um grupo de 1 direção só, sem nada pra girar. Guarda
+              // modelId+facing do item selecionado ANTES do refetch (a
+              // única forma estável de achar "a mesma entrada" depois
+              // que o array já mudou de posição) pra reencontrar o novo
+              // índice quando a promise resolver.
+              const selectedBefore =
+                selectedCatalogIndex !== null ? FURNITURE_CATALOG[selectedCatalogIndex] : null;
+              const selectedModelId = selectedBefore?.modelId;
+              const selectedFacing = selectedBefore?.facing;
+
               const furnitureRefreshed = fetchAndRegisterCustomFurniture();
               fetchAndRegisterCustomFloor();
+              fetchAndRegisterCustomWall();
+              fetchAndRegisterCustomDoor();
               fetchAndRegisterCustomSkins();
               fetchAndRegisterCustomAvatarItems();
               fetchDefaultReferences();
+
+              if (selectedModelId) {
+                furnitureRefreshed.finally(() => {
+                  // mesma direção que tava selecionada, na entrada NOVA
+                  // (mesmo modelId+facing, índice pode ter mudado).
+                  const sameDirection = FURNITURE_CATALOG.findIndex(
+                    (e) => e.modelId === selectedModelId && e.facing === selectedFacing
+                  );
+                  if (sameDirection !== -1) {
+                    setSelectedCatalogIndex(sameDirection);
+                    return;
+                  }
+                  // a direção selecionada não existe mais (ex: removida
+                  // na edição) -- cai pra primeira direção que sobrou
+                  // desse modelo, ou limpa a seleção se o modelo inteiro
+                  // sumiu.
+                  const fallback = FURNITURE_CATALOG.findIndex((e) => e.modelId === selectedModelId);
+                  setSelectedCatalogIndex(fallback !== -1 ? fallback : null);
+                });
+              }
               // Douglas: "eu fui editar ela pra posicionar o carinha
               // melhor e ficou assim -- no editor ta certo no mapa real
               // nao ficou" -- ver comentário grande em
@@ -4118,6 +4960,24 @@ export default function GameRoom({
           draftFloorItems={draftFloorItems}
           onClearAllFloor={clearDraftFloorItems}
           floorSaveStatus={floorSaveStatus}
+          selectedWallToolId={selectedWallToolId}
+          onSelectWallPaint={selectWallPaint}
+          onSelectWallEraser={selectWallEraser}
+          draftWallItems={draftWallItems}
+          onClearAllWall={clearDraftWallItems}
+          wallSaveStatus={wallSaveStatus}
+          wallPlacementMode={wallPlacementMode}
+          onSelectWallPlacementMode={selectWallPlacementMode}
+          wallCenterOrientation={wallCenterOrientation}
+          onSelectWallCenterOrientation={selectWallCenterOrientation}
+          selectedDoorToolId={selectedDoorToolId}
+          onSelectDoorPaint={selectDoorPaint}
+          onSelectDoorEraser={selectDoorEraser}
+          draftDoorItems={draftDoorItems}
+          onClearAllDoor={clearDraftDoorItems}
+          doorSaveStatus={doorSaveStatus}
+          doorFacing={doorFacing}
+          onToggleDoorFacing={toggleDoorFacing}
           draftAreaDefs={draftAreaDefs}
           onCreateArea={createArea}
           onRemoveArea={removeArea}
@@ -4159,7 +5019,7 @@ const FACING_LABEL: Record<FurnitureFacing, string> = {
 };
 
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso" | "area" | "assento";
+  id: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -4169,14 +5029,29 @@ const EDIT_CATEGORY_TABS: {
   { id: "planta", label: "Planta", icon: PlantIcon },
   { id: "computador", label: "Computador", icon: ComputerIcon },
   // era "Divisória" -- pedido do Douglas: essa categoria (tipo "vidro",
-  // ver FURNITURE_TYPE_CATEGORY em game/furniture.ts) agora é a aba
-  // "Parede" dentro da seção "Mapa" (ver EDIT_SECTIONS/CATEGORY_SECTION
-  // abaixo) -- MESMO sistema de sempre (objeto que bloqueia passagem,
-  // ver FURNITURE_BLOCKS_MOVEMENT.vidro), só rebatizado. Item custom
-  // com CARA de parede (opaco, em vez do vidro decorativo de hoje) sobe
-  // como um MODELO NOVO dessa mesma categoria pelo Editor de Itens,
-  // sem precisar de tipo/categoria nova no código.
-  { id: "divisoria", label: "Parede", icon: DividerIcon },
+  // ver FURNITURE_TYPE_CATEGORY em game/furniture.ts) vivia sozinha
+  // dentro da seção "Mapa" com o rótulo "Parede" (ver EDIT_SECTIONS/
+  // CATEGORY_SECTION abaixo) -- MESMO sistema de sempre (objeto que
+  // bloqueia passagem, ver FURNITURE_BLOCKS_MOVEMENT.vidro). Rebatizada
+  // de volta pro nome original ("Divisória") agora que "Parede" virou o
+  // rótulo da aba NOVA logo abaixo (a parede de sistema de verdade que o
+  // Douglas pediu) -- as duas continuam na mesma seção "Mapa", só que
+  // agora com 2 abas em vez de 1 (ver categoryTabsInSection dentro de
+  // EditPanel: com >1 categoria na seção, a barrinha de sub-abas aparece
+  // sozinha, sem precisar de nenhum layout novo).
+  { id: "divisoria", label: "Divisória", icon: DividerIcon },
+  // parede de SISTEMA (ver game/wall.ts) -- pedido do Douglas: "paredes
+  // de sistema igual o piso, mesma ideia do habbo... essa opção de
+  // parede aí, eu quero ela LÁ no catálogo". Pinta ARESTA da grade (não
+  // um tile inteiro, ver WallSegmentDef), por isso tem painel próprio
+  // (activeCategory === "parede-sistema" mais abaixo) em vez de cair no
+  // fluxo genérico de FURNITURE_CATALOG das outras abas.
+  { id: "parede-sistema", label: "Parede", icon: WallIcon },
+  // porta -- pedido do Douglas: "vamos criar uma nova categoria 'porta'"
+  // (ver comentário grande no topo de game/door.ts). Mesma ideia de
+  // "Parede" logo acima: pinta ARESTA da grade, painel próprio
+  // (activeCategory === "porta" mais abaixo), mesma seção "Mapa".
+  { id: "porta", label: "Porta", icon: DoorIcon },
   { id: "piso", label: "Piso", icon: FloorIcon },
   { id: "area", label: "Área", icon: AreaIcon },
   // "Assento": ajuste fino (setas) de onde o boneco senta em cada
@@ -4206,21 +5081,28 @@ const EDIT_SECTIONS: {
   id: "moveis" | "construir" | "mapa";
   label: string;
   icon: () => JSX.Element;
-  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento";
+  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
 }[] = [
   // rótulos ajustados a pedido do Douglas: "Minha mesa"->"Mobília",
   // "Construir"->"Piso", "Mapa"->"Parede" (ids internos continuam os
-  // mesmos, só o texto exibido mudou).
+  // mesmos, só o texto exibido mudou). defaultCategory da seção "mapa"
+  // trocou de "divisoria" pra "parede-sistema" -- clicar na seção
+  // "Parede" agora abre direto na ferramenta de pintar parede de
+  // sistema (o pedido de verdade do Douglas), com "Divisória" (o objeto
+  // de vidro que já existia) acessível pela sub-aba ao lado.
   { id: "moveis", label: "Mobília", icon: DeskIcon, defaultCategory: "poltrona" },
   { id: "construir", label: "Piso", icon: BuildIcon, defaultCategory: "piso" },
-  { id: "mapa", label: "Parede", icon: MapIcon, defaultCategory: "divisoria" },
+  { id: "mapa", label: "Parede", icon: MapIcon, defaultCategory: "parede-sistema" },
 ];
 
 // categoria -> seção (inverso de EDIT_SECTIONS[].defaultCategory, mas
 // com TODAS as categorias de cada seção, não só a padrão). "assento"
 // entra em "moveis" -- é ajuste fino de móvel sentável, não faz sentido
 // em outra seção.
-const CATEGORY_SECTION: Record<FurnitureCategoryId | "piso" | "area" | "assento", "moveis" | "construir" | "mapa"> = {
+const CATEGORY_SECTION: Record<
+  FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta",
+  "moveis" | "construir" | "mapa"
+> = {
   poltrona: "moveis",
   sofa: "moveis",
   mesa: "moveis",
@@ -4230,6 +5112,8 @@ const CATEGORY_SECTION: Record<FurnitureCategoryId | "piso" | "area" | "assento"
   piso: "construir",
   area: "construir",
   divisoria: "mapa",
+  "parede-sistema": "mapa",
+  porta: "mapa",
 };
 
 function EditPanel({
@@ -4248,6 +5132,24 @@ function EditPanel({
   draftFloorItems,
   onClearAllFloor,
   floorSaveStatus,
+  selectedWallToolId,
+  onSelectWallPaint,
+  onSelectWallEraser,
+  draftWallItems,
+  onClearAllWall,
+  wallSaveStatus,
+  wallPlacementMode,
+  onSelectWallPlacementMode,
+  wallCenterOrientation,
+  onSelectWallCenterOrientation,
+  selectedDoorToolId,
+  onSelectDoorPaint,
+  onSelectDoorEraser,
+  draftDoorItems,
+  onClearAllDoor,
+  doorSaveStatus,
+  doorFacing,
+  onToggleDoorFacing,
   draftAreaDefs,
   onCreateArea,
   onRemoveArea,
@@ -4258,8 +5160,8 @@ function EditPanel({
   onClearAllArea,
   areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento";
-  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento") => void;
+  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
+  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta") => void;
   selectedCatalogIndex: number | null;
   onSelectCatalog: (index: number) => void;
   selectedColorId: string | null;
@@ -4273,6 +5175,24 @@ function EditPanel({
   draftFloorItems: FloorTileDef[];
   onClearAllFloor: () => void;
   floorSaveStatus: "idle" | "saving" | "saved" | "error";
+  selectedWallToolId: string | "erase" | null;
+  onSelectWallPaint: (entry: WallCatalogEntry) => void;
+  onSelectWallEraser: () => void;
+  draftWallItems: WallSegmentDef[];
+  onClearAllWall: () => void;
+  wallSaveStatus: "idle" | "saving" | "saved" | "error";
+  wallPlacementMode: "edge" | "center";
+  onSelectWallPlacementMode: (mode: "edge" | "center") => void;
+  wallCenterOrientation: "center" | "centerRow";
+  onSelectWallCenterOrientation: (orientation: "center" | "centerRow") => void;
+  selectedDoorToolId: string | "erase" | null;
+  onSelectDoorPaint: (entry: DoorCatalogEntry) => void;
+  onSelectDoorEraser: () => void;
+  draftDoorItems: DoorSegmentDef[];
+  onClearAllDoor: () => void;
+  doorSaveStatus: "idle" | "saving" | "saved" | "error";
+  doorFacing: DoorFacing;
+  onToggleDoorFacing: () => void;
   draftAreaDefs: AreaDef[];
   onCreateArea: (name: string, type: AreaType) => void;
   onRemoveArea: (id: string) => void;
@@ -4305,6 +5225,16 @@ function EditPanel({
   const filteredFloorCatalog = normalizedQuery
     ? FLOOR_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
     : FLOOR_CATALOG;
+  const filteredWallCatalog = normalizedQuery
+    ? WALL_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
+    : WALL_CATALOG;
+  const filteredDoorCatalog = normalizedQuery
+    ? DOOR_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
+    : DOOR_CATALOG;
+  // comprimento de UMA aresta da grade, só pro thumbnail do padrão de
+  // parede na paleta abaixo -- mesma constante/motivo de
+  // WALL_PREVIEW_EDGE_LENGTH_PX em ItemEditor.tsx.
+  const wallPreviewEdgeLengthPx = wallEdgeLengthPx(0, 0, "colPlus");
 
   // um GRUPO por botão na grade (não mais um por direção, ver
   // catalogEntryGroupKey/catalogIndicesForGroup em game/furniture.ts):
@@ -4318,7 +5248,11 @@ function EditPanel({
   // FURNITURE_CATALOG_STATIC, game/furniture.ts), continua existindo só
   // nos itens fixos antigos de ROOM_FURNITURE.
   const categoryEntries =
-    activeCategory === "piso" || activeCategory === "area" || activeCategory === "assento"
+    activeCategory === "piso" ||
+    activeCategory === "area" ||
+    activeCategory === "assento" ||
+    activeCategory === "parede-sistema" ||
+    activeCategory === "porta"
       ? []
       : FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory);
   const hasModelsInCategory = categoryEntries.some((e) => e.modelId);
@@ -4487,6 +5421,234 @@ function EditPanel({
           {draftFloorItems.length === 0 && <p className="edit-hint">Nenhum quadrado pintado ainda.</p>}
           {draftFloorItems.length > 0 && (
             <button className="clear-btn" onClick={onClearAllFloor}>
+              Limpar tudo
+            </button>
+          )}
+        </>
+      ) : activeCategory === "parede-sistema" ? (
+        <>
+          {/* parede de sistema (ver game/wall.ts) -- MESMA ideia/estrutura
+              do painel de piso acima, só que pintando uma ARESTA da grade
+              em vez de um quadrado inteiro (ver nearestWallEdge em
+              MainScene.ts, e o destaque em linha verde que segue o cursor
+              -- o "tile verde" do desenho de referência do Douglas). */}
+          <p className="edit-hint">
+            Escolha um estilo abaixo e clique numa BORDA entre dois quadrados
+            da sala pra levantar a parede ali ("unitário"), ou clique e
+            arraste pra levantar vários segmentos de uma vez. Pode ficar em
+            qualquer lugar da sala, não só na borda dela. "Apagar parede"
+            derruba o segmento. Salva sozinho.
+          </p>
+
+          {/* modo de inserção -- pedido do Douglas: "eu quero tambem a
+              opcao de inserir ela no centro do tile" -- "Borda" é o
+              comportamento de sempre (decorativo, não trava passagem);
+              "Centro do tile" planta a parede dentro do próprio quadrado
+              e TRAVA o caminho por ali (ver isMovementBlockedAt em
+              MainScene.ts -- "no centro do tile, ela tem que bloquear o
+              caminhar dai, no canto nao bloqueia"). */}
+          <div className="wall-placement-mode-toggle">
+            <button
+              type="button"
+              className={wallPlacementMode === "edge" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={() => onSelectWallPlacementMode("edge")}
+              title="Planta na borda entre 2 quadrados (não trava passagem)"
+            >
+              Borda
+            </button>
+            <button
+              type="button"
+              className={wallPlacementMode === "center" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={() => onSelectWallPlacementMode("center")}
+              title="Planta no meio do quadrado (trava passagem ali)"
+            >
+              Centro do tile
+            </button>
+          </div>
+
+          {/* orientação do pilar "Centro do tile" -- pedido posterior do
+              Douglas: "as paredes de centro de tile precisam poder nas
+              duas direcoes, so ta em uma". Só aparece nesse modo (na
+              "Borda" a orientação já vem do lado clicado, não tem o que
+              escolher aqui). "/" e "\" marcam as 2 diagonais possíveis
+              do losango (ver WallSide em game/wall.ts: "center" segue
+              colPlus, "centerRow" segue rowPlus) -- pilares na mesma
+              orientação+estilo em tiles vizinhos na direção certa
+              emendam retos (ver wallJunctionAt em MainScene.ts). */}
+          {wallPlacementMode === "center" && (
+            <div className="wall-placement-mode-toggle">
+              <button
+                type="button"
+                className={
+                  wallCenterOrientation === "center" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"
+                }
+                onClick={() => onSelectWallCenterOrientation("center")}
+                title="Diagonal igual à parede de Borda 'colPlus' (\\)"
+              >
+                {"\\"}
+              </button>
+              <button
+                type="button"
+                className={
+                  wallCenterOrientation === "centerRow" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"
+                }
+                onClick={() => onSelectWallCenterOrientation("centerRow")}
+                title="Diagonal igual à parede de Borda 'rowPlus' (/)"
+              >
+                {"/"}
+              </button>
+            </div>
+          )}
+
+          <button
+            className={selectedWallToolId === "erase" ? "floor-erase-standalone-btn selected" : "floor-erase-standalone-btn"}
+            onClick={onSelectWallEraser}
+            title="Apagar segmento de parede"
+          >
+            <TrashIcon />
+            Apagar parede
+          </button>
+
+          <input
+            type="search"
+            className="catalog-search-input"
+            placeholder="Pesquisar paredes"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+
+          <div className="floor-palette">
+            {filteredWallCatalog.map((entry) => (
+              <button
+                key={entry.id}
+                className={selectedWallToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
+                // parede "padrão" (ver WallPatternConfig em game/wall.ts)
+                // não tem imagem nenhuma pra usar de miniatura -- desenha
+                // o mesmo tijolo + argamassa + faixa de espessura (cor
+                // sólida clareada) do jogo de verdade via
+                // <WallPatternSwatch>, mesma ideia de
+                // FloorPatternSwatch acima (achado testando ao vivo: sem
+                // isso, o estilo cadastrado pela aba "Criar Parede"
+                // entrava no catálogo mas ficava com o botão em branco --
+                // sem imagem nenhuma pro background-image de sempre
+                // mostrar -- então "sumia" da paleta na prática).
+                style={entry.pattern ? undefined : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }}
+                onClick={() => onSelectWallPaint(entry)}
+                title={entry.label}
+              >
+                {entry.pattern && <WallPatternSwatch pattern={entry.pattern} edgeLengthPx={wallPreviewEdgeLengthPx} />}
+              </button>
+            ))}
+          </div>
+          {filteredWallCatalog.length === 0 && (
+            <p className="edit-hint">
+              {normalizedQuery
+                ? `Nada encontrado pra "${searchQuery.trim()}".`
+                : "Nenhum modelo de parede ainda -- suba as imagens na pasta de origem."}
+            </p>
+          )}
+
+          <h3>
+            Parede levantada ({draftWallItems.length})
+            <span className={`floor-save-status floor-save-status-${wallSaveStatus}`}>
+              {wallSaveStatus === "saving" && "Salvando…"}
+              {wallSaveStatus === "saved" && "Salvo ✓"}
+              {wallSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
+          {draftWallItems.length === 0 && <p className="edit-hint">Nenhum segmento levantado ainda.</p>}
+          {draftWallItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAllWall}>
+              Limpar tudo
+            </button>
+          )}
+        </>
+      ) : activeCategory === "porta" ? (
+        <>
+          {/* porta (ver game/door.ts) -- MESMA estrutura do painel de
+              parede acima (pinta uma ARESTA da grade), só que em vez do
+              modo de inserção tem o LADO da arte (esquerdo/direito,
+              escolhido ANTES de posicionar, igual girar um móvel) e ela
+              abre/fecha sozinha (proximidade) ou por travamento do dono
+              da área que ela guarda -- ver comentário grande no topo de
+              game/door.ts. */}
+          <p className="edit-hint">
+            Escolha um modelo abaixo e clique numa BORDA entre dois quadrados
+            da sala pra encaixar a porta ali. Ela abre sozinha quando alguém
+            se aproxima e fecha ao afastar; o dono da área que ela guarda (se
+            houver) pode travar/destravar clicando nela. "Apagar porta"
+            derruba o segmento. Salva sozinho.
+          </p>
+
+          <div className="wall-placement-mode-toggle">
+            <button
+              type="button"
+              className={doorFacing === "left" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={() => doorFacing !== "left" && onToggleDoorFacing()}
+              title="Usar a arte do lado esquerdo"
+            >
+              Lado esquerdo
+            </button>
+            <button
+              type="button"
+              className={doorFacing === "right" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={() => doorFacing !== "right" && onToggleDoorFacing()}
+              title="Usar a arte do lado direito"
+            >
+              Lado direito
+            </button>
+          </div>
+
+          <button
+            className={selectedDoorToolId === "erase" ? "floor-erase-standalone-btn selected" : "floor-erase-standalone-btn"}
+            onClick={onSelectDoorEraser}
+            title="Apagar segmento de porta"
+          >
+            <TrashIcon />
+            Apagar porta
+          </button>
+
+          <input
+            type="search"
+            className="catalog-search-input"
+            placeholder="Pesquisar portas"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+
+          <div className="floor-palette">
+            {filteredDoorCatalog.map((entry) => {
+              const art = entry.art[doorFacing] ?? entry.art.left ?? entry.art.right;
+              return (
+                <button
+                  key={entry.id}
+                  className={selectedDoorToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
+                  style={art ? { backgroundImage: `url(${furnitureAssetUrl(art.closed)})` } : undefined}
+                  onClick={() => onSelectDoorPaint(entry)}
+                  title={entry.label}
+                />
+              );
+            })}
+          </div>
+          {filteredDoorCatalog.length === 0 && (
+            <p className="edit-hint">
+              {normalizedQuery
+                ? `Nada encontrado pra "${searchQuery.trim()}".`
+                : 'Nenhum modelo de porta ainda -- suba a arte na aba "Criar Porta".'}
+            </p>
+          )}
+
+          <h3>
+            Porta encaixada ({draftDoorItems.length})
+            <span className={`floor-save-status floor-save-status-${doorSaveStatus}`}>
+              {doorSaveStatus === "saving" && "Salvando…"}
+              {doorSaveStatus === "saved" && "Salvo ✓"}
+              {doorSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
+          {draftDoorItems.length === 0 && <p className="edit-hint">Nenhuma porta encaixada ainda.</p>}
+          {draftDoorItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAllDoor}>
               Limpar tudo
             </button>
           )}
@@ -4838,6 +6000,36 @@ function DividerIcon() {
   );
 }
 
+// ícone da aba "Parede" (parede de SISTEMA, ver EDIT_CATEGORY_TABS/
+// game/wall.ts) -- tijolos emparelhados (fileiras alternadas, padrão
+// clássico de alvenaria), pra diferenciar visualmente da "Divisória"
+// (2 painéis lisos, ícone acima).
+function WallIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+      <rect x="2.5" y="3" width="19" height="18" rx="1.4" />
+      {/* fileiras "amarradas" (running bond) -- 2 divisórias horizontais
+          + verticais desencontradas por fileira, padrão clássico de
+          tijolo. */}
+      <path d="M2.5 9h19M2.5 15h19M8.5 3v6M14.5 3v6M5.5 9v6M11.5 9v6M17.5 9v6M8.5 15v6M14.5 15v6" />
+    </svg>
+  );
+}
+
+// ícone da aba "Porta" (ver EDIT_CATEGORY_TABS/game/door.ts) -- vão de
+// porta (moldura) com uma folha deslizada pro lado, pra remeter à porta
+// de correr (a única variante que existe hoje, ver DOOR_KINDS), bem
+// diferente visualmente de "Parede" (tijolos, ícone acima).
+function DoorIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+      <rect x="2.5" y="2.5" width="19" height="19" rx="1.4" />
+      <path d="M2.5 21V9M21.5 21V9" />
+      <rect x="10.5" y="9" width="7" height="12" fill="currentColor" opacity="0.55" stroke="none" />
+    </svg>
+  );
+}
+
 // ícone da seção "Minha mesa" (ver EDIT_SECTIONS) -- mesa com gaveta,
 // de propósito DIFERENTE do TableIcon (usado pela aba de categoria
 // "Mesa" dentro dessa mesma seção) pra não confundir as duas.
@@ -5024,6 +6216,174 @@ function instagramHref(handle: string) {
   return `https://instagram.com/${handle.replace(/^@/, "").trim()}`;
 }
 
+// Card genérico de confirmação de área -- usado tanto pro balão
+// "destituir mesa de fulano?" (ver comentário grande de
+// areaDestituirPrompt em GameRoom) quanto pro "Assumir essa mesa?" (ver
+// comentário grande de areaClaimPrompt), mais o efeito de
+// reposicionamento via requestAnimationFrame logo acima deles --
+// puramente visual/CSS, SEM ideia nenhuma de mundo/câmera/Phaser (recebe
+// só a mensagem já pronta e os callbacks de clique); quem cuida de
+// "onde" é o innerRef + o efeito de posicionamento em GameRoom. Estilo
+// replicado das referências que o
+// Douglas mandou (card "squircle" azul-marinho escuro, painel interno
+// mais escuro com o texto, botão pílula azul sólido) só que agora com
+// `backdrop-filter`/`border-radius`/`box-shadow` de CSS de verdade --
+// exatamente o pedido: "nao tem como ele ficar como as coisas de fora?
+// afinal ele e um balao com botao" (Phaser/WebGL nunca ia conseguir essa
+// suavidade, ver histórico do arquivo -- inclusive um bug real de
+// triangulação de gradiente que criava um vinco/dobra visível no card
+// desenhado pelo Phaser). Ancorado pela BASE via CSS
+// (translate(-50%,-100%) no innerRef, ver GameRoom) -- cresce pra CIMA
+// a partir do ponto ancorado, então não precisa saber a própria altura
+// de antemão.
+// Dois DIVs aninhados, não um só -- o de FORA (innerRef) é quem recebe o
+// transform de POSIÇÃO escrito via JS a cada frame (ver efeito de
+// GameRoom); o de DENTRO (.area-confirm-balloon) é quem tem a animação
+// CSS de pulso (@keyframes, transform: scale). Precisam ser elementos
+// DIFERENTES porque uma `animation` do CSS assume o controle total da
+// propriedade `transform` do elemento (sobrepõe até um `style.transform`
+// escrito via JS nesse MESMO elemento) -- juntar os dois no mesmo DIV
+// faria o pulso apagar a posição a cada frame, o balão pularia pra
+// (0,0).
+function AreaConfirmBalloon({
+  innerRef,
+  message,
+  onYes,
+  onNo,
+}: {
+  innerRef: RefObject<HTMLDivElement>;
+  message: string;
+  onYes: () => void;
+  onNo: () => void;
+}) {
+  return (
+    <div ref={innerRef} className="area-confirm-anchor">
+      <div className="area-confirm-balloon">
+        <div className="area-confirm-inner">{message}</div>
+        <div className="area-confirm-buttons">
+          <button type="button" className="area-confirm-btn area-confirm-btn-yes" onClick={onYes}>
+            ✓ Sim
+          </button>
+          <button type="button" className="area-confirm-btn area-confirm-btn-no" onClick={onNo}>
+            ✕ Não
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Card "quem é o dono dessa mesa", ao passar o mouse numa mesa JÁ
+// assumida (ver comentário grande de areaOwnerHoverCard/
+// scene.onAreaOwnerHoverCardChange mais acima) -- pedido do Douglas com
+// print de referência ("nesse estilo"): foto de perfil pequena numa
+// moldura circular (sobrepondo a borda de cima do card, não o rosto
+// pixelado do boneco -- pedido dele: "mas no lugar do rosto do avatar,
+// a foto do perfil"), nome+bolinha de status, cargo embaixo (mesmo
+// campo/mesmo texto de fallback do ProfileCard, ver profile-role),
+// linha separadora, fileira de botões SÓ DE ÍCONE (sem texto, diferente
+// dos botões do ProfileCard): Perfil (abre o ProfileCard de verdade,
+// mesmo destino de clicar na mesa/no boneco), Chamar (sendPoke "call",
+// mesma ação do botão "Chamar até você" do ProfileCard), "Posso ir
+// aí?" (sendPoke "available", mesma ação do botão "Disponível?" do
+// ProfileCard -- pede pra ir até a mesa da pessoa), Abrir conversa
+// (sendMessageTo, mesma ação do botão "Enviar mensagem" -- abre/cria a
+// conversa direta já na gaveta de chat). Nenhuma ação nova de verdade:
+// as quatro já existiam pro ProfileCard, esse card só oferece um atalho
+// pra elas sem precisar abrir o card grande primeiro.
+function AreaOwnerHoverCard({
+  innerRef,
+  remoteProfile,
+  onMouseEnter,
+  onMouseLeave,
+  onProfile,
+  onCallOver,
+  onAskAvailable,
+  onSendMessage,
+}: {
+  innerRef: RefObject<HTMLDivElement>;
+  remoteProfile: RemoteProfile | undefined;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onProfile: () => void;
+  onCallOver: () => void;
+  onAskAvailable: () => void;
+  onSendMessage: () => void;
+}) {
+  const fields = remoteProfile ?? pickRemoteProfile(undefined);
+  const status = statusMeta(fields.status);
+  const displayName = fields.name || "Visitante";
+  return (
+    <div ref={innerRef} className="area-owner-hover-anchor">
+      {/* onMouseEnter/onMouseLeave aqui (não no anchor) -- ver
+          cancelHideAreaOwnerHoverCard/scheduleHideAreaOwnerHoverCard em
+          GameRoom: o mouse "atravessa" da hitbox da mesa (Phaser) pro
+          card de DOM por cima dela, isso conta como sair da hitbox
+          (pointerout), então precisa desse hand-off pro card pra não
+          fechar sozinho antes do clique num botão. */}
+      <div className="area-owner-hover-card" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+        <div
+          className="area-owner-hover-avatar"
+          style={{ backgroundImage: fields.photoUrl ? `url(${fields.photoUrl})` : undefined }}
+        >
+          {!fields.photoUrl && (
+            <span className="area-owner-hover-avatar-fallback">{displayName.slice(0, 1).toUpperCase()}</span>
+          )}
+        </div>
+        <div className="area-owner-hover-name-row">
+          <span className="area-owner-hover-name">{displayName}</span>
+          <span className="area-owner-hover-dot" style={{ background: status.dot }} title={status.label} />
+        </div>
+        <div className="area-owner-hover-role">{fields.role || " "}</div>
+        <div className="area-owner-hover-divider" />
+        <div className="area-owner-hover-actions">
+          <button type="button" className="area-owner-hover-action-btn" data-tooltip="Perfil" onClick={onProfile}>
+            <PersonIcon />
+          </button>
+          <button
+            type="button"
+            className="area-owner-hover-action-btn"
+            data-tooltip="Chamar até você"
+            onClick={onCallOver}
+          >
+            <ArmchairIcon />
+          </button>
+          <button
+            type="button"
+            className="area-owner-hover-action-btn"
+            data-tooltip="Posso ir aí?"
+            onClick={onAskAvailable}
+          >
+            <TableIcon />
+          </button>
+          <button
+            type="button"
+            className="area-owner-hover-action-btn"
+            data-tooltip="Abrir conversa"
+            onClick={onSendMessage}
+          >
+            <ChatIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="8.2" r="3.7" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M4.7 20c0-3.7 3.2-6.3 7.3-6.3s7.3 2.6 7.3 6.3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 // Card de perfil -- visual "cartão fosco" (foto grande no topo, nome,
 // status/cargo, ação embaixo) parecido com o card de compartilhar
 // perfil do iOS que o usuário mandou de referência. Dois modos bem
@@ -5072,6 +6432,7 @@ function ProfileCard({
   onAskAvailable,
   onCallOver,
   onSendMessage,
+  onSendNote,
 }: {
   info: { playerId: string; isLocal: boolean };
   myProfile: ProfileFields;
@@ -5121,6 +6482,11 @@ function ProfileCard({
   onAskAvailable: () => void;
   onCallOver: () => void;
   onSendMessage: () => void;
+  /** "Deixar um recado" -- ver sendNote em GameRoom.tsx. Recebe o TEXTO
+   * já digitado no composer inline do card (ver recado-composer no JSX
+   * abaixo), diferente de onAskAvailable/onCallOver/onSendMessage (esses
+   * não precisam de argumento nenhum, são sempre o mesmo aviso fixo). */
+  onSendNote: (text: string) => void;
 }) {
   const thumbScale = HAIR_THUMB_W / 200;
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -5133,6 +6499,21 @@ function ProfileCard({
   // GameRoom, esse aqui é só o estado local da prévia -- não precisa
   // persistir).
   const [previewDirection, setPreviewDirection] = useState<Direction>("down");
+
+  // composer inline de "Deixar um recado" (ver onSendNote/sendNote em
+  // GameRoom.tsx) -- fica FECHADO por padrão (só o botão), abre um campo
+  // de texto pequeno dentro do próprio card ao clicar. Estado local do
+  // card mesmo (não precisa subir pra GameRoom), mas o <ProfileCard> não
+  // tem `key` no JSX (GameRoom só troca o objeto `info`, não desmonta o
+  // componente ao trocar de pessoa) -- por isso reseta À MÃO sempre que
+  // o playerId mudar, senão um recado meio-digitado pra uma pessoa
+  // vazaria pro card da PRÓXIMA se clicar em outro boneco sem fechar.
+  const [recadoOpen, setRecadoOpen] = useState(false);
+  const [recadoText, setRecadoText] = useState("");
+  useEffect(() => {
+    setRecadoOpen(false);
+    setRecadoText("");
+  }, [info.playerId]);
 
   const fields: RemoteProfile = info.isLocal
     ? { ...myProfile, role: "" }
@@ -5861,14 +7242,57 @@ function ProfileCard({
               <ShareIcon />
               Enviar mensagem
             </button>
-            <div className="profile-actions-row">
-              <button className="profile-action-btn" onClick={onAskAvailable}>
-                Disponível?
-              </button>
-              <button className="profile-action-btn" onClick={onCallOver}>
-                Chamar até você
-              </button>
-            </div>
+            {recadoOpen ? (
+              // composer do "Deixar um recado" (ver onSendNote em
+              // GameRoom.tsx) -- SUBSTITUI a fileira de botões enquanto
+              // aberto, em vez de empilhar embaixo, pra não bagunçar o
+              // card com os dois ao mesmo tempo.
+              <div className="profile-recado-composer">
+                <textarea
+                  className="profile-recado-input"
+                  value={recadoText}
+                  onChange={(e) => setRecadoText(e.target.value.slice(0, 200))}
+                  placeholder="Escreve um recado..."
+                  rows={2}
+                  maxLength={200}
+                  autoFocus
+                />
+                <div className="profile-actions-row">
+                  <button
+                    className="profile-action-btn"
+                    onClick={() => {
+                      setRecadoOpen(false);
+                      setRecadoText("");
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="profile-action-btn primary"
+                    disabled={!recadoText.trim()}
+                    onClick={() => {
+                      onSendNote(recadoText);
+                      setRecadoOpen(false);
+                      setRecadoText("");
+                    }}
+                  >
+                    Enviar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="profile-actions-row">
+                <button className="profile-action-btn" onClick={onAskAvailable}>
+                  Disponível?
+                </button>
+                <button className="profile-action-btn" onClick={onCallOver}>
+                  Chamar até você
+                </button>
+                <button className="profile-action-btn" onClick={() => setRecadoOpen(true)}>
+                  Recado
+                </button>
+              </div>
+            )}
           </div>
         )}
         </div>

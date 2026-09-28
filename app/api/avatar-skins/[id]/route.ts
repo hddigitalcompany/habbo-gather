@@ -1,4 +1,4 @@
-// Apaga um TOM DE PELE custom -- só o dono. Pedido do Douglas: "deixar
+// Apaga um TOM DE PELE custom -- só o admin da plataforma. Pedido do Douglas: "deixar
 // apenas branco/pardo/negro" na lista "Tons cadastrados" (tinha entrada
 // com nome errado "Ela" e "Pardo" duplicado -- feminino e masculino
 // separados -- de teste antigo). Mesmo padrão de
@@ -23,7 +23,7 @@
 //     (melhor esforço) o arquivo ANTIGO no Storage quando a URL muda.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -41,9 +41,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode apagar tom de pele" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode apagar tom de pele" }, { status: 403 });
   }
 
   const admin = getSupabaseAdminClient();
@@ -70,9 +69,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode editar tom de pele" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode editar tom de pele" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);

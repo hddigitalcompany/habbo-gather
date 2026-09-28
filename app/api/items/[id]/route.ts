@@ -1,4 +1,4 @@
-// Edita/apaga um item de móvel CUSTOM (Editor de Itens) -- só o dono.
+// Edita/apaga um item de móvel CUSTOM (Editor de Itens) -- só o admin da plataforma.
 // PATCH atualiza só os campos que vierem no corpo (nome/categoria/
 // imagens/tamanho/ícone/posição -- ver ItemEditor.tsx, botão "Editar"),
 // mesclando a arte nova com a que já existia (não perde uma direção que
@@ -12,7 +12,7 @@
 // lixo se ninguém apagar.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 import {
   clampFootprintSize,
   clampItemOffset,
@@ -20,6 +20,7 @@ import {
   cleanDirectionDisplayWidth,
   cleanDirectionOffsets,
   cleanExtraSeats,
+  cleanFootprintByDirection,
   cleanSeatDirectionOffsets,
 } from "@/lib/supabase/itemFields";
 
@@ -43,9 +44,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode editar item" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode editar item" }, { status: 403 });
   }
 
   const admin = getSupabaseAdminClient();
@@ -147,6 +147,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // dos outros campos opcionais acima.
   if ("footprint_cols" in body) update.footprint_cols = clampFootprintSize(body.footprint_cols);
   if ("footprint_rows" in body) update.footprint_rows = clampFootprintSize(body.footprint_rows);
+  // footprint desenhado à mão, por direção (pedido do Douglas: "quero
+  // selecionar os tiles que ele ocupa, CLICANDO... pra CADA POSICAO") --
+  // ver supabase/migrations/0023_room_items_footprint_by_direction.sql e
+  // o comentário grande em cleanFootprintByDirection, lib/supabase/
+  // itemFields.ts. "in body" de propósito, mesmo motivo dos outros
+  // campos opcionais acima.
+  if ("footprint_by_direction" in body) update.footprint_by_direction = cleanFootprintByDirection(body.footprint_by_direction);
+  // "Sobrepor" (ver comentário equivalente em app/api/items/route.ts/POST
+  // e o comentário grande em FurnitureModelDef.stackable/
+  // stackSurfaceOffsetY, game/furniture.ts) -- "in body" de propósito,
+  // mesmo motivo dos outros campos opcionais acima.
+  if (typeof body.stackable === "boolean") update.stackable = body.stackable;
+  if ("stack_surface_offset_y" in body) update.stack_surface_offset_y = clampItemOffset(body.stack_surface_offset_y);
   // assentos EXTRA (ver comentário equivalente em app/api/items/
   // route.ts/POST) -- "in body" de propósito, mesmo motivo dos outros
   // campos opcionais acima (null/ausente nunca chega aqui de verdade já
@@ -199,9 +212,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode apagar item" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode apagar item" }, { status: 403 });
   }
 
   const admin = getSupabaseAdminClient();

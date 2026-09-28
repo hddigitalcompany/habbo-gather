@@ -37,10 +37,17 @@
 //   profile -> { type: "profile", id, name, status, instagram, bio, photoUrl }
 //              (card de perfil -- ver ProfileCard em GameRoom.tsx; "role"
 //              NÃO entra aqui, é só o servidor que atribui, ver PROFILE_FIELDS)
-//   poke    -> { type: "poke", from, fromName, kind, text? }
+//   poke    -> cliente->servidor: { type: "poke", to, kind, text? }
+//              servidor->alvo:    { type: "poke", from, fromName, kind, text? }
 //              (botões de interação do card de OUTRO jogador -- "Disponível?"
 //              / "Chamar até você" / "Enviar mensagem" -- relay privado, só
-//              pro alvo, vira um toast do lado de quem recebe)
+//              pro alvo, vira um toast do lado de quem recebe. "text" só
+//              existe pro kind "note" -- pedido do Douglas: "deixar um
+//              recado, igual o gather" -- um texto curto digitado na hora
+//              no card, mandado como aviso avulso, igual "Disponível?"/
+//              "Chamar até você" -- NÃO abre o chat, NÃO fica salvo em
+//              lugar nenhum, só o toast de quem recebe, ver "poke" em
+//              GameRoom.tsx e ProfileCard/recado-composer no JSX).
 //
 // Chat de VERDADE (conversa direta/grupo, histórico, foto/arquivo/áudio)
 // -- ver server/chatStore.js pra persistência e o comentário logo antes
@@ -112,6 +119,24 @@
 //        normal; no deploy de verdade (ex: Render) o host precisa estar
 //        com NODE_ENV=production setado.
 //
+// Parede de sistema ("Editar espaço" -> aba "Parede", ver game/wall.ts)
+// -- MESMO esquema/travas do piso acima, só troca item por aresta
+// (col/row/side) em vez de tile inteiro (col/row):
+//   GET  /room/walls    -> 200 { items: WallSegmentDef[] }
+//   POST /room/walls    (corpo JSON: { items: WallSegmentDef[] }, sempre
+//                        a parede INTEIRA, não um diff)
+//     -> 200 { ok: true, items }
+//     -> 403, mesma trava de produção do /room/floor acima.
+//
+// Porta ("Editar espaço" -> aba "Porta", ver game/door.ts) -- MESMO
+// esquema/travas da parede acima (também é aresta, col/row/side, com
+// `facing` a mais -- ver DoorFacing em game/door.ts):
+//   GET  /room/doors    -> 200 { items: DoorSegmentDef[] }
+//   POST /room/doors    (corpo JSON: { items: DoorSegmentDef[] }, sempre
+//                        a porta INTEIRA, não um diff)
+//     -> 200 { ok: true, items }
+//     -> 403, mesma trava de produção do /room/floor acima.
+//
 // Áreas da sala ("Editar espaço" -> aba "Área", ver game/areas.ts pro
 // conceito de área NOMEADA/tipo "mesa-privada"/"sala") -- MESMO arquivo
 // data/room.json do piso, mesma trava de produção:
@@ -143,8 +168,9 @@
 //
 // Posse de mesa privada (clicar "Tomar posse" numa área tipo
 // "mesa-privada", ver onClaimArea/onReleaseArea em MainScene.ts) NÃO usa
-// os endpoints acima -- é estado só em memória, pelo WebSocket (ver
-// roomAreaOwners mais abaixo), igual à chamada de chat (activeCalls):
+// os endpoints acima -- passa pelo WebSocket, mas PERSISTE em disco (ver
+// roomStore.js/livePlayerIdForUserId mais abaixo) -- pedido do Douglas:
+// "quando voce assume a mesa, ela e sua, ate apagarem o espaco":
 //   claim-area   -> cliente->servidor: { type: "claim-area", areaId }
 //                   (ignorado em silêncio se a área já tiver dono --
 //                   primeira mensagem a chegar no servidor ganha)
@@ -240,20 +266,91 @@ function getRoom(roomId) {
   return room;
 }
 
-// roomId -> Map<areaId, { playerId, name }> -- quem tem posse de cada
-// área "mesa-privada" agora (ver comentário grande de protocolo lá em
-// cima, "claim-area"/"release-area"). SÓ em memória, mesmo motivo do
-// activeCalls acima -- diferente da LISTA de áreas em si (nome/tipo/
-// tiles), que persiste em disco (ver roomStore.js).
-const roomAreaOwners = new Map();
-
-function getAreaOwners(roomId) {
-  let owners = roomAreaOwners.get(roomId);
-  if (!owners) {
-    owners = new Map();
-    roomAreaOwners.set(roomId, owners);
+// posse de mesa privada ("mesa-privada", claim-area/release-area) agora
+// PERSISTE em disco (ver roomStore.js) -- pedido do Douglas: "quando
+// voce assume a mesa, ela e sua, ate apagarem o espaco, se nao nao
+// troca". Guardada por userId PERSISTENTE (ver "identify" abaixo), não
+// pelo id de conexão (esse muda a cada reconexão) -- o id de conexão
+// "ao vivo" de quem tá com aquela mesa agora (null = dono offline no
+// momento, a mesa continua dele mesmo assim) é sempre recalculado na
+// hora de mandar pro cliente, nunca guardado.
+function livePlayerIdForUserId(room, userId) {
+  for (const [connId, c] of room.entries()) {
+    if (c.player.userId === userId) return connId;
   }
-  return owners;
+  return null;
+}
+
+/** Monta o registro de posse de UMA área pronto pra mandar pro cliente
+ * (broadcast "area-owner" ou dentro de "init", ver protocolo lá em
+ * cima) -- null se essa área não tem dono nenhum persistido. */
+function areaOwnerWireEntry(room, areaId) {
+  const entry = roomStore.getAreaOwners()[areaId];
+  if (!entry) return null;
+  return { areaId, playerId: livePlayerIdForUserId(room, entry.userId), name: entry.name };
+}
+
+/** Manda pra SALA INTEIRA (todo mundo, ninguém excluído -- mesma
+ * convenção de "area-owner" no protocolo) o estado atual de posse de
+ * TODAS as áreas de que `userId` é dono agora -- chamado quando esse
+ * userId conecta ou desconecta (ver "connection"/"close" abaixo), pra
+ * quem já tava na sala atualizar a bolinha de status da mesa dele na
+ * hora (online -> cinza de "offline" ou vice-versa), sem esperar o
+ * próximo claim/release de QUALQUER mesa acontecer por acaso. */
+function broadcastAreaOwnershipFor(room, userId) {
+  const owners = roomStore.getAreaOwners();
+  for (const areaId of Object.keys(owners)) {
+    if (owners[areaId].userId !== userId) continue;
+    const wire = areaOwnerWireEntry(room, areaId);
+    if (wire) broadcast(room, { type: "area-owner", ...wire });
+  }
+}
+
+// roomId -> Set<"col_row_side"> -- portas travadas MANUALMENTE agora
+// pelo dono da área que cada uma guarda (ver comentário grande de
+// protocolo "lock-door"/"unlock-door" abaixo). SÓ em memória, DIFERENTE
+// da posse de mesa acima (essa sim persiste, ver roomStore.js) -- uma
+// porta travada volta destravada depois de um restart, sem problema, o
+// dono trava de novo se quiser (travar porta não tem o mesmo peso de
+// "perder a mesa" que motivou persistir a posse). Pedido do Douglas: "o
+// dono da area em questao, pode bloquear ela, fechar, pra que ninguem
+// entre".
+const roomDoorLocks = new Map();
+
+function getDoorLocks(roomId) {
+  let locks = roomDoorLocks.get(roomId);
+  if (!locks) {
+    locks = new Set();
+    roomDoorLocks.set(roomId, locks);
+  }
+  return locks;
+}
+
+function doorLockKey(col, row, side) {
+  return `${col}_${row}_${side}`;
+}
+
+/** Dado um segmento de porta (col,row,side, ver DoorSegmentDef em
+ * game/door.ts), acha a área tipo "mesa-privada" (se houver) num dos 2
+ * tiles vizinhos da aresta que ela separa -- é essa área que a porta
+ * "guarda" (só o dono DELA pode travar/destravar a porta, ver
+ * "lock-door"/"unlock-door" abaixo). Mesma ideia de areaIdAtTile
+ * (game/areas.ts), reescrita aqui em JS puro porque o servidor não
+ * importa os módulos TS do jogo (mesmo motivo de WALL_SIDES/DOOR_SIDES
+ * em roomStore.js serem Sets redigitados à mão em vez de importados).
+ * Sem área "mesa-privada" nenhuma dos 2 lados, devolve null -- a porta
+ * continua funcionando (abre por proximidade), só ninguém consegue
+ * travá-la manualmente. */
+function doorGuardedAreaId(col, row, side) {
+  const neighbor = side === "colPlus" ? { col: col + 1, row } : { col, row: row + 1 };
+  const { list, tiles } = roomStore.getAreaState();
+  for (const t of [{ col, row }, neighbor]) {
+    const tile = tiles.find((x) => x.col === t.col && x.row === t.row);
+    if (!tile) continue;
+    const def = list.find((d) => d.id === tile.areaId);
+    if (def && def.type === "mesa-privada") return def.id;
+  }
+  return null;
 }
 
 // connectionId -> { ws, player } -- igual "rooms", mas achatado (sem
@@ -548,6 +645,138 @@ function handleGetFloor(req, res) {
   res.end(JSON.stringify({ items: roomStore.getFloor() }));
 }
 
+/** GET /room/walls -- mesma ideia de handleGetFloor acima, ver
+ * game/wall.ts (WallSegmentDef) e loadSavedWall em MainScene.ts. */
+function handleGetWalls(req, res) {
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ items: roomStore.getWalls() }));
+}
+
+/** POST /room/walls -- mesma ideia/travas de handlePostFloor acima, só
+ * troca roomStore.setFloor por roomStore.setWalls. */
+async function handlePostWalls(req, res) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+    res.writeHead(403, corsHeaders());
+    res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_ROOM_BODY_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Corpo grande demais");
+    return;
+  }
+
+  const chunks = [];
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
+      aborted = true;
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Corpo grande demais");
+      }
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, corsHeaders());
+      res.end("JSON inválido");
+      return;
+    }
+    const saved = roomStore.setWalls(data?.items);
+    if (saved === null) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "items" (array)');
+      return;
+    }
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, items: saved }));
+  });
+
+  req.on("error", () => {
+    aborted = true;
+  });
+}
+
+/** GET /room/doors -- mesma ideia de handleGetWalls acima, ver
+ * game/door.ts (DoorSegmentDef) e loadSavedDoors em MainScene.ts. */
+function handleGetDoors(req, res) {
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ items: roomStore.getDoors() }));
+}
+
+/** POST /room/doors -- mesma ideia/travas de handlePostWalls acima, só
+ * troca roomStore.setWalls por roomStore.setDoors. */
+async function handlePostDoors(req, res) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+    res.writeHead(403, corsHeaders());
+    res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_ROOM_BODY_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Corpo grande demais");
+    return;
+  }
+
+  const chunks = [];
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
+      aborted = true;
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Corpo grande demais");
+      }
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, corsHeaders());
+      res.end("JSON inválido");
+      return;
+    }
+    const saved = roomStore.setDoors(data?.items);
+    if (saved === null) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "items" (array)');
+      return;
+    }
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, items: saved }));
+  });
+
+  req.on("error", () => {
+    aborted = true;
+  });
+}
+
 /** GET /room/presence -- contagem de membro x visitante ONLINE agora
  * (ver painel de configuração de membros em RoomMembersPanel.tsx) --
  * "membro" = conta confirmada (player.accountVerified, ver
@@ -600,8 +829,8 @@ async function handleGetPresence(req, res, url) {
 /** GET /room/areas -- mesma ideia do handleGetFloor acima, ver
  * loadSavedAreas/setAreaDefs em MainScene.ts. Devolve lista + tiles
  * juntos (ver getAreaState em roomStore.js) -- posse (quem clicou
- * "Tomar posse") NÃO vem por aqui, é estado só em memória do WebSocket
- * (ver "init"/roomAreaOwners). */
+ * "Assumir mesa") NÃO vem por aqui, chega pelo WebSocket (ver "init"
+ * acima/roomStore.getAreaOwners). */
 function handleGetAreas(req, res) {
   const { list, tiles } = roomStore.getAreaState();
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
@@ -851,6 +1080,26 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/room/walls") {
+    handleGetWalls(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/room/walls") {
+    handlePostWalls(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/room/doors") {
+    handleGetDoors(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/room/doors") {
+    handlePostDoors(req, res);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/room/areas") {
     handleGetAreas(req, res);
     return;
@@ -882,7 +1131,40 @@ const httpServer = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server: httpServer });
 
+// "boneco fantasma" (Douglas: "voltou a aparecer isso na primeira
+// atualizada" / "continua" -- avatares parados, fora de qualquer
+// posição atual, que nunca somem da sala) -- ACHADO/CORRIGIDO: esse
+// servidor nunca detectava uma conexão que caiu SEM mandar o frame de
+// close de verdade (notebook dormiu, trocou de wifi/rede, aba travou
+// ou o processo do navegador morreu) -- "close" (ver mais abaixo) só
+// dispara nesses casos de queda "limpa"; numa queda "suja" o player
+// correspondente nunca saía de `room`/`connectionsById`, continuava
+// sendo mandado pra sempre no "init" de quem entra depois (e nunca
+// recebia o "leave" que tira o boneco da tela de quem já tava
+// dentro). Fix padrão da lib `ws` (ping periódico + isAlive): quem não
+// respondeu (pong) o ping ANTERIOR é considerado morto e
+// terminate()ado -- isso já dispara "close" sozinho, reaproveitando
+// toda a limpeza que já existe ali (solta mesa/chamada, broadcast
+// "leave", etc.), sem precisar duplicar nada.
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const heartbeatInterval = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      continue;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, HEARTBEAT_INTERVAL_MS);
+wss.on("close", () => clearInterval(heartbeatInterval));
+
 wss.on("connection", (ws, req) => {
+  ws.isAlive = true;
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
+
   const url = new URL(req.url ?? "/", "http://localhost");
   const segments = url.pathname.split("/").filter(Boolean);
   // aceita qualquer caminho; usa o último pedaço da URL como nome da sala
@@ -933,11 +1215,17 @@ wss.on("connection", (ws, req) => {
       // protocolo lá em cima) -- sem isso, quem entra DEPOIS de alguém
       // já ter clicado "Tomar posse" só veria o dono na tela depois do
       // PRÓXIMO claim/release de qualquer área, não do estado atual.
-      areaOwners: Array.from(getAreaOwners(roomId).entries()).map(([areaId, owner]) => ({
-        areaId,
-        playerId: owner.playerId,
-        name: owner.name,
-      })),
+      areaOwners: Object.keys(roomStore.getAreaOwners())
+        .map((areaId) => areaOwnerWireEntry(room, areaId))
+        .filter(Boolean),
+      // portas já travadas agora (mesmo motivo do areaOwners acima --
+      // sem isso, quem entra DEPOIS de alguém travar uma porta só veria
+      // ela travada na tela depois do PRÓXIMO lock/unlock, não do
+      // estado atual).
+      doorLocks: Array.from(getDoorLocks(roomId)).map((key) => {
+        const [col, row, side] = key.split("_");
+        return { col: Number(col), row: Number(row), side };
+      }),
     })
   );
 
@@ -1002,6 +1290,13 @@ wss.on("connection", (ws, req) => {
             // muda a cada reconexão -- exatamente o problema que o
             // "userId" persistente existe pra evitar.
             broadcast(room, { type: "identity", id, userId: player.userId }, id);
+            // se esse userId (agora resolvido de verdade) já é dono de
+            // alguma mesa, avisa a sala de novo com o id de conexão ATUAL
+            // -- sem isso, quem já tava na sala só saberia que essa mesa
+            // "acordou" (voltou a ficar online) no próximo claim/release
+            // de QUALQUER área da sala, por acaso (ver
+            // broadcastAreaOwnershipFor acima).
+            broadcastAreaOwnershipFor(room, player.userId);
           }
           syncChatUser(player);
           // roster de "todo mundo cadastrado no ambiente" (ver
@@ -1040,9 +1335,28 @@ wss.on("connection", (ws, req) => {
       case "claim-area": {
         const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
         if (!areaId) break;
-        const owners = getAreaOwners(roomId);
-        if (owners.has(areaId)) break; // já tem dono -- primeira mensagem a chegar ganha, ignora o resto
-        owners.set(areaId, { playerId: id, name: player.name });
+        const owners = roomStore.getAreaOwners();
+        if (owners[areaId]) break; // já tem dono (mesmo offline) -- primeira mensagem a chegar ganha, ignora o resto
+        // pedido do Douglas: "uma pessoa só pode assumir uma mesa por
+        // espaço" -- confere se esse MESMO jogador (pelo userId
+        // PERSISTENTE agora, ver comentário grande de
+        // livePlayerIdForUserId acima) já é dono de outra área nessa
+        // sala antes de aceitar mais uma (servidor decide de verdade,
+        // mesmo motivo de sempre: nunca confia só no cliente pra travar
+        // isso -- ele nem deveria deixar clicar, ver
+        // onLocalAreaTileChanged/showAreaClaimPrompt e
+        // updateAreaHoverLabels em MainScene.ts, mas a trava de verdade é
+        // aqui). BLOQUEIA de propósito (perguntado se preferia trocar
+        // sozinho automaticamente, respondeu que não -- "tem que soltar"
+        // a mesa antiga à mão antes de assumir outra, ver release-area
+        // acima). Avisa só quem tentou (claim-area-denied), sem broadcast
+        // -- ninguém mais precisa saber que essa tentativa aconteceu.
+        const alreadyOwnsAnother = Object.values(owners).some((o) => o.userId === player.userId);
+        if (alreadyOwnsAnother) {
+          ws.send(JSON.stringify({ type: "claim-area-denied", areaId, reason: "already-owns" }));
+          break;
+        }
+        roomStore.setAreaOwner(areaId, player.userId, player.name);
         // pra TODO MUNDO, incluindo quem clicou (diferente do "move"/
         // "seat" acima, que excluem o remetente porque ele já aplicou
         // local -- aqui o cliente só reage a esse broadcast, não aplica
@@ -1054,11 +1368,64 @@ wss.on("connection", (ws, req) => {
       case "release-area": {
         const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
         if (!areaId) break;
-        const owners = getAreaOwners(roomId);
-        const current = owners.get(areaId);
-        if (!current || current.playerId !== id) break; // só quem é dono pode soltar
-        owners.delete(areaId);
+        const current = roomStore.getAreaOwners()[areaId];
+        if (!current || current.userId !== player.userId) break; // só quem é dono pode soltar
+        roomStore.removeAreaOwner(areaId);
         broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
+        break;
+      }
+      // "force-release-area" -- pedido do Douglas: "esse tomar posse,
+      // vamos renomear 'assumir mesa'... somente o CEO pode 'destituir
+      // mesa de fulano'". DIFERENTE de "release-area" acima (que só quem
+      // É o dono pode mandar): aqui é o contrário, só quem NÃO é o dono
+      // (o "CEO", ver isRoomOwner/setRoomOwner em MainScene.ts) pode
+      // tirar a posse de OUTRA pessoa à força. "CEO" aqui é o MESMO
+      // "owner" de room_members (dono da sala) que já libera o editor de
+      // espaço (ver callerIsOwner acima) -- não existe um papel separado
+      // só pra isso, essa sala só tem UM dono mesmo. Confere o papel de
+      // NOVO aqui, sem cache nenhum (mesma cautela de getRole/
+      // callerIsOwner -- isso é permissão de verdade, não contador),
+      // porque uma conexão WebSocket pode ficar aberta por muito tempo
+      // (bem mais que qualquer cache faria sentido) e "identify" só
+      // roda uma vez por conexão. Em desenvolvimento (sem
+      // NODE_ENV=production), libera geral, igual toda outra trava de
+      // dono já feita nesse arquivo -- não trava ninguém enquanto o
+      // Douglas ainda não tiver o Supabase/conta configurados.
+      case "force-release-area": {
+        const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
+        if (!areaId) break;
+        (async () => {
+          const role = player.userId ? await getRole(player.userId) : null;
+          const isCeo = process.env.NODE_ENV !== "production" || role === "owner";
+          if (!isCeo) return;
+          if (!roomStore.getAreaOwners()[areaId]) return; // já sem dono -- nada pra destituir
+          roomStore.removeAreaOwner(areaId);
+          broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
+        })();
+        break;
+      }
+      // "lock-door"/"unlock-door" -- pedido do Douglas: "o dono da area
+      // em questao, pode bloquear ela, fechar, pra que ninguem entre"
+      // (ver comentário grande de roomDoorLocks/doorGuardedAreaId acima).
+      // Só quem é dono DA ÁREA QUE A PORTA GUARDA pode travar/destravar
+      // -- não é "quem clicou primeiro" como claim-area, é sempre o
+      // MESMO dono (a posse da área já resolveu essa disputa antes).
+      case "lock-door":
+      case "unlock-door": {
+        const col = Number.isFinite(Number(data.col)) ? Math.trunc(Number(data.col)) : NaN;
+        const row = Number.isFinite(Number(data.row)) ? Math.trunc(Number(data.row)) : NaN;
+        const side = data.side === "colPlus" || data.side === "rowPlus" ? data.side : null;
+        if (!Number.isFinite(col) || !Number.isFinite(row) || !side) break;
+        const areaId = doorGuardedAreaId(col, row, side);
+        if (!areaId) break; // porta sem área "mesa-privada" nos 2 lados -- ninguém trava
+        const owner = roomStore.getAreaOwners()[areaId];
+        if (!owner || owner.userId !== player.userId) break;
+        const key = doorLockKey(col, row, side);
+        const locks = getDoorLocks(roomId);
+        const locked = data.type === "lock-door";
+        if (locked) locks.add(key);
+        else locks.delete(key);
+        broadcast(room, { type: "door-lock", col, row, side, locked });
         break;
       }
       case "signal": {
@@ -1117,13 +1484,19 @@ wss.on("connection", (ws, req) => {
       }
       case "poke": {
         // botões do card de OUTRO jogador ("Disponível?" / "Chamar até
-        // você" / "Enviar mensagem") -- relay PRIVADO, só quem recebeu o
-        // clique vê o toast, não a sala toda.
+        // você" / "Enviar mensagem" / "Deixar um recado") -- relay
+        // PRIVADO, só quem recebeu o clique vê o toast, não a sala toda.
         const target = room.get(data.to);
         const kind = String(data.kind ?? "").slice(0, 40);
+        // "text" só existe (e só é repassado) pro kind "note" -- pedido
+        // do Douglas: "deixar um recado, igual o gather", um aviso avulso
+        // com texto livre, mesmo espírito dos outros pokes (NÃO vira
+        // mensagem de chat de verdade, não fica salvo em lugar nenhum
+        // além do toast momentâneo de quem recebe).
+        const text = kind === "note" && typeof data.text === "string" ? data.text.slice(0, 200) : undefined;
         if (target && target.ws.readyState === target.ws.OPEN && kind) {
           target.ws.send(
-            JSON.stringify({ type: "poke", from: id, fromName: player.name, kind })
+            JSON.stringify({ type: "poke", from: id, fromName: player.name, kind, ...(text ? { text } : {}) })
           );
         }
         break;
@@ -1368,22 +1741,21 @@ wss.on("connection", (ws, req) => {
     connectionsById.delete(id);
     unregisterUserConnection(player.userId, ws);
     leaveAllCalls(id);
-    // solta qualquer mesa privada que essa pessoa tinha posse -- senão
-    // ficaria "presa" pra sempre depois que ela sai da sala (fecha a
-    // aba sem clicar em soltar, cai a conexão, etc.).
-    const owners = roomAreaOwners.get(roomId);
-    if (owners) {
-      for (const [areaId, owner] of Array.from(owners.entries())) {
-        if (owner.playerId !== id) continue;
-        owners.delete(areaId);
-        broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
-      }
-    }
+    // NÃO solta mais a mesa privada que essa pessoa tinha posse -- pedido
+    // do Douglas: "quando voce assume a mesa, ela e sua, ate apagarem o
+    // espaco, se nao nao troca". Antes soltava aqui (fechar a aba, F5,
+    // queda de wifi, restart do servidor -- QUALQUER close), o que
+    // parecia "mesa voltando a aparecer Assumir mesa" pra ele depois de
+    // um refresh comum. A posse persiste (ver roomStore.js); só avisa a
+    // sala que o dono ficou OFFLINE agora (bolinha cinza no rótulo "mesa
+    // de <nome>", ver statusColorForPlayer/updateAreaHoverLabels em
+    // MainScene.ts) -- `room.delete(id)` já rodou 2 linhas acima, então
+    // livePlayerIdForUserId (dentro de broadcastAreaOwnershipFor) só acha
+    // OUTRA aba/dispositivo dessa mesma pessoa ainda conectada, se
+    // houver; sem nenhuma, devolve null de verdade.
+    broadcastAreaOwnershipFor(room, player.userId);
     broadcast(room, { type: "leave", id });
-    if (room.size === 0) {
-      rooms.delete(roomId);
-      roomAreaOwners.delete(roomId); // sala vazia -- limpa a posse junto, ninguém mais pra ver
-    }
+    if (room.size === 0) rooms.delete(roomId);
   });
 
   ws.on("error", (err) => {

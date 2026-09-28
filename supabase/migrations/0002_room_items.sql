@@ -25,11 +25,14 @@ insert into storage.buckets (id, name, public)
 values ('room-items', 'room-items', true)
 on conflict (id) do nothing;
 
--- só o DONO da sala pode subir/apagar arquivo nesse bucket -- confere
--- direto contra room_members (mesma regra de "quem é owner" usada em
--- app/api/room/**). A inserção da LINHA de metadados (tabela
--- room_items abaixo) sempre passa pela rota da API (service role, que
--- confere de novo) -- isso aqui só protege o Storage em si.
+-- Quem pode subir/apagar arquivo nesse bucket -- NOTA: essas duas
+-- policies foram SUBSTITUÍDAS em supabase/migrations/0031_platform_admins.sql
+-- (conferem platform_admins agora, não mais room_members.role='owner'
+-- -- ver comentário grande lá do porquê). Ficam aqui só de histórico,
+-- já que uma migration antiga não deve ser reescrita depois de rodada
+-- em produção. A inserção da LINHA de metadados (tabela room_items
+-- abaixo) sempre passa pela rota da API (service role, que confere de
+-- novo) -- isso aqui só protege o Storage em si.
 create policy "room-items: só o dono sobe arquivo" on storage.objects
   for insert to authenticated
   with check (

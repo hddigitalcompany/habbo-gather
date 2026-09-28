@@ -19,7 +19,7 @@
 // fallback -- ver ItemEditor.tsx, handleClearPadrao).
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -49,10 +49,8 @@ export async function POST(req: NextRequest) {
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  await bootstrapOwnerIfEmpty(callerId);
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode cadastrar o Avatar Padrão" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode cadastrar o Avatar Padrão" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
@@ -92,9 +90,8 @@ export async function DELETE(req: NextRequest) {
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode apagar o Avatar Padrão" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode apagar o Avatar Padrão" }, { status: 403 });
   }
 
   const gender = req.nextUrl.searchParams.get("gender") ?? "";

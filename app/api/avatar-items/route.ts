@@ -3,7 +3,7 @@
 // correspondente -- ver AvatarCreatorPanel em components/ItemEditor.tsx).
 // Continuação de app/api/avatar-skins/route.ts (que só cobre TOM DE
 // PELE/"Avatar") -- mesmo padrão de auth (getVerifiedUserId +
-// bootstrapOwnerIfEmpty + getMembership owner-check), mesmo esquema de
+// isPlatformAdmin), mesmo esquema de
 // upload (a FOLHA já composta -- 8x2/200x260, ver composeAvatarArtSheet
 // em ItemEditor.tsx -- já foi enviada direto do navegador pro Supabase
 // Storage, bucket "room-items", path "avatar-items/...", REUSA o
@@ -12,7 +12,7 @@
 // gerar cor) e DELETE (apagar) ficam em app/api/avatar-items/[id]/route.ts.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { bootstrapOwnerIfEmpty, getMembership, getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +23,8 @@ export async function POST(req: NextRequest) {
   const callerId = await getVerifiedUserId(req);
   if (!callerId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
 
-  await bootstrapOwnerIfEmpty(callerId);
-  const membership = await getMembership(callerId);
-  if (membership?.role !== "owner" || membership.status !== "active") {
-    return NextResponse.json({ error: "só o dono da sala pode cadastrar item de avatar" }, { status: 403 });
+  if (!(await isPlatformAdmin(callerId))) {
+    return NextResponse.json({ error: "só o admin da plataforma pode cadastrar item de avatar" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
