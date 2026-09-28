@@ -1304,6 +1304,28 @@ wss.on("connection", (ws, req) => {
           // toda vez que alguém entra/identifica, assim quem já tava
           // conectado também enxerga gente nova sem precisar recarregar.
           broadcast(room, { type: "users:list", users: chatStore.listAllUsers() });
+          // Corrige corrida achada 28/set ("crio agenda, salvo, atualizo
+          // e some"): o cliente manda "chat:list"/"agenda:list" logo
+          // depois de "identify" (ver GameRoom.tsx), mas esse handler é
+          // ASSÍNCRONO (verifyAccessToken acima é um round-trip de rede
+          // pro Supabase quando tem accessToken) -- então aquele
+          // chat:list/agenda:list quase sempre processava ANTES de
+          // player.userId virar o id de verdade, e respondia com a
+          // lista vazia do id provisório (= id da conexão), que o
+          // cliente aplica com setCalls/setConversations (SUBSTITUI, não
+          // mescla) -- a call/conversa que acabou de aparecer "sumia" da
+          // tela (o dado sempre ficou salvo certinho no servidor, só a
+          // lista que a tela mostrava é que ficava errada). Agora que o
+          // userId de verdade já foi resolvido (linha acima), manda a
+          // lista CERTA de novo pra essa conexão -- sobrescreve a
+          // resposta vazia/errada que já tinha ido antes.
+          ws.send(JSON.stringify({ type: "agenda:calls", calls: agendaStore.listCallsForUser(player.userId) }));
+          ws.send(
+            JSON.stringify({
+              type: "chat:conversations",
+              conversations: chatStore.listConversationsForUser(player.userId),
+            })
+          );
         })();
         break;
       }
