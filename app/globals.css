@@ -3631,6 +3631,117 @@ body {
   text-decoration: underline;
 }
 
+/* Lobby (ver components/Lobby.tsx) -- tela entre login e a sala,
+   mesma linguagem visual do auth-gate (cartão roxo-escuro fosco,
+   fundo #14101f) só que com uma "placa de letreiro" pra lembrar
+   entrada de hotel, e um pouco mais largo pra caber a linha de
+   presença sem quebrar feio. */
+.lobby-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #14101f;
+  padding: 16px;
+}
+
+.lobby-card {
+  width: 360px;
+  max-width: 100%;
+  background: rgba(28, 22, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  padding: 28px 24px 24px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: center;
+}
+
+/* "letreiro" do hotel -- placa com borda em degradê violeta, letras
+   espaçadas tipo neon, sem precisar de nenhum asset novo. */
+.lobby-sign {
+  align-self: center;
+  padding: 10px 22px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(124, 92, 255, 0.25), rgba(124, 92, 255, 0.05));
+  border: 1px solid rgba(156, 130, 255, 0.55);
+  box-shadow: 0 0 18px rgba(124, 92, 255, 0.35), inset 0 0 12px rgba(124, 92, 255, 0.15);
+}
+
+.lobby-sign-text {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #e7defc;
+  text-shadow: 0 0 10px rgba(156, 130, 255, 0.7);
+}
+
+.lobby-greeting {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f5f0ff;
+}
+
+.lobby-presence {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0 0 22px;
+  font-size: 13px;
+  color: #cfc4e6;
+}
+
+.lobby-presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b6480;
+  flex-shrink: 0;
+}
+
+.lobby-presence-dot-active {
+  background: #29c46a;
+  box-shadow: 0 0 6px rgba(41, 196, 106, 0.8);
+}
+
+.lobby-enter-btn {
+  background: #7c5cff;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  padding: 13px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-enter-btn:hover {
+  background: #8c6dff;
+}
+
+.lobby-signout-btn {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #9fb4ff;
+  font-size: 13px;
+  text-align: center;
+  padding: 14px 0 0;
+  cursor: pointer;
+}
+
+.lobby-signout-btn:hover {
+  text-decoration: underline;
+}
+
 /* botão de sair, só aparece pra quem entrou com conta (ver onSignOut
    em GameRoom.tsx) -- cantinho discreto, não disputa espaço com a
    av-bar/HUD do jogo. */
