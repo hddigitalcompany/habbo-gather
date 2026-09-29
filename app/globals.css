@@ -3929,11 +3929,24 @@ body {
    barra flutuante (mesmo respiro de 16px que ela usa nas bordas,
    começando logo abaixo dela). Some em telas estreitas pra não
    sobrepor o card central da sala. */
+/* mesma "caixa" invisível de centralização que .lobby-topbar usa
+   (left/right:16px + max-width:1180px + margin:0 auto) -- é assim que
+   o card fica alinhado com a borda esquerda da barra em qualquer
+   largura de tela, inclusive telas bem largas onde a barra não
+   encosta no left:16 puro (ela centraliza dentro desse respiro
+   quando sobra espaço). Pedido do Douglas: "alinhe o balao superior
+   com o card da empresa". pointer-events:none na caixa (que é maior
+   que o card em telas largas) + auto só no card, pra essa área vazia
+   não bloquear clique em nada por baixo dela. */
 .lobby-company-card-pin {
   position: fixed;
   top: 128px;
   left: 16px;
+  right: 16px;
+  max-width: 1180px;
+  margin: 0 auto;
   z-index: 5;
+  pointer-events: none;
 }
 
 @media (max-width: 900px) {
@@ -3949,6 +3962,7 @@ body {
   overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: auto;
 }
 
 /* metade clara de cima -- frase de efeito (duas linhas + par de
