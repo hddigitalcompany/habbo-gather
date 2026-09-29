@@ -77,6 +77,18 @@ const MAX_FLOOR_ITEMS = 2000;
 const MAX_STYLE_ID_LEN = 200;
 const MAX_COORD = 1000;
 
+// tamanho da sala (GRID_COLS/GRID_ROWS, ver game/grid.ts) -- pedido do
+// Douglas: "eu quero aumentar ou diminuir a sala, adicionando NOVOS
+// tiles" (ver aba "Tamanho" no editor de espaço, GameRoom.tsx). MESMOS
+// limites de MIN_GRID_SIZE/MAX_GRID_SIZE em game/grid.ts -- os dois
+// arquivos não se importam entre si (um roda no cliente, outro no
+// servidor), então ficam duplicados de propósito, mantidos em
+// sincronia à mão (qualquer ajuste tem que mudar os dois).
+const MIN_GRID_SIZE = 4;
+const MAX_GRID_SIZE = 24;
+const DEFAULT_GRID_COLS = 12;
+const DEFAULT_GRID_ROWS = 7;
+
 // parede de sistema (ver game/wall.ts) -- mesma grade pequena do
 // piso/área, mesmos limites reaproveitados. MAX_WALL_ITEMS um pouco
 // menor que MAX_FLOOR_ITEMS: parede é ARESTA (2 por tile no máximo,
@@ -139,6 +151,14 @@ const MAX_SEAT_OFFSET = 500; // px -- bem mais que qualquer ajuste fino de verda
 
 function emptyStore() {
   return {
+    // tamanho da sala (ver MIN_GRID_SIZE/MAX_GRID_SIZE acima) -- CAMPO
+    // NOVO, pedido do Douglas: "eu quero aumentar ou diminuir a sala,
+    // adicionando NOVOS tiles". Default bate com o tamanho fixo de
+    // sempre (GRID_COLS=12/GRID_ROWS=7 em game/grid.ts), pra sala já
+    // salva ANTES dessa feature (sem esses dois campos) continuar do
+    // mesmo tamanho de sempre -- ver normalizeStore abaixo.
+    gridCols: DEFAULT_GRID_COLS,
+    gridRows: DEFAULT_GRID_ROWS,
     floor: [],
     walls: [],
     doors: [],
@@ -168,7 +188,17 @@ function emptyStore() {
  * reaproveitado nos dois carregadores abaixo em vez de duplicado. */
 function normalizeStore(parsed) {
   if (!parsed || typeof parsed !== "object") return emptyStore();
+  const gridCols =
+    Number.isInteger(parsed.gridCols) && parsed.gridCols >= MIN_GRID_SIZE && parsed.gridCols <= MAX_GRID_SIZE
+      ? parsed.gridCols
+      : DEFAULT_GRID_COLS;
+  const gridRows =
+    Number.isInteger(parsed.gridRows) && parsed.gridRows >= MIN_GRID_SIZE && parsed.gridRows <= MAX_GRID_SIZE
+      ? parsed.gridRows
+      : DEFAULT_GRID_ROWS;
   return {
+    gridCols,
+    gridRows,
     floor: Array.isArray(parsed.floor) ? parsed.floor : [],
     walls: Array.isArray(parsed.walls) ? parsed.walls : [],
     doors: Array.isArray(parsed.doors) ? parsed.doors : [],
@@ -274,6 +304,32 @@ function sanitizeFloorItem(item) {
   if (Math.abs(col) > MAX_COORD || Math.abs(row) > MAX_COORD) return null;
   if (!styleId || styleId.length > MAX_STYLE_ID_LEN) return null;
   return { col, row, styleId };
+}
+
+/** Tamanho salvo da sala (ver MIN_GRID_SIZE/MAX_GRID_SIZE acima) --
+ * devolvido pra popular a cena assim que ela fica pronta (ver GET
+ * /room/size em server/index.js, aplicado via MainScene.setGridSize
+ * chamado de GameRoom.tsx), mesma ideia de getFloor/getWalls/etc. */
+export function getRoomSize() {
+  return { cols: store.gridCols, rows: store.gridRows };
+}
+
+/** Muda o tamanho da sala -- pedido do Douglas: "eu quero aumentar ou
+ * diminuir a sala, adicionando NOVOS tiles" (ver aba "Tamanho" no
+ * editor de espaço). Clampado pros limites de segurança (nunca lixo,
+ * nunca fora do intervalo) em vez de rejeitar a chamada inteira --
+ * devolve null só se cols/rows nem chegarem a ser número. Igual
+ * setFloor/setWalls/etc., devolve o valor realmente salvo. */
+export function setRoomSize(cols, rows) {
+  const c = Math.round(Number(cols));
+  const r = Math.round(Number(rows));
+  if (!Number.isFinite(c) || !Number.isFinite(r)) return null;
+  const clampedCols = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, c));
+  const clampedRows = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, r));
+  store.gridCols = clampedCols;
+  store.gridRows = clampedRows;
+  persist();
+  return { cols: clampedCols, rows: clampedRows };
 }
 
 export function getFloor() {

@@ -647,6 +647,68 @@ function handleServeUpload(req, res, pathname) {
   createReadStream(filePath).pipe(res);
 }
 
+/** GET /room/size -- tamanho salvo da sala (ver MIN_GRID_SIZE/
+ * MAX_GRID_SIZE em roomStore.js), pedido do Douglas: "eu quero
+ * aumentar ou diminuir a sala, adicionando NOVOS tiles" (aba
+ * "Tamanho" no editor de espaço). Devolve pra popular a cena assim
+ * que ela fica pronta (ver MainScene.setGridSize, chamado pelo React
+ * em GameRoom.tsx), mesma ideia de handleGetFloor logo abaixo. */
+function handleGetSize(req, res) {
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify(roomStore.getRoomSize()));
+}
+
+/** POST /room/size -- mesma trava de handlePostFloor abaixo (só o DONO
+ * da sala salva em produção), corpo pequeno de propósito (só 2
+ * números), então sem o limite de MAX_ROOM_BODY_BYTES por chunk --
+ * ainda assim limitado a um corpo minúsculo antes de tentar decodificar
+ * JSON, mesma cautela. */
+async function handlePostSize(req, res) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+    res.writeHead(403, corsHeaders());
+    res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const chunks = [];
+  let received = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    received += chunk.length;
+    if (received > 1024 && !aborted) {
+      aborted = true;
+      if (!res.headersSent) {
+        res.writeHead(413, corsHeaders());
+        res.end("Corpo grande demais");
+      }
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      res.writeHead(400, corsHeaders());
+      res.end("JSON inválido");
+      return;
+    }
+    const saved = roomStore.setRoomSize(data?.cols, data?.rows);
+    if (saved === null) {
+      res.writeHead(400, corsHeaders());
+      res.end('Corpo precisa ter "cols"/"rows" (número)');
+      return;
+    }
+    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, ...saved }));
+  });
+}
+
 /** GET /room/floor -- ver comentário grande no topo do arquivo. Devolve o
  * piso salvo pra popular a cena assim que ela fica pronta (ver
  * loadSavedFloor em MainScene.ts, chamado pelo React em GameRoom.tsx). */
@@ -1401,6 +1463,16 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname.startsWith("/uploads/")) {
     handleServeUpload(req, res, url.pathname);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/room/size") {
+    handleGetSize(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/room/size") {
+    handlePostSize(req, res);
     return;
   }
 

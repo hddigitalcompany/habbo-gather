@@ -43,6 +43,7 @@ import {
   GAME_HEIGHT,
   GRID_ORIGIN_X,
   GRID_ORIGIN_Y,
+  setGridSize as setGlobalGridSize,
 } from "./grid";
 import { tileDiamondCorners, tileRangeCorners, Point } from "./iso";
 import {
@@ -3591,6 +3592,41 @@ export default class MainScene extends Phaser.Scene {
       this.destroyAreaOwnerHoverCard();
     }
     this.refreshAreaTileAlpha();
+  }
+
+  /** Aumenta/diminui a sala (ver aba "Tamanho" no editor de espaço,
+   * GameRoom.tsx) -- pedido do Douglas: "eu quero aumentar ou diminuir
+   * a sala, adicionando NOVOS tiles". Só repassa pra setGridSize
+   * (game/grid.ts, ver comentário grande lá) e redesenha o contorno do
+   * editor (drawEditGrid já é re-chamável, mesma ideia de sempre) --
+   * tudo o resto (movimento, limite de parede/porta na borda, piso)
+   * já lê GRID_COLS/GRID_ROWS ao vivo, sem precisar de mais nada aqui.
+   * Chamado tanto no carregamento inicial (GET /room/size, tamanho já
+   * salvo) quanto ao vivo quando o dono clica "+"/"-". */
+  setGridSize(cols: number, rows: number) {
+    setGlobalGridSize(cols, rows);
+    this.drawEditGrid();
+  }
+
+  /** A borda que SERIA cortada ao diminuir a sala em 1 (ver
+   * resizeRoom em GameRoom.tsx, botão "-" de Tamanho) já tem alguma
+   * coisa nela -- piso pintado, móvel, parede, porta ou área? Usado só
+   * pra DESABILITAR esse botão quando diminuir apagaria conteúdo
+   * junto (mais seguro que apagar sozinho sem avisar). kind:"col" olha
+   * a última coluna válida hoje (col===GRID_COLS), kind:"row" a última
+   * linha (row===GRID_ROWS) -- a mesma checagem que clampTile usa pro
+   * boneco, só que na borda de FORA (a que sumiria). */
+  edgeHasContent(kind: "col" | "row"): boolean {
+    const limit = kind === "col" ? GRID_COLS : GRID_ROWS;
+    const hits = (col: number, row: number) => (kind === "col" ? col === limit : row === limit);
+    for (const f of this.draftFloor.values()) if (hits(f.col, f.row)) return true;
+    for (const f of this.draftFurniture.values()) {
+      if (furnitureFootprintTiles(f).some((t) => hits(t.col, t.row))) return true;
+    }
+    for (const w of this.draftWall.values()) if (hits(w.col, w.row)) return true;
+    for (const d of this.draftDoor.values()) if (hits(d.col, d.row)) return true;
+    for (const a of this.draftArea.values()) if (hits(a.col, a.row)) return true;
+    return false;
   }
 
   /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma as outras ferramentas (piso/área/mover, ver selectFloorTool/selectAreaTool/selectMoveTool) -- só uma ferramenta ativa por vez. */

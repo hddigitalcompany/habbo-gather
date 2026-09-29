@@ -1989,6 +1989,59 @@ body {
   color: #1c1430;
 }
 
+/* Painel "Tamanho" (aba nova em EDIT_CATEGORY_TABS, GameRoom.tsx) --
+   pedido do Douglas: "eu quero aumentar ou diminuir a sala, adicionando
+   NOVOS tiles". Mesma paleta escura/dourada do resto do editor de
+   espaço (ver .floor-erase-standalone-btn acima) -- linha "Largura"/
+   "Altura" com um stepper +/- no meio, igual um controle de quantidade
+   comum. */
+.room-size-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.room-size-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffd28a;
+}
+
+.room-size-value {
+  min-width: 24px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.room-size-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #5c4420;
+  background: #3a2a15;
+  color: #ffd28a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.room-size-btn:hover:not(:disabled) {
+  background: #4a3620;
+}
+
+.room-size-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 /* Toggle "Borda"/"Centro do tile" do painel de parede (ver EditPanel em
    GameRoom.tsx -- pedido do Douglas: "eu quero tambem a opcao de
    inserir ela no centro do tile"), mesma pegada visual/paleta do

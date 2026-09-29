@@ -82,6 +82,7 @@ import {
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
 import { WallPatternSwatch } from "@/components/WallPatternSwatch";
 import type { Direction } from "@/game/grid";
+import { MIN_GRID_SIZE, MAX_GRID_SIZE } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
   HAIR_CATALOG,
@@ -1803,12 +1804,23 @@ export default function GameRoom({
   // nenhum FurnitureType/arte cadastrado -- aparecem na barra mas com a
   // grade vazia, até subir os arquivos de origem (combinado com o
   // Douglas: estrutura agora, arte depois).
-  const [activeCategory, setActiveCategory] = useState<FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta">(
-    "poltrona"
-  );
+  const [activeCategory, setActiveCategory] = useState<
+    FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
+  >("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // tamanho da sala (GRID_COLS/GRID_ROWS, ver game/grid.ts) -- pedido do
+  // Douglas: "eu quero aumentar ou diminuir a sala, adicionando NOVOS
+  // tiles" (aba "Tamanho" dentro de "Editar espaço", ver EDIT_CATEGORY_TABS
+  // abaixo). +1 porque GRID_COLS/GRID_ROWS guardam o ÍNDICE máximo
+  // (col/row 0..N), não a contagem de quadrados (ver comentário "colunas
+  // 0..12 (13 posições)" em game/grid.ts) -- gridCols/gridRows aqui já
+  // guardam a CONTAGEM (13/8), mais fácil de mostrar/pensar na UI; vira
+  // índice de novo (-1) só na hora de mandar pro servidor/scene.
+  const [roomGridCols, setRoomGridCols] = useState(12 + 1);
+  const [roomGridRows, setRoomGridRows] = useState(7 + 1);
+  const [gridSizeStatus, setGridSizeStatus] = useState<"idle" | "saving" | "error">("idle");
   // true só depois que a busca inicial do piso salvo (GET /room/floor,
   // ver game.events.once(READY, ...) mais abaixo) terminar -- ver o
   // useEffect de autosave logo depois, que confere essa flag antes de
@@ -2914,6 +2926,26 @@ export default function GameRoom({
         // fetchAndRegisterCustomSkins/fetchAndRegisterCustomAvatarItems)
         // rodam em PARALELO, sem bloquear a cadeia de carregar móvel --
         // nenhum desses três depende dos outros.
+        // tamanho salvo da sala (ver GET /room/size em server/index.js) --
+        // pedido do Douglas: "eu quero aumentar ou diminuir a sala,
+        // adicionando NOVOS tiles". Busca em PARALELO com o resto (não
+        // bloqueia piso/mobília/área) e aplica assim que responder --
+        // não tem problema se demorar mais que o piso, já que nada mais
+        // depende de já estar aplicado antes (só reflete via
+        // setGridSize/drawEditGrid). Falha em silêncio (ex: servidor
+        // fora do ar) -- a sala ainda funciona com o tamanho padrão
+        // (12x7, mesmo default de sempre).
+        fetch(`${REALTIME_HTTP_BASE}/room/size`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (destroyed) return;
+            if (typeof data?.cols === "number" && typeof data?.rows === "number") {
+              sceneRef.current?.setGridSize(data.cols, data.rows);
+              setRoomGridCols(data.cols + 1);
+              setRoomGridRows(data.rows + 1);
+            }
+          })
+          .catch(() => {});
         fetchAndRegisterCustomSkins();
         fetchAndRegisterCustomAvatarItems();
         fetchDefaultReferences();
@@ -3780,13 +3812,72 @@ export default function GameRoom({
   // direto (era só isso antes) porque "assento" precisa ligar/desligar o
   // modo de ajuste na cena (ver setSeatTuningMode em MainScene.ts, muda o
   // que as setas de direção fazem enquanto sentado).
-  function changeCategory(category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta") {
+  function changeCategory(
+    category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
+  ) {
     setActiveCategory(category);
     setDeleteToolActive(false);
     setMoveToolActive(false);
     sceneRef.current?.setSeatTuningMode(category === "assento");
     sceneRef.current?.selectMoveTool(false);
     sceneRef.current?.selectDeleteTool(false);
+  }
+
+  /** Aumenta/diminui a sala em 1 quadrado (aba "Tamanho") -- pedido do
+   * Douglas: "eu quero aumentar ou diminuir a sala, adicionando NOVOS
+   * tiles". `axis` escolhe largura (cols) ou altura (rows), `delta` é
+   * +1 (adicionar) ou -1 (remover). Ao DIMINUIR, primeiro confere se a
+   * borda que sumiria já tem piso/móvel/parede/porta/área (ver
+   * edgeHasContent em MainScene.ts) -- se tiver, cancela e avisa, em
+   * vez de apagar conteúdo junto sem perguntar. Aplica na cena NA HORA
+   * (otimista, mesmo padrão de sempre nesse editor) e salva no servidor
+   * em seguida (POST /room/size) -- se o POST falhar, desfaz o tamanho
+   * local de volta e mostra erro (gridSizeStatus), pra nunca ficar
+   * divergente do que o servidor tem. */
+  async function resizeRoom(axis: "cols" | "rows", delta: 1 | -1) {
+    if (!canEditRoom) return;
+    const prevCols = roomGridCols;
+    const prevRows = roomGridRows;
+    const nextCols = axis === "cols" ? prevCols + delta : prevCols;
+    const nextRows = axis === "rows" ? prevRows + delta : prevRows;
+    // +1/-1 acima é em CONTAGEM de quadrados; MIN_GRID_SIZE/MAX_GRID_SIZE
+    // (game/grid.ts) também são contagem (não índice), então compara direto.
+    if (nextCols < MIN_GRID_SIZE || nextCols > MAX_GRID_SIZE) return;
+    if (nextRows < MIN_GRID_SIZE || nextRows > MAX_GRID_SIZE) return;
+    if (delta === -1) {
+      const kind = axis === "cols" ? "col" : "row";
+      if (sceneRef.current?.edgeHasContent(kind)) {
+        window.alert(
+          axis === "cols"
+            ? "Tem piso, móvel, parede, porta ou área na última coluna -- apague o que tiver lá antes de diminuir a largura."
+            : "Tem piso, móvel, parede, porta ou área na última linha -- apague o que tiver lá antes de diminuir a altura."
+        );
+        return;
+      }
+    }
+    setRoomGridCols(nextCols);
+    setRoomGridRows(nextRows);
+    // -1 aqui: gridCols/gridRows guardados/mandados pro servidor são
+    // ÍNDICE máximo (GRID_COLS/GRID_ROWS, ver comentário em
+    // game/grid.ts), não a contagem mostrada na UI.
+    sceneRef.current?.setGridSize(nextCols - 1, nextRows - 1);
+    setGridSizeStatus("saving");
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/room/size`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cols: nextCols - 1, rows: nextRows - 1 }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setGridSizeStatus("idle");
+    } catch {
+      // desfaz -- servidor não confirmou, não pode deixar o cliente
+      // achar que salvou um tamanho que na verdade não persistiu.
+      setRoomGridCols(prevCols);
+      setRoomGridRows(prevRows);
+      sceneRef.current?.setGridSize(prevCols - 1, prevRows - 1);
+      setGridSizeStatus("error");
+    }
   }
 
   /** Aplica a COR escolhida (ver selectFurnitureColor) numa entrada de catálogo, se ela tiver cores (ver FurnitureCatalogEntry.colors) -- devolve a entrada como veio quando não tiver (ex: vidro) ou quando o id não bater com nenhuma cor dela. */
@@ -5027,6 +5118,10 @@ export default function GameRoom({
           activeCategory={activeCategory}
           onChangeCategory={changeCategory}
           isPlatformAdmin={isPlatformAdmin}
+          roomGridCols={roomGridCols}
+          roomGridRows={roomGridRows}
+          gridSizeStatus={gridSizeStatus}
+          onResizeRoom={resizeRoom}
           selectedCatalogIndex={selectedCatalogIndex}
           onSelectCatalog={selectCatalog}
           selectedColorId={selectedColorId}
@@ -5099,7 +5194,7 @@ const FACING_LABEL: Record<FurnitureFacing, string> = {
 };
 
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
+  id: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -5134,6 +5229,12 @@ const EDIT_CATEGORY_TABS: {
   { id: "porta", label: "Porta", icon: DoorIcon },
   { id: "piso", label: "Piso", icon: FloorIcon },
   { id: "area", label: "Área", icon: AreaIcon },
+  // "Tamanho": aumenta/diminui a sala (GRID_COLS/GRID_ROWS, ver
+  // game/grid.ts) -- pedido do Douglas: "eu quero aumentar ou diminuir
+  // a sala, adicionando NOVOS tiles". Mesma seção "Piso" (construir),
+  // painel próprio (activeCategory === "tamanho" mais abaixo) sem
+  // paleta nenhuma pra procurar -- só os controles +/- de largura/altura.
+  { id: "tamanho", label: "Tamanho", icon: ResizeIcon },
   // "Assento": ajuste fino (setas) de onde o boneco senta em cada
   // MODELO de móvel sentável -- ver resolveSeatOffset em
   // game/furniture.ts. Só existe aqui dentro do "Editar espaço" (mesma
@@ -5161,7 +5262,7 @@ const EDIT_SECTIONS: {
   id: "moveis" | "construir" | "mapa";
   label: string;
   icon: () => JSX.Element;
-  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
+  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho";
 }[] = [
   // rótulos ajustados a pedido do Douglas: "Minha mesa"->"Mobília",
   // "Construir"->"Piso", "Mapa"->"Parede" (ids internos continuam os
@@ -5180,7 +5281,7 @@ const EDIT_SECTIONS: {
 // entra em "moveis" -- é ajuste fino de móvel sentável, não faz sentido
 // em outra seção.
 const CATEGORY_SECTION: Record<
-  FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta",
+  FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho",
   "moveis" | "construir" | "mapa"
 > = {
   poltrona: "moveis",
@@ -5191,6 +5292,7 @@ const CATEGORY_SECTION: Record<
   assento: "moveis",
   piso: "construir",
   area: "construir",
+  tamanho: "construir",
   divisoria: "mapa",
   "parede-sistema": "mapa",
   porta: "mapa",
@@ -5200,6 +5302,10 @@ function EditPanel({
   activeCategory,
   onChangeCategory,
   isPlatformAdmin,
+  roomGridCols,
+  roomGridRows,
+  gridSizeStatus,
+  onResizeRoom,
   selectedCatalogIndex,
   onSelectCatalog,
   selectedColorId,
@@ -5241,8 +5347,14 @@ function EditPanel({
   onClearAllArea,
   areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta";
-  onChangeCategory: (category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta") => void;
+  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho";
+  onChangeCategory: (
+    category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
+  ) => void;
+  roomGridCols: number;
+  roomGridRows: number;
+  gridSizeStatus: "idle" | "saving" | "error";
+  onResizeRoom: (axis: "cols" | "rows", delta: 1 | -1) => void;
   // Douglas (28/set): "retire essa opcao do catalogo, nao quero que os
   // clientes mexam nisso" -- ver comentário grande em EDIT_CATEGORY_TABS
   // (a aba "Assento" ajusta o MODELO inteiro no catálogo GLOBAL, não só
@@ -5443,6 +5555,63 @@ function EditPanel({
             );
           })}
         </div>
+      )}
+
+      {activeCategory === "tamanho" && (
+        <>
+          <p className="edit-hint">
+            Muda o tamanho da sala, um quadrado por vez. Salva sozinho. O
+            botão "−" fica desativado se ainda tiver piso, móvel, parede,
+            porta ou área bem na borda que seria removida -- apague o que
+            tiver lá primeiro.
+          </p>
+          <div className="room-size-row">
+            <span className="room-size-label">Largura</span>
+            <button
+              type="button"
+              className="room-size-btn"
+              onClick={() => onResizeRoom("cols", -1)}
+              disabled={roomGridCols <= MIN_GRID_SIZE}
+              title="Diminuir largura"
+            >
+              −
+            </button>
+            <span className="room-size-value">{roomGridCols}</span>
+            <button
+              type="button"
+              className="room-size-btn"
+              onClick={() => onResizeRoom("cols", 1)}
+              disabled={roomGridCols >= MAX_GRID_SIZE}
+              title="Aumentar largura"
+            >
+              +
+            </button>
+          </div>
+          <div className="room-size-row">
+            <span className="room-size-label">Altura</span>
+            <button
+              type="button"
+              className="room-size-btn"
+              onClick={() => onResizeRoom("rows", -1)}
+              disabled={roomGridRows <= MIN_GRID_SIZE}
+              title="Diminuir altura"
+            >
+              −
+            </button>
+            <span className="room-size-value">{roomGridRows}</span>
+            <button
+              type="button"
+              className="room-size-btn"
+              onClick={() => onResizeRoom("rows", 1)}
+              disabled={roomGridRows >= MAX_GRID_SIZE}
+              title="Aumentar altura"
+            >
+              +
+            </button>
+          </div>
+          {gridSizeStatus === "saving" && <p className="edit-hint">Salvando…</p>}
+          {gridSizeStatus === "error" && <p className="edit-hint">Não deu pra salvar -- tenta de novo.</p>}
+        </>
       )}
 
       {activeCategory === "piso" ? (
@@ -6195,6 +6364,21 @@ function AreaIcon() {
         strokeDasharray="4 3"
       />
       <circle cx="12" cy="12" r="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+// ícone da aba "Tamanho" (ver EDIT_CATEGORY_TABS) -- um quadrado com
+// setas apontando pra fora nos 2 cantos opostos (expandir/encolher),
+// pra diferenciar visualmente de "Área" (quadrado tracejado com alvo).
+function ResizeIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="6" y="6" width="12" height="12" rx="1.6" />
+      <path d="M14 3.5h6.5V10" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 3.5 14.5 10" strokeLinecap="round" />
+      <path d="M10 20.5H3.5V14" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 20.5 9.5 14" strokeLinecap="round" />
     </svg>
   );
 }
