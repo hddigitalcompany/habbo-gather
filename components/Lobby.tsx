@@ -918,11 +918,16 @@ export default function Lobby({
           <div className="lobby-topbar-tab-wrap">
             <button
               type="button"
-              className={spacesMenuOpen ? "lobby-topbar-tab active" : "lobby-topbar-tab"}
+              // sempre "active" -- é a seção atual (mesma ideia da
+              // bolinha atrás de "PRODUCTS" no print de referência,
+              // que marca a aba selecionada, não se o menu tá aberto;
+              // aberto/fechado é só a setinha girar, ver
+              // lobby-topbar-chevron logo abaixo).
+              className="lobby-topbar-tab active"
               onClick={() => setSpacesMenuOpen((v) => !v)}
               aria-expanded={spacesMenuOpen}
             >
-              Meus espaços
+              <span className="lobby-topbar-tab-label">Meus espaços</span>
               <span className={spacesMenuOpen ? "lobby-topbar-chevron open" : "lobby-topbar-chevron"}>
                 <ChevronIcon />
               </span>
