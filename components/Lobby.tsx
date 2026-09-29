@@ -2164,7 +2164,19 @@ export default function Lobby({
         <div className="lobby-topbar-logo-group">
           {/* semáforo decorativo removido -- pedido do Douglas (28/set):
               "tire isso, esses pontinhos". */}
-          <span className="lobby-topbar-logo">Habbo-gather</span>
+          {/* logo de verdade (pedido do Douglas, 29/set: "minha logo,
+              no lugar de habbo-gather / O x use a loog, o tower,
+              escreve / a fonte é: Raleway") -- o "X" é a marca dele
+              (public/logo-x-dark.png, recortada da logo "X Tower" que
+              ele mandou, recolorida pra escuro porque o topbar aqui é
+              claro -- a original é branca, feita pro fundo escuro do
+              resto do app) e "Tower" é texto de verdade (não imagem),
+              na fonte Raleway (ver --font-raleway em app/layout.tsx). */}
+          <span className="lobby-topbar-logo">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-x-dark.png" alt="" className="lobby-topbar-logo-mark" />
+            <span className="lobby-topbar-logo-text">Tower</span>
+          </span>
         </div>
         <nav className="lobby-topbar-nav">
           <div className="lobby-topbar-tab-wrap">
