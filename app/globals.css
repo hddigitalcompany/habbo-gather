@@ -3653,7 +3653,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(100deg, #16224f 0%, #223a8f 55%, #3f5fc4 100%);
+  /* imagem de fundo mandada pelo Douglas: "coloque essa imagem de
+     fundo no lobby" (degradê azul/preto desfocado). background-color
+     como fallback enquanto a imagem carrega / se falhar, e
+     background-size:cover + position:center pra preencher a tela
+     inteira sem distorcer, igual o gradiente que ela substitui. */
+  background-color: #0b0f22;
+  background-image: url("/assets/lobby-bg.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   padding: 128px 16px 16px;
 }
 
