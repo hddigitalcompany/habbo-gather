@@ -17,8 +17,27 @@ automaticamente (o efeito principal do Gather.town).
 ## O que ainda falta (próximas etapas)
 
 - Sistema de assinatura/pagamento pra liberar acesso.
-- Mais salas, customização de avatar, arte final (a atual é placeholder).
+- Customização de avatar, arte final (a atual é placeholder).
 - Empacotar como app baixável (Windows/Mac).
+
+### Sala modelo (hoje) vs. salas dos clientes (depois)
+
+Decisão do Douglas (29/set): a ÚNICA sala que existe hoje (single-tenant,
+"sala-principal" -- ver ROOM_SLUG em server/roomStore.js) é a **sala
+modelo**: onde toda alteração de funcionalidade (piso, parede, porta,
+formato livre, móvel, etc.) é construída e testada, publicada em
+produção. Ela continua sendo essa sala de referência por enquanto --
+NÃO é uma sala qualquer descartável.
+
+**As "salas padrão" que cada cliente/empresa vai poder criar pra si
+(multi-tenant de verdade -- cada uma com seu próprio piso/parede/
+móvel/formato, isolada das outras) ficam pra DEPOIS**, como tarefa
+separada -- provavelmente usando a sala modelo de hoje como PONTO DE
+PARTIDA (uma cópia do layout dela) pra cada sala nova que um cliente
+criar, em vez de começar toda sala do zero vazia. Enquanto isso não for
+construído, o resto do produto (empresas/perfis/eventos, ver Lobby.tsx)
+já é multi-usuário -- só a sala 3D em si que continua sendo essa única
+instância compartilhada.
 
 ## Como rodar na sua máquina
 
