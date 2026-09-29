@@ -251,15 +251,15 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
 // 29/set: pedido do Douglas "quero uma setinha do lado do card da
 // empresa, abrindo a aba de edicao: Nome fantasia / cnpj / permissoes
 // de exibicao" + "e editar foto de perfil, e foto de banner do card
-// da empresa" -- virou estado editável (companyProfile/
-// setCompanyProfile) em vez de const fixa, pra edição realmente
-// refletir no card ao vivo. Continua tudo local (useState, sem
+// da empresa" (CNPJ removido depois, ver "Tira o cnpj da empresa" --
+// campo/formatCnpj/tipo saíram todos) -- virou estado editável
+// (companyProfile/setCompanyProfile) em vez de const fixa, pra edição
+// realmente refletir no card ao vivo. Continua tudo local (useState, sem
 // persistir em lugar nenhum) pelo MESMO motivo do comentário acima:
 // não tem backend de empresa ainda -- quando existir, isso troca pra
 // vir/salvar no banco em vez de só na memória da aba.
 type CompanyProfile = {
   name: string;
-  cnpj: string;
   handle: string;
   bio: string;
   followers: number;
@@ -275,7 +275,6 @@ type CompanyProfile = {
 
 const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   name: "Empresa Exemplo",
-  cnpj: "",
   handle: "empresaexemplo",
   bio: "Espaço reservado para a empresa patrocinadora em destaque na plataforma.",
   followers: 57,
@@ -284,19 +283,6 @@ const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   bannerUrl: "",
   showNameOnEmployeeProfiles: true,
 };
-
-// digita só número, mostra formatado (00.000.000/0000-00) -- mesma
-// ideia de "formata enquanto digita" de qualquer campo de CPF/CNPJ
-// brasileiro; nunca deixa passar de 14 dígitos.
-function formatCnpj(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 14);
-  let out = digits;
-  if (digits.length > 12) out = digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})$/, "$1.$2.$3/$4-$5");
-  else if (digits.length > 8) out = digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{1,4})$/, "$1.$2.$3/$4");
-  else if (digits.length > 5) out = digits.replace(/^(\d{2})(\d{3})(\d{1,3})$/, "$1.$2.$3");
-  else if (digits.length > 2) out = digits.replace(/^(\d{2})(\d{1,3})$/, "$1.$2");
-  return out;
-}
 
 // mesma ideia de compressPhotoToDataUrl em GameRoom.tsx (recorta
 // quadrado central, reamostra, exporta JPEG pequeno) -- copiada (não
@@ -1491,18 +1477,6 @@ export default function Lobby({
                       placeholder="empresaexemplo"
                       maxLength={30}
                       onChange={(e) => setCompanyProfile((prev) => ({ ...prev, handle: e.target.value }))}
-                    />
-                  </label>
-
-                  <label className="company-edit-field">
-                    <span>CNPJ *</span>
-                    <input
-                      className="company-edit-input"
-                      value={companyProfile.cnpj}
-                      placeholder="00.000.000/0000-00"
-                      inputMode="numeric"
-                      maxLength={18}
-                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, cnpj: formatCnpj(e.target.value) }))}
                     />
                   </label>
                 </div>
