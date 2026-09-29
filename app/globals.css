@@ -4743,7 +4743,12 @@ body {
   z-index: 5;
   display: flex;
   gap: 16px;
-  max-width: min(860px, calc(100vw - 754px));
+  /* pedido do Douglas: "diminui um pouco o corte de exibicao, ta
+     pegando a pontinha de um card" -- 860px sobrava 18px além de 3
+     cards inteiros (3*270 + 2*16 = 842px), suficiente pra mostrar uma
+     tirinha cortada do 4º card. Trocado pro valor exato de 3 cards +
+     2 gaps (842px), sem sobra nenhuma. */
+  max-width: min(842px, calc(100vw - 754px));
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
