@@ -126,21 +126,26 @@ type RoomShape = {
 // nenhum. slug É o valor mandado pro servidor (PartySocket.room e
 // "?room=" nas chamadas REST, ver roomSlug em GameRoom.tsx), label é
 // só o texto do botão.
-// ownerOnly: true -- pedido do Douglas (29/set): "seguinte o cliente so
-// vai ver Mapa modelo, apenas eu vejo o Mapa Publicado" -- "Sala
-// principal" (Mapa Publicada, onde as funcionalidades são testadas/
-// construídas, ver README) só aparece no dropdown pra quem é OWNER da
-// sala (mesmo papel de sempre, ver isOwner/fetch de /api/room/members
-// mais abaixo); "Mapa modelo" aparece pra todo mundo. Isso é só
-// visibilidade de TELA (o dropdown não lista/oferece o botão) -- não é
-// uma trava de servidor nova (o servidor sempre aceitou qualquer slug,
-// ver comentário grande "MULTI-SALA" em server/roomStore.js), então
-// não é uma garantia de segurança de verdade contra alguém client-side
-// forçando a URL/room manualmente -- é o mesmo nível de confiança que
-// canEditRoom em GameRoom.tsx já usa pra esconder o editor de espaço.
-const ROOM_SLUGS: { slug: string; label: string; ownerOnly: boolean }[] = [
-  { slug: "sala-principal", label: "Sala principal", ownerOnly: true },
-  { slug: "mapa-modelo", label: "Mapa modelo", ownerOnly: false },
+// teamOnly: true -- pedido do Douglas (29/set): "seguinte o cliente so
+// vai ver Mapa modelo, apenas eu vejo o Mapa Publicado... minha equipe
+// vai entrar na minha sala por link de convidado" -- "Sala principal"
+// (Mapa Publicada, a sala PRIVADA do Douglas, onde as funcionalidades
+// são testadas/construídas, ver README) só aparece no dropdown pra
+// quem já é do time dele: role "owner" (ele mesmo) OU "member" (quem
+// redimiu um convite dele, ver app/api/room/invite/redeem/route.ts --
+// esse convite JÁ existe e já é assim que o time entra, não é feature
+// nova). Um "visitor" (cliente qualquer, sem convite nenhum) só vê
+// "Mapa modelo". Ver roomRole/canSeeSalaPrincipal no fetch de
+// /api/room/members mais abaixo. Isso é só visibilidade de TELA (o
+// dropdown não lista/oferece o botão) -- não é uma trava de servidor
+// nova (o servidor sempre aceitou qualquer slug, ver comentário grande
+// "MULTI-SALA" em server/roomStore.js), então não é uma garantia de
+// segurança de verdade contra alguém client-side forçando a URL/room
+// manualmente -- é o mesmo nível de confiança que canEditRoom em
+// GameRoom.tsx já usa pra esconder o editor de espaço.
+const ROOM_SLUGS: { slug: string; label: string; teamOnly: boolean }[] = [
+  { slug: "sala-principal", label: "Sala principal", teamOnly: true },
+  { slug: "mapa-modelo", label: "Mapa modelo", teamOnly: false },
 ];
 
 const PREVIEW_W = 264;
@@ -1359,22 +1364,27 @@ export default function Lobby({
   onSignOut: (() => void) | null;
 }) {
   const [presence, setPresence] = useState<PresenceInfo>(null);
-  // dono da sala ou não (ver comentário grande "ownerOnly" em
+  // papel na sala do Douglas (ver comentário grande "teamOnly" em
   // ROOM_SLUGS acima) -- MESMA fonte que GameRoom.tsx já usa pra
   // canEditRoom (GET /api/room/members com o access token, ver efeito
   // logo abaixo), só que buscado aqui no Lobby (ANTES de entrar em
   // sala nenhuma) porque é o que decide quais itens de "Meus espaços"
-  // aparecem. Começa false de propósito (esconde "Sala principal" até
-  // confirmar que é dono, nunca o contrário -- evita um flash do botão
-  // aparecendo e sumindo pra quem não é dono).
-  const [isOwner, setIsOwner] = useState(false);
+  // aparecem. Começa "visitor" de propósito (esconde "Sala principal"
+  // até confirmar owner/member, nunca o contrário -- evita um flash do
+  // botão aparecendo e sumindo pra quem não devia ver).
+  const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
+  // "Sala principal" (Mapa Publicada) é a sala PRIVADA do Douglas --
+  // só ele (owner) e quem ele convidou pro time (member, ver comentário
+  // grande "teamOnly" acima) enxergam ela em "Meus espaços". Um
+  // "visitor" (cliente qualquer) nunca vê.
+  const canSeeSalaPrincipal = roomRole === "owner" || roomRole === "member";
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
   // mais abaixo/ROOM_SLUGS acima) -- "mapa-modelo" por padrão (visível
-  // pra todo mundo); vira "sala-principal" sozinho quando confirma que
-  // é o dono (ver efeito logo abaixo), preservando o comportamento de
-  // sempre pro Douglas, mas só DEPOIS de confirmar (nunca busca/mostra
-  // o preview da Sala principal pra quem não é dono, nem por um
-  // instante).
+  // pra todo mundo); vira "sala-principal" sozinho quando confirma
+  // owner/member (ver efeito logo abaixo), preservando o comportamento
+  // de sempre pro time do Douglas, mas só DEPOIS de confirmar (nunca
+  // busca/mostra o preview da Sala principal pra quem não devia ver,
+  // nem por um instante).
   const [selectedRoomSlug, setSelectedRoomSlug] = useState<string>("mapa-modelo");
   // true assim que a pessoa mexe no dropdown à mão -- trava o efeito
   // de auto-selecionar "sala-principal" pro dono acima de rodar de
@@ -1630,30 +1640,33 @@ export default function Lobby({
     };
   }, [selectedRoomSlug]);
 
-  // confere se é dono da sala (ver comentário grande "ownerOnly" em
-  // ROOM_SLUGS/isOwner acima) -- mesma rota que GameRoom.tsx usa pra
+  // confere o papel na sala do Douglas (ver comentário grande "teamOnly"
+  // em ROOM_SLUGS/roomRole acima) -- mesma rota que GameRoom.tsx usa pra
   // canEditRoom (GET /api/room/members), só que chamada aqui no Lobby.
-  // Sem token (visitante sem conta, ou conta ainda carregando), nunca é
-  // dono -- fica no "mapa-modelo" padrão, mesmo comportamento de visitante
-  // de sempre.
+  // Sem token (visitante sem conta, ou conta ainda carregando), fica
+  // "visitor" -- fica no "mapa-modelo" padrão, mesmo comportamento de
+  // cliente/visitante de sempre.
   useEffect(() => {
     let cancelled = false;
     if (!accountAccessToken) {
-      setIsOwner(false);
+      setRoomRole("visitor");
       return;
     }
     fetch("/api/room/members", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled) return;
-        const owner = data?.role === "owner";
-        setIsOwner(owner);
-        // dono cai direto na Sala principal por padrão (comportamento de
-        // sempre), a menos que já tenha escolhido algo no dropdown à mão.
-        if (owner && !userPickedRoomRef.current) setSelectedRoomSlug("sala-principal");
+        const role: "owner" | "member" | "visitor" =
+          data?.role === "owner" || data?.role === "member" ? data.role : "visitor";
+        setRoomRole(role);
+        // owner/member (time do Douglas, convidado por link, ver
+        // comentário grande "teamOnly" acima) cai direto na Sala
+        // principal por padrão (comportamento de sempre), a menos que já
+        // tenha escolhido algo no dropdown à mão.
+        if (role !== "visitor" && !userPickedRoomRef.current) setSelectedRoomSlug("sala-principal");
       })
       .catch(() => {
-        if (!cancelled) setIsOwner(false);
+        if (!cancelled) setRoomRole("visitor");
       });
     return () => {
       cancelled = true;
@@ -1661,9 +1674,9 @@ export default function Lobby({
   }, [accountAccessToken]);
 
   // itens realmente mostrados no dropdown "Meus espaços" (ver
-  // comentário grande "ownerOnly" em ROOM_SLUGS acima) -- quem não é
-  // dono só vê "Mapa modelo".
-  const visibleRoomSlugs = ROOM_SLUGS.filter((r) => !r.ownerOnly || isOwner);
+  // comentário grande "teamOnly" em ROOM_SLUGS acima) -- quem não é do
+  // time do Douglas (owner/member) só vê "Mapa modelo".
+  const visibleRoomSlugs = ROOM_SLUGS.filter((r) => !r.teamOnly || canSeeSalaPrincipal);
 
   // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
   // causa raiz: o Lobby não abre WebSocket de propósito (ver
