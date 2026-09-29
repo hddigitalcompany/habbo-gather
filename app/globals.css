@@ -4043,7 +4043,9 @@ body {
   top: 128px;
   bottom: 100px;
   left: 292px;
-  width: 820px;
+  /* pedido do Douglas: "diminui 1/3 desse card de edicao na largura"
+     -- era 820px, 1/3 a menos = 820 * 2/3 ≈ 547px. */
+  width: 547px;
   max-width: calc(100vw - 292px - 16px);
   z-index: 7;
   display: flex;
@@ -4059,7 +4061,7 @@ body {
   color: #f5f0ff;
 }
 
-@media (max-width: 1300px) {
+@media (max-width: 1024px) {
   .company-edit-panel {
     width: calc(100vw - 292px - 16px);
   }
