@@ -3915,16 +3915,18 @@ body {
    quero o card da Empresa selecionada / Copie EXATAMENTE TUDO, ate os
    textos, cores, padrao de texto, verificado, tudo" (print de
    referência: card de perfil de marca no X/Twitter). O LAYOUT foi
-   copiado exatamente: metade clara em cima com frase de efeito
-   centralizada em caixa alta (com o par de pontinhos separador, ver
-   .company-card-tagline-dots), logo em caixa arredondada com borda
-   preta "vazando" pra metade de baixo, metade preta embaixo com nome
-   + selo verificado azul, @arroba, bio, seguidores/seguindo e link. O
-   CONTEÚDO é um molde/exemplo (ver CompanyProfile/DEFAULT_COMPANY_PROFILE em Lobby.tsx) em
-   vez dos dados reais da empresa do print, porque reproduzir o
-   nome/@arroba/selo verificado de uma empresa real aqui dentro
-   passaria a impressão falsa de que ela é parceira/verificada no
-   habbo-gather.
+   copiado exatamente: metade clara em cima (a faixa de banner, ver
+   .company-card-top), logo em caixa arredondada com borda preta
+   "vazando" pra metade de baixo, metade preta embaixo com nome + selo
+   verificado azul, @arroba, bio, seguidores/seguindo e link. (A faixa
+   de cima TINHA um texto/frase de efeito desenhado por cima também,
+   mas o Douglas apontou: "a frase no caso e a imagem do banner, nao e
+   um texto" -- removido, ver comentário em .company-card-top.) O
+   CONTEÚDO é um molde/exemplo (ver CompanyProfile/DEFAULT_COMPANY_PROFILE
+   em Lobby.tsx) em vez dos dados reais da empresa do print, porque
+   reproduzir o nome/@arroba/selo verificado de uma empresa real aqui
+   dentro passaria a impressão falsa de que ela é parceira/verificada
+   no habbo-gather.
 
    Primeira versão era um dropdown que abria clicando num chip no
    canto DIREITO da barra (do lado do card da conta) -- o Douglas
@@ -4091,55 +4093,22 @@ body {
 /* metade clara de cima -- frase de efeito (duas linhas + par de
    pontinhos separador, igual print) + logo "vazando" pra metade de
    baixo. */
+/* 29/set: pedido do Douglas "a frase no caso e a imagem do banner,
+   nao e um texto" -- essa faixa clara é só a MOLDURA da foto de
+   banner (companyProfile.bannerUrl, background cover/center) ou, sem
+   foto ainda, um retângulo liso na mesma cor de antes. Sem
+   texto/tagline desenhado por cima (isso era conteúdo inventado meu
+   -- o texto do print de referência fazia parte do design ORIGINAL
+   do banner da Obrazur). min-height mantém a proporção do card
+   parecida com a versão anterior mesmo sem o texto ocupando espaço,
+   e dá espaço suficiente pra logo "vazar" pra baixo (ver
+   .company-card-logo-box). */
 .company-card-top {
   position: relative;
+  min-height: 130px;
   background: #f3efe6;
   background-size: cover;
   background-position: center;
-  padding: 30px 18px 42px;
-  text-align: center;
-}
-
-/* tinta clara por cima do banner (quando tem foto, ver
-   companyProfile.bannerUrl) -- sem isso a frase de efeito escura fica
-   ilegível dependendo da foto escolhida; com a tinta ela sempre lê
-   como se estivesse sobre o mesmo fundo claro de antes. z-index:1 +
-   .company-card-tagline com position:relative/z-index:2 (ver abaixo)
-   -- sem isso um elemento position:absolute pinta por CIMA de texto
-   normal (não-posicionado) mesmo vindo antes no DOM, e a tinta cobria
-   o texto. */
-.company-card-top-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: rgba(243, 239, 230, 0.62);
-}
-
-.company-card-tagline {
-  position: relative;
-  z-index: 2;
-  margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #211f2b;
-  line-height: 1.7;
-}
-
-.company-card-tagline-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  margin: 3px 0;
-}
-
-.company-card-tagline-dots span {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #211f2b;
 }
 
 .company-card-logo-box {

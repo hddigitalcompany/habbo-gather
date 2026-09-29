@@ -261,8 +261,6 @@ type CompanyProfile = {
   name: string;
   cnpj: string;
   handle: string;
-  tagline: string;
-  taglineEnd: string;
   bio: string;
   following: number;
   followers: number;
@@ -280,8 +278,6 @@ const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   name: "Empresa Exemplo",
   cnpj: "",
   handle: "empresaexemplo",
-  tagline: "MARCA EM DESTAQUE",
-  taglineEnd: "AQUI VOCÊ BRILHA.",
   bio: "Espaço reservado para a empresa patrocinadora em destaque na plataforma.",
   following: 24,
   followers: 57,
@@ -1297,19 +1293,19 @@ export default function Lobby({
           companyEditOpen/DEFAULT_COMPANY_PROFILE lá em cima). */}
       <div className="lobby-company-card-pin">
         <div className="company-card">
+          {/* 29/set: pedido do Douglas "a frase no caso e a imagem do
+              banner, nao e um texto" -- tirei o texto/frase de efeito
+              que eu tinha desenhado por cima (era conteúdo INVENTADO
+              meu, o print de referência só tinha aquele texto porque
+              fazia parte do design ORIGINAL do banner da Obrazur, não
+              porque o app deveria desenhar um texto ali). Essa faixa
+              clara agora é só a moldura da foto de banner mesmo (ver
+              companyProfile.bannerUrl) -- sem overlay/tinta em cima
+              (não tem mais texto pra proteger a legibilidade de). */}
           <div
             className="company-card-top"
             style={companyProfile.bannerUrl ? { backgroundImage: `url(${companyProfile.bannerUrl})` } : undefined}
           >
-            {companyProfile.bannerUrl && <div className="company-card-top-overlay" />}
-            <p className="company-card-tagline">
-              {companyProfile.tagline}
-              <span className="company-card-tagline-dots" aria-hidden="true">
-                <span />
-                <span />
-              </span>
-              {companyProfile.taglineEnd}
-            </p>
             <div className="company-card-logo-box">
               {companyProfile.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
