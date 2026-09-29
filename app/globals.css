@@ -3652,7 +3652,17 @@ body {
   z-index: 500;
   display: flex;
   align-items: center;
-  justify-content: center;
+  /* 29/set: pedido do Douglas "fixa o card da Sala no lado direito,
+     respeitando os espacamentos padroes" -- .lobby-card era o único
+     filho ainda no fluxo normal do flex (topbar/company-card-pin/
+     av-bar já são todos position:absolute|fixed, fora do fluxo),
+     então só ele responde a justify-content. Trocado de `center` pra
+     `flex-end`: ele encosta na borda direita respeitando o MESMO
+     padding:16px que já existia aqui (o "espaçamento padrão" usado
+     em toda a barra/card da empresa/av-bar), sem precisar de nenhum
+     valor novo. Continua centralizado verticalmente (align-items
+     não mudou). */
+  justify-content: flex-end;
   /* imagem de fundo mandada pelo Douglas: "coloque essa imagem de
      fundo no lobby" (degradê azul/preto desfocado). background-color
      como fallback enquanto a imagem carrega / se falhar, e
