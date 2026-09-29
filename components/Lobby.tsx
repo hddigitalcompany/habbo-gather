@@ -659,6 +659,31 @@ function formatCallWhen(startTs: number): string {
   });
 }
 
+// pedido do Douglas: "faca uma previa da agenda conforme a foto
+// enviada" -- print de referência com 3 cards (um por dia com
+// compromisso), cada um com um "selo" de data (29 Set / Terça-feira)
+// + a lista de eventos daquele dia. Formatação em pt-BR sem depender
+// de toLocaleDateString({month:"short"}) pra não vir com ponto/"de"
+// (ex: "29 de set."), que não bate com o print ("29 Set").
+const AGENDA_MONTH_ABBR_PT = [
+  "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+];
+
+function formatAgendaDayBadge(ts: number): { day: string; month: string; weekday: string } {
+  const d = new Date(ts);
+  const weekdayRaw = d.toLocaleDateString("pt-BR", { weekday: "long" });
+  return {
+    day: String(d.getDate()).padStart(2, "0"),
+    month: AGENDA_MONTH_ABBR_PT[d.getMonth()],
+    weekday: weekdayRaw.charAt(0).toUpperCase() + weekdayRaw.slice(1),
+  };
+}
+
+function formatAgendaEventTime(startTs: number, durationMinutes: number): string {
+  const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${fmt(new Date(startTs))} - ${fmt(new Date(startTs + durationMinutes * 60000))}`;
+}
+
 /** Painel de chat do Lobby -- lista de conversas -> clicar abre o
  * histórico + campo de resposta. Ver comentário grande no topo do
  * arquivo pra entender o porquê de tudo aqui ser REST (sem WebSocket,
@@ -1305,6 +1330,28 @@ export default function Lobby({
     [calls, myUserId]
   );
 
+  // agrupa os compromissos futuros (calls, já vem do /agenda/summary
+  // de verdade -- ver useEffect logo acima) por dia, pega os 3
+  // próximos dias que têm pelo menos 1 evento, ordenados por data --
+  // é a "previa da agenda" pedida pelo Douglas, mostrada no lobby.
+  const agendaPreviewDays = useMemo(() => {
+    if (!calls || calls.length === 0) return [];
+    const now = Date.now();
+    const byDay = new Map<string, CallSummary[]>();
+    for (const call of calls) {
+      if (call.startTs < now - 5 * 60 * 1000) continue; // já passou
+      const d = new Date(call.startTs);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const list = byDay.get(key);
+      if (list) list.push(call);
+      else byDay.set(key, [call]);
+    }
+    return Array.from(byDay.values())
+      .map((items) => [...items].sort((a, b) => a.startTs - b.startTs))
+      .sort((a, b) => a[0].startTs - b[0].startTs)
+      .slice(0, 3);
+  }, [calls]);
+
   return (
     <div className="lobby-backdrop">
       {/* barra de topo -- pedido do Douglas (28/set, com print de
@@ -1796,6 +1843,64 @@ export default function Lobby({
           </div>
         </>
       )}
+
+      {/* pedido do Douglas, com print de referência (3 cards "29 Set /
+          30 Set / 02 Out", cada um com PRÓXIMOS + lista de eventos +
+          contagem, e um botão "Abrir minha agenda" embaixo): "faca uma
+          previa da agenda conforme a foto enviada, embaixo um botao
+          direto pra agenda dele abrindo todas as funcionalidades
+          dela". Os dados são os `calls` de verdade (mesmo
+          /agenda/summary que já alimenta o LobbyAgendaPanel/av-bar --
+          ver agendaPreviewDays acima), então o que aparece aqui é
+          real, não mockado. O botão só abre o MESMO
+          LobbyAgendaPanel de sempre (setAgendaPanelOpen(true)) --
+          "todas as funcionalidades dela" já existem lá (aceitar/
+          recusar compromisso etc), não precisa duplicar nada. Fica
+          antes de .lobby-card no fluxo do flex (justify-content:
+          flex-end em .lobby-backdrop), então os dois ficam colados um
+          no outro, encostados na borda direita junto. */}
+      <div className="lobby-agenda-preview">
+        {agendaPreviewDays.length > 0 ? (
+          <div className="lobby-agenda-preview-cards">
+            {agendaPreviewDays.map((items) => {
+              const badge = formatAgendaDayBadge(items[0].startTs);
+              return (
+                <div key={items[0].id} className="lobby-agenda-day-card">
+                  <div className="lobby-agenda-day-left">
+                    <div className="lobby-agenda-day-badge">
+                      <span className="lobby-agenda-day-badge-num">{badge.day}</span>
+                      <span className="lobby-agenda-day-badge-month">{badge.month}</span>
+                    </div>
+                    <p className="lobby-agenda-day-weekday">{badge.weekday}</p>
+                    <span className="lobby-agenda-day-count">
+                      {items.length} {items.length === 1 ? "evento" : "eventos"}
+                    </span>
+                  </div>
+                  <div className="lobby-agenda-day-right">
+                    <span className="lobby-agenda-day-label">Próximos</span>
+                    <ul className="lobby-agenda-day-events">
+                      {items.slice(0, 4).map((call, i) => (
+                        <li key={call.id} className={`lobby-agenda-event-item tone-${i % 4}`}>
+                          <p className="lobby-agenda-event-title">{call.title}</p>
+                          <p className="lobby-agenda-event-time">
+                            {formatAgendaEventTime(call.startTs, call.durationMinutes)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="lobby-agenda-preview-empty">Nenhum compromisso agendado.</p>
+        )}
+        <button type="button" className="lobby-agenda-open-btn" onClick={() => setAgendaPanelOpen(true)}>
+          <AgendaIcon />
+          Abrir minha agenda
+        </button>
+      </div>
 
       <div className="lobby-card">
         <div className="lobby-sign">

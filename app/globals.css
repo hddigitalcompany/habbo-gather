@@ -3663,6 +3663,10 @@ body {
      valor novo. Continua centralizado verticalmente (align-items
      não mudou). */
   justify-content: flex-end;
+  /* agora tem 2 filhos no fluxo (a prévia da agenda + .lobby-card) --
+     gap entre os dois, mesmo valor padrão de 16px usado no resto do
+     layout. */
+  gap: 16px;
   /* imagem de fundo mandada pelo Douglas: "coloque essa imagem de
      fundo no lobby" (degradê azul/preto desfocado). background-color
      como fallback enquanto a imagem carrega / se falhar, e
@@ -4717,6 +4721,195 @@ body {
    (.lobby-panel, .members-panel, .items-panel/.settings-panel logo
    abaixo -- os dois últimos são compartilhados com a sala de verdade
    também, GameRoom.tsx). */
+/* prévia da agenda -- pedido do Douglas, print de referência (3
+   cards de dia + botão "Abrir minha agenda" embaixo). Escondida em
+   telas menores (mesmo espírito de .company-card-pin/.company-edit-panel
+   sumirem em telas estreitas) -- 3 cards de 270px + o card da Sala
+   (400px) + o card da empresa (290px) juntos só cabem confortável em
+   telas bem largas; a agenda continua acessível pelo ícone dela na
+   av-bar mesmo com isso escondido. */
+.lobby-agenda-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 860px;
+  max-width: 100%;
+}
+
+@media (max-width: 1300px) {
+  .lobby-agenda-preview {
+    display: none;
+  }
+}
+
+.lobby-agenda-preview-cards {
+  display: flex;
+  gap: 16px;
+}
+
+.lobby-agenda-day-card {
+  width: 270px;
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(110, 90, 170, 0.22), rgba(14, 11, 22, 0.62));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.lobby-agenda-day-left {
+  flex: 0 0 auto;
+  width: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.lobby-agenda-day-badge {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: linear-gradient(160deg, #4f7dfb, #8b5cf6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  line-height: 1.05;
+}
+
+.lobby-agenda-day-badge-num {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.lobby-agenda-day-badge-month {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.lobby-agenda-day-weekday {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #f0edf9;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.lobby-agenda-day-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #cfc4e6;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.lobby-agenda-day-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.lobby-agenda-day-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9d8fc9;
+}
+
+.lobby-agenda-day-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.lobby-agenda-event-item {
+  padding-left: 9px;
+  border-left: 3px solid #7c5cff;
+}
+
+.lobby-agenda-event-item.tone-1 {
+  border-left-color: #4f7dfb;
+}
+
+.lobby-agenda-event-item.tone-2 {
+  border-left-color: #ff6ec7;
+}
+
+.lobby-agenda-event-item.tone-3 {
+  border-left-color: #34d399;
+}
+
+.lobby-agenda-event-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lobby-agenda-event-time {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #b7b2c9;
+}
+
+.lobby-agenda-preview-empty {
+  margin: 0;
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: rgba(20, 16, 31, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cfc4e6;
+  font-size: 13px;
+  text-align: center;
+}
+
+.lobby-agenda-open-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 12, 24, 0.55);
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.lobby-agenda-open-btn:hover {
+  background: rgba(124, 92, 255, 0.25);
+  border-color: rgba(124, 92, 255, 0.5);
+}
+
+.lobby-agenda-open-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 .lobby-card {
   width: 400px;
   max-width: 100%;
