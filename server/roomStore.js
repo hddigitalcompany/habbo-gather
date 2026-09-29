@@ -12,15 +12,50 @@
 // doors, areaDefs, areaTiles, areaOwners, furniture,
 // furnitureSeatOffsets), só troca ONDE mora -- não virou um schema
 // relacional de verdade de propósito (menor risco, migração
-// praticamente igual ao formato antigo). Chaveado por ROOM_SLUG (hoje
-// sempre "sala-principal", mesmo valor hardcoded no PartySocket do
-// cliente) em vez de public.rooms.id porque o servidor ainda não foi
-// migrado pra multi-tenant de verdade (Task #63 maior, ainda
-// pendente) -- essa mudança resolve só a DURABILIDADE.
+// praticamente igual ao formato antigo).
+//
+// MULTI-SALA (29/set, pedido do Douglas: "Mapa de teste (depois) / Mapa
+// publicada (essa) / Mapa modelo (ja pode criar um, mesmo que sem
+// decoracao, so pra gente estruturar como vai ser pros clientes)") --
+// esse arquivo ERA um singleton de verdade: uma `store` só, um
+// `ROOM_SLUG` fixo ("sala-principal"), carregada uma vez com top-level
+// await no boot do processo. Virou um Map<roomSlug, store> (ver
+// `ensureStore` abaixo) -- cada sala (hoje: "sala-principal" = Mapa
+// Publicada, "mapa-modelo" = Mapa Modelo) tem seu PRÓPRIO blob,
+// carregado sob demanda (na primeira vez que alguém pede aquele slug) e
+// cacheado em memória depois disso, mesma ideia de bootStore de sempre,
+// só que agora parametrizada por slug em vez de uma constante. A sala
+// padrão ("sala-principal") continua pré-aquecida no boot do módulo
+// (ver `await ensureStore(DEFAULT_ROOM_SLUG)` lá embaixo) pra não mudar
+// a latência de hoje em nada -- só uma sala NOVA (tipo "mapa-modelo")
+// paga o custo de um boot (1 leitura no Supabase) na primeira vez que
+// alguém entra nela.
+//
+// Por causa disso, getRoomShape/getFloor/getWalls/getDoors/
+// getAreaState/getAreaOwners/getFurnitureState e todos os setters
+// PARARAM de ser síncronos (liam de um cache em memória carregado uma
+// vez no boot) -- agora recebem `roomSlug` como PRIMEIRO argumento e
+// devolvem Promise (await `ensureStore(roomSlug)` antes de ler/mudar
+// qualquer coisa). Todo call site em server/index.js precisou virar
+// `await roomStore.get/setAlgumaCoisa(roomSlug, ...)` -- ver
+// comentários lá.
+//
+// Ainda NÃO é multi-tenant de verdade (Task #63 maior, ainda pendente):
+// continua chaveado por um SLUG texto (hoje só "sala-principal" e
+// "mapa-modelo" existem, mesmo valor que o cliente manda no PartySocket
+// e nas chamadas REST /room/*), não por public.rooms.id/dono/permissão
+// nenhuma -- qualquer slug que alguém mandar cria uma sala nova vazia
+// na hora (comportamento igual a "sala-principal" antes dessa mudança:
+// sempre existiu, nunca pediu permissão pra existir). Isso é de
+// propósito nessa passada: o pedido do Douglas foi "so pra gente
+// estruturar como vai ser pros clientes", não ownership/RLS/catálogo de
+// sala ainda (isso fica pra quando o `public.rooms` -- migration 0032,
+// ainda sem nenhum código lendo ela -- entrar em uso de verdade).
 //
 // Se SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não estiverem configurados
 // nesse processo (mesmo esquema de fallback de server/roomAuth.js),
-// cai pro arquivo local de sempre (data/room.json) em vez de travar --
+// cai pro arquivo local de sempre (data/room.json pra "sala-principal",
+// data/room.<slug>.json pra qualquer outro slug) em vez de travar --
 // só afeta ambiente sem Supabase configurado (não devia acontecer em
 // produção/staging, os dois já têm essas variáveis, ver README).
 //
@@ -44,14 +79,12 @@
 // espaco, se nao nao troca" -- ver setAreaOwner/getAreaOwners/
 // removeAreaOwner abaixo.
 //
-// getFloor/getWalls/getDoors/getAreaState/getAreaOwners/
-// getFurnitureState continuam SÍNCRONOS de propósito (leem de um cache
-// em memória, `store`, carregado uma vez no boot) -- nenhum call site
-// em server/index.js precisou mudar. Só o carregamento inicial
-// (bootStore, chamado com top-level await lá embaixo) e persist() (que
-// grava no Supabase) viraram assíncronos -- persist() é best-effort,
-// chamado sem await pelos setters (mesmo comportamento de antes: a
-// escrita em disco também não era esperada por quem chamava).
+// persist() (que grava no Supabase/disco) continua best-effort, chamada
+// sem await pelos setters (mesmo comportamento de antes: a escrita não
+// era esperada por quem chamava) -- só a LEITURA (ensureStore) que
+// virou algo que todo call site precisa esperar agora, porque antes de
+// esperar ela simplesmente não existia como conceito (só rodava uma vez
+// no boot do processo inteiro).
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
@@ -60,9 +93,32 @@ import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
-const STORE_PATH = path.join(DATA_DIR, "room.json");
 
-const ROOM_SLUG = "sala-principal";
+export const DEFAULT_ROOM_SLUG = "sala-principal";
+// slug só pode ter letras/números/hífen (mesma ideia de um "handle" --
+// vem de query string em requests REST, ver roomSlugFromUrl em
+// server/index.js, então precisa ser seguro pra virar nome de arquivo
+// em disco -- ver storePathFor abaixo -- e pra ir numa cláusula
+// .eq(...) do Supabase). Qualquer slug fora desse formato (ou vazio)
+// cai pro padrão -- nunca trava a chamada, só ignora um slug malformado
+// e usa "sala-principal" no lugar dele.
+const SLUG_PATTERN = /^[a-z0-9-]{1,80}$/;
+
+function normalizeSlug(roomSlug) {
+  const slug = typeof roomSlug === "string" ? roomSlug.trim() : "";
+  return slug && SLUG_PATTERN.test(slug) ? slug : DEFAULT_ROOM_SLUG;
+}
+
+/** Caminho do arquivo local pra um slug -- a sala padrão continua
+ * usando EXATAMENTE data/room.json (mesmo nome de sempre, sem migração
+ * nenhuma pra quem já tinha esse arquivo); qualquer sala nova (ex:
+ * "mapa-modelo") ganha o próprio arquivo (data/room.<slug>.json), pra
+ * não colidir com a padrão. */
+function storePathFor(roomSlug) {
+  if (roomSlug === DEFAULT_ROOM_SLUG) return path.join(DATA_DIR, "room.json");
+  return path.join(DATA_DIR, `room.${roomSlug}.json`);
+}
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const admin =
@@ -248,78 +304,119 @@ function normalizeStore(parsed) {
 
 /** Fallback de sempre (arquivo local) -- usado quando o Supabase não tá
  * configurado nesse processo, ou se a leitura no Supabase falhar. */
-function loadStoreFromFile() {
+function loadStoreFromFile(roomSlug) {
+  const storePath = storePathFor(roomSlug);
   try {
-    if (!existsSync(STORE_PATH)) return emptyStore();
-    const raw = readFileSync(STORE_PATH, "utf8");
+    if (!existsSync(storePath)) return emptyStore();
+    const raw = readFileSync(storePath, "utf8");
     return normalizeStore(JSON.parse(raw));
   } catch (e) {
-    console.error("Não deu pra ler data/room.json, começando do zero.", e);
+    console.error(`Não deu pra ler ${storePath}, começando do zero.`, e);
     return emptyStore();
   }
 }
 
-function persistToFile(snapshot) {
+function persistToFile(roomSlug, snapshot) {
+  const storePath = storePathFor(roomSlug);
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(STORE_PATH, JSON.stringify(snapshot), "utf8");
+    writeFileSync(storePath, JSON.stringify(snapshot), "utf8");
   } catch (e) {
-    console.error("Não deu pra salvar data/room.json", e);
+    console.error(`Não deu pra salvar ${storePath}`, e);
   }
 }
 
-/** Carrega o estado inicial da sala -- Supabase quando configurado
- * (tabela room_layout_state, ver migration 0034), senão cai pro
- * arquivo local de sempre. Se o Supabase estiver configurado mas AINDA
- * não tiver linha pra ROOM_SLUG (primeiro boot depois desse deploy), e
- * existir um data/room.json local (sala decorada antes dessa
- * migração, ainda no disco DESSE boot), usa ele como ponto de partida
- * e já sobe pro Supabase na hora -- migração automática, sem passo
- * manual, só funciona nesse primeiro boot (disco local não sobrevive
- * a um serviço recriado do zero, por isso a pressa em subir assim que
- * possível). */
-async function bootStore() {
-  if (!admin) return loadStoreFromFile();
+/** Carrega o estado inicial de UMA sala (roomSlug) -- Supabase quando
+ * configurado (tabela room_layout_state, ver migration 0034), senão cai
+ * pro arquivo local de sempre. Se o Supabase estiver configurado mas
+ * AINDA não tiver linha pra esse slug (primeiro boot desse slug depois
+ * desse deploy, ou sala nova tipo "mapa-modelo" entrando pela primeira
+ * vez), e existir um arquivo local pra esse mesmo slug (sala decorada
+ * antes dessa migração, ainda no disco DESSE boot), usa ele como ponto
+ * de partida e já sobe pro Supabase na hora -- migração automática, sem
+ * passo manual, só funciona nesse primeiro boot daquele slug (disco
+ * local não sobrevive a um serviço recriado do zero, por isso a pressa
+ * em subir assim que possível). Sem arquivo nenhum (caso normal de uma
+ * sala nova, tipo "mapa-modelo" na primeira vez), começa de emptyStore()
+ * mesmo -- é assim que uma sala nasce vazia. */
+async function bootStore(roomSlug) {
+  if (!admin) return loadStoreFromFile(roomSlug);
   try {
     const { data, error } = await admin
       .from("room_layout_state")
       .select("data")
-      .eq("room_slug", ROOM_SLUG)
+      .eq("room_slug", roomSlug)
       .maybeSingle();
     if (error) throw error;
     if (data?.data) return normalizeStore(data.data);
     // sem linha ainda no Supabase -- tenta herdar do arquivo local
     // desse boot (pode não existir, tudo bem, emptyStore() nesse caso).
-    const fromFile = loadStoreFromFile();
+    const fromFile = loadStoreFromFile(roomSlug);
     await admin
       .from("room_layout_state")
-      .upsert({ room_slug: ROOM_SLUG, data: fromFile, updated_at: new Date().toISOString() });
+      .upsert({ room_slug: roomSlug, data: fromFile, updated_at: new Date().toISOString() });
     return fromFile;
   } catch (e) {
-    console.error("Não deu pra carregar a sala do Supabase, caindo pro arquivo local.", e);
-    return loadStoreFromFile();
+    console.error(`Não deu pra carregar a sala "${roomSlug}" do Supabase, caindo pro arquivo local.`, e);
+    return loadStoreFromFile(roomSlug);
   }
 }
 
-const store = await bootStore();
+// Map<roomSlug, store> -- cache em memória de cada sala já carregada
+// (ver comentário grande "MULTI-SALA" no topo do arquivo). Map<roomSlug,
+// Promise<store>> separado pro boot em andamento -- evita 2 boots
+// concorrentes da MESMA sala nova se 2 requests chegarem juntos antes do
+// primeiro terminar (ex: GET /room/shape?room=mapa-modelo e GET
+// /room/floor?room=mapa-modelo quase juntos, ver GameRoom.tsx que
+// dispara várias chamadas em paralelo ao entrar numa sala).
+const storeCache = new Map();
+const bootingCache = new Map();
 
-/** Grava o estado atual -- Supabase quando configurado, senão o
- * arquivo local de sempre. Best-effort/assíncrono (mesmo contrato de
- * antes: quem chama não espera a escrita terminar) -- erro só vai pro
- * log, nunca derruba a chamada que gerou a mudança (o dado já está
- * certo em memória, é só a gravação que pode falhar). */
-async function persist() {
+/** Devolve (e cacheia) a store de UM slug -- todo getter/setter abaixo
+ * começa chamando isso. Primeira vez que um slug aparece: dispara
+ * bootStore(slug) (1 leitura no Supabase/disco) e cacheia a Promise pra
+ * quem pedir de novo enquanto isso ainda tá em andamento reaproveitar a
+ * MESMA leitura em vez de disparar outra; depois de resolvida, guarda o
+ * objeto de verdade em storeCache e todo pedido seguinte é síncrono na
+ * prática (Promise.resolve de um valor já em mãos). */
+function ensureStore(roomSlug) {
+  const slug = normalizeSlug(roomSlug);
+  if (storeCache.has(slug)) return Promise.resolve(storeCache.get(slug));
+  if (bootingCache.has(slug)) return bootingCache.get(slug);
+  const booting = bootStore(slug).then((store) => {
+    storeCache.set(slug, store);
+    bootingCache.delete(slug);
+    return store;
+  });
+  bootingCache.set(slug, booting);
+  return booting;
+}
+
+// pré-aquece a sala padrão ("sala-principal" = Mapa Publicada) no boot
+// do módulo -- preserva EXATAMENTE a latência de hoje pra ela (já
+// carregada em memória antes do primeiro request chegar, mesmo
+// comportamento do antigo `const store = await bootStore()`). Só uma
+// sala NOVA (ex: "mapa-modelo") paga o custo de esperar 1 leitura na
+// primeira vez que alguém entra nela -- ver ensureStore acima.
+await ensureStore(DEFAULT_ROOM_SLUG);
+
+/** Grava o estado atual de UM slug -- Supabase quando configurado,
+ * senão o arquivo local de sempre. Best-effort/assíncrono (mesmo
+ * contrato de antes: quem chama não espera a escrita terminar) -- erro
+ * só vai pro log, nunca derruba a chamada que gerou a mudança (o dado já
+ * está certo em memória, é só a gravação que pode falhar). */
+async function persist(roomSlug, store) {
   if (!admin) {
-    persistToFile(store);
+    persistToFile(roomSlug, store);
     return;
   }
   try {
     const { error } = await admin
       .from("room_layout_state")
-      .upsert({ room_slug: ROOM_SLUG, data: store, updated_at: new Date().toISOString() });
+      .upsert({ room_slug: roomSlug, data: store, updated_at: new Date().toISOString() });
     if (error) throw error;
   } catch (e) {
-    console.error("Não deu pra salvar a sala no Supabase.", e);
+    console.error(`Não deu pra salvar a sala "${roomSlug}" no Supabase.`, e);
   }
 }
 
@@ -340,7 +437,8 @@ function sanitizeFloorItem(item) {
  * devolvido pra popular a cena assim que ela fica pronta (ver GET
  * /room/shape em server/index.js, aplicado via MainScene.loadSavedRoomShape
  * chamado de GameRoom.tsx), mesma ideia de getFloor/getWalls/etc. */
-export function getRoomShape() {
+export async function getRoomShape(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return store.roomTiles;
 }
 
@@ -355,15 +453,17 @@ export function getRoomShape() {
  * sala com formato estranho, nunca dado de outra sala/usuário). Devolve
  * null só se a lista sanear pra vazia (nunca aceita esvaziar a sala de
  * verdade). */
-export function setRoomShape(items) {
+export async function setRoomShape(roomSlug, items) {
   const clean = sanitizeRoomTiles(items);
   if (clean.length === 0) return null;
+  const store = await ensureStore(roomSlug);
   store.roomTiles = clean;
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return clean;
 }
 
-export function getFloor() {
+export async function getFloor(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return store.floor;
 }
 
@@ -371,11 +471,12 @@ export function getFloor() {
  * estado completo, não um diff -- ver onDraftFloorChange em
  * MainScene.ts). Itens inválidos são descartados silenciosamente em vez
  * de rejeitar a chamada inteira. Devolve a lista realmente salva. */
-export function setFloor(items) {
+export async function setFloor(roomSlug, items) {
   if (!Array.isArray(items)) return null;
   const clean = items.slice(0, MAX_FLOOR_ITEMS).map(sanitizeFloorItem).filter(Boolean);
+  const store = await ensureStore(roomSlug);
   store.floor = clean;
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return clean;
 }
 
@@ -395,17 +496,19 @@ function sanitizeWallItem(item) {
   return { col, row, side, styleId };
 }
 
-export function getWalls() {
+export async function getWalls(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return store.walls;
 }
 
 /** Substitui a parede inteira pela lista mandada -- mesma ideia de
  * setFloor acima (sempre o estado completo, não um diff). */
-export function setWalls(items) {
+export async function setWalls(roomSlug, items) {
   if (!Array.isArray(items)) return null;
   const clean = items.slice(0, MAX_WALL_ITEMS).map(sanitizeWallItem).filter(Boolean);
+  const store = await ensureStore(roomSlug);
   store.walls = clean;
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return clean;
 }
 
@@ -428,17 +531,19 @@ function sanitizeDoorItem(item) {
   return { col, row, side, styleId, facing };
 }
 
-export function getDoors() {
+export async function getDoors(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return store.doors;
 }
 
 /** Substitui a porta inteira pela lista mandada -- mesma ideia de
  * setWalls acima (sempre o estado completo, não um diff). */
-export function setDoors(items) {
+export async function setDoors(roomSlug, items) {
   if (!Array.isArray(items)) return null;
   const clean = items.slice(0, MAX_DOOR_ITEMS).map(sanitizeDoorItem).filter(Boolean);
+  const store = await ensureStore(roomSlug);
   store.doors = clean;
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return clean;
 }
 
@@ -471,7 +576,8 @@ function sanitizeAreaTile(item) {
   return { col, row, areaId };
 }
 
-export function getAreaState() {
+export async function getAreaState(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return { list: store.areaDefs, tiles: store.areaTiles };
 }
 
@@ -481,13 +587,14 @@ export function getAreaState() {
  * bate com NENHUMA área da lista mandada é descartado (pode acontecer
  * se o cliente apagou a área mas ainda tinha um tile dela em rascunho) --
  * devolve null se `list`/`tiles` não vierem como array. */
-export function setAreaState(payload) {
+export async function setAreaState(roomSlug, payload) {
   if (!payload || typeof payload !== "object") return null;
   if (!Array.isArray(payload.list) || !Array.isArray(payload.tiles)) return null;
   const list = payload.list.slice(0, MAX_AREA_DEFS).map(sanitizeAreaDef).filter(Boolean);
   const rawTiles = payload.tiles.slice(0, MAX_AREA_TILES).map(sanitizeAreaTile).filter(Boolean);
   const validIds = new Set(list.map((a) => a.id));
   const tiles = rawTiles.filter((t) => validIds.has(t.areaId));
+  const store = await ensureStore(roomSlug);
   store.areaDefs = list;
   store.areaTiles = tiles;
   // uma área apagada (id que não existe mais na lista nova) leva a posse
@@ -497,15 +604,17 @@ export function setAreaState(payload) {
   for (const areaId of Object.keys(store.areaOwners)) {
     if (!validIds.has(areaId)) delete store.areaOwners[areaId];
   }
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return { list, tiles };
 }
 
 /** Posse de mesa privada persistida -- { [areaId]: { userId, name } },
  * ver comentário grande de "areaOwners" em emptyStore acima. Devolve o
  * objeto de verdade (não cópia) -- só server/index.js lê isso, sempre
- * síncrono, sem risco de mutação concorrente (Node é single-thread). */
-export function getAreaOwners() {
+ * dentro do mesmo processo Node (single-thread), sem risco de mutação
+ * concorrente. */
+export async function getAreaOwners(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return store.areaOwners;
 }
 
@@ -515,24 +624,26 @@ export function getAreaOwners() {
  * o jogador de novo depois (ver comentário grande de areaOwners acima).
  * Sobrescreve sem confirmar nada -- quem chama (claim-area) já confere
  * que a área tá livre antes. */
-export function setAreaOwner(areaId, userId, name) {
+export async function setAreaOwner(roomSlug, areaId, userId, name) {
   const cleanAreaId = String(areaId ?? "").slice(0, MAX_AREA_NAME_LEN);
   const cleanUserId = String(userId ?? "").slice(0, MAX_ID_LEN);
   const cleanName = String(name ?? "").slice(0, MAX_AREA_NAME_LEN);
   if (!cleanAreaId || !cleanUserId || !cleanName) return null;
   const entry = { userId: cleanUserId, name: cleanName };
+  const store = await ensureStore(roomSlug);
   store.areaOwners[cleanAreaId] = entry;
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return entry;
 }
 
 /** Solta a posse de UMA área (ver "release-area"/"force-release-area" em
  * server/index.js) -- não confirma dono nenhum, quem chama já conferiu. */
-export function removeAreaOwner(areaId) {
+export async function removeAreaOwner(roomSlug, areaId) {
   const cleanAreaId = String(areaId ?? "").slice(0, MAX_AREA_NAME_LEN);
+  const store = await ensureStore(roomSlug);
   if (!cleanAreaId || !(cleanAreaId in store.areaOwners)) return false;
   delete store.areaOwners[cleanAreaId];
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return true;
 }
 
@@ -597,7 +708,8 @@ function sanitizeSeatOffsets(raw) {
   return out;
 }
 
-export function getFurnitureState() {
+export async function getFurnitureState(roomSlug) {
+  const store = await ensureStore(roomSlug);
   return { items: store.furniture, seatOffsets: store.furnitureSeatOffsets };
 }
 
@@ -605,13 +717,14 @@ export function getFurnitureState() {
  * só (mesmo esquema combinado de setAreaState acima -- o editor sempre
  * manda os dois juntos, ver autosave em GameRoom.tsx). Devolve null se
  * `items`/`seatOffsets` não vierem no formato esperado. */
-export function setFurnitureState(payload) {
+export async function setFurnitureState(roomSlug, payload) {
   if (!payload || typeof payload !== "object") return null;
   if (!Array.isArray(payload.items)) return null;
   const items = payload.items.slice(0, MAX_FURNITURE_ITEMS).map(sanitizeFurnitureItem).filter(Boolean);
   const seatOffsets = sanitizeSeatOffsets(payload.seatOffsets);
+  const store = await ensureStore(roomSlug);
   store.furniture = items;
   store.furnitureSeatOffsets = seatOffsets;
-  persist();
+  persist(normalizeSlug(roomSlug), store);
   return { items, seatOffsets };
 }

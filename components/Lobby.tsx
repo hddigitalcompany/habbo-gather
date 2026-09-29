@@ -114,6 +114,23 @@ type RoomShape = {
   walls: WallSegment[];
 } | null;
 
+// espaços clicáveis em "Meus espaços" (ver dropdown mais abaixo) --
+// pedido do Douglas (29/set): "Mapa de teste (depois) / Mapa publicada
+// (essa) / Mapa modelo (ja pode criar um, mesmo que sem decoracao, so
+// pra gente estruturar como vai ser pros clientes)". "Mapa de teste"
+// fica de fora por enquanto (adiado, ver README -- "duplica e joga os
+// testes pra la" só quando a base ficar mais estável); os 2 daqui já
+// existem de verdade no servidor (ver DEFAULT_ROOM_SLUG/comentário
+// grande "MULTI-SALA" em server/roomStore.js) -- "mapa-modelo" nasce
+// vazio na primeira vez que alguém entra nele, sem passo manual
+// nenhum. slug É o valor mandado pro servidor (PartySocket.room e
+// "?room=" nas chamadas REST, ver roomSlug em GameRoom.tsx), label é
+// só o texto do botão.
+const ROOM_SLUGS: { slug: string; label: string }[] = [
+  { slug: "sala-principal", label: "Sala principal" },
+  { slug: "mapa-modelo", label: "Mapa modelo" },
+];
+
 const PREVIEW_W = 264;
 const PREVIEW_H = 168;
 const PREVIEW_PAD = 10;
@@ -1324,10 +1341,14 @@ export default function Lobby({
 }: {
   accountUserId: string | null;
   accountProfile: Partial<AccountProfile> | null;
-  onEnter: () => void;
+  onEnter: (roomSlug: string) => void;
   onSignOut: (() => void) | null;
 }) {
   const [presence, setPresence] = useState<PresenceInfo>(null);
+  // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
+  // mais abaixo/ROOM_SLUGS acima) -- "sala-principal" (Mapa Publicada)
+  // por padrão, mesmo espaço de sempre pra quem nunca mexeu no menu.
+  const [selectedRoomSlug, setSelectedRoomSlug] = useState<string>(ROOM_SLUGS[0].slug);
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
@@ -1528,7 +1549,7 @@ export default function Lobby({
     // dele própria (ver requestMedia lá), sem isso os dois ficariam
     // segurando o mesmo dispositivo ao mesmo tempo por um instante.
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    onEnter();
+    onEnter(selectedRoomSlug);
   }
 
   useEffect(() => {
@@ -1544,12 +1565,20 @@ export default function Lobby({
     };
   }, []);
 
+  // refaz a busca do "mapinha" toda vez que a seleção em "Meus espaços"
+  // muda (ver selectedRoomSlug acima) -- cada slug tem seu PRÓPRIO piso/
+  // parede/mobília agora (ver comentário grande "MULTI-SALA" em
+  // server/roomStore.js), então o preview precisa mandar "?room=" igual
+  // GameRoom.tsx faz (ver roomApiPath lá), senão mostraria sempre o
+  // preview da sala padrão mesmo com "Mapa modelo" selecionado.
   useEffect(() => {
     let cancelled = false;
+    setRoomLoading(true);
+    const qs = `?room=${encodeURIComponent(selectedRoomSlug)}`;
     Promise.all([
-      fetch(`${REALTIME_HTTP_BASE}/room/floor`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${REALTIME_HTTP_BASE}/room/walls`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${REALTIME_HTTP_BASE}/room/furniture`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${REALTIME_HTTP_BASE}/room/floor${qs}`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${REALTIME_HTTP_BASE}/room/walls${qs}`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${REALTIME_HTTP_BASE}/room/furniture${qs}`).then((r) => (r.ok ? r.json() : null)),
     ])
       .then(([floorData, wallsData, furnitureData]) => {
         if (cancelled) return;
@@ -1568,7 +1597,7 @@ export default function Lobby({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedRoomSlug]);
 
   // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
   // causa raiz: o Lobby não abre WebSocket de propósito (ver
@@ -1787,9 +1816,33 @@ export default function Lobby({
               <>
                 <div className="lobby-topbar-dropdown-backdrop" onClick={() => setSpacesMenuOpen(false)} />
                 <div className="lobby-topbar-dropdown">
-                  <button type="button" className="lobby-topbar-dropdown-item active">
-                    Sala principal
-                  </button>
+                  {/* 29/set, pedido do Douglas: "Mapa publicada (essa) /
+                      Mapa modelo (ja pode criar um, mesmo que sem
+                      decoracao, so pra gente estruturar como vai ser
+                      pros clientes)" -- 2 espaços clicáveis agora (ver
+                      ROOM_SLUGS no topo do arquivo), no lugar do único
+                      botão fixo "Sala principal" de antes (não
+                      reagia a clique nenhum). Clicar troca só a
+                      SELEÇÃO (selectedRoomSlug) -- entrar de verdade
+                      continua sendo o botão "Entrar na sala" lá embaixo
+                      (handleEnter), mesmo fluxo de sempre. */}
+                  {ROOM_SLUGS.map((r) => (
+                    <button
+                      key={r.slug}
+                      type="button"
+                      className={
+                        r.slug === selectedRoomSlug
+                          ? "lobby-topbar-dropdown-item active"
+                          : "lobby-topbar-dropdown-item"
+                      }
+                      onClick={() => {
+                        setSelectedRoomSlug(r.slug);
+                        setSpacesMenuOpen(false);
+                      }}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
                 </div>
               </>
             )}

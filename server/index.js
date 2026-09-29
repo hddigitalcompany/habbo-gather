@@ -294,8 +294,8 @@ function livePlayerIdForUserId(room, userId) {
 /** Monta o registro de posse de UMA área pronto pra mandar pro cliente
  * (broadcast "area-owner" ou dentro de "init", ver protocolo lá em
  * cima) -- null se essa área não tem dono nenhum persistido. */
-function areaOwnerWireEntry(room, areaId) {
-  const entry = roomStore.getAreaOwners()[areaId];
+function areaOwnerWireEntry(room, areaId, owners) {
+  const entry = owners[areaId];
   if (!entry) return null;
   return { areaId, playerId: livePlayerIdForUserId(room, entry.userId), name: entry.name };
 }
@@ -307,11 +307,11 @@ function areaOwnerWireEntry(room, areaId) {
  * quem já tava na sala atualizar a bolinha de status da mesa dele na
  * hora (online -> cinza de "offline" ou vice-versa), sem esperar o
  * próximo claim/release de QUALQUER mesa acontecer por acaso. */
-function broadcastAreaOwnershipFor(room, userId) {
-  const owners = roomStore.getAreaOwners();
+async function broadcastAreaOwnershipFor(room, roomId, userId) {
+  const owners = await roomStore.getAreaOwners(roomId);
   for (const areaId of Object.keys(owners)) {
     if (owners[areaId].userId !== userId) continue;
-    const wire = areaOwnerWireEntry(room, areaId);
+    const wire = areaOwnerWireEntry(room, areaId, owners);
     if (wire) broadcast(room, { type: "area-owner", ...wire });
   }
 }
@@ -351,9 +351,9 @@ function doorLockKey(col, row, side) {
  * Sem área "mesa-privada" nenhuma dos 2 lados, devolve null -- a porta
  * continua funcionando (abre por proximidade), só ninguém consegue
  * travá-la manualmente. */
-function doorGuardedAreaId(col, row, side) {
+async function doorGuardedAreaId(col, row, side, roomId) {
   const neighbor = side === "colPlus" ? { col: col + 1, row } : { col, row: row + 1 };
-  const { list, tiles } = roomStore.getAreaState();
+  const { list, tiles } = await roomStore.getAreaState(roomId);
   for (const t of [{ col, row }, neighbor]) {
     const tile = tiles.find((x) => x.col === t.col && x.row === t.row);
     if (!tile) continue;
@@ -647,6 +647,19 @@ function handleServeUpload(req, res, pathname) {
   createReadStream(filePath).pipe(res);
 }
 
+/** Extrai o slug da sala (ver comentário grande "MULTI-SALA" em
+ * server/roomStore.js) do query string de uma rota REST /room/* -- ex:
+ * GET /room/shape?room=mapa-modelo. Sem "?room=" (todo request de hoje,
+ * antes do Lobby ganhar um 2º espaço clicável -- ver Lobby.tsx), cai
+ * pro slug padrão (roomStore trata undefined como DEFAULT_ROOM_SLUG
+ * sozinho) -- é assim que "sala-principal" continua funcionando
+ * IDÊNTICO a antes, sem precisar mandar "?room=sala-principal" toda
+ * vez. */
+function roomSlugFromUrl(url) {
+  const raw = url.searchParams.get("room");
+  return raw && raw.trim() ? raw.trim().slice(0, 80) : undefined;
+}
+
 /** GET /room/shape -- formato salvo da sala (ver comentário grande de
  * roomTiles em roomStore.js), pedido do Douglas: "eu quero adicionar
  * mais piso alem do limite que ja tem da sala, quero aumentar a sala"
@@ -654,14 +667,16 @@ function handleServeUpload(req, res, pathname) {
  * que ela fica pronta (ver MainScene.loadSavedRoomShape, chamado pelo
  * React em GameRoom.tsx), mesma ideia/mesmo formato de resposta
  * ({items: [...]}) de handleGetFloor logo abaixo. */
-function handleGetShape(req, res) {
+async function handleGetShape(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ items: roomStore.getRoomShape() }));
+  res.end(JSON.stringify({ items: await roomStore.getRoomShape(roomSlug) }));
 }
 
 /** POST /room/shape -- mesma trava/mesmo limite de tamanho de corpo de
  * handlePostFloor abaixo (só o DONO da sala salva em produção). */
-async function handlePostShape(req, res) {
+async function handlePostShape(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
@@ -693,7 +708,7 @@ async function handlePostShape(req, res) {
     chunks.push(chunk);
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     if (aborted) return;
     let data;
     try {
@@ -703,7 +718,7 @@ async function handlePostShape(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setRoomShape(data?.items);
+    const saved = await roomStore.setRoomShape(roomSlug, data?.items);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
       res.end('Corpo precisa ter "items" (array, nunca vazio -- a sala não pode ficar sem tile nenhum)');
@@ -717,21 +732,24 @@ async function handlePostShape(req, res) {
 /** GET /room/floor -- ver comentário grande no topo do arquivo. Devolve o
  * piso salvo pra popular a cena assim que ela fica pronta (ver
  * loadSavedFloor em MainScene.ts, chamado pelo React em GameRoom.tsx). */
-function handleGetFloor(req, res) {
+async function handleGetFloor(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ items: roomStore.getFloor() }));
+  res.end(JSON.stringify({ items: await roomStore.getFloor(roomSlug) }));
 }
 
 /** GET /room/walls -- mesma ideia de handleGetFloor acima, ver
  * game/wall.ts (WallSegmentDef) e loadSavedWall em MainScene.ts. */
-function handleGetWalls(req, res) {
+async function handleGetWalls(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ items: roomStore.getWalls() }));
+  res.end(JSON.stringify({ items: await roomStore.getWalls(roomSlug) }));
 }
 
 /** POST /room/walls -- mesma ideia/travas de handlePostFloor acima, só
  * troca roomStore.setFloor por roomStore.setWalls. */
-async function handlePostWalls(req, res) {
+async function handlePostWalls(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
@@ -763,7 +781,7 @@ async function handlePostWalls(req, res) {
     chunks.push(chunk);
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     if (aborted) return;
     let data;
     try {
@@ -773,7 +791,7 @@ async function handlePostWalls(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setWalls(data?.items);
+    const saved = await roomStore.setWalls(roomSlug, data?.items);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
       res.end('Corpo precisa ter "items" (array)');
@@ -790,14 +808,16 @@ async function handlePostWalls(req, res) {
 
 /** GET /room/doors -- mesma ideia de handleGetWalls acima, ver
  * game/door.ts (DoorSegmentDef) e loadSavedDoors em MainScene.ts. */
-function handleGetDoors(req, res) {
+async function handleGetDoors(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ items: roomStore.getDoors() }));
+  res.end(JSON.stringify({ items: await roomStore.getDoors(roomSlug) }));
 }
 
 /** POST /room/doors -- mesma ideia/travas de handlePostWalls acima, só
  * troca roomStore.setWalls por roomStore.setDoors. */
-async function handlePostDoors(req, res) {
+async function handlePostDoors(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
@@ -829,7 +849,7 @@ async function handlePostDoors(req, res) {
     chunks.push(chunk);
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     if (aborted) return;
     let data;
     try {
@@ -839,7 +859,7 @@ async function handlePostDoors(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setDoors(data?.items);
+    const saved = await roomStore.setDoors(roomSlug, data?.items);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
       res.end('Corpo precisa ter "items" (array)');
@@ -1232,8 +1252,9 @@ function handleGetAgendaSummary(req, res, url) {
  * juntos (ver getAreaState em roomStore.js) -- posse (quem clicou
  * "Assumir mesa") NÃO vem por aqui, chega pelo WebSocket (ver "init"
  * acima/roomStore.getAreaOwners). */
-function handleGetAreas(req, res) {
-  const { list, tiles } = roomStore.getAreaState();
+async function handleGetAreas(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
+  const { list, tiles } = await roomStore.getAreaState(roomSlug);
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
   res.end(JSON.stringify({ list, tiles }));
 }
@@ -1242,8 +1263,9 @@ function handleGetAreas(req, res) {
  * a mobília colocada + o ajuste de assento por modelo (ver
  * loadSavedFurniture/setSeatOffsets em MainScene.ts, chamado pelo React em
  * GameRoom.tsx). */
-function handleGetFurniture(req, res) {
-  const { items, seatOffsets } = roomStore.getFurnitureState();
+async function handleGetFurniture(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
+  const { items, seatOffsets } = await roomStore.getFurnitureState(roomSlug);
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
   res.end(JSON.stringify({ items, seatOffsets }));
 }
@@ -1273,7 +1295,8 @@ async function callerIsOwner(req) {
  * antes disso aqui, em produção o servidor recusava TODO mundo, mesmo o
  * dono (bug -- o editor abria, parecia salvar, mas sempre dava "Erro ao
  * salvar" assim que saía do ambiente de dev). */
-async function handlePostFloor(req, res) {
+async function handlePostFloor(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
@@ -1305,7 +1328,7 @@ async function handlePostFloor(req, res) {
     chunks.push(chunk);
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     if (aborted) return;
     let data;
     try {
@@ -1315,7 +1338,7 @@ async function handlePostFloor(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setFloor(data?.items);
+    const saved = await roomStore.setFloor(roomSlug, data?.items);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
       res.end('Corpo precisa ter "items" (array)');
@@ -1334,7 +1357,8 @@ async function handlePostFloor(req, res) {
  * callerIsOwner), só troca roomStore.setFloor por
  * roomStore.setAreaState (ver validação em server/roomStore.js --
  * espera { list, tiles } em vez de { items }). */
-async function handlePostAreas(req, res) {
+async function handlePostAreas(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
@@ -1366,7 +1390,7 @@ async function handlePostAreas(req, res) {
     chunks.push(chunk);
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     if (aborted) return;
     let data;
     try {
@@ -1376,7 +1400,7 @@ async function handlePostAreas(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setAreaState(data);
+    const saved = await roomStore.setAreaState(roomSlug, data);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
       res.end('Corpo precisa ter "list" e "tiles" (arrays)');
@@ -1395,7 +1419,8 @@ async function handlePostAreas(req, res) {
  * (ver callerIsOwner), só troca roomStore.setAreaState por
  * roomStore.setFurnitureState (ver validação em server/roomStore.js --
  * espera { items, seatOffsets } em vez de { list, tiles }). */
-async function handlePostFurniture(req, res) {
+async function handlePostFurniture(req, res, url) {
+  const roomSlug = roomSlugFromUrl(url);
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
@@ -1427,7 +1452,7 @@ async function handlePostFurniture(req, res) {
     chunks.push(chunk);
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     if (aborted) return;
     let data;
     try {
@@ -1437,7 +1462,7 @@ async function handlePostFurniture(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setFurnitureState(data);
+    const saved = await roomStore.setFurnitureState(roomSlug, data);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
       res.end('Corpo precisa ter "items" (array)');
@@ -1472,62 +1497,62 @@ const httpServer = createServer((req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/room/shape") {
-    handleGetShape(req, res);
+    handleGetShape(req, res, url);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/room/shape") {
-    handlePostShape(req, res);
+    handlePostShape(req, res, url);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/room/floor") {
-    handleGetFloor(req, res);
+    handleGetFloor(req, res, url);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/room/floor") {
-    handlePostFloor(req, res);
+    handlePostFloor(req, res, url);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/room/walls") {
-    handleGetWalls(req, res);
+    handleGetWalls(req, res, url);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/room/walls") {
-    handlePostWalls(req, res);
+    handlePostWalls(req, res, url);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/room/doors") {
-    handleGetDoors(req, res);
+    handleGetDoors(req, res, url);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/room/doors") {
-    handlePostDoors(req, res);
+    handlePostDoors(req, res, url);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/room/areas") {
-    handleGetAreas(req, res);
+    handleGetAreas(req, res, url);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/room/areas") {
-    handlePostAreas(req, res);
+    handlePostAreas(req, res, url);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/room/furniture") {
-    handleGetFurniture(req, res);
+    handleGetFurniture(req, res, url);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/room/furniture") {
-    handlePostFurniture(req, res);
+    handlePostFurniture(req, res, url);
     return;
   }
 
@@ -1620,7 +1645,7 @@ const heartbeatInterval = setInterval(() => {
 }, HEARTBEAT_INTERVAL_MS);
 wss.on("close", () => clearInterval(heartbeatInterval));
 
-wss.on("connection", (ws, req) => {
+wss.on("connection", async (ws, req) => {
   ws.isAlive = true;
   ws.on("pong", () => {
     ws.isAlive = true;
@@ -1667,6 +1692,8 @@ wss.on("connection", (ws, req) => {
   connectionsById.set(id, { ws, player });
   registerUserConnection(player.userId, ws);
 
+  const initAreaOwners = await roomStore.getAreaOwners(roomId);
+
   ws.send(
     JSON.stringify({
       type: "init",
@@ -1676,8 +1703,8 @@ wss.on("connection", (ws, req) => {
       // protocolo lá em cima) -- sem isso, quem entra DEPOIS de alguém
       // já ter clicado "Tomar posse" só veria o dono na tela depois do
       // PRÓXIMO claim/release de qualquer área, não do estado atual.
-      areaOwners: Object.keys(roomStore.getAreaOwners())
-        .map((areaId) => areaOwnerWireEntry(room, areaId))
+      areaOwners: Object.keys(initAreaOwners)
+        .map((areaId) => areaOwnerWireEntry(room, areaId, initAreaOwners))
         .filter(Boolean),
       // portas já travadas agora (mesmo motivo do areaOwners acima --
       // sem isso, quem entra DEPOIS de alguém travar uma porta só veria
@@ -1757,7 +1784,7 @@ wss.on("connection", (ws, req) => {
             // "acordou" (voltou a ficar online) no próximo claim/release
             // de QUALQUER área da sala, por acaso (ver
             // broadcastAreaOwnershipFor acima).
-            broadcastAreaOwnershipFor(room, player.userId);
+            await broadcastAreaOwnershipFor(room, roomId, player.userId);
           }
           syncChatUser(player);
           // roster de "todo mundo cadastrado no ambiente" (ver
@@ -1818,8 +1845,9 @@ wss.on("connection", (ws, req) => {
       case "claim-area": {
         const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
         if (!areaId) break;
-        const owners = roomStore.getAreaOwners();
-        if (owners[areaId]) break; // já tem dono (mesmo offline) -- primeira mensagem a chegar ganha, ignora o resto
+        (async () => {
+        const owners = await roomStore.getAreaOwners(roomId);
+        if (owners[areaId]) return; // já tem dono (mesmo offline) -- primeira mensagem a chegar ganha, ignora o resto
         // pedido do Douglas: "uma pessoa só pode assumir uma mesa por
         // espaço" -- confere se esse MESMO jogador (pelo userId
         // PERSISTENTE agora, ver comentário grande de
@@ -1837,24 +1865,27 @@ wss.on("connection", (ws, req) => {
         const alreadyOwnsAnother = Object.values(owners).some((o) => o.userId === player.userId);
         if (alreadyOwnsAnother) {
           ws.send(JSON.stringify({ type: "claim-area-denied", areaId, reason: "already-owns" }));
-          break;
+          return;
         }
-        roomStore.setAreaOwner(areaId, player.userId, player.name);
+        await roomStore.setAreaOwner(roomId, areaId, player.userId, player.name);
         // pra TODO MUNDO, incluindo quem clicou (diferente do "move"/
         // "seat" acima, que excluem o remetente porque ele já aplicou
         // local -- aqui o cliente só reage a esse broadcast, não aplica
         // otimista, pra não desincronizar numa corrida de dois cliques
         // quase juntos).
         broadcast(room, { type: "area-owner", areaId, playerId: id, name: player.name });
+        })();
         break;
       }
       case "release-area": {
         const areaId = typeof data.areaId === "string" ? data.areaId.slice(0, 100) : "";
         if (!areaId) break;
-        const current = roomStore.getAreaOwners()[areaId];
-        if (!current || current.userId !== player.userId) break; // só quem é dono pode soltar
-        roomStore.removeAreaOwner(areaId);
+        (async () => {
+        const current = (await roomStore.getAreaOwners(roomId))[areaId];
+        if (!current || current.userId !== player.userId) return; // só quem é dono pode soltar
+        await roomStore.removeAreaOwner(roomId, areaId);
         broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
+        })();
         break;
       }
       // "force-release-area" -- pedido do Douglas: "esse tomar posse,
@@ -1881,8 +1912,8 @@ wss.on("connection", (ws, req) => {
           const role = player.userId ? await getRole(player.userId) : null;
           const isCeo = process.env.NODE_ENV !== "production" || role === "owner";
           if (!isCeo) return;
-          if (!roomStore.getAreaOwners()[areaId]) return; // já sem dono -- nada pra destituir
-          roomStore.removeAreaOwner(areaId);
+          if (!(await roomStore.getAreaOwners(roomId))[areaId]) return; // já sem dono -- nada pra destituir
+          await roomStore.removeAreaOwner(roomId, areaId);
           broadcast(room, { type: "area-owner", areaId, playerId: null, name: null });
         })();
         break;
@@ -1899,16 +1930,18 @@ wss.on("connection", (ws, req) => {
         const row = Number.isFinite(Number(data.row)) ? Math.trunc(Number(data.row)) : NaN;
         const side = data.side === "colPlus" || data.side === "rowPlus" ? data.side : null;
         if (!Number.isFinite(col) || !Number.isFinite(row) || !side) break;
-        const areaId = doorGuardedAreaId(col, row, side);
-        if (!areaId) break; // porta sem área "mesa-privada" nos 2 lados -- ninguém trava
-        const owner = roomStore.getAreaOwners()[areaId];
-        if (!owner || owner.userId !== player.userId) break;
+        (async () => {
+        const areaId = await doorGuardedAreaId(col, row, side, roomId);
+        if (!areaId) return; // porta sem área "mesa-privada" nos 2 lados -- ninguém trava
+        const owner = (await roomStore.getAreaOwners(roomId))[areaId];
+        if (!owner || owner.userId !== player.userId) return;
         const key = doorLockKey(col, row, side);
         const locks = getDoorLocks(roomId);
         const locked = data.type === "lock-door";
         if (locked) locks.add(key);
         else locks.delete(key);
         broadcast(room, { type: "door-lock", col, row, side, locked });
+        })();
         break;
       }
       case "signal": {
@@ -2219,7 +2252,7 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", async () => {
     room.delete(id);
     connectionsById.delete(id);
     unregisterUserConnection(player.userId, ws);
@@ -2236,7 +2269,7 @@ wss.on("connection", (ws, req) => {
     // livePlayerIdForUserId (dentro de broadcastAreaOwnershipFor) só acha
     // OUTRA aba/dispositivo dessa mesma pessoa ainda conectada, se
     // houver; sem nenhuma, devolve null de verdade.
-    broadcastAreaOwnershipFor(room, player.userId);
+    await broadcastAreaOwnershipFor(room, roomId, player.userId);
     broadcast(room, { type: "leave", id });
     if (room.size === 0) rooms.delete(roomId);
   });

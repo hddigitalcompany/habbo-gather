@@ -19,6 +19,13 @@ export default function Home() {
   // senão voltaria direto pro Lobby só pra clicar Entrar de novo com
   // outra conta -- mais natural já cair no portão de login.
   const [entered, setEntered] = useState(false);
+  // qual sala foi escolhida em "Meus espaços" antes de clicar "Entrar
+  // na sala" (ver ROOM_SLUGS/selectedRoomSlug em Lobby.tsx) -- pedido
+  // do Douglas (29/set): "Mapa publicada (essa) / Mapa modelo (ja pode
+  // criar um...)". Default "sala-principal" (Mapa Publicada, mesmo
+  // valor de sempre) -- só muda de verdade quando o Lobby manda um
+  // slug diferente pra onEnter.
+  const [roomSlug, setRoomSlug] = useState("sala-principal");
 
   return (
     <main className="page">
@@ -30,12 +37,16 @@ export default function Home() {
               accountProfile={auth.accountProfile}
               accountAccessToken={auth.accountAccessToken}
               onSignOut={auth.onSignOut}
+              roomSlug={roomSlug}
             />
           ) : (
             <Lobby
               accountUserId={auth.accountUserId}
               accountProfile={auth.accountProfile}
-              onEnter={() => setEntered(true)}
+              onEnter={(slug) => {
+                setRoomSlug(slug);
+                setEntered(true);
+              }}
               onSignOut={
                 auth.onSignOut
                   ? () => {

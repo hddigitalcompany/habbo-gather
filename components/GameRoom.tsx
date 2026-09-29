@@ -137,6 +137,15 @@ type GameRoomProps = {
   accountProfile?: Partial<ProfileFields> | null;
   accountAccessToken?: string | null;
   onSignOut?: (() => void) | null;
+  // slug da sala a entrar (ver comentário grande "MULTI-SALA" em
+  // server/roomStore.js) -- pedido do Douglas: "Mapa modelo (ja pode
+  // criar um, mesmo que sem decoracao, so pra gente estruturar como vai
+  // ser pros clientes)". Default "sala-principal" (= Mapa Publicada,
+  // mesmo valor hardcoded de sempre) pra quem já chamava <GameRoom />
+  // sem essa prop continuar entrando EXATAMENTE na mesma sala de antes
+  // -- ver roomSlug escolhido em app/page.tsx (state novo, setado pelo
+  // Lobby) e ROOM_SLUGS em Lobby.tsx.
+  roomSlug?: string;
 };
 
 type RemoteProfile = ProfileFields & { role: string };
@@ -506,6 +515,17 @@ function attachmentUrl(path: string): string {
   return path.startsWith("http") ? path : `${REALTIME_HTTP_BASE}${path}`;
 }
 
+/** Monta a URL de uma rota REST /room/* já com o slug da sala (ver
+ * comentário grande "MULTI-SALA" em server/roomStore.js e
+ * roomSlugFromUrl em server/index.js) -- toda chamada de
+ * GET/POST /room/shape|floor|walls|doors|areas|furniture precisa
+ * passar por aqui agora, em vez de montar `${REALTIME_HTTP_BASE}/room/...`
+ * direto (senão sempre bateria na sala padrão, "sala-principal",
+ * mesmo dentro do Mapa Modelo). */
+function roomApiPath(roomSlug: string, path: string): string {
+  return `${REALTIME_HTTP_BASE}${path}?room=${encodeURIComponent(roomSlug)}`;
+}
+
 function formatFileSize(bytes: number): string {
   if (!bytes) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -569,6 +589,7 @@ export default function GameRoom({
   accountProfile = null,
   accountAccessToken = null,
   onSignOut = null,
+  roomSlug = "sala-principal",
 }: GameRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -1761,7 +1782,7 @@ export default function GameRoom({
     let cancelled = false;
     async function poll() {
       try {
-        const res = await fetch(`${REALTIME_HTTP_BASE}/room/presence`);
+        const res = await fetch(roomApiPath(roomSlug, "/room/presence"));
         const data = await res.json();
         if (!cancelled && res.ok) setPresenceCounts({ memberCount: data.memberCount, visitorCount: data.visitorCount });
       } catch {
@@ -2951,7 +2972,7 @@ export default function GameRoom({
         // antes de mandar qualquer POST, senão o primeiro render
         // (draftRoomShapeItems ainda vazio) salvaria um formato vazio
         // por cima do que já tava salvo antes mesmo da busca responder.
-        fetch(`${REALTIME_HTTP_BASE}/room/shape`)
+        fetch(roomApiPath(roomSlug, "/room/shape"))
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
             if (destroyed) return;
@@ -2972,7 +2993,7 @@ export default function GameRoom({
         fetchAndRegisterCustomAvatarItems();
         fetchDefaultReferences();
         fetchAndRegisterCustomFurniture().finally(() => {
-          fetch(`${REALTIME_HTTP_BASE}/room/furniture`)
+          fetch(roomApiPath(roomSlug, "/room/furniture"))
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
               // trava contra StrictMode/dev double-invoke (ver comentário
@@ -3010,7 +3031,7 @@ export default function GameRoom({
         // um piso salvo usando um estilo CUSTOM carregaria antes da
         // textura dele existir na cena.
         fetchAndRegisterCustomFloor().finally(() => {
-          fetch(`${REALTIME_HTTP_BASE}/room/floor`)
+          fetch(roomApiPath(roomSlug, "/room/floor"))
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
               // ACHADO investigando o erro "TypeError: Cannot read
@@ -3065,7 +3086,7 @@ export default function GameRoom({
         // "textura/estilo não encontrado" de addWallSprite antes do
         // estilo existir em WALL_CATALOG.
         fetchAndRegisterCustomWall().finally(() => {
-          fetch(`${REALTIME_HTTP_BASE}/room/walls`)
+          fetch(roomApiPath(roomSlug, "/room/walls"))
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
               if (destroyed) return;
@@ -3083,7 +3104,7 @@ export default function GameRoom({
         // de addDoorSprite antes do estilo existir em DOOR_CATALOG -- porta
         // é SEMPRE custom hoje, ver comentário grande em game/door.ts).
         fetchAndRegisterCustomDoor().finally(() => {
-          fetch(`${REALTIME_HTTP_BASE}/room/doors`)
+          fetch(roomApiPath(roomSlug, "/room/doors"))
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
               if (destroyed) return;
@@ -3101,7 +3122,7 @@ export default function GameRoom({
         // porque a cor de cada tile pintado vem da área dona dele (ver
         // addAreaTileRect em MainScene.ts, que já precisa da lista
         // carregada antes de desenhar).
-        fetch(`${REALTIME_HTTP_BASE}/room/areas`)
+        fetch(roomApiPath(roomSlug, "/room/areas"))
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
             // trava contra StrictMode/dev double-invoke -- mesmo bug/
@@ -3177,7 +3198,7 @@ export default function GameRoom({
         else scene.events.once("scene-ready", runWhenSceneReady);
       });
 
-      const socket = new PartySocket({ host: REALTIME_HOST, room: "sala-principal" });
+      const socket = new PartySocket({ host: REALTIME_HOST, room: roomSlug });
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
@@ -4086,7 +4107,7 @@ export default function GameRoom({
     if (!floorLoadedRef.current) return;
     const timer = setTimeout(() => {
       setFloorSaveStatus("saving");
-      fetch(`${REALTIME_HTTP_BASE}/room/floor`, {
+      fetch(roomApiPath(roomSlug, "/room/floor"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4116,7 +4137,7 @@ export default function GameRoom({
     if (!roomShapeLoadedRef.current) return;
     const timer = setTimeout(() => {
       setRoomShapeSaveStatus("saving");
-      fetch(`${REALTIME_HTTP_BASE}/room/shape`, {
+      fetch(roomApiPath(roomSlug, "/room/shape"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4141,7 +4162,7 @@ export default function GameRoom({
     if (!wallLoadedRef.current) return;
     const timer = setTimeout(() => {
       setWallSaveStatus("saving");
-      fetch(`${REALTIME_HTTP_BASE}/room/walls`, {
+      fetch(roomApiPath(roomSlug, "/room/walls"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4166,7 +4187,7 @@ export default function GameRoom({
     if (!doorLoadedRef.current) return;
     const timer = setTimeout(() => {
       setDoorSaveStatus("saving");
-      fetch(`${REALTIME_HTTP_BASE}/room/doors`, {
+      fetch(roomApiPath(roomSlug, "/room/doors"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4200,7 +4221,7 @@ export default function GameRoom({
     if (!areaLoadedRef.current) return;
     const timer = setTimeout(() => {
       setAreaSaveStatus("saving");
-      fetch(`${REALTIME_HTTP_BASE}/room/areas`, {
+      fetch(roomApiPath(roomSlug, "/room/areas"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4229,7 +4250,7 @@ export default function GameRoom({
     if (!furnitureLoadedRef.current) return;
     const timer = setTimeout(() => {
       setFurnitureSaveStatus("saving");
-      fetch(`${REALTIME_HTTP_BASE}/room/furniture`, {
+      fetch(roomApiPath(roomSlug, "/room/furniture"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
