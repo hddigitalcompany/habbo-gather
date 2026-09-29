@@ -3748,9 +3748,15 @@ body {
 .lobby-topbar-glow {
   position: absolute;
   inset: -60%;
+  /* Douglas: "os cards tao meio roxeado ou impressao minha?" -- não
+     era impressão, o segundo blob era roxo puro (mesmo roxo de marca,
+     124/92/255) num valor forte demais, competindo com o laranja em
+     vez de só complementar -- trocado por um azul-acinzentado bem
+     mais discreto (mais frio/neutro, menos "roxo"), pro laranja
+     dominar igual no print de referência. */
   background:
     radial-gradient(circle at 12% 30%, rgba(255, 138, 60, 0.28), transparent 55%),
-    radial-gradient(circle at 88% 75%, rgba(124, 92, 255, 0.35), transparent 55%);
+    radial-gradient(circle at 88% 75%, rgba(90, 110, 150, 0.18), transparent 55%);
   filter: blur(34px);
 }
 
@@ -4852,9 +4858,13 @@ body {
   position: absolute;
   inset: -20%;
   z-index: 0;
+  /* Douglas: "os cards tao meio roxeado ou impressao minha?" -- não
+     era impressão, mesmo motivo do brilho da barra superior (ver
+     .lobby-topbar-glow) -- roxo de marca forte demais brigando com o
+     laranja. Trocado por um azul-acinzentado mais discreto. */
   background:
     radial-gradient(circle at 22% 78%, rgba(255, 138, 60, 0.55), transparent 55%),
-    radial-gradient(circle at 78% 18%, rgba(124, 92, 255, 0.45), transparent 55%);
+    radial-gradient(circle at 78% 18%, rgba(90, 110, 150, 0.22), transparent 55%);
   filter: blur(26px);
   pointer-events: none;
 }
