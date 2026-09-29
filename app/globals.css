@@ -3980,11 +3980,13 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-/* metade clara de cima -- frase de efeito + logo + ícones sociais. */
+/* metade clara de cima -- frase de efeito (duas linhas + par de
+   pontinhos separador, igual print) + logo "vazando" pra metade de
+   baixo. */
 .company-card-top {
   position: relative;
   background: #f3efe6;
-  padding: 28px 18px 40px;
+  padding: 30px 18px 42px;
   text-align: center;
 }
 
@@ -3994,8 +3996,23 @@ body {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #6b6558;
-  line-height: 1.6;
+  color: #211f2b;
+  line-height: 1.7;
+}
+
+.company-card-tagline-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin: 3px 0;
+}
+
+.company-card-tagline-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #211f2b;
 }
 
 .company-card-logo-box {
@@ -4014,37 +4031,6 @@ body {
   font-size: 24px;
   font-weight: 800;
   color: #0e0d16;
-}
-
-.company-card-socials {
-  position: absolute;
-  right: 16px;
-  bottom: -16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.company-card-social-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid rgba(14, 13, 22, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #0e0d16;
-}
-
-.company-card-follow-btn {
-  font-size: 12px;
-  font-weight: 700;
-  color: #ffffff;
-  background: #0e0d16;
-  border-radius: 999px;
-  padding: 7px 16px;
-  white-space: nowrap;
 }
 
 /* metade preta de baixo -- nome + selo, @arroba, bio, stats, link. */

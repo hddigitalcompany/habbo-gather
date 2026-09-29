@@ -253,34 +253,10 @@ const FEATURED_COMPANY = {
   tagline: "MARCA EM DESTAQUE",
   taglineEnd: "AQUI VOCÊ BRILHA.",
   bio: "Espaço reservado para a empresa patrocinadora em destaque na plataforma.",
-  following: 0,
-  followers: 0,
+  following: 24,
+  followers: 57,
   link: "habbo-gather.com/empresas",
 };
-
-function XSocialIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M18.9 2H22l-7.6 8.7L23.3 22H16.6l-5.2-6.8L5.4 22H2.3l8.1-9.3L1.5 2h6.9l4.7 6.2L18.9 2Zm-1.2 18h1.7L7.4 4h-1.8l12.1 16Z" />
-    </svg>
-  );
-}
-
-function LinkedInSocialIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM3 9h4v12H3V9Zm7 0h3.8v1.7h.05c.53-.95 1.83-1.95 3.77-1.95 4.03 0 4.78 2.5 4.78 5.75V21h-4v-5.6c0-1.34-.02-3.06-1.87-3.06-1.87 0-2.16 1.46-2.16 2.96V21h-4V9Z" />
-    </svg>
-  );
-}
-
-function ButterflySocialIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 6.2C10.6 3.9 7.4 2.3 4.9 2c-.5 2.9.3 6.6 2.8 8.4-2 .1-3.9 1.1-3.9 3.4 0 2.3 2.1 3 3.6 3-1 .6-1.4 1.5-.9 2.6 1.7-.2 3.6-1.2 4.5-2.7.9 1.5 2.8 2.5 4.5 2.7.5-1.1.1-2-.9-2.6 1.5 0 3.6-.7 3.6-3 0-2.3-1.9-3.3-3.9-3.4 2.5-1.8 3.3-5.5 2.8-8.4-2.5.3-5.7 1.9-7.1 4.2Z" />
-    </svg>
-  );
-}
 
 function VerifiedBadge() {
   return (
@@ -1118,22 +1094,13 @@ export default function Lobby({
                   <div className="company-card-top">
                     <p className="company-card-tagline">
                       {FEATURED_COMPANY.tagline}
-                      <br />
+                      <span className="company-card-tagline-dots" aria-hidden="true">
+                        <span />
+                        <span />
+                      </span>
                       {FEATURED_COMPANY.taglineEnd}
                     </p>
                     <div className="company-card-logo-box">{FEATURED_COMPANY.name.charAt(0)}</div>
-                    <div className="company-card-socials">
-                      <span className="company-card-social-icon">
-                        <XSocialIcon />
-                      </span>
-                      <span className="company-card-social-icon">
-                        <LinkedInSocialIcon />
-                      </span>
-                      <span className="company-card-social-icon">
-                        <ButterflySocialIcon />
-                      </span>
-                      <span className="company-card-follow-btn">Seguir</span>
-                    </div>
                   </div>
                   <div className="company-card-bottom">
                     <p className="company-card-name">
