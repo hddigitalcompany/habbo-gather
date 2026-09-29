@@ -1990,56 +1990,42 @@ body {
 }
 
 /* Painel "Tamanho" (aba nova em EDIT_CATEGORY_TABS, GameRoom.tsx) --
-   pedido do Douglas: "eu quero aumentar ou diminuir a sala, adicionando
-   NOVOS tiles". Mesma paleta escura/dourada do resto do editor de
-   espaço (ver .floor-erase-standalone-btn acima) -- linha "Largura"/
-   "Altura" com um stepper +/- no meio, igual um controle de quantidade
-   comum. */
-.room-size-row {
+   pedido do Douglas: "eu quero adicionar mais piso alem do limite que
+   ja tem da sala, quero aumentar a sala" (formato livre, tile por tile
+   -- ver comentário grande de roomShape em game/MainScene.ts). Mesma
+   pegada visual do toggle "Borda"/"Centro do tile" da parede logo
+   abaixo (.wall-placement-mode-toggle/-btn) -- 2 botões lado a lado
+   (Adicionar/Apagar), mutuamente exclusivos. */
+.room-shape-tool-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.room-size-label {
+.room-shape-tool-btn {
   flex: 1;
-  font-size: 13px;
-  font-weight: 600;
-  color: #ffd28a;
-}
-
-.room-size-value {
-  min-width: 24px;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 800;
-  color: #ffffff;
-}
-
-.room-size-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid #5c4420;
-  background: #3a2a15;
-  color: #ffd28a;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid #5c4420;
+  background: #3a2a15;
+  color: #ffd28a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 6px;
+  cursor: pointer;
 }
 
-.room-size-btn:hover:not(:disabled) {
+.room-shape-tool-btn:hover {
   background: #4a3620;
 }
 
-.room-size-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.room-shape-tool-btn.selected {
+  background: #c98a2e;
+  border-color: #ffbf5c;
+  color: #1c1430;
 }
 
 /* Toggle "Borda"/"Centro do tile" do painel de parede (ver EditPanel em

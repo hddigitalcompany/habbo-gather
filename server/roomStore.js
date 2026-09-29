@@ -77,17 +77,31 @@ const MAX_FLOOR_ITEMS = 2000;
 const MAX_STYLE_ID_LEN = 200;
 const MAX_COORD = 1000;
 
-// tamanho da sala (GRID_COLS/GRID_ROWS, ver game/grid.ts) -- pedido do
-// Douglas: "eu quero aumentar ou diminuir a sala, adicionando NOVOS
-// tiles" (ver aba "Tamanho" no editor de espaço, GameRoom.tsx). MESMOS
-// limites de MIN_GRID_SIZE/MAX_GRID_SIZE em game/grid.ts -- os dois
-// arquivos não se importam entre si (um roda no cliente, outro no
-// servidor), então ficam duplicados de propósito, mantidos em
-// sincronia à mão (qualquer ajuste tem que mudar os dois).
-const MIN_GRID_SIZE = 4;
-const MAX_GRID_SIZE = 24;
+// FORMATO da sala (ver roomShape/isTileInRoom em game/MainScene.ts) --
+// pedido do Douglas: "eu quero adicionar mais piso alem do limite que
+// ja tem da sala, quero aumentar a sala", confirmado como "formato
+// livre, tile por tile" (não esticar um retângulo -- uma tentativa
+// ANTERIOR desse pedido tratava assim, descartada). DEFAULT_GRID_COLS/
+// DEFAULT_GRID_ROWS só geram o retângulo PADRÃO (13x8, mesmo tamanho
+// de sempre) quando a sala ainda não tem roomTiles salvo (ver
+// normalizeStore abaixo) -- não limitam mais o tamanho de verdade em
+// lugar nenhum, isso agora é só quantos tiles cabem em MAX_ROOM_TILES.
 const DEFAULT_GRID_COLS = 12;
 const DEFAULT_GRID_ROWS = 7;
+// generoso (bem mais que o retângulo padrão, 13x8=104), só pra impedir
+// um formato absurdo de travar o servidor ou inchar o arquivo -- mesmo
+// espírito de MAX_FLOOR_ITEMS acima, não pra travar o uso normal.
+const MAX_ROOM_TILES = 2000;
+
+function defaultRoomTiles() {
+  const tiles = [];
+  for (let col = 0; col <= DEFAULT_GRID_COLS; col++) {
+    for (let row = 0; row <= DEFAULT_GRID_ROWS; row++) {
+      tiles.push({ col, row });
+    }
+  }
+  return tiles;
+}
 
 // parede de sistema (ver game/wall.ts) -- mesma grade pequena do
 // piso/área, mesmos limites reaproveitados. MAX_WALL_ITEMS um pouco
@@ -151,14 +165,12 @@ const MAX_SEAT_OFFSET = 500; // px -- bem mais que qualquer ajuste fino de verda
 
 function emptyStore() {
   return {
-    // tamanho da sala (ver MIN_GRID_SIZE/MAX_GRID_SIZE acima) -- CAMPO
-    // NOVO, pedido do Douglas: "eu quero aumentar ou diminuir a sala,
-    // adicionando NOVOS tiles". Default bate com o tamanho fixo de
-    // sempre (GRID_COLS=12/GRID_ROWS=7 em game/grid.ts), pra sala já
-    // salva ANTES dessa feature (sem esses dois campos) continuar do
-    // mesmo tamanho de sempre -- ver normalizeStore abaixo.
-    gridCols: DEFAULT_GRID_COLS,
-    gridRows: DEFAULT_GRID_ROWS,
+    // FORMATO da sala (ver comentário grande acima) -- CAMPO NOVO,
+    // pedido do Douglas. Default é o retângulo de sempre (13x8), pra
+    // sala já salva ANTES dessa feature (sem esse campo) continuar
+    // exatamente do mesmo tamanho/formato de sempre -- ver
+    // normalizeStore abaixo.
+    roomTiles: defaultRoomTiles(),
     floor: [],
     walls: [],
     doors: [],
@@ -182,23 +194,41 @@ function emptyStore() {
   };
 }
 
+/** Valida/saneia a lista de tiles do FORMATO da sala -- devolve []
+ * quando `raw` não é uma lista usável (normalizeStore cai pro
+ * retângulo padrão nesse caso, ver defaultRoomTiles acima) ou uma
+ * lista limpa (col/row inteiros dentro de MAX_COORD, sem duplicata,
+ * capada em MAX_ROOM_TILES) quando é. Mesma ideia de
+ * sanitizeFloorItem/sanitizeWallItem mais abaixo, só que o "item" aqui
+ * é só {col,row}, sem campo nenhum além desses dois. */
+function sanitizeRoomTiles(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const clean = [];
+  for (const item of raw) {
+    if (clean.length >= MAX_ROOM_TILES) break;
+    if (!item || typeof item !== "object") continue;
+    const col = Math.trunc(Number(item.col));
+    const row = Math.trunc(Number(item.row));
+    if (!Number.isFinite(col) || !Number.isFinite(row)) continue;
+    if (Math.abs(col) > MAX_COORD || Math.abs(row) > MAX_COORD) continue;
+    const key = `${col},${row}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push({ col, row });
+  }
+  return clean;
+}
+
 /** Normaliza um blob cru (vindo do arquivo local OU do Supabase) pro
  * formato de sempre -- mesmos fallbacks de campo "novo" que faltava em
  * sala salva antes de alguma feature (walls/doors/areaOwners), agora
  * reaproveitado nos dois carregadores abaixo em vez de duplicado. */
 function normalizeStore(parsed) {
   if (!parsed || typeof parsed !== "object") return emptyStore();
-  const gridCols =
-    Number.isInteger(parsed.gridCols) && parsed.gridCols >= MIN_GRID_SIZE && parsed.gridCols <= MAX_GRID_SIZE
-      ? parsed.gridCols
-      : DEFAULT_GRID_COLS;
-  const gridRows =
-    Number.isInteger(parsed.gridRows) && parsed.gridRows >= MIN_GRID_SIZE && parsed.gridRows <= MAX_GRID_SIZE
-      ? parsed.gridRows
-      : DEFAULT_GRID_ROWS;
+  const roomTiles = sanitizeRoomTiles(parsed.roomTiles);
   return {
-    gridCols,
-    gridRows,
+    roomTiles: roomTiles.length > 0 ? roomTiles : defaultRoomTiles(),
     floor: Array.isArray(parsed.floor) ? parsed.floor : [],
     walls: Array.isArray(parsed.walls) ? parsed.walls : [],
     doors: Array.isArray(parsed.doors) ? parsed.doors : [],
@@ -306,30 +336,31 @@ function sanitizeFloorItem(item) {
   return { col, row, styleId };
 }
 
-/** Tamanho salvo da sala (ver MIN_GRID_SIZE/MAX_GRID_SIZE acima) --
+/** Formato salvo da sala (ver comentário grande de roomTiles acima) --
  * devolvido pra popular a cena assim que ela fica pronta (ver GET
- * /room/size em server/index.js, aplicado via MainScene.setGridSize
+ * /room/shape em server/index.js, aplicado via MainScene.loadSavedRoomShape
  * chamado de GameRoom.tsx), mesma ideia de getFloor/getWalls/etc. */
-export function getRoomSize() {
-  return { cols: store.gridCols, rows: store.gridRows };
+export function getRoomShape() {
+  return store.roomTiles;
 }
 
-/** Muda o tamanho da sala -- pedido do Douglas: "eu quero aumentar ou
- * diminuir a sala, adicionando NOVOS tiles" (ver aba "Tamanho" no
- * editor de espaço). Clampado pros limites de segurança (nunca lixo,
- * nunca fora do intervalo) em vez de rejeitar a chamada inteira --
- * devolve null só se cols/rows nem chegarem a ser número. Igual
- * setFloor/setWalls/etc., devolve o valor realmente salvo. */
-export function setRoomSize(cols, rows) {
-  const c = Math.round(Number(cols));
-  const r = Math.round(Number(rows));
-  if (!Number.isFinite(c) || !Number.isFinite(r)) return null;
-  const clampedCols = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, c));
-  const clampedRows = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, r));
-  store.gridCols = clampedCols;
-  store.gridRows = clampedRows;
+/** Muda o formato da sala -- pedido do Douglas: "eu quero adicionar
+ * mais piso alem do limite que ja tem da sala, quero aumentar a sala"
+ * (formato livre, tile por tile, ver aba "Tamanho" no editor de
+ * espaço). O cliente (MainScene.paintRoomShapeAt/eraseRoomShapeAt) já
+ * garante que a sala nunca fica vazia/desconectada ANTES de mandar pra
+ * cá -- aqui só saneia formato/tamanho de payload (mesma cautela de
+ * setFloor/setWalls/etc.), sem reconferir conectividade (confiar no
+ * cliente aqui é seguro: o pior que um payload malformado faz é uma
+ * sala com formato estranho, nunca dado de outra sala/usuário). Devolve
+ * null só se a lista sanear pra vazia (nunca aceita esvaziar a sala de
+ * verdade). */
+export function setRoomShape(items) {
+  const clean = sanitizeRoomTiles(items);
+  if (clean.length === 0) return null;
+  store.roomTiles = clean;
   persist();
-  return { cols: clampedCols, rows: clampedRows };
+  return clean;
 }
 
 export function getFloor() {

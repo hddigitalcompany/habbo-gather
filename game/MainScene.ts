@@ -31,7 +31,6 @@ import {
   seatOffsetGroupLabel,
 } from "./furniture";
 import {
-  clampTile,
   tileToWorld,
   worldToTile,
   Direction,
@@ -43,7 +42,6 @@ import {
   GAME_HEIGHT,
   GRID_ORIGIN_X,
   GRID_ORIGIN_Y,
-  setGridSize as setGlobalGridSize,
 } from "./grid";
 import { tileDiamondCorners, tileRangeCorners, Point } from "./iso";
 import {
@@ -924,6 +922,30 @@ export default class MainScene extends Phaser.Scene {
   /** Definido de fora (GameRoom.tsx) -- emitido só por um NUDGE de verdade (ver nudgeSeatOffset), nunca só por sentar/levantar/ligar o modo (isso é só onSeatTuningChange, puramente de EXIBIÇÃO). É esse aqui que o React usa pra atualizar o mapa que autosalva -- sentar numa cadeira com o modo ligado não pode sozinho "gravar" o valor default como se fosse um ajuste manual. */
   onSeatOffsetChange?: (groupKey: string, facing: FurnitureFacing, x: number, y: number) => void;
 
+  // --- FORMATO da sala (aba "Tamanho", ver selectRoomShapeTool) --
+  // pedido do Douglas: "eu quero adicionar mais piso alem do limite que
+  // ja tem da sala, quero aumentar a sala" -- depois de confirmar que é
+  // "formato livre, tile por tile", não esticar um retângulo inteiro
+  // (ver comentário grande sobre GRID_COLS/GRID_ROWS em game/grid.ts --
+  // essas duas constantes eram o único limite de movimento/parede/porta
+  // antes, agora são só o tamanho PADRÃO de uma sala nova). roomShape é
+  // a fonte de verdade de "quais tiles são a sala de verdade" -- tudo
+  // que antes checava [0,GRID_COLS]x[0,GRID_ROWS] (movimento, clique-
+  // pra-andar, BFS, limite de parede/porta na borda) passa a checar
+  // isTileInRoom (membro do Set) em vez disso. Chave "col,row" (mesmo
+  // formato de draftFloor/draftWall/etc.), populado com um retângulo
+  // 13x8 (GRID_COLS/GRID_ROWS) já em create() -- ANTES até do tamanho
+  // de verdade chegar do servidor (loadSavedRoomShape, assíncrono, ver
+  // GameRoom.tsx) -- assim ninguém fica travado sem conseguir andar
+  // enquanto isso não responde (mesma ideia de "sala funciona sem piso
+  // pintado nenhum" pro autosave do piso).
+  private roomShape: Set<string> = new Set();
+  private selectedRoomShapeTool: "add" | "erase" | null = null;
+  /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftFloorChange, mas pro formato da sala. */
+  onDraftRoomShapeChange?: (items: { col: number; row: number }[]) => void;
+  /** Definido de fora (GameRoom.tsx) -- avisa quando um clique em "Apagar" (aba "Tamanho") foi bloqueado, com o motivo (ver eraseRoomShapeAt). */
+  onRoomShapeEraseBlocked?: (reason: string) => void;
+
   // --- piso do editor de espaço (aba "Piso", ver selectFloorTool) --
   // draftFloor/draftFloorSprites guardam TODO o piso da sala (tanto o já
   // salvo no servidor, carregado por loadSavedFloor, quanto o pintado
@@ -1433,6 +1455,18 @@ export default class MainScene extends Phaser.Scene {
     this.add
       .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x201434)
       .setDepth(DEPTH_ROOM_BACKGROUND);
+
+    // formato PADRÃO da sala (ver comentário grande de roomShape lá em
+    // cima) -- um retângulo GRID_COLS x GRID_ROWS (13x8), só pra já dar
+    // pra andar/editar ANTES do formato de verdade chegar do servidor
+    // (loadSavedRoomShape, assíncrono, mesma ideia do piso abaixo).
+    // loadSavedRoomShape SUBSTITUI isso inteiro assim que a busca
+    // responder -- este é só o valor inicial.
+    for (let col = 0; col <= GRID_COLS; col++) {
+      for (let row = 0; row <= GRID_ROWS; row++) {
+        this.roomShape.add(this.roomTileKey(col, row));
+      }
+    }
 
     // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
     // escolhidos -- por isso desenha antes até dos móveis fixos (ver
@@ -3295,18 +3329,20 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /** Checagem de limite PRÓPRIA da parede -- diferente do gate genérico
-   * de tile ([0,GRID_COLS]x[0,GRID_ROWS], pensado pra móvel), porque uma
-   * aresta na BORDA do mapa (pedido do Douglas: "pode estar na borda
-   * também") tem col/row FORA desse intervalo de propósito: a aresta
-   * mais externa de todas é colPlus com col=-1 (borda esquerda) ou
-   * col=GRID_COLS (borda direita, aresta externa do último tile), e o
-   * espelho disso pra rowPlus (row=-1/GRID_ROWS, borda de cima/baixo).
-   */
+   * de tile (pensado pra móvel), porque uma aresta na BORDA da sala
+   * (pedido do Douglas: "pode estar na borda também") separa um tile
+   * que É da sala de um que NÃO é (ou de nada nenhum, fora de tudo) --
+   * ANTES (sala sempre um retângulo [0,GRID_COLS]x[0,GRID_ROWS]) isso
+   * virava uma checagem de intervalo simples; agora (sala em formato
+   * livre, ver roomShape/isTileInRoom lá em cima) uma aresta é válida
+   * sempre que TOCA pelo menos um tile que é da sala -- vale tanto pra
+   * parede interna (divide 2 tiles da sala) quanto pra parede bem na
+   * borda externa (só um dos dois lados é sala, o outro é "fora"). */
   private isWallEdgeInBounds(edge: { col: number; row: number; side: WallSide }): boolean {
     if (edge.side === "colPlus") {
-      return edge.col >= -1 && edge.col <= GRID_COLS && edge.row >= 0 && edge.row <= GRID_ROWS;
+      return this.isTileInRoom(edge.col, edge.row) || this.isTileInRoom(edge.col + 1, edge.row);
     }
-    return edge.row >= -1 && edge.row <= GRID_ROWS && edge.col >= 0 && edge.col <= GRID_COLS;
+    return this.isTileInRoom(edge.col, edge.row) || this.isTileInRoom(edge.col, edge.row + 1);
   }
 
   /** Aplica um novo zoom mantendo o mesmo PONTO CENTRAL da câmera --
@@ -3380,15 +3416,18 @@ export default class MainScene extends Phaser.Scene {
   private startStep(dir: Direction) {
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
     const delta = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] }[dir];
-    const target = clampTile(col + delta[0], row + delta[1]);
+    const target = { col: col + delta[0], row: row + delta[1] };
     const targetPos = tileToWorld(target.col, target.row);
 
-    // bateu na borda do mapa (destino = posição atual) OU o tile de
-    // destino é travado por um móvel (ex: divisória de vidro, ver
+    // bateu na borda da sala (destino fora do formato livre, ver
+    // isTileInRoom/roomShape -- ANTES era clampTile, um retângulo fixo;
+    // com a sala em formato livre o "fora" de verdade é "não tá em
+    // roomShape", não um intervalo de números) OU o tile de destino é
+    // travado por um móvel (ex: divisória de vidro, ver
     // FURNITURE_BLOCKS_MOVEMENT em furniture.ts) -- nos dois casos só
     // vira de frente pra direção pedida, sem "andar" de verdade.
     const blocked =
-      (targetPos.x === this.localContainer.x && targetPos.y === this.localContainer.y) ||
+      !this.isTileInRoom(target.col, target.row) ||
       this.isMovementBlockedAt(target.col, target.row, col, row);
     if (blocked) {
       this.localContainer.setData("dir", dir);
@@ -3568,6 +3607,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedRoomShapeTool = null;
     this.moveToolActive = false;
     this.deleteToolActive = false;
     this.cancelMovingFurniture();
@@ -3594,41 +3634,6 @@ export default class MainScene extends Phaser.Scene {
     this.refreshAreaTileAlpha();
   }
 
-  /** Aumenta/diminui a sala (ver aba "Tamanho" no editor de espaço,
-   * GameRoom.tsx) -- pedido do Douglas: "eu quero aumentar ou diminuir
-   * a sala, adicionando NOVOS tiles". Só repassa pra setGridSize
-   * (game/grid.ts, ver comentário grande lá) e redesenha o contorno do
-   * editor (drawEditGrid já é re-chamável, mesma ideia de sempre) --
-   * tudo o resto (movimento, limite de parede/porta na borda, piso)
-   * já lê GRID_COLS/GRID_ROWS ao vivo, sem precisar de mais nada aqui.
-   * Chamado tanto no carregamento inicial (GET /room/size, tamanho já
-   * salvo) quanto ao vivo quando o dono clica "+"/"-". */
-  setGridSize(cols: number, rows: number) {
-    setGlobalGridSize(cols, rows);
-    this.drawEditGrid();
-  }
-
-  /** A borda que SERIA cortada ao diminuir a sala em 1 (ver
-   * resizeRoom em GameRoom.tsx, botão "-" de Tamanho) já tem alguma
-   * coisa nela -- piso pintado, móvel, parede, porta ou área? Usado só
-   * pra DESABILITAR esse botão quando diminuir apagaria conteúdo
-   * junto (mais seguro que apagar sozinho sem avisar). kind:"col" olha
-   * a última coluna válida hoje (col===GRID_COLS), kind:"row" a última
-   * linha (row===GRID_ROWS) -- a mesma checagem que clampTile usa pro
-   * boneco, só que na borda de FORA (a que sumiria). */
-  edgeHasContent(kind: "col" | "row"): boolean {
-    const limit = kind === "col" ? GRID_COLS : GRID_ROWS;
-    const hits = (col: number, row: number) => (kind === "col" ? col === limit : row === limit);
-    for (const f of this.draftFloor.values()) if (hits(f.col, f.row)) return true;
-    for (const f of this.draftFurniture.values()) {
-      if (furnitureFootprintTiles(f).some((t) => hits(t.col, t.row))) return true;
-    }
-    for (const w of this.draftWall.values()) if (hits(w.col, w.row)) return true;
-    for (const d of this.draftDoor.values()) if (hits(d.col, d.row)) return true;
-    for (const a of this.draftArea.values()) if (hits(a.col, a.row)) return true;
-    return false;
-  }
-
   /** Escolhe qual item da paleta o próximo clique num tile livre vai colocar (null = nenhum selecionado, clique não faz nada em tile livre). Selecionar um item de móvel desarma as outras ferramentas (piso/área/mover, ver selectFloorTool/selectAreaTool/selectMoveTool) -- só uma ferramenta ativa por vez. */
   selectCatalogEntry(entry: FurnitureCatalogEntry | null) {
     this.selectedCatalogEntry = entry;
@@ -3636,6 +3641,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
@@ -3691,6 +3697,7 @@ export default class MainScene extends Phaser.Scene {
       this.selectedAreaTool = null;
       this.selectedWallTool = null;
       this.selectedDoorTool = null;
+      this.selectedRoomShapeTool = null;
       this.deleteToolActive = false;
       this.refreshCatalogGhost();
     } else {
@@ -3717,6 +3724,7 @@ export default class MainScene extends Phaser.Scene {
       this.selectedAreaTool = null;
       this.selectedWallTool = null;
       this.selectedDoorTool = null;
+      this.selectedRoomShapeTool = null;
       this.selectMoveTool(false);
       this.refreshCatalogGhost();
     }
@@ -3767,6 +3775,170 @@ export default class MainScene extends Phaser.Scene {
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
+  /** "col,row" -- mesma chave usada em draftFloor/draftWall/etc. */
+  private roomTileKey(col: number, row: number): string {
+    return `${col},${row}`;
+  }
+
+  /** Esse tile faz parte da sala HOJE? Base de tudo que antes checava
+   * [0,GRID_COLS]x[0,GRID_ROWS] (movimento, clique-pra-andar, BFS,
+   * limite de parede/porta na borda) -- ver comentário grande de
+   * roomShape lá em cima. */
+  isTileInRoom(col: number, row: number): boolean {
+    return this.roomShape.has(this.roomTileKey(col, row));
+  }
+
+  /** Tiles vizinhos (4 direções, sem diagonal -- mesma grade de sempre)
+   * que JÁ são da sala -- usado pra decidir se um "Adicionar" é válido
+   * (precisa encostar em pelo menos 1, senão viraria uma ilha solta,
+   * sem caminho a pé até o resto da sala). */
+  private roomNeighbors(col: number, row: number): { col: number; row: number }[] {
+    return [
+      { col: col + 1, row },
+      { col: col - 1, row },
+      { col, row: row + 1 },
+      { col, row: row - 1 },
+    ].filter((t) => this.isTileInRoom(t.col, t.row));
+  }
+
+  /** Carrega o formato salvo da sala (ver GET /room/shape em
+   * server/index.js) -- chamado pelo React assim que a cena fica pronta
+   * (mesmo timing de loadSavedFloor/loadSavedFurniture). SUBSTITUI o
+   * retângulo padrão que create() já tinha colocado em roomShape (não
+   * soma) -- a lista que vem do servidor é sempre o estado completo,
+   * mesma convenção de floor/wall/etc. Redesenha o contorno do editor
+   * em seguida (drawEditGrid é re-chamável, mesma ideia de sempre).
+   * Defensivo contra lista vazia (nunca aplica um formato sem tile
+   * nenhum -- ver eraseRoomShapeAt, que já impede isso de acontecer de
+   * verdade, mas uma resposta velha/corrompida do servidor não devia
+   * conseguir deixar a sala inteira intransitável). */
+  loadSavedRoomShape(list: { col: number; row: number }[]) {
+    if (list.length === 0) return;
+    this.roomShape = new Set(list.map((t) => this.roomTileKey(t.col, t.row)));
+    this.drawEditGrid();
+  }
+
+  getDraftRoomShapeList(): { col: number; row: number }[] {
+    return Array.from(this.roomShape).map((key) => {
+      const [col, row] = key.split(",").map(Number);
+      return { col, row };
+    });
+  }
+
+  /** Escolhe a ferramenta "Tamanho" ativa: "add" pinta um tile novo
+   * encostado na sala, "erase" apaga um já pintado, null desarma.
+   * Mesmo padrão de exclusão mútua das outras ferramentas (ver
+   * selectFloorTool/selectAreaTool/etc. logo abaixo). */
+  selectRoomShapeTool(tool: "add" | "erase" | null) {
+    this.selectedRoomShapeTool = tool;
+    this.selectedCatalogEntry = null;
+    this.selectedFloorTool = null;
+    this.selectedAreaTool = null;
+    this.selectedWallTool = null;
+    this.selectedDoorTool = null;
+    this.deleteToolActive = false;
+    this.selectMoveTool(false);
+    this.refreshCatalogGhost();
+  }
+
+  /** Algum avatar (local OU remoto) tá em pé nesse tile agora? Não dá
+   * pra apagar o chão debaixo de alguém. */
+  private someoneStandingAt(col: number, row: number): boolean {
+    const local = worldToTile(this.localContainer.x, this.localContainer.y);
+    if (local.col === col && local.row === row) return true;
+    for (const container of this.remoteContainers.values()) {
+      const t = worldToTile(container.x, container.y);
+      if (t.col === col && t.row === row) return true;
+    }
+    return false;
+  }
+
+  /** Apagar esse tile SEPARARIA a sala em duas (ou mais) partes
+   * desconectadas? Anda (BFS pelas 4 direções, mesma grade de sempre) a
+   * partir de QUALQUER outro tile restante e confere se alcança todos
+   * os demais -- se sobrar algum de fora, apagar esse tile isolaria ele
+   * (inacessível a pé). Mesma ideia de computeWalkPath (BFS simples,
+   * grade pequena, sem heurística nenhuma). */
+  private wouldDisconnectRoom(col: number, row: number): boolean {
+    const removedKey = this.roomTileKey(col, row);
+    const remaining = Array.from(this.roomShape).filter((k) => k !== removedKey);
+    if (remaining.length === 0) return false; // eraseRoomShapeAt já bloqueia esvaziar a sala antes de chegar aqui
+    const start = remaining[0];
+    const visited = new Set<string>([start]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const key = queue.shift()!;
+      const [c, r] = key.split(",").map(Number);
+      for (const n of [
+        { col: c + 1, row: r },
+        { col: c - 1, row: r },
+        { col: c, row: r + 1 },
+        { col: c, row: r - 1 },
+      ]) {
+        const nKey = this.roomTileKey(n.col, n.row);
+        if (nKey === removedKey || !this.roomShape.has(nKey) || visited.has(nKey)) continue;
+        visited.add(nKey);
+        queue.push(nKey);
+      }
+    }
+    return visited.size < remaining.length;
+  }
+
+  /** Esse tile tem piso pintado, móvel, parede, porta ou área -- usado
+   * por eraseRoomShapeAt logo abaixo pra bloquear apagar em cima de
+   * conteúdo sem avisar (mesma cautela de edgeHasContent numa tentativa
+   * anterior desse pedido, agora por TILE em vez de por borda inteira). */
+  private tileHasContent(col: number, row: number): boolean {
+    const hits = (c: number, r: number) => c === col && r === row;
+    if (this.draftFloor.has(this.roomTileKey(col, row))) return true;
+    for (const f of this.draftFurniture.values()) {
+      if (furnitureFootprintTiles(f).some((t) => hits(t.col, t.row))) return true;
+    }
+    for (const w of this.draftWall.values()) if (hits(w.col, w.row)) return true;
+    for (const d of this.draftDoor.values()) if (hits(d.col, d.row)) return true;
+    for (const a of this.draftArea.values()) if (hits(a.col, a.row)) return true;
+    return false;
+  }
+
+  /** Pinta (adiciona) um tile novo na sala -- só aceita se ele AINDA
+   * não for da sala e encostar (4 direções) em pelo menos um tile que
+   * já é (mantém a sala sempre conectada, crescendo pela borda, nunca
+   * uma ilha solta). Silencioso quando inválido (mesmo padrão de
+   * clicar num tile já ocupado com outra ferramenta -- não faz nada). */
+  private paintRoomShapeAt(col: number, row: number) {
+    const key = this.roomTileKey(col, row);
+    if (this.roomShape.has(key)) return;
+    if (this.roomNeighbors(col, row).length === 0) return;
+    this.roomShape.add(key);
+    this.drawEditGrid();
+    this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
+  }
+
+  /** Apaga (remove) um tile da sala -- bloqueado se: for o ÚLTIMO tile
+   * (a sala nunca pode ficar vazia), tiver piso/móvel/parede/porta/área
+   * colocado nele (apaga isso primeiro), tiver alguém em pé nele agora,
+   * ou se isso separasse a sala em duas partes (ver
+   * wouldDisconnectRoom). Devolve o MOTIVO do bloqueio (pra
+   * GameRoom.tsx mostrar um aviso) ou null quando apagou de verdade. */
+  private eraseRoomShapeAt(col: number, row: number): string | null {
+    const key = this.roomTileKey(col, row);
+    if (!this.roomShape.has(key)) return null; // clique num tile que já não é da sala -- nada a fazer, sem aviso
+    if (this.roomShape.size <= 1) return "A sala não pode ficar sem nenhum quadrado.";
+    if (this.tileHasContent(col, row)) {
+      return "Tem piso, móvel, parede, porta ou área nesse tile -- apague o que tiver lá antes.";
+    }
+    if (this.someoneStandingAt(col, row)) {
+      return "Tem alguém em pé nesse tile agora -- peça pra sair antes de apagar.";
+    }
+    if (this.wouldDisconnectRoom(col, row)) {
+      return "Isso ia separar a sala em duas partes -- apague de um jeito que não isole nenhum pedaço.";
+    }
+    this.roomShape.delete(key);
+    this.drawEditGrid();
+    this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
+    return null;
+  }
+
   /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma as outras (móvel/área/mover, ver selectCatalogEntry/selectAreaTool/selectMoveTool) -- só uma ferramenta ativa por vez. */
   selectFloorTool(tool: FloorTool) {
     this.selectedFloorTool = tool;
@@ -3774,6 +3946,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
@@ -3818,6 +3991,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedAreaTool = null;
     this.selectedDoorTool = null;
+    this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
@@ -4885,6 +5059,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedWallTool = null;
     this.selectedAreaTool = null;
+    this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
@@ -5201,6 +5376,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
@@ -6188,7 +6364,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /** Desenha o contorno de TODO tile colocável (mesmos limites que
-   * clampTile usa pro boneco) -- só visível durante o modo de edição.
+   * isTileInRoom usa pro boneco) -- só visível durante o modo de edição.
    * Re-chamável (destrói o Graphics anterior e refaz do zero, mantendo
    * o visible() de antes) -- precisa ser, porque editGridHiddenAt acima
    * depende do piso JÁ PINTADO, que muda com o tempo (pintar/apagar
@@ -6200,12 +6376,16 @@ export default class MainScene extends Phaser.Scene {
     this.gridGraphics?.destroy();
     const g = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(wasVisible);
     g.lineStyle(1, 0xffffff, 0.25);
-    for (let col = 0; col <= GRID_COLS; col++) {
-      for (let row = 0; row <= GRID_ROWS; row++) {
-        if (this.editGridHiddenAt(col, row)) continue;
-        const { x, y } = tileToWorld(col, row);
-        g.strokePoints(tileDiamondCorners(x, y), true);
-      }
+    // itera roomShape (o Set de tiles que são a sala HOJE, ver
+    // comentário grande lá em cima) em vez do antigo retângulo
+    // [0,GRID_COLS]x[0,GRID_ROWS] -- desenha o contorno só onde a sala
+    // de fato existe, mesmo formato livre que o resto do movimento/
+    // colocação já respeita.
+    for (const key of this.roomShape) {
+      const [col, row] = key.split(",").map(Number);
+      if (this.editGridHiddenAt(col, row)) continue;
+      const { x, y } = tileToWorld(col, row);
+      g.strokePoints(tileDiamondCorners(x, y), true);
     }
     this.gridGraphics = g;
   }
@@ -6303,7 +6483,7 @@ export default class MainScene extends Phaser.Scene {
       for (const s of steps) {
         const nc = cur.col + s.dc;
         const nr = cur.row + s.dr;
-        if (nc < 0 || nc > GRID_COLS || nr < 0 || nr > GRID_ROWS) continue;
+        if (!this.isTileInRoom(nc, nr)) continue;
         const k = key(nc, nr);
         if (visited.has(k) || this.isMovementBlockedAt(nc, nr, cur.col, cur.row)) continue;
         const path = [...cur.path, s.dir];
@@ -6331,7 +6511,7 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
     const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
-    const inBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
+    const inBounds = this.isTileInRoom(col, row);
     if (!inBounds) {
       this.roomHoverGraphics.setVisible(false);
       return;
@@ -6381,7 +6561,7 @@ export default class MainScene extends Phaser.Scene {
       }
     }
     const { col: targetCol, row: targetRow } = worldToTile(pointer.worldX, pointer.worldY);
-    const inBounds = targetCol >= 0 && targetCol <= GRID_COLS && targetRow >= 0 && targetRow <= GRID_ROWS;
+    const inBounds = this.isTileInRoom(targetCol, targetRow);
     if (!inBounds || this.isMovementBlockedAt(targetCol, targetRow)) {
       this.walkQueue = [];
       this.lastRoomClickAt = 0;
@@ -6465,7 +6645,7 @@ export default class MainScene extends Phaser.Scene {
       this.hoverGraphics.setVisible(false);
       this.catalogGhostSprite?.setVisible(false);
       if (this.wallPlacementMode === "center") {
-        const inTileBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
+        const inTileBounds = this.isTileInRoom(col, row);
         if (!inTileBounds) {
           this.wallHoverGraphics?.setVisible(false);
           return;
@@ -6532,9 +6712,37 @@ export default class MainScene extends Phaser.Scene {
       }
       return;
     }
+
+    // ferramenta "Tamanho" armada (formato livre da sala, ver
+    // selectRoomShapeTool) -- checagem/desenho PRÓPRIOS, ANTES do gate
+    // de "inBounds" genérico logo abaixo (mesma ideia da parede acima):
+    // ao contrário de TODAS as outras ferramentas, "Adicionar" PRECISA
+    // aceitar hover num tile que ainda não é da sala (é assim que ela
+    // cresce, ver roomShape/paintRoomShapeAt lá em cima) -- esse gate
+    // (pensado pra só aceitar tile que já é sala) rejeitaria bem o caso
+    // de uso principal dela. Verde = clique funcionaria; vermelho =
+    // clique não faz nada (tile já é da sala ao "Adicionar", ou tile
+    // fora da sala ao "Apagar", ou -- só pro "Adicionar" -- um tile sem
+    // NENHUM vizinho já na sala, o que viraria uma ilha solta sem
+    // caminho a pé até o resto). Sem arrasto de propósito (mesmo
+    // cuidado da parede -- "colocada com mais cuidado, tile a tile",
+    // crescer/encolher a sala merece a mesma atenção).
+    if (this.selectedRoomShapeTool) {
+      this.wallHoverGraphics?.setVisible(false);
+      this.catalogGhostSprite?.setVisible(false);
+      const already = this.isTileInRoom(col, row);
+      const valid = this.selectedRoomShapeTool === "add" ? !already && this.roomNeighbors(col, row).length > 0 : already;
+      const { x, y } = tileToWorld(col, row);
+      this.hoverGraphics
+        .clear()
+        .fillStyle(valid ? EDIT_HOVER_COLOR_FREE : EDIT_HOVER_COLOR_OCCUPIED, 0.35)
+        .fillPoints(tileDiamondCorners(x, y), true)
+        .setVisible(true);
+      return;
+    }
     this.wallHoverGraphics?.setVisible(false);
 
-    const inBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
+    const inBounds = this.isTileInRoom(col, row);
     if (!inBounds) {
       this.hoverGraphics.setVisible(false);
       this.catalogGhostSprite?.setVisible(false);
@@ -6669,9 +6877,34 @@ export default class MainScene extends Phaser.Scene {
     const { col, row } = worldToTile(pointer.worldX, pointer.worldY);
     // ferramenta de parede/porta NÃO usa esse gate -- as duas moram numa
     // ARESTA, não num tile (ver isWallEdgeInBounds logo abaixo, que faz a
-    // checagem própria delas); as outras ferramentas continuam usando
-    // esse aqui.
-    if (!this.selectedWallTool && !this.selectedDoorTool && (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS)) return;
+    // checagem própria delas); a ferramenta "Tamanho" (selectedRoomShapeTool)
+    // também não usa -- ela PRECISA aceitar clique fora da sala de hoje
+    // (é assim que "Adicionar" funciona, ver paintRoomShapeAt); as
+    // outras ferramentas continuam usando esse aqui.
+    if (
+      !this.selectedWallTool &&
+      !this.selectedDoorTool &&
+      !this.selectedRoomShapeTool &&
+      (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS)
+    )
+      return;
+
+    // ferramenta "Tamanho" armada (ver selectRoomShapeTool) -- "add"
+    // tenta pintar um tile novo, "erase" tenta apagar um já pintado (os
+    // dois são no-op silencioso ou mostram um aviso via
+    // onRoomShapeEraseBlocked, ver paintRoomShapeAt/eraseRoomShapeAt).
+    // Fora daqui em diante o clique é sempre num TILE já validado como
+    // parte da sala (ver gate acima), diferente de add, que pode mirar
+    // qualquer coordenada.
+    if (this.selectedRoomShapeTool === "add") {
+      this.paintRoomShapeAt(col, row);
+      return;
+    }
+    if (this.selectedRoomShapeTool === "erase") {
+      const reason = this.eraseRoomShapeAt(col, row);
+      if (reason) this.onRoomShapeEraseBlocked?.(reason);
+      return;
+    }
 
     // ferramenta "Mover" armada (ver selectMoveTool) -- pedido do
     // Douglas: precisa editar a POSIÇÃO de um item já colocado, sem ter
@@ -6786,7 +7019,7 @@ export default class MainScene extends Phaser.Scene {
     // "centerRow" conforme wallCenterOrientation.
     if (this.selectedWallTool) {
       if (this.wallPlacementMode === "center") {
-        const inTileBounds = col >= 0 && col <= GRID_COLS && row >= 0 && row <= GRID_ROWS;
+        const inTileBounds = this.isTileInRoom(col, row);
         if (!inTileBounds) return;
         const orientation = this.wallCenterOrientation;
         this.isPaintingWall = true;

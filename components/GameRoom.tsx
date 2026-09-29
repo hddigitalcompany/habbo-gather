@@ -82,7 +82,6 @@ import {
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
 import { WallPatternSwatch } from "@/components/WallPatternSwatch";
 import type { Direction } from "@/game/grid";
-import { MIN_GRID_SIZE, MAX_GRID_SIZE } from "@/game/grid";
 import { AREA_TYPES, AreaDef, AreaTileDef, AreaType } from "@/game/areas";
 import {
   HAIR_CATALOG,
@@ -1810,22 +1809,23 @@ export default function GameRoom({
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
   const [floorSaveStatus, setFloorSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  // tamanho da sala (GRID_COLS/GRID_ROWS, ver game/grid.ts) -- pedido do
-  // Douglas: "eu quero aumentar ou diminuir a sala, adicionando NOVOS
-  // tiles" (aba "Tamanho" dentro de "Editar espaço", ver EDIT_CATEGORY_TABS
-  // abaixo). +1 porque GRID_COLS/GRID_ROWS guardam o ÍNDICE máximo
-  // (col/row 0..N), não a contagem de quadrados (ver comentário "colunas
-  // 0..12 (13 posições)" em game/grid.ts) -- gridCols/gridRows aqui já
-  // guardam a CONTAGEM (13/8), mais fácil de mostrar/pensar na UI; vira
-  // índice de novo (-1) só na hora de mandar pro servidor/scene.
-  const [roomGridCols, setRoomGridCols] = useState(12 + 1);
-  const [roomGridRows, setRoomGridRows] = useState(7 + 1);
-  const [gridSizeStatus, setGridSizeStatus] = useState<"idle" | "saving" | "error">("idle");
   // true só depois que a busca inicial do piso salvo (GET /room/floor,
   // ver game.events.once(READY, ...) mais abaixo) terminar -- ver o
   // useEffect de autosave logo depois, que confere essa flag antes de
   // mandar qualquer POST.
   const floorLoadedRef = useRef(false);
+
+  // --- formato da sala (aba "Tamanho", ver selectRoomShapeTool em
+  // MainScene.ts) -- pedido do Douglas: "eu quero adicionar mais piso
+  // alem do limite que ja tem da sala, quero aumentar a sala" (formato
+  // livre, tile por tile, não um retângulo esticável -- ver comentário
+  // grande de roomShape em MainScene.ts). MESMO esquema piso/parede/
+  // porta/área: fonte de verdade fica na cena (MainScene.roomShape),
+  // React só espelha pra desenhar o painel/autosave.
+  const [selectedRoomShapeToolId, setSelectedRoomShapeToolId] = useState<"add" | "erase" | null>(null);
+  const [draftRoomShapeItems, setDraftRoomShapeItems] = useState<{ col: number; row: number }[]>([]);
+  const [roomShapeSaveStatus, setRoomShapeSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const roomShapeLoadedRef = useRef(false);
 
   // --- parede de sistema do editor de espaço (aba "Parede" dentro da
   // seção "Mapa", ver game/wall.ts) -- MESMO esquema/nomes do piso
@@ -2842,6 +2842,13 @@ export default function GameRoom({
         };
         scene.onDraftChange = (items) => setDraftItems(items);
         scene.onDraftFloorChange = (items) => setDraftFloorItems(items);
+        scene.onDraftRoomShapeChange = (items) => setDraftRoomShapeItems(items);
+        // aviso quando um clique em "Apagar" (aba "Tamanho") é bloqueado
+        // (ver eraseRoomShapeAt em MainScene.ts -- tile com conteúdo,
+        // alguém em pé nele, isolaria um pedaço da sala, ou é o último
+        // tile restante) -- window.alert é o mesmo recurso simples já
+        // usado noutro lugar do editor pra avisos bloqueantes assim.
+        scene.onRoomShapeEraseBlocked = (reason) => window.alert(reason);
         scene.onDraftWallChange = (items) => setDraftWallItems(items);
         scene.onDraftDoorChange = (items) => setDraftDoorItems(items);
         // Clique numa porta cuja área guardada é do jogador local (ver
@@ -2926,26 +2933,35 @@ export default function GameRoom({
         // fetchAndRegisterCustomSkins/fetchAndRegisterCustomAvatarItems)
         // rodam em PARALELO, sem bloquear a cadeia de carregar móvel --
         // nenhum desses três depende dos outros.
-        // tamanho salvo da sala (ver GET /room/size em server/index.js) --
-        // pedido do Douglas: "eu quero aumentar ou diminuir a sala,
-        // adicionando NOVOS tiles". Busca em PARALELO com o resto (não
-        // bloqueia piso/mobília/área) e aplica assim que responder --
-        // não tem problema se demorar mais que o piso, já que nada mais
-        // depende de já estar aplicado antes (só reflete via
-        // setGridSize/drawEditGrid). Falha em silêncio (ex: servidor
-        // fora do ar) -- a sala ainda funciona com o tamanho padrão
-        // (12x7, mesmo default de sempre).
-        fetch(`${REALTIME_HTTP_BASE}/room/size`)
+        // formato salvo da sala (ver GET /room/shape em server/index.js)
+        // -- pedido do Douglas: "eu quero adicionar mais piso alem do
+        // limite que ja tem da sala, quero aumentar a sala". Busca em
+        // PARALELO com o resto (não bloqueia piso/mobília/área) --
+        // MainScene já nasce com um retângulo padrão em roomShape (ver
+        // create()), então ninguém fica travado sem conseguir andar
+        // enquanto essa busca não responde. roomShapeLoadedRef só vira
+        // true DEPOIS da tentativa (sucesso ou falha), mesmo padrão de
+        // floorLoadedRef -- o autosave logo abaixo confere essa flag
+        // antes de mandar qualquer POST, senão o primeiro render
+        // (draftRoomShapeItems ainda vazio) salvaria um formato vazio
+        // por cima do que já tava salvo antes mesmo da busca responder.
+        fetch(`${REALTIME_HTTP_BASE}/room/shape`)
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
             if (destroyed) return;
-            if (typeof data?.cols === "number" && typeof data?.rows === "number") {
-              sceneRef.current?.setGridSize(data.cols, data.rows);
-              setRoomGridCols(data.cols + 1);
-              setRoomGridRows(data.rows + 1);
+            if (Array.isArray(data?.items) && data.items.length > 0) {
+              sceneRef.current?.loadSavedRoomShape(data.items);
+              setDraftRoomShapeItems(data.items);
+            } else {
+              setDraftRoomShapeItems(sceneRef.current?.getDraftRoomShapeList() ?? []);
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            setDraftRoomShapeItems(sceneRef.current?.getDraftRoomShapeList() ?? []);
+          })
+          .finally(() => {
+            roomShapeLoadedRef.current = true;
+          });
         fetchAndRegisterCustomSkins();
         fetchAndRegisterCustomAvatarItems();
         fetchDefaultReferences();
@@ -3823,63 +3839,6 @@ export default function GameRoom({
     sceneRef.current?.selectDeleteTool(false);
   }
 
-  /** Aumenta/diminui a sala em 1 quadrado (aba "Tamanho") -- pedido do
-   * Douglas: "eu quero aumentar ou diminuir a sala, adicionando NOVOS
-   * tiles". `axis` escolhe largura (cols) ou altura (rows), `delta` é
-   * +1 (adicionar) ou -1 (remover). Ao DIMINUIR, primeiro confere se a
-   * borda que sumiria já tem piso/móvel/parede/porta/área (ver
-   * edgeHasContent em MainScene.ts) -- se tiver, cancela e avisa, em
-   * vez de apagar conteúdo junto sem perguntar. Aplica na cena NA HORA
-   * (otimista, mesmo padrão de sempre nesse editor) e salva no servidor
-   * em seguida (POST /room/size) -- se o POST falhar, desfaz o tamanho
-   * local de volta e mostra erro (gridSizeStatus), pra nunca ficar
-   * divergente do que o servidor tem. */
-  async function resizeRoom(axis: "cols" | "rows", delta: 1 | -1) {
-    if (!canEditRoom) return;
-    const prevCols = roomGridCols;
-    const prevRows = roomGridRows;
-    const nextCols = axis === "cols" ? prevCols + delta : prevCols;
-    const nextRows = axis === "rows" ? prevRows + delta : prevRows;
-    // +1/-1 acima é em CONTAGEM de quadrados; MIN_GRID_SIZE/MAX_GRID_SIZE
-    // (game/grid.ts) também são contagem (não índice), então compara direto.
-    if (nextCols < MIN_GRID_SIZE || nextCols > MAX_GRID_SIZE) return;
-    if (nextRows < MIN_GRID_SIZE || nextRows > MAX_GRID_SIZE) return;
-    if (delta === -1) {
-      const kind = axis === "cols" ? "col" : "row";
-      if (sceneRef.current?.edgeHasContent(kind)) {
-        window.alert(
-          axis === "cols"
-            ? "Tem piso, móvel, parede, porta ou área na última coluna -- apague o que tiver lá antes de diminuir a largura."
-            : "Tem piso, móvel, parede, porta ou área na última linha -- apague o que tiver lá antes de diminuir a altura."
-        );
-        return;
-      }
-    }
-    setRoomGridCols(nextCols);
-    setRoomGridRows(nextRows);
-    // -1 aqui: gridCols/gridRows guardados/mandados pro servidor são
-    // ÍNDICE máximo (GRID_COLS/GRID_ROWS, ver comentário em
-    // game/grid.ts), não a contagem mostrada na UI.
-    sceneRef.current?.setGridSize(nextCols - 1, nextRows - 1);
-    setGridSizeStatus("saving");
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/room/size`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cols: nextCols - 1, rows: nextRows - 1 }),
-      });
-      if (!res.ok) throw new Error("save failed");
-      setGridSizeStatus("idle");
-    } catch {
-      // desfaz -- servidor não confirmou, não pode deixar o cliente
-      // achar que salvou um tamanho que na verdade não persistiu.
-      setRoomGridCols(prevCols);
-      setRoomGridRows(prevRows);
-      sceneRef.current?.setGridSize(prevCols - 1, prevRows - 1);
-      setGridSizeStatus("error");
-    }
-  }
-
   /** Aplica a COR escolhida (ver selectFurnitureColor) numa entrada de catálogo, se ela tiver cores (ver FurnitureCatalogEntry.colors) -- devolve a entrada como veio quando não tiver (ex: vidro) ou quando o id não bater com nenhuma cor dela. */
   function entryWithColor(entry: FurnitureCatalogEntry, colorId: string | null): FurnitureCatalogEntry {
     if (!colorId || !entry.colors?.some((c) => c.id === colorId)) return entry;
@@ -3945,6 +3904,29 @@ export default function GameRoom({
 
   function clearDraftFloorItems() {
     sceneRef.current?.clearDraftFloor();
+  }
+
+  // MESMO padrão "clica de novo desarma" das ferramentas de piso acima,
+  // pro formato da sala (aba "Tamanho", ver selectRoomShapeTool em
+  // MainScene.ts) -- sem "Limpar tudo" aqui de propósito (diferente do
+  // piso): a sala nunca pode ficar sem nenhum tile, não faz sentido
+  // apagar tudo de uma vez (ver eraseRoomShapeAt em MainScene.ts).
+  function selectRoomShapeAdd() {
+    const next = selectedRoomShapeToolId === "add" ? null : "add";
+    setSelectedRoomShapeToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectRoomShapeTool(next);
+  }
+
+  function selectRoomShapeErase() {
+    const next = selectedRoomShapeToolId === "erase" ? null : "erase";
+    setSelectedRoomShapeToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectRoomShapeTool(next);
   }
 
   // MESMO padrão "clica de novo desarma" das duas funções de piso acima,
@@ -4116,6 +4098,36 @@ export default function GameRoom({
     }, 600);
     return () => clearTimeout(timer);
   }, [draftFloorItems]);
+
+  // autosave do FORMATO da sala -- MESMA lógica/timing do autosave do
+  // piso acima (POST /room/shape, ver server/index.js), disparado por
+  // qualquer mudança em draftRoomShapeItems (pintar/apagar um tile na
+  // aba "Tamanho", ou o carregamento inicial). roomShapeLoadedRef evita
+  // salvar ANTES da busca inicial responder (mesmo cuidado de
+  // floorLoadedRef -- senão o primeiro render, ainda com o retângulo
+  // padrão da cena, salvaria por cima de um formato já customizado).
+  useEffect(() => {
+    if (!roomShapeLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setRoomShapeSaveStatus("saving");
+      fetch(`${REALTIME_HTTP_BASE}/room/shape`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
+        body: JSON.stringify({ items: draftRoomShapeItems }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setRoomShapeSaveStatus("saved");
+        })
+        .catch(() => setRoomShapeSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftRoomShapeItems]);
 
   // autosave da parede -- MESMA lógica/timing do autosave do piso acima
   // (POST /room/walls, ver server/index.js).
@@ -5118,10 +5130,11 @@ export default function GameRoom({
           activeCategory={activeCategory}
           onChangeCategory={changeCategory}
           isPlatformAdmin={isPlatformAdmin}
-          roomGridCols={roomGridCols}
-          roomGridRows={roomGridRows}
-          gridSizeStatus={gridSizeStatus}
-          onResizeRoom={resizeRoom}
+          selectedRoomShapeToolId={selectedRoomShapeToolId}
+          onSelectRoomShapeAdd={selectRoomShapeAdd}
+          onSelectRoomShapeErase={selectRoomShapeErase}
+          draftRoomShapeItems={draftRoomShapeItems}
+          roomShapeSaveStatus={roomShapeSaveStatus}
           selectedCatalogIndex={selectedCatalogIndex}
           onSelectCatalog={selectCatalog}
           selectedColorId={selectedColorId}
@@ -5302,10 +5315,11 @@ function EditPanel({
   activeCategory,
   onChangeCategory,
   isPlatformAdmin,
-  roomGridCols,
-  roomGridRows,
-  gridSizeStatus,
-  onResizeRoom,
+  selectedRoomShapeToolId,
+  onSelectRoomShapeAdd,
+  onSelectRoomShapeErase,
+  draftRoomShapeItems,
+  roomShapeSaveStatus,
   selectedCatalogIndex,
   onSelectCatalog,
   selectedColorId,
@@ -5351,10 +5365,11 @@ function EditPanel({
   onChangeCategory: (
     category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
   ) => void;
-  roomGridCols: number;
-  roomGridRows: number;
-  gridSizeStatus: "idle" | "saving" | "error";
-  onResizeRoom: (axis: "cols" | "rows", delta: 1 | -1) => void;
+  selectedRoomShapeToolId: "add" | "erase" | null;
+  onSelectRoomShapeAdd: () => void;
+  onSelectRoomShapeErase: () => void;
+  draftRoomShapeItems: { col: number; row: number }[];
+  roomShapeSaveStatus: "idle" | "saving" | "saved" | "error";
   // Douglas (28/set): "retire essa opcao do catalogo, nao quero que os
   // clientes mexam nisso" -- ver comentário grande em EDIT_CATEGORY_TABS
   // (a aba "Assento" ajusta o MODELO inteiro no catálogo GLOBAL, não só
@@ -5560,57 +5575,34 @@ function EditPanel({
       {activeCategory === "tamanho" && (
         <>
           <p className="edit-hint">
-            Muda o tamanho da sala, um quadrado por vez. Salva sozinho. O
-            botão "−" fica desativado se ainda tiver piso, móvel, parede,
-            porta ou área bem na borda que seria removida -- apague o que
-            tiver lá primeiro.
+            "Adicionar" pinta um tile NOVO encostado na sala (fora do
+            limite de hoje conta -- é assim que ela cresce). "Apagar"
+            tira um tile já pintado (bloqueado se tiver piso, móvel,
+            parede, porta ou área nele, ou se isso separasse a sala em
+            duas partes). Salva sozinho.
           </p>
-          <div className="room-size-row">
-            <span className="room-size-label">Largura</span>
+          <div className="room-shape-tool-row">
             <button
               type="button"
-              className="room-size-btn"
-              onClick={() => onResizeRoom("cols", -1)}
-              disabled={roomGridCols <= MIN_GRID_SIZE}
-              title="Diminuir largura"
+              className={selectedRoomShapeToolId === "add" ? "room-shape-tool-btn selected" : "room-shape-tool-btn"}
+              onClick={onSelectRoomShapeAdd}
             >
-              −
+              <PlusIcon />
+              Adicionar
             </button>
-            <span className="room-size-value">{roomGridCols}</span>
             <button
               type="button"
-              className="room-size-btn"
-              onClick={() => onResizeRoom("cols", 1)}
-              disabled={roomGridCols >= MAX_GRID_SIZE}
-              title="Aumentar largura"
+              className={selectedRoomShapeToolId === "erase" ? "room-shape-tool-btn selected" : "room-shape-tool-btn"}
+              onClick={onSelectRoomShapeErase}
             >
-              +
+              <TrashIcon />
+              Apagar
             </button>
           </div>
-          <div className="room-size-row">
-            <span className="room-size-label">Altura</span>
-            <button
-              type="button"
-              className="room-size-btn"
-              onClick={() => onResizeRoom("rows", -1)}
-              disabled={roomGridRows <= MIN_GRID_SIZE}
-              title="Diminuir altura"
-            >
-              −
-            </button>
-            <span className="room-size-value">{roomGridRows}</span>
-            <button
-              type="button"
-              className="room-size-btn"
-              onClick={() => onResizeRoom("rows", 1)}
-              disabled={roomGridRows >= MAX_GRID_SIZE}
-              title="Aumentar altura"
-            >
-              +
-            </button>
-          </div>
-          {gridSizeStatus === "saving" && <p className="edit-hint">Salvando…</p>}
-          {gridSizeStatus === "error" && <p className="edit-hint">Não deu pra salvar -- tenta de novo.</p>}
+          <p className="edit-hint">{draftRoomShapeItems.length} quadrados na sala hoje.</p>
+          {roomShapeSaveStatus === "error" && (
+            <p className="edit-hint">Não deu pra salvar -- tenta de novo.</p>
+          )}
         </>
       )}
 

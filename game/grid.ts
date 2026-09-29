@@ -88,38 +88,22 @@ export const ISO_TILE_HEIGHT = 64;
 // sem precisar mexer em mais nada (tudo deriva daqui).
 export const GRID_ORIGIN_X = 440;
 export const GRID_ORIGIN_Y = 170;
-// GRID_COLS/GRID_ROWS eram `const` fixo -- pedido do Douglas: "eu quero
-// aumentar ou diminuir a sala, adicionando NOVOS tiles" (ver aba
-// "Tamanho" no editor de espaço, GameRoom.tsx/MainScene.setGridSize).
-// Viraram `let` + setGridSize() abaixo pra dar pra mudar em tempo de
-// execução, assim que o tamanho salvo da sala chega do servidor (GET
-// /room/size) -- todo o resto que já lia essas duas constantes
-// (movimento, limite de parede/porta na borda, contorno do editor,
-// BFS) continua funcionando sem precisar mudar NADA: import nomeado
-// (`import { GRID_COLS } from "./grid"`, nunca desestruturado de um
-// objeto) sempre lê o valor mais recente do módulo automaticamente,
-// mesmo depois de setGridSize reatribuir. Só quem PRECISA reagir na
-// hora (redesenhar o contorno) chama isso explicitamente (ver
-// MainScene.setGridSize).
-export let GRID_COLS = 12; // colunas 0..12 (13 posições)
-export let GRID_ROWS = 7; // linhas 0..7 (8 posições)
-
-// limites de segurança pro tamanho da sala (editor + validação no
-// servidor, ver MIN_GRID_SIZE/MAX_GRID_SIZE em server/roomStore.js --
-// arquivos sem import cruzado entre client/server, mantidos em
-// sincronia à mão). MIN garante espaço pro spawn/andar; MAX evita grade
-// gigante pesando o BFS/render sem necessidade real.
-export const MIN_GRID_SIZE = 4;
-export const MAX_GRID_SIZE = 24;
-
-/** Muda o tamanho lógico da sala (ver comentário grande acima). Sempre
- * clampado pros limites de segurança e arredondado pra inteiro -- quem
- * chama (GameRoom.tsx, tanto no carregamento inicial quanto no botão
- * "+"/"-" de Tamanho) não precisa validar antes. */
-export function setGridSize(cols: number, rows: number) {
-  GRID_COLS = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, Math.round(cols)));
-  GRID_ROWS = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, Math.round(rows)));
-}
+// GRID_COLS/GRID_ROWS -- tentativa ANTERIOR desse pedido do Douglas
+// tratava a sala como um RETÂNGULO de tamanho variável (essas duas
+// constantes viravam `let` + setGridSize()). Descartada: o pedido de
+// verdade ("quero adicionar mais piso alem do limite que ja tem da
+// sala", confirmado como "formato livre, tile por tile") é sobre poder
+// crescer em QUALQUER direção, tile a tile, não só esticar uma
+// retângulo inteiro -- ver MainScene.roomShape (o Set de tiles que
+// de fato pertencem à sala hoje) e a aba "Tamanho" no editor de espaço
+// (GameRoom.tsx), que agora pinta/apaga tile a tile igual "Piso".
+// GRID_COLS/GRID_ROWS voltaram a ser só o tamanho PADRÃO (usado pra
+// gerar o retângulo inicial de uma sala nova, ver DEFAULT_GRID_COLS/
+// DEFAULT_GRID_ROWS em server/roomStore.js) -- não limitam mais
+// movimento/parede/porta em lugar nenhum (isso agora é
+// MainScene.isTileInRoom, baseado no shape salvo, não numa fórmula).
+export const GRID_COLS = 12; // colunas 0..12 (13 posições) -- só o padrão inicial
+export const GRID_ROWS = 7; // linhas 0..7 (8 posições) -- só o padrão inicial
 
 export function tileToWorld(col: number, row: number) {
   return {

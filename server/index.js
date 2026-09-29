@@ -647,26 +647,31 @@ function handleServeUpload(req, res, pathname) {
   createReadStream(filePath).pipe(res);
 }
 
-/** GET /room/size -- tamanho salvo da sala (ver MIN_GRID_SIZE/
- * MAX_GRID_SIZE em roomStore.js), pedido do Douglas: "eu quero
- * aumentar ou diminuir a sala, adicionando NOVOS tiles" (aba
- * "Tamanho" no editor de espaço). Devolve pra popular a cena assim
- * que ela fica pronta (ver MainScene.setGridSize, chamado pelo React
- * em GameRoom.tsx), mesma ideia de handleGetFloor logo abaixo. */
-function handleGetSize(req, res) {
+/** GET /room/shape -- formato salvo da sala (ver comentário grande de
+ * roomTiles em roomStore.js), pedido do Douglas: "eu quero adicionar
+ * mais piso alem do limite que ja tem da sala, quero aumentar a sala"
+ * (aba "Tamanho" no editor de espaço). Devolve pra popular a cena assim
+ * que ela fica pronta (ver MainScene.loadSavedRoomShape, chamado pelo
+ * React em GameRoom.tsx), mesma ideia/mesmo formato de resposta
+ * ({items: [...]}) de handleGetFloor logo abaixo. */
+function handleGetShape(req, res) {
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify(roomStore.getRoomSize()));
+  res.end(JSON.stringify({ items: roomStore.getRoomShape() }));
 }
 
-/** POST /room/size -- mesma trava de handlePostFloor abaixo (só o DONO
- * da sala salva em produção), corpo pequeno de propósito (só 2
- * números), então sem o limite de MAX_ROOM_BODY_BYTES por chunk --
- * ainda assim limitado a um corpo minúsculo antes de tentar decodificar
- * JSON, mesma cautela. */
-async function handlePostSize(req, res) {
+/** POST /room/shape -- mesma trava/mesmo limite de tamanho de corpo de
+ * handlePostFloor abaixo (só o DONO da sala salva em produção). */
+async function handlePostShape(req, res) {
   if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
+    return;
+  }
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (contentLength > MAX_ROOM_BODY_BYTES) {
+    res.writeHead(413, corsHeaders());
+    res.end("Corpo grande demais");
     return;
   }
 
@@ -676,7 +681,7 @@ async function handlePostSize(req, res) {
 
   req.on("data", (chunk) => {
     received += chunk.length;
-    if (received > 1024 && !aborted) {
+    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
       aborted = true;
       if (!res.headersSent) {
         res.writeHead(413, corsHeaders());
@@ -698,14 +703,14 @@ async function handlePostSize(req, res) {
       res.end("JSON inválido");
       return;
     }
-    const saved = roomStore.setRoomSize(data?.cols, data?.rows);
+    const saved = roomStore.setRoomShape(data?.items);
     if (saved === null) {
       res.writeHead(400, corsHeaders());
-      res.end('Corpo precisa ter "cols"/"rows" (número)');
+      res.end('Corpo precisa ter "items" (array, nunca vazio -- a sala não pode ficar sem tile nenhum)');
       return;
     }
     res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, ...saved }));
+    res.end(JSON.stringify({ ok: true, items: saved }));
   });
 }
 
@@ -1466,13 +1471,13 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
-  if (req.method === "GET" && url.pathname === "/room/size") {
-    handleGetSize(req, res);
+  if (req.method === "GET" && url.pathname === "/room/shape") {
+    handleGetShape(req, res);
     return;
   }
 
-  if (req.method === "POST" && url.pathname === "/room/size") {
-    handlePostSize(req, res);
+  if (req.method === "POST" && url.pathname === "/room/shape") {
+    handlePostShape(req, res);
     return;
   }
 
