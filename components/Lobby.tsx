@@ -247,8 +247,38 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
 // existir uma empresa de verdade cadastrada (ver "Empresas
 // Posicionadas" na barra, ainda sem backend), esses campos viram dado
 // real vindo dela, não mais esse molde fixo.
-const FEATURED_COMPANY = {
+//
+// 29/set: pedido do Douglas "quero uma setinha do lado do card da
+// empresa, abrindo a aba de edicao: Nome fantasia / cnpj / permissoes
+// de exibicao" + "e editar foto de perfil, e foto de banner do card
+// da empresa" -- virou estado editável (companyProfile/
+// setCompanyProfile) em vez de const fixa, pra edição realmente
+// refletir no card ao vivo. Continua tudo local (useState, sem
+// persistir em lugar nenhum) pelo MESMO motivo do comentário acima:
+// não tem backend de empresa ainda -- quando existir, isso troca pra
+// vir/salvar no banco em vez de só na memória da aba.
+type CompanyProfile = {
+  name: string;
+  cnpj: string;
+  handle: string;
+  tagline: string;
+  taglineEnd: string;
+  bio: string;
+  following: number;
+  followers: number;
+  link: string;
+  logoUrl: string;
+  bannerUrl: string;
+  // "Permitir exibicao do nome da empresa do perfil dos
+  // colaboradores?" -- também só fica guardado localmente por
+  // enquanto (mesmo motivo acima); o perfil dos colaboradores ainda
+  // não lê esse valor de lugar nenhum.
+  showNameOnEmployeeProfiles: boolean;
+};
+
+const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   name: "Empresa Exemplo",
+  cnpj: "",
   handle: "empresaexemplo",
   tagline: "MARCA EM DESTAQUE",
   taglineEnd: "AQUI VOCÊ BRILHA.",
@@ -256,7 +286,113 @@ const FEATURED_COMPANY = {
   following: 24,
   followers: 57,
   link: "habbo-gather.com/empresas",
+  logoUrl: "",
+  bannerUrl: "",
+  showNameOnEmployeeProfiles: true,
 };
+
+// digita só número, mostra formatado (00.000.000/0000-00) -- mesma
+// ideia de "formata enquanto digita" de qualquer campo de CPF/CNPJ
+// brasileiro; nunca deixa passar de 14 dígitos.
+function formatCnpj(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 14);
+  let out = digits;
+  if (digits.length > 12) out = digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})$/, "$1.$2.$3/$4-$5");
+  else if (digits.length > 8) out = digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{1,4})$/, "$1.$2.$3/$4");
+  else if (digits.length > 5) out = digits.replace(/^(\d{2})(\d{3})(\d{1,3})$/, "$1.$2.$3");
+  else if (digits.length > 2) out = digits.replace(/^(\d{2})(\d{1,3})$/, "$1.$2");
+  return out;
+}
+
+// mesma ideia de compressPhotoToDataUrl em GameRoom.tsx (recorta
+// quadrado central, reamostra, exporta JPEG pequeno) -- copiada (não
+// importada, GameRoom não exporta essa função, mesmo motivo dos
+// ícones acima) e reaproveitada pra logo/foto de perfil da empresa.
+function compressSquarePhotoToDataUrl(file: File, target = 240): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      img.onerror = () => reject(new Error("Não deu pra ler a imagem"));
+      img.onload = () => {
+        const size = Math.min(img.width, img.height);
+        const sx = (img.width - size) / 2;
+        const sy = (img.height - size) / 2;
+        const finalSize = Math.min(target, size);
+        const canvas = document.createElement("canvas");
+        canvas.width = finalSize;
+        canvas.height = finalSize;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Sem contexto 2D"));
+        ctx.drawImage(img, sx, sy, size, size, 0, 0, finalSize, finalSize);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// variante SEM recorte quadrado, pro banner (retangular, largo) --
+// só reamostra pra caber num teto de largura/altura, mantendo a
+// proporção original da foto (o CSS do card usa background-size:cover
+// pra preencher a faixa clara de cima, então não precisa vir
+// pré-cortada num formato exato).
+function compressBannerPhotoToDataUrl(file: File, maxWidth = 640, maxHeight = 320): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      img.onerror = () => reject(new Error("Não deu pra ler a imagem"));
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Sem contexto 2D"));
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// MESMO ícone de "trocar foto" (profile-photo-edit) do editor de
+// perfil dentro da sala em GameRoom.tsx -- copiado (não importada,
+// mesmo motivo de sempre) pros botões de trocar logo/banner aqui.
+function BrushIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 20c0-3.2 1.3-5 4-5s3 1.8 3 3.5S9.5 21 8 21c-1.8 0-2.4-1-4-1Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m10.5 14.5 7.3-7.3a2 2 0 0 0 0-2.8l-.2-.2a2 2 0 0 0-2.8 0L7.5 11.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function VerifiedBadge() {
   return (
@@ -697,9 +833,35 @@ export default function Lobby({
   // tava vazia/reservada, ver comentário grande em app/globals.css).
   const [accountCardOpen, setAccountCardOpen] = useState(false);
 
-  // card da Empresa selecionada agora é sempre visível, sem estado de
-  // aberto/fechado (ver .lobby-company-card-pin lá embaixo, perto de
-  // .lobby-card).
+  // card da Empresa selecionada é sempre visível (ver
+  // .lobby-company-card-pin lá embaixo, perto de .lobby-card) -- mas
+  // agora tem uma aba de EDIÇÃO (companyEditOpen), aberta pela
+  // setinha do lado do card (ver DEFAULT_COMPANY_PROFILE/CompanyProfile
+  // lá em cima pra entender por que os dados ficam em state em vez de
+  // const fixa).
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(DEFAULT_COMPANY_PROFILE);
+  const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  const companyLogoInputRef = useRef<HTMLInputElement>(null);
+  const companyBannerInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleCompanyLogoChange(file: File) {
+    try {
+      const dataUrl = await compressSquarePhotoToDataUrl(file);
+      setCompanyProfile((prev) => ({ ...prev, logoUrl: dataUrl }));
+    } catch (e) {
+      console.warn("Não deu pra processar a foto de perfil da empresa", e);
+    }
+  }
+
+  async function handleCompanyBannerChange(file: File) {
+    try {
+      const dataUrl = await compressBannerPhotoToDataUrl(file);
+      setCompanyProfile((prev) => ({ ...prev, bannerUrl: dataUrl }));
+    } catch (e) {
+      console.warn("Não deu pra processar o banner da empresa", e);
+    }
+  }
+
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -1127,44 +1289,191 @@ export default function Lobby({
           canto direito, do lado da conta). Fixo no canto ESQUERDO da
           tela, sempre visível (sem clique pra abrir) -- combina com o
           nome da aba "Empresas Posicionadas" no topbar: é uma vitrine
-          fixa, não um menu. Ver comentário do FEATURED_COMPANY lá em
+          fixa, não um menu. Ver comentário do CompanyProfile lá em
           cima sobre por que o conteúdo é um molde/exemplo, não os
-          dados reais da referência (Obrazur). */}
+          dados reais da referência (Obrazur).
+
+          29/set: + a setinha do lado que abre a aba de edição (ver
+          companyEditOpen/DEFAULT_COMPANY_PROFILE lá em cima). */}
       <div className="lobby-company-card-pin">
         <div className="company-card">
-          <div className="company-card-top">
+          <div
+            className="company-card-top"
+            style={companyProfile.bannerUrl ? { backgroundImage: `url(${companyProfile.bannerUrl})` } : undefined}
+          >
+            {companyProfile.bannerUrl && <div className="company-card-top-overlay" />}
             <p className="company-card-tagline">
-              {FEATURED_COMPANY.tagline}
+              {companyProfile.tagline}
               <span className="company-card-tagline-dots" aria-hidden="true">
                 <span />
                 <span />
               </span>
-              {FEATURED_COMPANY.taglineEnd}
+              {companyProfile.taglineEnd}
             </p>
-            <div className="company-card-logo-box">{FEATURED_COMPANY.name.charAt(0)}</div>
+            <div className="company-card-logo-box">
+              {companyProfile.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={companyProfile.logoUrl} alt="" />
+              ) : (
+                companyProfile.name.charAt(0)
+              )}
+            </div>
           </div>
           <div className="company-card-bottom">
             <p className="company-card-name">
-              {FEATURED_COMPANY.name}
+              {companyProfile.name}
               <VerifiedBadge />
             </p>
-            <p className="company-card-handle">@{FEATURED_COMPANY.handle}</p>
-            <p className="company-card-bio">{FEATURED_COMPANY.bio}</p>
+            <p className="company-card-handle">@{companyProfile.handle}</p>
+            <p className="company-card-bio">{companyProfile.bio}</p>
             <p className="company-card-stats">
               <span>
-                <strong>{FEATURED_COMPANY.following}</strong> Seguindo
+                <strong>{companyProfile.following}</strong> Seguindo
               </span>
               <span>
-                <strong>{FEATURED_COMPANY.followers}</strong> Seguidores
+                <strong>{companyProfile.followers}</strong> Seguidores
               </span>
             </p>
             <p className="company-card-link">
               <LinkIcon />
-              {FEATURED_COMPANY.link}
+              {companyProfile.link}
             </p>
           </div>
         </div>
+
+        <button
+          type="button"
+          className="company-card-edit-trigger"
+          onClick={() => setCompanyEditOpen(true)}
+          aria-expanded={companyEditOpen}
+          title="Editar empresa"
+          data-tooltip="Editar empresa"
+        >
+          <ChevronRightIcon />
+        </button>
       </div>
+
+      {companyEditOpen && (
+        <div className="items-panel-backdrop" onClick={() => setCompanyEditOpen(false)}>
+          <div className="items-panel company-edit-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="items-panel-header">
+              <h2>Editar empresa</h2>
+              <button type="button" className="items-panel-close" onClick={() => setCompanyEditOpen(false)} title="Fechar">
+                ✕
+              </button>
+            </div>
+
+            <section className="items-panel-section">
+              <h3>Fotos</h3>
+
+              <div className="company-edit-photo-row">
+                <div className="company-edit-photo-field">
+                  <div className="company-edit-photo-preview company-edit-photo-preview-logo">
+                    {companyProfile.logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={companyProfile.logoUrl} alt="" />
+                    ) : (
+                      <span>{companyProfile.name.charAt(0)}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="company-edit-photo-btn"
+                      onClick={() => companyLogoInputRef.current?.click()}
+                      title="Trocar foto de perfil"
+                    >
+                      <BrushIcon />
+                    </button>
+                  </div>
+                  <input
+                    ref={companyLogoInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleCompanyLogoChange(file);
+                      e.target.value = "";
+                    }}
+                  />
+                  <span className="company-edit-photo-label">Foto de perfil</span>
+                </div>
+
+                <div className="company-edit-photo-field company-edit-photo-field-banner">
+                  <div className="company-edit-photo-preview company-edit-photo-preview-banner">
+                    {companyProfile.bannerUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={companyProfile.bannerUrl} alt="" />
+                    ) : (
+                      <span>Sem banner</span>
+                    )}
+                    <button
+                      type="button"
+                      className="company-edit-photo-btn"
+                      onClick={() => companyBannerInputRef.current?.click()}
+                      title="Trocar foto de banner"
+                    >
+                      <BrushIcon />
+                    </button>
+                  </div>
+                  <input
+                    ref={companyBannerInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleCompanyBannerChange(file);
+                      e.target.value = "";
+                    }}
+                  />
+                  <span className="company-edit-photo-label">Foto de banner</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="items-panel-section">
+              <h3>Dados da empresa</h3>
+
+              <label className="settings-field">
+                <span>Nome fantasia</span>
+                <input
+                  className="items-panel-input"
+                  value={companyProfile.name}
+                  maxLength={60}
+                  onChange={(e) => setCompanyProfile((prev) => ({ ...prev, name: e.target.value }))}
+                />
+              </label>
+
+              <label className="settings-field">
+                <span>CNPJ</span>
+                <input
+                  className="items-panel-input"
+                  value={companyProfile.cnpj}
+                  placeholder="00.000.000/0000-00"
+                  inputMode="numeric"
+                  maxLength={18}
+                  onChange={(e) => setCompanyProfile((prev) => ({ ...prev, cnpj: formatCnpj(e.target.value) }))}
+                />
+              </label>
+            </section>
+
+            <section className="items-panel-section">
+              <h3>Permissões de exibição</h3>
+
+              <label className="settings-hint settings-hint-check">
+                <input
+                  type="checkbox"
+                  checked={companyProfile.showNameOnEmployeeProfiles}
+                  onChange={(e) =>
+                    setCompanyProfile((prev) => ({ ...prev, showNameOnEmployeeProfiles: e.target.checked }))
+                  }
+                />
+                Permitir exibição do nome da empresa no perfil dos colaboradores?
+              </label>
+            </section>
+          </div>
+        </div>
+      )}
 
       <div className="lobby-card">
         <div className="lobby-sign">

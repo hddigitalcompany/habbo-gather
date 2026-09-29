@@ -3920,7 +3920,7 @@ body {
    .company-card-tagline-dots), logo em caixa arredondada com borda
    preta "vazando" pra metade de baixo, metade preta embaixo com nome
    + selo verificado azul, @arroba, bio, seguidores/seguindo e link. O
-   CONTEÚDO é um molde/exemplo (ver FEATURED_COMPANY em Lobby.tsx) em
+   CONTEÚDO é um molde/exemplo (ver CompanyProfile/DEFAULT_COMPANY_PROFILE em Lobby.tsx) em
    vez dos dados reais da empresa do print, porque reproduzir o
    nome/@arroba/selo verificado de uma empresa real aqui dentro
    passaria a impressão falsa de que ela é parceira/verificada no
@@ -3963,6 +3963,119 @@ body {
   }
 }
 
+/* setinha do lado do card -- pedido do Douglas: "quero uma setinha do
+   lado do card da empresa, abrindo a aba de edicao". MESMO estilo
+   redondo/escuro do botão de trocar foto (.profile-photo-edit em
+   GameRoom.tsx) -- só posicionado do LADO do card (não por cima dele),
+   verticalmente centralizado (.lobby-company-card-pin virou a
+   "caixa" de referência com a mudança anterior, top+bottom, então
+   50%/translateY continua certo mesmo o card esticando). */
+.company-card-edit-trigger {
+  position: absolute;
+  top: 50%;
+  left: calc(290px + 14px);
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(20, 14, 32, 0.85);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.company-card-edit-trigger:hover {
+  background: #7c5cff;
+}
+
+/* aba de edição da empresa (Nome fantasia/CNPJ/fotos/permissão de
+   exibição) -- reaproveita toda a "casca" .items-panel-backdrop/
+   .items-panel/.items-panel-header/.items-panel-section/
+   .items-panel-input já usada por Configurações e pelo Editor de
+   Itens (mesmo request de sempre: reusar o padrão em vez de inventar
+   um novo). */
+.company-edit-photo-row {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.company-edit-photo-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.company-edit-photo-field-banner {
+  flex: 1;
+  align-items: stretch;
+}
+
+.company-edit-photo-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #9d90bb;
+  font-size: 11px;
+  text-align: center;
+}
+
+.company-edit-photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.company-edit-photo-preview-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #cfc4e6;
+}
+
+.company-edit-photo-preview-banner {
+  width: 100%;
+  height: 72px;
+  border-radius: 10px;
+}
+
+.company-edit-photo-btn {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(20, 14, 32, 0.85);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.company-edit-photo-btn:hover {
+  background: #7c5cff;
+}
+
+.company-edit-photo-label {
+  font-size: 11px;
+  color: #9d90bb;
+}
+
 .company-card {
   width: 290px;
   max-width: calc(100vw - 32px);
@@ -3981,11 +4094,30 @@ body {
 .company-card-top {
   position: relative;
   background: #f3efe6;
+  background-size: cover;
+  background-position: center;
   padding: 30px 18px 42px;
   text-align: center;
 }
 
+/* tinta clara por cima do banner (quando tem foto, ver
+   companyProfile.bannerUrl) -- sem isso a frase de efeito escura fica
+   ilegível dependendo da foto escolhida; com a tinta ela sempre lê
+   como se estivesse sobre o mesmo fundo claro de antes. z-index:1 +
+   .company-card-tagline com position:relative/z-index:2 (ver abaixo)
+   -- sem isso um elemento position:absolute pinta por CIMA de texto
+   normal (não-posicionado) mesmo vindo antes no DOM, e a tinta cobria
+   o texto. */
+.company-card-top-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(243, 239, 230, 0.62);
+}
+
 .company-card-tagline {
+  position: relative;
+  z-index: 2;
   margin: 0;
   font-size: 11px;
   font-weight: 700;
@@ -4015,9 +4147,11 @@ body {
   left: 50%;
   bottom: -26px;
   transform: translateX(-50%);
+  z-index: 2;
   width: 64px;
   height: 64px;
   border-radius: 18px;
+  overflow: hidden;
   background: #f3efe6;
   border: 3px solid #0e0d16;
   display: flex;
@@ -4026,6 +4160,12 @@ body {
   font-size: 24px;
   font-weight: 800;
   color: #0e0d16;
+}
+
+.company-card-logo-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* metade preta de baixo -- nome + selo, @arroba, bio, stats, link. */
