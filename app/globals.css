@@ -3672,7 +3672,18 @@ body {
   top: 16px;
   left: 16px;
   right: 16px;
-  z-index: 501;
+  /* 28/set: "nao ta dando pra abrir as conversas fora da sala" --
+     causa raiz: z-index:501 (mais alto que TUDO no Lobby, inclusive
+     os fundos dos painéis de Conversas/Agenda [.lobby-panel-backdrop,
+     z:60], Contatos/Membros [.members-panel-backdrop, z:400] e
+     Configurações/Itens [.items-panel-backdrop, z:400]) -- a barra
+     ficava por CIMA desses painéis dentro da MESMA stacking context
+     (.lobby-backdrop, position:fixed + z-index, ver logo acima), então
+     em telas mais baixas a barra roubava o clique/cobria o topo do
+     painel que deveria estar por cima dela. Baixado pra abaixo de
+     TODOS os fundos de painel de propósito -- um menu de navegação não
+     deveria nunca ficar por cima de um modal aberto. */
+  z-index: 10;
   height: 84px;
   max-width: 1180px;
   margin: 0 auto;
@@ -3691,34 +3702,6 @@ body {
   box-shadow: 0 20px 50px rgba(5, 8, 30, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(22px) saturate(160%);
   -webkit-backdrop-filter: blur(22px) saturate(160%);
-}
-
-/* "semáforo" decorativo (vermelho/amarelo/verde), mesmo estilo dos
-   3 pontinhos de canto de janela do print de referência -- só
-   enfeite, sem função (não tem "janela" nenhuma pra fechar/minimizar
-   aqui). */
-.lobby-topbar-dots {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.lobby-topbar-dot {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-}
-
-.lobby-topbar-dot-red {
-  background: #ff5f57;
-}
-
-.lobby-topbar-dot-yellow {
-  background: #ffbd2e;
-}
-
-.lobby-topbar-dot-green {
-  background: #28c840;
 }
 
 .lobby-topbar-logo-group {
@@ -3820,7 +3803,10 @@ body {
 .lobby-topbar-dropdown-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 549;
+  /* mesmo ajuste do .lobby-topbar acima -- só precisa ficar ACIMA da
+     própria barra (z:10), não acima dos modais de verdade
+     (Conversas/Agenda/Contatos/Configurações). */
+  z-index: 11;
   background: transparent;
 }
 
@@ -3828,7 +3814,7 @@ body {
   position: absolute;
   top: calc(100% + 14px);
   left: 0;
-  z-index: 550;
+  z-index: 12;
   min-width: 200px;
   background: rgba(20, 26, 56, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.14);

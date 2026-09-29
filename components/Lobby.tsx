@@ -914,16 +914,8 @@ export default function Lobby({
           espaços". */}
       <div className="lobby-topbar">
         <div className="lobby-topbar-logo-group">
-          {/* semáforo decorativo (vermelho/amarelo/verde), pedido do
-              Douglas: "faca a barra superior com este efeito de card,
-              iphone com blur" (print de referência de um app estilo
-              Mac/iPhone) -- só enfeite, ver comentário grande em
-              app/globals.css. */}
-          <span className="lobby-topbar-dots" aria-hidden="true">
-            <span className="lobby-topbar-dot lobby-topbar-dot-red" />
-            <span className="lobby-topbar-dot lobby-topbar-dot-yellow" />
-            <span className="lobby-topbar-dot lobby-topbar-dot-green" />
-          </span>
+          {/* semáforo decorativo removido -- pedido do Douglas (28/set):
+              "tire isso, esses pontinhos". */}
           <span className="lobby-topbar-logo">Habbo-gather</span>
         </div>
         <nav className="lobby-topbar-nav">
