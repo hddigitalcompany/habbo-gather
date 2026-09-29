@@ -108,3 +108,32 @@ export async function getRole(userId) {
     return null;
   }
 }
+
+/**
+ * Dono de VERDADE de UMA sala específica (public.rooms.owner_user_id,
+ * ver supabase/migrations/0032_rooms.sql/0037_rooms_slug_and_first_
+ * template.sql) -- diferente de getRole acima, que só sabe responder
+ * sobre a Sala Principal (tabela room_members, GLOBAL, anterior ao
+ * multi-sala). Usado pelo callerIsOwner (ver handlePostFloor etc
+ * abaixo) pra autorizar salvar o espaço da sala CERTA -- sem isso, o
+ * dono da Sala Principal (ou quem quer que getRole ache "owner")
+ * conseguia editar a sala de QUALQUER cliente, já que getRole nem
+ * olha pra qual sala o pedido é. Sala Principal também funciona aqui
+ * sem tratamento especial -- o owner_user_id dela já foi preenchido
+ * (bootstrap em 0033_room_scoped_membership.sql), então essa função
+ * sozinha já cobre os dois casos.
+ */
+export async function isRoomOwner(userId, roomSlug) {
+  if (!admin || !userId || !roomSlug) return false;
+  try {
+    const { data } = await admin
+      .from("rooms")
+      .select("owner_user_id")
+      .eq("room_slug", roomSlug)
+      .eq("is_template", false)
+      .maybeSingle();
+    return !!data && data.owner_user_id === userId;
+  } catch {
+    return false;
+  }
+}

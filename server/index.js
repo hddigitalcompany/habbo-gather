@@ -246,7 +246,7 @@ import { fileURLToPath } from "url";
 import * as chatStore from "./chatStore.js";
 import * as agendaStore from "./agendaStore.js";
 import * as roomStore from "./roomStore.js";
-import { verifyAccessToken, getActiveMemberIds, isBanned, getRole } from "./roomAuth.js";
+import { verifyAccessToken, getActiveMemberIds, isBanned, getRole, isRoomOwner } from "./roomAuth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
@@ -677,7 +677,7 @@ async function handleGetShape(req, res, url) {
  * handlePostFloor abaixo (só o DONO da sala salva em produção). */
 async function handlePostShape(req, res, url) {
   const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -750,7 +750,7 @@ async function handleGetWalls(req, res, url) {
  * troca roomStore.setFloor por roomStore.setWalls. */
 async function handlePostWalls(req, res, url) {
   const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -818,7 +818,7 @@ async function handleGetDoors(req, res, url) {
  * troca roomStore.setWalls por roomStore.setDoors. */
 async function handlePostDoors(req, res, url) {
   const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -1272,19 +1272,27 @@ async function handleGetFurniture(req, res, url) {
 
 const MAX_ROOM_BODY_BYTES = 500_000; // generoso pro tamanho da sala hoje (12x7), evita payload absurdo
 
-/** Confere se quem chamou é o DONO da sala, via header "Authorization:
- * Bearer <token>" (mesmo esquema já usado em handleGetPresence acima) --
- * usado pelos handlePost* abaixo pra decidir se libera salvar em
- * PRODUÇÃO (ver comentário neles). Sem token, ou token de quem não é
- * owner, devolve false -- nunca lança. */
-async function callerIsOwner(req) {
+/** Confere se quem chamou é o DONO da sala CERTA (roomSlug -- ver
+ * public.rooms.owner_user_id via isRoomOwner em roomAuth.js), via header
+ * "Authorization: Bearer <token>" (mesmo esquema já usado em
+ * handleGetPresence acima) -- usado pelos handlePost* abaixo pra decidir
+ * se libera salvar em PRODUÇÃO (ver comentário neles). Sem token, ou
+ * token de quem não é dono DESSA sala, devolve false -- nunca lança.
+ *
+ * CORRIGIDO (29/set, bug real de autorização, não só visual): antes
+ * checava getRole(callerUserId) -- o papel GLOBAL na Sala Principal,
+ * sem nenhuma relação com roomSlug -- então o dono da Sala Principal (ou
+ * qualquer conta que getRole achasse "owner") conseguia salvar o
+ * floor/walls/furniture da sala de QUALQUER cliente, só mandando o
+ * roomSlug certo no POST. Agora confere o dono de VERDADE daquela sala
+ * específica. */
+async function callerIsOwner(req, roomSlug) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
   if (!token) return false;
   const callerUserId = await verifyAccessToken(token);
   if (!callerUserId) return false;
-  const role = await getRole(callerUserId);
-  return role === "owner";
+  return isRoomOwner(callerUserId, roomSlug);
 }
 
 /** POST /room/floor -- ver comentário grande no topo do arquivo. Em
@@ -1297,7 +1305,7 @@ async function callerIsOwner(req) {
  * salvar" assim que saía do ambiente de dev). */
 async function handlePostFloor(req, res, url) {
   const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -1359,7 +1367,7 @@ async function handlePostFloor(req, res, url) {
  * espera { list, tiles } em vez de { items }). */
 async function handlePostAreas(req, res, url) {
   const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;
@@ -1421,7 +1429,7 @@ async function handlePostAreas(req, res, url) {
  * espera { items, seatOffsets } em vez de { list, tiles }). */
 async function handlePostFurniture(req, res, url) {
   const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req))) {
+  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
     res.writeHead(403, corsHeaders());
     res.end("Editor de espaço desativado em produção.");
     return;

@@ -958,29 +958,53 @@ export default function GameRoom({
   const [deleteToolActive, setDeleteToolActive] = useState(false);
   const [moveToolActive, setMoveToolActive] = useState(false);
 
-  // --- membro/visitante/dono da sala (ver supabase/migrations/0001_accounts.sql
+  // --- papel GLOBAL na Sala Principal (ver supabase/migrations/0001_accounts.sql
   // e app/api/room/members) -- só quem tem conta (accountUserId, ver
   // AuthGate.tsx) tem um "role" de verdade; sem conta fica sempre
-  // "visitor". roomRole decide se o botão de abrir o painel de
-  // configuração aparece (só "owner"); presenceCounts é só decorativo
-  // (contador na tela), aparece pra todo mundo. ---
+  // "visitor". NÃO é sobre a sala ATUAL (ver isCurrentRoomOwner logo
+  // abaixo, que é o que importa em qualquer sala que não seja a Sala
+  // Principal) -- roomRole só serve hoje pro botão "Membros" (só existe
+  // conceito de time/convite lá, ver comentário dele mais abaixo).
+  // presenceCounts é só decorativo (contador na tela), aparece pra todo
+  // mundo. ---
   const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
-  // ref sempre em dia (sem precisar de useEffect nenhum pra isso, mesma
-  // ideia de draftAreaDefsRef mais abaixo) -- só pra runWhenSceneReady
-  // (efeito de bootstrap do Phaser.Game, roda uma vez só) conseguir ler
-  // o roomRole MAIS RECENTE na hora de scene.setRoomOwner, mesmo se ele
-  // já tiver chegado do servidor ANTES da cena terminar de carregar
-  // (fetch de /api/room/members é bem mais rápido que o Loader do
-  // Phaser, ver comentário grande em runWhenSceneReady) -- sem isso,
-  // scene.isRoomOwner ficaria travado no valor inicial ("visitor") pro
-  // resto da sessão nesse caso, e só corrigiria sozinho se roomRole
-  // mudasse de novo depois (o que pode nunca acontecer).
-  const roomRoleRef = useRef(roomRole);
-  roomRoleRef.current = roomRole;
+  // --- dono de VERDADE da sala ATUAL (roomSlug -- ver GET
+  // /api/room/owner, checa public.rooms.owner_user_id) -- CORRIGIDO
+  // 29/set: até aqui canEditRoom/scene.setRoomOwner usavam o roomRole
+  // acima (papel GLOBAL na Sala Principal, pré multi-sala), então o
+  // dono da Sala Principal aparecia como "dono" em QUALQUER sala que
+  // abrisse, inclusive a de um cliente (bug de autorização real, não só
+  // visual -- o servidor tinha o mesmo problema, ver callerIsOwner em
+  // server/index.js, corrigido junto). Isso aqui funciona igual pra
+  // Sala Principal (o Douglas já é owner_user_id dela) e pra sala
+  // própria de cada cliente. ---
+  const [isCurrentRoomOwner, setIsCurrentRoomOwner] = useState(false);
+  const isCurrentRoomOwnerRef = useRef(isCurrentRoomOwner);
+  isCurrentRoomOwnerRef.current = isCurrentRoomOwner;
+  useEffect(() => {
+    if (!accountAccessToken) {
+      setIsCurrentRoomOwner(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/room/owner?room=${encodeURIComponent(roomSlug)}`, {
+      headers: { Authorization: `Bearer ${accountAccessToken}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setIsCurrentRoomOwner(Boolean(data?.isOwner));
+      })
+      .catch(() => {
+        if (!cancelled) setIsCurrentRoomOwner(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken, roomSlug]);
   // libera "Editar espaço" (ver IS_ROOM_EDITOR_ENABLED acima) sempre em
-  // dev, e em qualquer ambiente pro DONO da sala -- membro/visitante
-  // nunca, em lugar nenhum.
-  const canEditRoom = IS_ROOM_EDITOR_ENABLED || roomRole === "owner";
+  // dev, e em qualquer ambiente pro DONO DESSA sala -- membro/visitante/
+  // dono de OUTRA sala nunca, em lugar nenhum.
+  const canEditRoom = IS_ROOM_EDITOR_ENABLED || isCurrentRoomOwner;
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
 
@@ -1770,8 +1794,8 @@ export default function GameRoom({
   // updateAreaHoverLabels em MainScene.ts) -- a permissão de verdade é
   // sempre reconferida no servidor.
   useEffect(() => {
-    sceneRef.current?.setRoomOwner(roomRole === "owner");
-  }, [roomRole]);
+    sceneRef.current?.setRoomOwner(isCurrentRoomOwner);
+  }, [isCurrentRoomOwner]);
 
   // contador de membro/visitante ONLINE -- reaproveita GET
   // /room/presence do servidor WebSocket (ver handleGetPresence em
@@ -2811,11 +2835,11 @@ export default function GameRoom({
           myProfileRef.current.name || "Você",
           statusColorFor(myProfileRef.current.status)
         );
-        // idem (ver comentário grande de roomRoleRef acima) -- valor
-        // inicial na hora, o useEffect logo abaixo (dependência
-        // [roomRole]) cobre qualquer troca DEPOIS que a cena já tá
-        // pronta.
-        scene.setRoomOwner(roomRoleRef.current === "owner");
+        // idem (ver comentário grande de isCurrentRoomOwnerRef acima) --
+        // valor inicial na hora, o useEffect logo abaixo (dependência
+        // [isCurrentRoomOwner]) cobre qualquer troca DEPOIS que a cena já
+        // tá pronta.
+        scene.setRoomOwner(isCurrentRoomOwnerRef.current);
         // aplica a aparência salva/sorteada (cabelo, tom de pele, barba,
         // acessório, traje) já na hora que a cena fica pronta -- sem
         // isso, createAvatar() sempre cria o boneco com DEFAULT_HAIR_ID/
@@ -4845,7 +4869,7 @@ export default function GameRoom({
         )}
 
         <div className="controls">
-          {roomRole === "owner" && (
+          {roomSlug === "sala-principal" && isCurrentRoomOwner && (
             <button
               className="av-btn"
               onClick={() => setMembersPanelOpen(true)}
