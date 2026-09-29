@@ -3608,6 +3608,50 @@ body {
   text-align: center;
 }
 
+/* 29/set, pedido do Douglas: "vamos arrumar a tela de login/criar
+   conta" -- botão "Continuar com o Google" (ver handleGoogleSignIn/
+   GoogleIcon em components/AuthGate.tsx). Fundo branco + borda, ícone
+   colorido -- convenção padrão dos botões de login do Google ("G"
+   colorido em cima de botão claro), destoa de propósito do resto da UI
+   escura pra ficar reconhecível na hora. */
+.auth-gate-google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  color: #1f1f1f;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.auth-gate-google-btn:hover {
+  background: #f4f4f4;
+}
+
+.auth-gate-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: #8b7fae;
+  font-size: 12px;
+}
+
+.auth-gate-divider::before,
+.auth-gate-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .auth-gate-tabs {
   display: flex;
   gap: 4px;
