@@ -95,6 +95,13 @@ type CallSummary = {
   startTs: number;
   durationMinutes: number;
   participants: CallParticipant[];
+  // já vinham do servidor (enrich() em server/agendaStore.js) mas o
+  // cliente não usava -- precisa de createdBy pra saber quem pode
+  // editar/apagar o compromisso (só quem criou, ver
+  // agendaStore.updateCall/deleteCall) e description pra reaproveitar
+  // no formulário de edição (ver LobbyAgendaPanel).
+  createdBy: string;
+  description: string;
 };
 
 type FloorTile = { col: number; row: number; styleId: string };
@@ -659,6 +666,29 @@ function formatCallWhen(startTs: number): string {
   });
 }
 
+// mesma ideia de pad2/localDateStr/localTimeStr/combineLocalDateTime
+// em GameRoom.tsx (copiadas, não importadas -- mesmo motivo dos
+// ícones/compressPhotoToDataUrl acima: GameRoom não exporta essas
+// funções) -- usadas no formulário de criar/editar compromisso do
+// LobbyAgendaPanel (inputs separados de data/hora, igual
+// <input type="date">/<input type="time">).
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function localTimeStr(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function combineLocalDateTime(dateStr: string, timeStr: string): number {
+  if (!dateStr || !timeStr) return NaN;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh, mm] = timeStr.split(":").map(Number);
+  if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
+  return new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
+}
+
 // pedido do Douglas: "faca uma previa da agenda conforme a foto
 // enviada" -- print de referência com 3 cards (um por dia com
 // compromisso), cada um com um "selo" de data (29 Set / Terça-feira)
@@ -849,18 +879,60 @@ function conversationTitle(c: ConversationSummary | null | undefined): string {
 /** Painel de agenda do Lobby -- lista de compromissos, com Aceitar/
  * Recusar pra quem ainda tá pendente (mesma trava de participante do
  * agendaStore, ver POST /agenda/respond em server/index.js). */
+type AgendaFormState = {
+  title: string;
+  date: string;
+  time: string;
+  durationMinutes: number;
+  participantIds: string[];
+  description: string;
+};
+
+const AGENDA_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120];
+
+/** Painel de agenda do Lobby -- lista de compromissos (Aceitar/Recusar
+ * pra quem ainda tá pendente, mesma trava de participante do
+ * agendaStore, ver POST /agenda/respond em server/index.js) + CRIAR e
+ * EDITAR compromisso (29/set: Douglas reportou "nao me da a agenda
+ * mesmo, editavel e criavel" -- antes só tinha leitura/resposta,
+ * igual a versão de dentro da sala (av-bar "Marcar compromisso"), mas
+ * essa daqui roda via REST (POST /agenda/create,update,delete em
+ * server/index.js), sem abrir WebSocket -- MESMO motivo do resto do
+ * Lobby ficar em REST (ver comentário grande no topo do arquivo: não
+ * virar presença fantasma na sala). Só quem CRIOU o compromisso pode
+ * editar/apagar (call.createdBy, ver agendaStore.updateCall/
+ * deleteCall) -- participantes continuam só podendo aceitar/recusar.
+ * Editar não mexe em quem foi convidado (participantes só se define
+ * na criação -- isso também não existe na versão de dentro da sala,
+ * não é regressão daqui). */
 function LobbyAgendaPanel({
   myUserId,
   calls,
+  directory,
   onClose,
-  onResponded,
+  setCalls,
 }: {
   myUserId: string;
   calls: CallSummary[] | null;
+  directory: ContactUser[] | null;
   onClose: () => void;
-  onResponded: (call: CallSummary) => void;
+  setCalls: (updater: (prev: CallSummary[] | null) => CallSummary[] | null) => void;
 }) {
   const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [view, setView] = useState<"list" | "form">("list");
+  const [editingCallId, setEditingCallId] = useState<string | null>(null);
+  const [form, setForm] = useState<AgendaFormState>({
+    title: "",
+    date: "",
+    time: "",
+    durationMinutes: 30,
+    participantIds: [],
+    description: "",
+  });
+  const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function respond(callId: string, status: "approved" | "declined") {
     if (respondingId) return;
@@ -873,7 +945,7 @@ function LobbyAgendaPanel({
       });
       if (res.ok) {
         const data = await res.json();
-        if (data?.call) onResponded(data.call);
+        if (data?.call) setCalls((prev) => (prev ? prev.map((c) => (c.id === data.call.id ? data.call : c)) : prev));
       }
     } catch {
       // rede caiu -- pessoa tenta de novo, botão volta a ficar clicável
@@ -882,62 +954,336 @@ function LobbyAgendaPanel({
     }
   }
 
+  function openNewForm() {
+    const suggestion = new Date(Date.now() + 30 * 60_000); // meia hora a partir de agora, só ponto de partida
+    setForm({
+      title: "",
+      date: localDateStr(suggestion),
+      time: localTimeStr(suggestion),
+      durationMinutes: 30,
+      participantIds: [],
+      description: "",
+    });
+    setEditingCallId(null);
+    setFormError(null);
+    setParticipantPickerOpen(false);
+    setView("form");
+  }
+
+  function openEditForm(call: CallSummary) {
+    const d = new Date(call.startTs);
+    setForm({
+      title: call.title,
+      date: localDateStr(d),
+      time: localTimeStr(d),
+      durationMinutes: call.durationMinutes,
+      participantIds: call.participants.filter((p) => p.id !== myUserId).map((p) => p.id),
+      description: call.description || "",
+    });
+    setEditingCallId(call.id);
+    setFormError(null);
+    setParticipantPickerOpen(false);
+    setView("form");
+  }
+
+  function toggleFormParticipant(userId: string) {
+    setForm((prev) => ({
+      ...prev,
+      participantIds: prev.participantIds.includes(userId)
+        ? prev.participantIds.filter((x) => x !== userId)
+        : [...prev.participantIds, userId],
+    }));
+  }
+
+  async function submitForm() {
+    const startTs = combineLocalDateTime(form.date, form.time);
+    if (!Number.isFinite(startTs)) {
+      setFormError("Preenche a data e o horário pra marcar o compromisso.");
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      if (editingCallId) {
+        const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            callId: editingCallId,
+            userId: myUserId,
+            title: form.title.trim() || "Call",
+            startTs,
+            durationMinutes: form.durationMinutes,
+            description: form.description.trim(),
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.call) {
+          setFormError("Não deu pra salvar -- tenta de novo.");
+          return;
+        }
+        setCalls((prev) => (prev ? prev.map((c) => (c.id === data.call.id ? data.call : c)) : prev));
+      } else {
+        const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: myUserId,
+            title: form.title.trim() || "Call",
+            startTs,
+            durationMinutes: form.durationMinutes,
+            participantIds: form.participantIds,
+            description: form.description.trim(),
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.call) {
+          setFormError("Não deu pra criar -- tenta de novo.");
+          return;
+        }
+        setCalls((prev) => [...(prev ?? []), data.call]);
+      }
+      setView("list");
+    } catch {
+      setFormError("Rede caiu -- tenta de novo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteCall(callId: string) {
+    if (deletingId) return;
+    if (!window.confirm("Apagar esse compromisso?")) return;
+    setDeletingId(callId);
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, userId: myUserId }),
+      });
+      if (res.ok) {
+        setCalls((prev) => (prev ? prev.filter((c) => c.id !== callId) : prev));
+      }
+    } catch {
+      // rede caiu -- pessoa tenta de novo
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const sorted = calls ? [...calls].sort((a, b) => a.startTs - b.startTs) : null;
 
   return (
     <div className="lobby-panel-backdrop" onClick={onClose}>
-      <div className="lobby-panel" onClick={(e) => e.stopPropagation()}>
+      <div className={view === "form" ? "lobby-panel lobby-panel-wide" : "lobby-panel"} onClick={(e) => e.stopPropagation()}>
         <div className="lobby-panel-header">
-          <h3>Agenda</h3>
+          {view === "form" && (
+            <button type="button" className="lobby-panel-back" onClick={() => setView("list")} title="Voltar">
+              ←
+            </button>
+          )}
+          <h3>{view === "list" ? "Agenda" : editingCallId ? "Editar compromisso" : "Novo compromisso"}</h3>
+          {view === "list" && (
+            <button type="button" className="lobby-panel-add" onClick={openNewForm} title="Novo compromisso">
+              +
+            </button>
+          )}
           <button type="button" className="lobby-panel-close" onClick={onClose} title="Fechar">
             ✕
           </button>
         </div>
 
-        {!sorted || sorted.length === 0 ? (
-          <p className="lobby-panel-empty">Nenhum compromisso agendado.</p>
-        ) : (
-          <ul className="lobby-call-list">
-            {sorted.map((call) => {
-              const mine = call.participants.find((p) => p.id === myUserId);
-              return (
-                <li key={call.id} className="lobby-call-item">
-                  <p className="lobby-call-title">{call.title}</p>
-                  <p className="lobby-call-when">
-                    {formatCallWhen(call.startTs)} · {call.durationMinutes} min
-                  </p>
-                  {mine?.status === "pending" ? (
-                    <div className="lobby-call-actions">
-                      <button
-                        type="button"
-                        className="lobby-call-accept"
-                        disabled={respondingId === call.id}
-                        onClick={() => respond(call.id, "approved")}
-                      >
-                        Aceitar
-                      </button>
-                      <button
-                        type="button"
-                        className="lobby-call-decline"
-                        disabled={respondingId === call.id}
-                        onClick={() => respond(call.id, "declined")}
-                      >
-                        Recusar
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="lobby-call-status">
-                      {mine?.status === "declined"
-                        ? "Você recusou"
-                        : mine?.status === "approved"
-                          ? "Confirmado"
-                          : ""}
+        {view === "list" ? (
+          !sorted || sorted.length === 0 ? (
+            <div className="lobby-panel-empty-wrap">
+              <p className="lobby-panel-empty">Nenhum compromisso agendado.</p>
+              <button type="button" className="lobby-agenda-new-btn" onClick={openNewForm}>
+                + Marcar compromisso
+              </button>
+            </div>
+          ) : (
+            <ul className="lobby-call-list">
+              {sorted.map((call) => {
+                const mine = call.participants.find((p) => p.id === myUserId);
+                const isOwner = call.createdBy === myUserId;
+                return (
+                  <li key={call.id} className="lobby-call-item">
+                    <p className="lobby-call-title">{call.title}</p>
+                    <p className="lobby-call-when">
+                      {formatCallWhen(call.startTs)} · {call.durationMinutes} min
                     </p>
+                    {mine?.status === "pending" ? (
+                      <div className="lobby-call-actions">
+                        <button
+                          type="button"
+                          className="lobby-call-accept"
+                          disabled={respondingId === call.id}
+                          onClick={() => respond(call.id, "approved")}
+                        >
+                          Aceitar
+                        </button>
+                        <button
+                          type="button"
+                          className="lobby-call-decline"
+                          disabled={respondingId === call.id}
+                          onClick={() => respond(call.id, "declined")}
+                        >
+                          Recusar
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="lobby-call-status">
+                        {mine?.status === "declined" ? "Você recusou" : mine?.status === "approved" ? "Confirmado" : ""}
+                      </p>
+                    )}
+                    {isOwner && (
+                      <div className="lobby-call-owner-actions">
+                        <button type="button" className="lobby-call-edit" onClick={() => openEditForm(call)}>
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="lobby-call-delete"
+                          disabled={deletingId === call.id}
+                          onClick={() => deleteCall(call.id)}
+                        >
+                          Apagar
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : (
+          <div className="lobby-agenda-form">
+            <label className="lobby-agenda-form-field">
+              <span>Título</span>
+              <input
+                type="text"
+                value={form.title}
+                maxLength={80}
+                placeholder="Reunião, call, compromisso…"
+                onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+              />
+            </label>
+
+            <div className="lobby-agenda-form-row">
+              <label className="lobby-agenda-form-field">
+                <span>Data</span>
+                <input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))}
+                />
+              </label>
+              <label className="lobby-agenda-form-field">
+                <span>Horário</span>
+                <input
+                  type="time"
+                  value={form.time}
+                  onChange={(e) => setForm((prev) => ({ ...prev, time: e.target.value }))}
+                />
+              </label>
+            </div>
+
+            <label className="lobby-agenda-form-field">
+              <span>Duração</span>
+              <select
+                value={form.durationMinutes}
+                onChange={(e) => setForm((prev) => ({ ...prev, durationMinutes: Number(e.target.value) }))}
+              >
+                {AGENDA_DURATION_OPTIONS.map((min) => (
+                  <option key={min} value={min}>
+                    {min} min
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* participantes só dá pra escolher na CRIAÇÃO -- editar
+                não mexe em quem foi convidado (ver comentário grande
+                no topo do componente). Ao editar, só mostra quem já
+                tá convidado, sem dropdown. */}
+            {editingCallId ? (
+              <div className="lobby-agenda-form-field">
+                <span>Convidados</span>
+                <p className="lobby-agenda-invited-readonly">
+                  {form.participantIds.length === 0
+                    ? "Só você"
+                    : form.participantIds
+                        .map((id) => directory?.find((u) => u.userId === id)?.name || "Alguém")
+                        .join(", ")}
+                </p>
+              </div>
+            ) : (
+              <label className="lobby-agenda-form-field">
+                <span>Convidar pessoas</span>
+                <div className="company-edit-category-select">
+                  <button
+                    type="button"
+                    className="company-edit-input company-edit-category-trigger"
+                    onClick={() => setParticipantPickerOpen((v) => !v)}
+                    aria-expanded={participantPickerOpen}
+                    disabled={!directory}
+                  >
+                    <span className="company-edit-category-trigger-text">
+                      {!directory
+                        ? "Carregando pessoas…"
+                        : form.participantIds.length > 0
+                          ? form.participantIds
+                              .map((id) => directory.find((u) => u.userId === id)?.name || "Alguém")
+                              .join(", ")
+                          : "Só você (opcional)"}
+                    </span>
+                    <ChevronIcon />
+                  </button>
+                  {participantPickerOpen && directory && (
+                    <>
+                      <div className="company-edit-category-catcher" onClick={() => setParticipantPickerOpen(false)} />
+                      <div className="company-edit-category-list" onClick={(e) => e.stopPropagation()}>
+                        {directory.filter((u) => u.userId !== myUserId).length === 0 ? (
+                          <p className="lobby-agenda-invited-readonly">Ninguém mais cadastrado ainda.</p>
+                        ) : (
+                          directory
+                            .filter((u) => u.userId !== myUserId)
+                            .map((u) => (
+                              <label key={u.userId} className="company-edit-category-option">
+                                <input
+                                  type="checkbox"
+                                  checked={form.participantIds.includes(u.userId)}
+                                  onChange={() => toggleFormParticipant(u.userId)}
+                                />
+                                <span>{u.name}</span>
+                              </label>
+                            ))
+                        )}
+                      </div>
+                    </>
                   )}
-                </li>
-              );
-            })}
-          </ul>
+                </div>
+              </label>
+            )}
+
+            <label className="lobby-agenda-form-field">
+              <span>Descrição (opcional)</span>
+              <textarea
+                className="company-edit-textarea"
+                value={form.description}
+                maxLength={2000}
+                rows={3}
+                placeholder="Detalhes do compromisso"
+                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+              />
+            </label>
+
+            {formError && <p className="lobby-agenda-form-error">{formError}</p>}
+
+            <button type="button" className="lobby-agenda-form-submit" disabled={saving} onClick={submitForm}>
+              {saving ? "Salvando…" : editingCallId ? "Salvar alterações" : "Marcar compromisso"}
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -1301,10 +1647,6 @@ export default function Lobby({
             .sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0))
         : prev
     );
-  }
-
-  function handleCallResponded(updated: CallSummary) {
-    setCalls((prev) => (prev ? prev.map((c) => (c.id === updated.id ? updated : c)) : prev));
   }
 
   const displayName = accountProfile?.name?.trim() || "visitante";
@@ -2057,8 +2399,9 @@ export default function Lobby({
         <LobbyAgendaPanel
           myUserId={myUserId}
           calls={calls}
+          directory={directory}
           onClose={() => setAgendaPanelOpen(false)}
-          onResponded={handleCallResponded}
+          setCalls={setCalls}
         />
       )}
     </div>

@@ -225,6 +225,16 @@
 //   agenda:reminder     -> servidor->participantes (não recusados), alguns minutos antes do horário:
 //                           { type: "agenda:reminder", call }
 //                           (timer em memória -- some se o servidor reiniciar antes da hora)
+//
+// 29/set: o Lobby (sem WebSocket, ver comentário logo abaixo) ganhou
+// REST equivalente pra criar/editar/apagar compromisso, não só
+// ler/responder (pedido do Douglas: "nao me da a agenda mesmo,
+// editavel e criavel") -- MESMAS funções de agendaStore.js por baixo:
+//   GET  /agenda/summary?userId=X           -> lista (agendaStore.listCallsForUser)
+//   POST /agenda/respond {callId,userId,status}            -> agendaStore.respondToCall
+//   POST /agenda/create  {userId,title,startTs,durationMinutes,participantIds,description} -> agendaStore.createCall
+//   POST /agenda/update  {callId,userId,title,startTs,durationMinutes,description}         -> agendaStore.updateCall (só quem criou)
+//   POST /agenda/delete  {callId,userId}                    -> agendaStore.deleteCall (só quem criou)
 
 import { createServer } from "http";
 import { randomUUID } from "crypto";
@@ -1023,6 +1033,92 @@ async function handlePostAgendaRespond(req, res) {
   res.end(JSON.stringify({ ok: true, call }));
 }
 
+/** POST /agenda/create -- cria um compromisso sem precisar abrir
+ * WebSocket (mesma ideia de handlePostAgendaRespond acima). 29/set,
+ * pedido do Douglas: agenda do Lobby "editavel e criavel", não só
+ * aceitar/recusar o que já existe. MESMA função usada pelo caso
+ * "agenda:create" do WebSocket (agendaStore.createCall) -- os campos
+ * mais avançados de lá (câmera/áudio/tela necessários, anexos) ficam
+ * de fora aqui de propósito: o formulário do Lobby é o básico
+ * (título/data/hora/duração/participantes/descrição); quem quiser
+ * afinar isso monta a call de dentro da sala mesmo ("Marcar
+ * compromisso" na av-bar), que já tem esse formulário completo. */
+async function handlePostAgendaCreate(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { userId, title, startTs, durationMinutes, participantIds, description } = body;
+  if (typeof userId !== "string" || !Number.isFinite(Number(startTs))) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "userId" e "startTs" (timestamp em ms)');
+    return;
+  }
+  const call = agendaStore.createCall({
+    title,
+    startTs: Number(startTs),
+    durationMinutes,
+    needs: { camera: false, audio: false, screen: false },
+    participantIds: Array.isArray(participantIds) ? participantIds.filter((x) => typeof x === "string") : [],
+    createdBy: userId,
+    visibility: "private",
+    description,
+    attachments: [],
+    blocksAgenda: true,
+  });
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, call }));
+}
+
+/** POST /agenda/update -- edita um compromisso JÁ criado (só quem
+ * criou, ver agendaStore.updateCall). */
+async function handlePostAgendaUpdate(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { callId, userId, title, startTs, durationMinutes, description } = body;
+  if (typeof callId !== "string" || typeof userId !== "string") {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "callId"/"userId"');
+    return;
+  }
+  const call = agendaStore.updateCall(callId, userId, { title, startTs, durationMinutes, description });
+  if (!call) {
+    res.writeHead(400, corsHeaders());
+    res.end("Compromisso não encontrado, ou quem pediu não é quem criou.");
+    return;
+  }
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, call }));
+}
+
+/** POST /agenda/delete -- cancela/apaga um compromisso (só quem
+ * criou). */
+async function handlePostAgendaDelete(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { callId, userId } = body;
+  if (typeof callId !== "string" || typeof userId !== "string") {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "callId"/"userId"');
+    return;
+  }
+  const removed = agendaStore.deleteCall(callId, userId);
+  if (!removed) {
+    res.writeHead(400, corsHeaders());
+    res.end("Compromisso não encontrado, ou quem pediu não é quem criou.");
+    return;
+  }
+  for (const p of removed.participants) {
+    sendToUser(p.id, { type: "agenda:call_deleted", callId: removed.id });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true }));
+}
+
 /** GET /chat/summary?userId=X -- resumo LEVE das conversas de um
  * usuário, sem precisar abrir WebSocket/"identify" -- pedido do
  * Douglas: chat "acompanha a pessoa por toda a plataforma", não só
@@ -1385,6 +1481,21 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/agenda/respond") {
     handlePostAgendaRespond(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agenda/create") {
+    handlePostAgendaCreate(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agenda/update") {
+    handlePostAgendaUpdate(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agenda/delete") {
+    handlePostAgendaDelete(req, res);
     return;
   }
 

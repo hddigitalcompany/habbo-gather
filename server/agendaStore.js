@@ -262,6 +262,39 @@ export function respondToCall(callId, userId, status) {
   return enrich(call);
 }
 
+/** Edita um compromisso JÁ criado -- só quem criou (call.createdBy)
+ * pode (29/set, pedido do Douglas: agenda "editavel e criavel", ver
+ * POST /agenda/update em server/index.js). Só os campos do próprio
+ * compromisso (título/horário/duração/descrição) -- participantes só
+ * se define na criação, não muda aqui (mesma limitação que já existia
+ * na criação via WebSocket, não é regressão). null se a call não
+ * existir ou quem pediu não for quem criou. */
+export function updateCall(callId, requesterUserId, updates) {
+  const call = store.calls[callId];
+  if (!call) return null;
+  if (call.createdBy !== requesterUserId) return null;
+  if (typeof updates.title === "string") call.title = updates.title.slice(0, 80) || "Call";
+  if (Number.isFinite(Number(updates.startTs))) call.startTs = Number(updates.startTs);
+  if (updates.durationMinutes !== undefined) {
+    call.durationMinutes = Math.min(Math.max(Number(updates.durationMinutes) || 30, 5), 480);
+  }
+  if (typeof updates.description === "string") call.description = updates.description.slice(0, 2000);
+  persist();
+  return enrich(call);
+}
+
+/** Cancela/apaga um compromisso -- só quem criou. Devolve a call
+ * (já removida do store) pra quem chamou avisar os participantes, ou
+ * null se não existir/quem pediu não for quem criou. */
+export function deleteCall(callId, requesterUserId) {
+  const call = store.calls[callId];
+  if (!call) return null;
+  if (call.createdBy !== requesterUserId) return null;
+  delete store.calls[callId];
+  persist();
+  return enrich(call);
+}
+
 export function getCall(callId) {
   const call = store.calls[callId];
   return call ? enrich(call) : null;

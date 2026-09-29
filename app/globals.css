@@ -4732,11 +4732,21 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: 860px;
-  max-width: 100%;
+  flex: 1 1 auto;
+  /* min-width:0 é o que deixa um filho de flex encolher além do
+     tamanho do conteúdo -- sem isso, o navegador nunca deixava esse
+     bloco ficar menor que os 3 cards juntos, e como .lobby-backdrop
+     não quebra linha, ele simplesmente sumia (ou ficava cortado) em
+     telas mais estreitas. 29/set: Douglas reportou "e nao apareceu no
+     lobby" -- a barreira de max-width:1300px que existia aqui (fixa,
+     tudo ou nada) provavelmente era mais larga que a tela dele; troca
+     pra isso encolher de verdade + rolar por dentro (ver
+     .lobby-agenda-preview-cards) em vez de só sumir. */
+  min-width: 0;
+  max-width: 860px;
 }
 
-@media (max-width: 1300px) {
+@media (max-width: 760px) {
   .lobby-agenda-preview {
     display: none;
   }
@@ -4745,10 +4755,21 @@ body {
 .lobby-agenda-preview-cards {
   display: flex;
   gap: 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lobby-agenda-preview-cards::-webkit-scrollbar {
+  display: none;
 }
 
 .lobby-agenda-day-card {
   width: 270px;
+  /* não deixa o card espremer (senão o texto vira sopa de letrinhas
+     antes de rolar) -- fica no tamanho natural e quem não couber
+     rola, ver overflow-x:auto no pai (.lobby-agenda-preview-cards). */
+  flex-shrink: 0;
   display: flex;
   gap: 14px;
   padding: 18px;
@@ -5099,7 +5120,8 @@ body {
 }
 
 .lobby-panel-back,
-.lobby-panel-close {
+.lobby-panel-close,
+.lobby-panel-add {
   background: transparent;
   border: none;
   color: #cfc4e6;
@@ -5110,9 +5132,24 @@ body {
 }
 
 .lobby-panel-back:hover,
-.lobby-panel-close:hover {
+.lobby-panel-close:hover,
+.lobby-panel-add:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
+}
+
+/* botão "+" de novo compromisso, ao lado do "Agenda" no cabeçalho --
+   pedido do Douglas: "nao me da a agenda mesmo, editavel e criavel". */
+.lobby-panel-add {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* painel mais largo quando tá mostrando o formulário de criar/editar
+   (campos demais pra caber nos 340px padrão da lista). */
+.lobby-panel-wide {
+  width: 420px;
 }
 
 .lobby-panel-empty {
@@ -5302,6 +5339,149 @@ body {
   margin: 0;
   font-size: 12px;
   color: #a89cc4;
+}
+
+/* estado vazio da agenda ganhou um botão "Marcar compromisso" junto
+   (antes era só o texto "Nenhum compromisso agendado."). */
+.lobby-panel-empty-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 16px;
+}
+
+.lobby-panel-empty-wrap .lobby-panel-empty {
+  padding: 0;
+}
+
+.lobby-agenda-new-btn {
+  background: #7c5cff;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 18px;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* "Editar"/"Apagar", só aparece pra quem criou o compromisso
+   (call.createdBy === myUserId, ver LobbyAgendaPanel) -- linha
+   separada das de Aceitar/Recusar (que são de quem foi CONVIDADO). */
+.lobby-call-owner-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.lobby-call-edit,
+.lobby-call-delete {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-call-edit {
+  color: #9fb8ff;
+}
+
+.lobby-call-delete {
+  color: #ff8a8a;
+}
+
+.lobby-call-edit:hover,
+.lobby-call-delete:hover {
+  text-decoration: underline;
+}
+
+.lobby-call-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* formulário de criar/editar compromisso (dentro do mesmo
+   .lobby-panel, só troca de view -- ver LobbyAgendaPanel). Reaproveita
+   .company-edit-input/.company-edit-textarea/.company-edit-category-*
+   (mesma casca escura, já usada no painel de edição da Empresa). */
+.lobby-agenda-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.lobby-agenda-form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.lobby-agenda-form-row .lobby-agenda-form-field {
+  flex: 1;
+}
+
+.lobby-agenda-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #cfc4e6;
+}
+
+.lobby-agenda-form-field input[type="text"],
+.lobby-agenda-form-field input[type="date"],
+.lobby-agenda-form-field input[type="time"],
+.lobby-agenda-form-field select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f5f0ff;
+  font-size: 13px;
+  padding: 9px 12px;
+  color-scheme: dark;
+}
+
+.lobby-agenda-form-field input:focus,
+.lobby-agenda-form-field select:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.lobby-agenda-invited-readonly {
+  margin: 0;
+  font-size: 12.5px;
+  color: #b7b2c9;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 9px 12px;
+}
+
+.lobby-agenda-form-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff8a8a;
+}
+
+.lobby-agenda-form-submit {
+  background: #7c5cff;
+  border: none;
+  border-radius: 999px;
+  padding: 11px 0;
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-agenda-form-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .lobby-enter-btn {
