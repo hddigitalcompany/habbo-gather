@@ -3726,6 +3726,168 @@ body {
   gap: 36px;
 }
 
+/* Chip da conta + "card" de perfil aberto -- pedido do Douglas (28/set,
+   com print de referência de um card "Hello! I'm Max": título grande
+   em duas linhas, faixa colorida em degradê na borda esquerda, bio,
+   pílulas de tag): "aqui nesse canto, faca o card da conta do
+   cliente" (aponta o canto direito da barra, a 3ª coluna do grid que
+   já tava vazia/reservada, ver .lobby-topbar) + "faca o 'card' do
+   perfil do usuario aberto" (o painel que abre, no estilo do print).
+   Usa os campos que a conta JÁ tem de verdade (name/status/bio/
+   instagram/photoUrl, ver AccountProfile em AuthGate.tsx) -- sem
+   inventar idade/skills/localização que o print tinha mas a gente não
+   coleta. */
+.lobby-topbar-account-wrap {
+  position: relative;
+  justify-self: end;
+}
+
+.lobby-topbar-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 6px 14px 6px 6px;
+  cursor: pointer;
+  color: #ffffff;
+}
+
+.lobby-topbar-account:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.lobby-topbar-account-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, #7c5cff, #5c9bff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lobby-topbar-account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lobby-topbar-account-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* o "card" que abre -- mesmo cartão do print, com a faixa colorida na
+   borda esquerda (aqui um gradiente vertical, ver ::before) e o
+   título grande em duas linhas. Abre encostado no canto direito da
+   barra (mesmo canto do chip que abre ele) e "cai" pra baixo/esquerda,
+   nunca pra fora da tela. */
+.lobby-account-card-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  background: transparent;
+}
+
+.lobby-account-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 12;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 22px 20px 18px 26px;
+  border-radius: 20px;
+  background: #0e0d16;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.lobby-account-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(180deg, #5c9bff, #7c5cff 35%, #ff5cf1 65%, #ff9a5c);
+}
+
+.lobby-account-card-greeting {
+  margin: 0 0 14px;
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.lobby-account-card-greeting span {
+  display: block;
+}
+
+.lobby-account-card-bio {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #b7b2c9;
+}
+
+.lobby-account-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.lobby-account-card-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e7e4f2;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.lobby-account-card-tag-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lobby-account-card-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+/* MESMAS cores de STATUS_DOT_COLORS em GameRoom.tsx -- um perfil
+   "Online"/"Ausente"/"Foco" tem a mesma cor em todo lugar do app. */
+.lobby-account-card-status-dot.online {
+  background: #4fd97a;
+}
+
+.lobby-account-card-status-dot.away {
+  background: #9a9aa5;
+}
+
+.lobby-account-card-status-dot.focus {
+  background: #f5c542;
+}
+
 .lobby-topbar-tab-wrap {
   position: relative;
 }

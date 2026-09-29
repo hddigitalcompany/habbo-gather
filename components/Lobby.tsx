@@ -224,6 +224,15 @@ function ChevronIcon() {
   );
 }
 
+// MESMO mapeamento de STATUS_OPTIONS/statusMeta em GameRoom.tsx
+// (copiado, não importado -- mesmo motivo dos ícones acima) -- usado
+// no "card" da conta (ver accountCardOpen mais abaixo).
+const ACCOUNT_STATUS_LABELS: Record<string, string> = {
+  online: "Online",
+  away: "Ausente",
+  focus: "Foco",
+};
+
 function ChatIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
@@ -630,6 +639,13 @@ export default function Lobby({
   // quando existir mais de uma (aí lista o nome de cada organização,
   // como o Douglas pediu).
   const [spacesMenuOpen, setSpacesMenuOpen] = useState(false);
+
+  // "card" da conta do cliente -- pedido do Douglas (28/set, print de
+  // referência de um card "Hello! I'm Max"): "aqui nesse canto, faca o
+  // card da conta do cliente" + "faca o 'card' do perfil do usuario
+  // aberto". Fica no canto direito da barra (3ª coluna do grid, que já
+  // tava vazia/reservada, ver comentário grande em app/globals.css).
+  const [accountCardOpen, setAccountCardOpen] = useState(false);
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -892,6 +908,14 @@ export default function Lobby({
   }
 
   const displayName = accountProfile?.name?.trim() || "visitante";
+  // "card" da conta (ver accountCardOpen) -- campos que a conta JÁ tem
+  // de verdade, sem inventar nada que o print de referência mostrava
+  // mas a gente não coleta (idade, skills, localização).
+  const accountBio = accountProfile?.bio?.trim() || "";
+  const accountInstagram = accountProfile?.instagram?.trim().replace(/^@/, "") || "";
+  const accountInitial = displayName.charAt(0).toUpperCase() || "?";
+  const accountStatusId = accountProfile?.status || "online";
+  const accountStatusLabel = ACCOUNT_STATUS_LABELS[accountStatusId] || ACCOUNT_STATUS_LABELS.online;
   const presenceText =
     presence === null
       ? "Verificando quem tá na sala…"
@@ -984,6 +1008,58 @@ export default function Lobby({
             <span className="lobby-topbar-tab-label">Empresas Posicionadas</span>
           </button>
         </nav>
+
+        {/* "card" da conta do cliente -- pedido do Douglas (28/set,
+            print de referência de um card "Hello! I'm Max"): "aqui
+            nesse canto, faca o card da conta do cliente" + "faca o
+            'card' do perfil do usuario aberto". Fica na 3ª coluna do
+            grid (canto direito, já reservada). */}
+        <div className="lobby-topbar-account-wrap">
+          <button
+            type="button"
+            className="lobby-topbar-account"
+            onClick={() => setAccountCardOpen((v) => !v)}
+            aria-expanded={accountCardOpen}
+          >
+            <span className="lobby-topbar-account-avatar">
+              {accountProfile?.photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={accountProfile.photoUrl} alt="" />
+              ) : (
+                accountInitial
+              )}
+            </span>
+            <span className="lobby-topbar-account-name">{displayName}</span>
+          </button>
+          {accountCardOpen && (
+            <>
+              <div className="lobby-account-card-backdrop" onClick={() => setAccountCardOpen(false)} />
+              <div className="lobby-account-card">
+                <p className="lobby-account-card-greeting">
+                  <span>Olá!</span>
+                  <span>Sou {displayName}</span>
+                </p>
+                {accountBio && <p className="lobby-account-card-bio">{accountBio}</p>}
+                <div className="lobby-account-card-tags">
+                  <span className="lobby-account-card-tag lobby-account-card-tag-status">
+                    <span className={`lobby-account-card-status-dot ${accountStatusId}`} />
+                    {accountStatusLabel}
+                  </span>
+                  {accountInstagram && (
+                    <a
+                      className="lobby-account-card-tag"
+                      href={`https://instagram.com/${accountInstagram}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      @{accountInstagram}
+                    </a>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="lobby-card">
