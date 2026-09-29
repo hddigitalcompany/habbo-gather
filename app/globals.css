@@ -3694,24 +3694,26 @@ body {
   /* 29/set (2): Douglas mandou um print de referência (mockup claro,
      branco, com um brilho azulado difuso no canto inferior direito) e
      pediu "gostei desse estilo, consegue?" -- confirmado que é pra
-     TROCAR TUDO pro tema claro (não só alguns detalhes). Fundo escuro
-     (lobby-bg.jpg) trocado por um degradê claro com o mesmo "blob"
-     azulado desfocado no canto, só que feito 100% em CSS (radial-
-     gradient) em vez de imagem -- não precisa de asset novo nem
-     esperar o Douglas subir nada. IMPORTANTE: esse re-tema cobre só a
-     TELA DO LOBBY em si (aqui, .lobby-topbar, .company-card,
-     .lobby-agenda-day-card, .lobby-card, e a variante clara da av-bar
-     -- ver .lobby-av-bar-light) -- NÃO toquei em .lobby-panel/
-     .members-panel/.items-panel/.settings-panel/.company-edit-panel:
-     os dois do meio (.members-panel, .items-panel) são compartilhados
-     com a SALA de verdade (GameRoom.tsx, pixel art escura) e mudar a
-     cor deles mudaria a cara de dentro da sala também, que não tava
-     no print e o Douglas não pediu. */
+     TROCAR TUDO pro tema claro (não só alguns detalhes). IMPORTANTE:
+     esse re-tema cobre só a TELA DO LOBBY em si (aqui, .lobby-topbar,
+     .company-card, .lobby-agenda-day-card, .lobby-card, e a variante
+     clara da av-bar -- ver .lobby-av-bar-light) -- NÃO toquei em
+     .lobby-panel/.members-panel/.items-panel/.settings-panel/
+     .company-edit-panel: os dois do meio (.members-panel, .items-panel)
+     são compartilhados com a SALA de verdade (GameRoom.tsx, pixel art
+     escura) e mudar a cor deles mudaria a cara de dentro da sala
+     também, que não tava no print e o Douglas não pediu.
+
+     29/set (3): primeira versão do fundo era um degradê 100% em CSS
+     (radial-gradient) tentando imitar o brilho azulado do mockup --
+     Douglas mandou a foto de verdade do brilho ("troque o fundo") e
+     pediu pra usar ela. MESMO padrão do fundo escuro original
+     (lobby-bg.jpg, pedido "coloque essa imagem de fundo no lobby"):
+     imagem enviada, comprimida (JPEG, ~50KB) e salva em
+     public/assets/lobby-bg-light.jpg. background-color continua como
+     fallback enquanto a imagem carrega / se falhar. */
   background-color: #eef1fb;
-  background-image:
-    radial-gradient(1100px 760px at 90% 94%, rgba(79, 125, 251, 0.38), transparent 60%),
-    radial-gradient(760px 560px at 102% 104%, rgba(29, 16, 74, 0.3), transparent 55%),
-    linear-gradient(180deg, #f8f9fd 0%, #eef1fb 100%);
+  background-image: url("/assets/lobby-bg-light.jpg");
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
