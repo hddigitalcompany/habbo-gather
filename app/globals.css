@@ -4773,18 +4773,50 @@ body {
   gap: 14px;
   padding: 18px;
   border-radius: 18px;
-  /* pedido do Douglas: "use o estilo blur do editar empresa" --
-     MESMO fundo/borda/sombra/blur de .company-edit-panel (fundo bem
-     escuro, quase preto, com blur mais forte), em vez do degradê roxo
-     claro que tinha antes aqui. */
-  background: linear-gradient(165deg, rgba(18, 14, 28, 0.94), rgba(6, 5, 10, 0.97));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  position: relative;
+  /* segura o brilho (.lobby-agenda-day-glow) dentro da borda
+     arredondada do card, sem vazar quina quadrada pra fora. */
+  overflow: hidden;
+  /* pedido do Douglas, com print de referência (card "glassmorphism"
+     premium -- vidro escuro bem transparente com um brilho colorido
+     vazando por trás através do blur): "nao consegue fazer esse
+     efeito no card do calendario??" -- não tem nada de verdade atrás
+     pra vazar (o fundo do Lobby é só a imagem escura de sempre),
+     então o brilho é sintético: um blob radial bem desfocado
+     (.lobby-agenda-day-glow, primeiro filho no JSX, atrás do
+     conteúdo) + o vidro em si bem mais transparente que a versão
+     anterior ("use o estilo blur do editar empresa", que era quase
+     opaca) + um fio de luz no topo (inset no box-shadow) simulando
+     reflexo de borda de vidro. */
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 50px rgba(0, 0, 0, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+
+/* o "brilho" atrás do vidro -- dois blobs radiais desfocados (um
+   quente, um frio, mesmo espírito do print de referência) parados no
+   card (não muda por dia/evento, é só textura). z-index:0 + os dois
+   filhos de conteúdo com z-index:1 garante que fica ATRÁS do
+   texto/badge, na frente só do fundo translúcido do próprio card. */
+.lobby-agenda-day-glow {
+  position: absolute;
+  inset: -20%;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 22% 78%, rgba(255, 138, 60, 0.55), transparent 55%),
+    radial-gradient(circle at 78% 18%, rgba(124, 92, 255, 0.45), transparent 55%);
+  filter: blur(26px);
+  pointer-events: none;
 }
 
 .lobby-agenda-day-left {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
   width: 62px;
   display: flex;
@@ -4838,6 +4870,8 @@ body {
 }
 
 .lobby-agenda-day-right {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-width: 0;
   display: flex;

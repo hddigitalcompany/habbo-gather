@@ -2224,6 +2224,7 @@ export default function Lobby({
           const badge = formatAgendaDayBadge(day.ts);
           return (
             <div key={day.key} className="lobby-agenda-day-card">
+              <div className="lobby-agenda-day-glow" aria-hidden="true" />
               <div className="lobby-agenda-day-left">
                 <div className="lobby-agenda-day-badge">
                   <span className="lobby-agenda-day-badge-num">{badge.day}</span>
