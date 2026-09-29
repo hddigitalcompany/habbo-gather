@@ -4861,89 +4861,93 @@ body {
      .lobby-agenda-day-events). Não deixa o card espremer na
      horizontal também (senão o texto vira sopa de letrinhas antes de
      rolar) -- fica no tamanho natural e quem não couber rola, ver
-     overflow-x:auto no pai (.lobby-agenda-preview). */
-  height: 178px;
+     overflow-x:auto no pai (.lobby-agenda-preview).
+     29/set (3): "quero o card de data exatamente igual!!!" -- a altura
+     subiu de 178px pra 232px (mesma proporção largura/altura do print
+     de referência: 270 * 424/490 ≈ 232) pra caber a coluna escura +
+     "PRÓXIMOS" + 3 eventos com o respiro do print, sem precisar
+     encolher fonte. Continua FIXA -- só a lista de eventos rola por
+     dentro depois de 3 (ver .lobby-agenda-day-events), mesma regra de
+     antes. */
+  height: 232px;
   flex-shrink: 0;
   display: flex;
-  gap: 14px;
-  padding: 18px;
-  border-radius: 18px;
+  border-radius: 20px;
   position: relative;
   overflow: hidden;
-  /* 29/set: o brilho colorido (.lobby-agenda-day-glow, existia aqui)
-     foi removido -- Douglas viu o resultado colorido (mesmo depois de
-     ajustar o tom, ver "os cards tao meio roxeado") e pediu, com um
-     print de referência (card "Journal" cinza neutro, sem nenhuma
-     cor): "tire, quero o blur pedido esmaecido acizentado, pra que
-     chegue a esse efeito aqui, em TUDO conversas, agenda". Só o vidro
-     fosco neutro ficou (sem matiz nenhum) -- MESMO background usado
-     agora em .lobby-panel/.lobby-card/.members-panel/.items-panel
-     (era roxo antes, neutralizado junto) e na barra superior
-     (.lobby-topbar). */
-  /* 29/set (2): Douglas mandou print de referência (mockup claro) e
-     pediu "gostei desse estilo, consegue?" -- trocar TUDO pro tema
-     claro (ver comentário grande em .lobby-backdrop). Cards viram
-     branco sólido com sombra suave, sem precisar mais de blur (fundo
-     já é opaco, backdrop-filter não tinha mais nada visível pra
-     borrar). */
   background: #ffffff;
   border: 1px solid rgba(20, 20, 45, 0.07);
   box-shadow: 0 18px 40px rgba(20, 20, 60, 0.1);
 }
 
+/* 29/set (3): no print de referência a coluna INTEIRA da esquerda é
+   um painel escuro (não um "quadradinho" com o número só, resto
+   claro, como era antes) -- vira esse painel aqui. Sem border-radius
+   próprio: enche a altura toda encostada no topo/base/esquerda do
+   card, e é o overflow:hidden + border-radius do .lobby-agenda-day-card
+   (pai) que arredonda os 2 cantos da esquerda sozinho -- a direita
+   fica reta porque emenda direto com .lobby-agenda-day-right (mesma
+   técnica 2 tons já usada em .company-card-top/-bottom). */
 .lobby-agenda-day-left {
   position: relative;
   z-index: 1;
   flex: 0 0 auto;
-  width: 62px;
+  width: 108px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 20px 14px;
+  background: linear-gradient(160deg, #262c46, #12131f);
+  color: #ffffff;
 }
 
-.lobby-agenda-day-badge {
-  width: 100%;
-  aspect-ratio: 1;
-  border-radius: 12px;
-  background: linear-gradient(160deg, #4f7dfb, #8b5cf6);
+.lobby-agenda-day-num-wrap {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
   line-height: 1.05;
+  margin-bottom: 2px;
 }
 
 .lobby-agenda-day-badge-num {
-  font-size: 18px;
+  font-size: 32px;
   font-weight: 800;
 }
 
 .lobby-agenda-day-badge-month {
-  font-size: 10.5px;
+  font-size: 15px;
   font-weight: 700;
-  text-transform: uppercase;
-  opacity: 0.9;
 }
 
 .lobby-agenda-day-weekday {
   margin: 0;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #5b5770;
-  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: left;
   line-height: 1.2;
 }
 
+/* botão de verdade agora (abre a agenda completa, ver onClick no
+   Lobby.tsx) -- a setinha do print vira uma affordance de clique de
+   verdade, não só decoração. */
 .lobby-agenda-day-count {
-  font-size: 10.5px;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
   font-weight: 700;
-  color: #5b5770;
-  background: rgba(20, 20, 45, 0.06);
-  border-radius: 999px;
-  padding: 3px 9px;
-  white-space: nowrap;
+  color: #ffffff;
+  padding: 0;
+  cursor: pointer;
+}
+
+.lobby-agenda-day-count svg {
+  flex-shrink: 0;
 }
 
 .lobby-agenda-day-right {
@@ -4953,7 +4957,8 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
+  padding: 20px 18px 20px 16px;
 }
 
 .lobby-agenda-day-label {
@@ -4979,18 +4984,20 @@ body {
 }
 
 /* pedido do Douglas: "se passar de 3 eventos, scrol ativa dentro do
-   card" -- max-height calibrado pra caber exatamente 3 linhas de
-   evento (título+horário, ~29.5px cada, + 8px de gap entre elas:
-   3*29.5 + 2*8 ≈ 104px); o 4º evento em diante só aparece rolando,
-   sem esticar a altura fixa do card (.lobby-agenda-day-card). */
+   card" -- max-height recalibrado pra caber exatamente 3 linhas de
+   evento com a fonte maior do print de referência (29/set 3: "quero o
+   card de data exatamente igual!!!" -- título 15px + horário 13px,
+   ~35px de altura por evento + 12px de gap entre elas: 3*35 + 2*12 ≈
+   129px, arredondado com folga); o 4º evento em diante só aparece
+   rolando, sem esticar a altura fixa do card. */
 .lobby-agenda-day-events {
   list-style: none;
   margin: 0;
   padding: 0 4px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 104px;
+  gap: 12px;
+  max-height: 140px;
   overflow-y: auto;
 }
 
@@ -5003,27 +5010,30 @@ body {
   border-radius: 999px;
 }
 
+/* 29/set (3): cores exatas do print de referência (azul / magenta /
+   ciano nos 3 primeiros eventos, em vez do roxo/azul/rosa/verde de
+   antes). */
 .lobby-agenda-event-item {
-  padding-left: 9px;
-  border-left: 3px solid #7c5cff;
+  padding-left: 10px;
+  border-left: 3px solid #4f7dfb;
 }
 
 .lobby-agenda-event-item.tone-1 {
-  border-left-color: #4f7dfb;
+  border-left-color: #d946ef;
 }
 
 .lobby-agenda-event-item.tone-2 {
-  border-left-color: #ff6ec7;
+  border-left-color: #22d3ee;
 }
 
 .lobby-agenda-event-item.tone-3 {
-  border-left-color: #34d399;
+  border-left-color: #f59e0b;
 }
 
 .lobby-agenda-event-title {
   margin: 0;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
   color: #14121f;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5031,9 +5041,9 @@ body {
 }
 
 .lobby-agenda-event-time {
-  margin: 2px 0 0;
-  font-size: 11px;
-  color: #6b6780;
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: #8b879c;
 }
 
 .lobby-card {

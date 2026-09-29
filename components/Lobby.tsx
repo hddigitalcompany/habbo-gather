@@ -2270,16 +2270,28 @@ export default function Lobby({
           const badge = formatAgendaDayBadge(day.ts);
           return (
             <div key={day.key} className="lobby-agenda-day-card">
+              {/* 29/set (3): Douglas mandou o print de novo, agora
+                  reto: "quero o card de data exatamente igual!!!" --
+                  no print a coluna da esquerda inteira é um painel
+                  escuro (não um "quadradinho" de número + resto
+                  claro, como eu tinha) e "X eventos" tem uma setinha
+                  (vira botão de verdade agora, abre a agenda completa
+                  -- setinha sem função seria só decoração morta). */}
               <div className="lobby-agenda-day-left">
-                <div className="lobby-agenda-day-badge">
+                <div className="lobby-agenda-day-num-wrap">
                   <span className="lobby-agenda-day-badge-num">{badge.day}</span>
                   <span className="lobby-agenda-day-badge-month">{badge.month}</span>
                 </div>
                 <p className="lobby-agenda-day-weekday">{badge.weekday}</p>
                 {day.items.length > 0 && (
-                  <span className="lobby-agenda-day-count">
+                  <button
+                    type="button"
+                    className="lobby-agenda-day-count"
+                    onClick={() => setAgendaPanelOpen(true)}
+                  >
                     {day.items.length} {day.items.length === 1 ? "evento" : "eventos"}
-                  </span>
+                    <ChevronRightIcon />
+                  </button>
                 )}
               </div>
               <div className="lobby-agenda-day-right">
