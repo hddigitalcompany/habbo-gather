@@ -43,7 +43,7 @@ import {
   setStoredSpeakerDeviceId,
 } from "@/lib/mediaPrefs";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
-import ContactsPanel from "@/components/ContactsPanel";
+import FriendsPanel from "@/components/FriendsPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
 import {
@@ -232,6 +232,12 @@ type ConversationParticipant = { id: string; name: string; color: string; photoU
 type Conversation = {
   id: string;
   kind: "direct" | "group";
+  // "company" (conversa normal, sempre foi assim -- qualquer um com
+  // qualquer um) ou "private" (só entre amigos mútuos), ver comentário
+  // grande em server/chatStore.js/getOrCreateDirectConversation.
+  // Grupos (kind "group") são sempre "company" (servidor nunca manda
+  // "private" num grupo, ver chat:create_group em server/index.js).
+  lane: "company" | "private";
   name: string | null;
   participantIds: string[];
   participants: ConversationParticipant[]; // só os OUTROS, sem mim
@@ -3455,9 +3461,9 @@ export default function GameRoom({
     }
   }
 
-  function startDirectWith(targetUserId: string) {
+  function startDirectWith(targetUserId: string, lane: "company" | "private" = "company") {
     autoOpenNextConversationRef.current = true;
-    socketRef.current?.send(JSON.stringify({ type: "chat:create_direct", targetUserId }));
+    socketRef.current?.send(JSON.stringify({ type: "chat:create_direct", targetUserId, lane }));
     setNewConvSelection([]);
     setNewConvName("");
   }
@@ -4626,13 +4632,17 @@ export default function GameRoom({
     closeProfileCard();
   }
 
-  // "Conversar" no painel de Contatos -- mesma ideia de sendMessageTo
-  // acima (abre/cria a conversa direta e já mostra a gaveta de chat),
-  // só que a pessoa já vem com o userId PERSISTENTE certinho (não
-  // precisa resolver via remotePlayersRef, o diretório allUsers já é
-  // indexado por userId) e fecha o painel de Contatos ao entrar no chat.
+  // "Conversar" no painel de Amigos (antigo "Contatos", ver
+  // FriendsPanel.tsx) -- mesma ideia de sendMessageTo acima (abre/cria
+  // a conversa direta e já mostra a gaveta de chat), só que a pessoa
+  // já vem com o userId PERSISTENTE certinho (não precisa resolver via
+  // remotePlayersRef, a lista de amigos já é indexado por userId) e
+  // fecha o painel ao entrar no chat. SEMPRE lane "private" -- esse
+  // painel só lista amigo mútuo (ver aba "Conversas Privadas" em
+  // LobbyChatPanel/ChatDrawer, mesma trava do servidor em
+  // chat:create_direct).
   function startConversationFromContacts(targetUserId: string) {
-    startDirectWith(targetUserId);
+    startDirectWith(targetUserId, "private");
     setChatOpen(true);
     setContactsOpen(false);
   }
@@ -5106,8 +5116,8 @@ export default function GameRoom({
           <button
             className={contactsOpen ? "av-btn on" : "av-btn"}
             onClick={() => setContactsOpen((v) => !v)}
-            aria-label={contactsOpen ? "Fechar contatos" : "Abrir contatos"}
-            data-tooltip={contactsOpen ? "Fechar contatos" : "Contatos"}
+            aria-label={contactsOpen ? "Fechar amigos" : "Abrir amigos"}
+            data-tooltip={contactsOpen ? "Fechar amigos" : "Amigos"}
           >
             <ContactsIcon />
           </button>
@@ -5124,9 +5134,8 @@ export default function GameRoom({
         {chatOpen && chatPinMode !== "side" && <ChatDrawer {...chatDrawerProps} />}
         {agendaOpen && <AgendaDrawer {...agendaDrawerProps} />}
         {contactsOpen && (
-          <ContactsPanel
-            users={allUsers}
-            myUserId={myUserId}
+          <FriendsPanel
+            accountAccessToken={accountAccessToken}
             onStartConversation={(targetUserId) => startConversationFromContacts(targetUserId)}
             onClose={() => setContactsOpen(false)}
           />
@@ -8097,6 +8106,17 @@ function ChatDrawer({
     (p) => p.userId !== myUserId
   );
 
+  // duas abas (pedido do Douglas, 29/set: "vao ter duas abas nas
+  // conversas / EmpresaTal / Conversas Privadas") -- "Empresa" é o
+  // chat de sempre (Sala + toda conversa direta/grupo criada sem
+  // restrição, ver lane "company" em server/chatStore.js), "Privadas"
+  // só mostra conversa lane "private" (só existe entre amigos mútuos,
+  // ver FriendsPanel.tsx/startConversationFromContacts). "Sala" fica
+  // só na aba Empresa -- ela é justamente o chat com quem tá por
+  // perto, sem exigir amizade nenhuma.
+  const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
+  const laneConversations = conversations.filter((c) => c.lane === laneFilter);
+
   return (
     <div
       className={pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}
@@ -8115,21 +8135,39 @@ function ChatDrawer({
               </button>
             </div>
           </div>
-          <div className="chat-conv-list">
-            <button className="chat-conv-item" onClick={() => onOpenConversation(null)}>
-              <span className="chat-conv-avatar chat-conv-avatar-room">
-                <RoomIcon />
-              </span>
-              <span className="chat-conv-info">
-                <span className="chat-conv-name">Sala</span>
-                <span className="chat-conv-preview">
-                  {roomChatLog.length > 0
-                    ? roomChatLog[roomChatLog.length - 1].text
-                    : "Conversa com todo mundo por perto"}
-                </span>
-              </span>
+          <div className="chat-lane-tabs">
+            <button
+              type="button"
+              className={`chat-lane-tab${laneFilter === "company" ? " chat-lane-tab-active" : ""}`}
+              onClick={() => setLaneFilter("company")}
+            >
+              Empresa
             </button>
-            {conversations.map((c) => {
+            <button
+              type="button"
+              className={`chat-lane-tab${laneFilter === "private" ? " chat-lane-tab-active" : ""}`}
+              onClick={() => setLaneFilter("private")}
+            >
+              Conversas privadas
+            </button>
+          </div>
+          <div className="chat-conv-list">
+            {laneFilter === "company" && (
+              <button className="chat-conv-item" onClick={() => onOpenConversation(null)}>
+                <span className="chat-conv-avatar chat-conv-avatar-room">
+                  <RoomIcon />
+                </span>
+                <span className="chat-conv-info">
+                  <span className="chat-conv-name">Sala</span>
+                  <span className="chat-conv-preview">
+                    {roomChatLog.length > 0
+                      ? roomChatLog[roomChatLog.length - 1].text
+                      : "Conversa com todo mundo por perto"}
+                  </span>
+                </span>
+              </button>
+            )}
+            {laneConversations.map((c) => {
               // botão verde "tipo discord": acende quando tem gente NA
               // CHAMADA dessa conversa agora, mesmo que eu ainda não
               // tenha entrado -- clicar nele já abre a conversa E entra
@@ -8168,9 +8206,14 @@ function ChatDrawer({
                 </button>
               );
             })}
-            {conversations.length === 0 && (
-              <p className="chat-empty-hint">Clique em + pra começar uma conversa direta ou em grupo.</p>
-            )}
+            {laneConversations.length === 0 &&
+              (laneFilter === "private" ? (
+                <p className="chat-empty-hint">
+                  Nenhuma conversa privada ainda. Vire amigo de alguém no painel de Amigos pra conversar aqui.
+                </p>
+              ) : (
+                <p className="chat-empty-hint">Clique em + pra começar uma conversa direta ou em grupo.</p>
+              ))}
           </div>
         </>
       )}

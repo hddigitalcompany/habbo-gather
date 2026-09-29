@@ -580,6 +580,32 @@ body {
   outline: none;
 }
 
+/* abas "Empresa" / "Conversas privadas" dentro da gaveta de chat --
+   pedido do Douglas 29/set (ver comentário grande em ChatDrawer/
+   LobbyChatPanel, components/GameRoom.tsx e components/Lobby.tsx). */
+.chat-lane-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 6px 0;
+}
+
+.chat-lane-tab {
+  flex: 1;
+  border: none;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 10px;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.chat-lane-tab-active {
+  background: #111;
+  color: #fff;
+}
+
 .chat-conv-list {
   flex: 1;
   overflow-y: auto;
@@ -5399,6 +5425,32 @@ body {
   color: #a89cc4;
 }
 
+/* abas "Empresa" / "Conversas privadas" no painel de Conversas do
+   Lobby -- mesma ideia/mesmas classes-irmãs do ChatDrawer de dentro
+   da sala (.chat-lane-tab*, ver comentário grande lá). */
+.lobby-lane-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 10px 0;
+}
+
+.lobby-lane-tab {
+  flex: 1;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #a89cc4;
+}
+
+.lobby-lane-tab-active {
+  background: #fff;
+  color: #17111f;
+}
+
 .lobby-conv-list,
 .lobby-call-list {
   list-style: none;
@@ -6041,9 +6093,33 @@ body {
   cursor: default;
 }
 
-/* Painel de Contatos (components/ContactsPanel.tsx) -- reaproveita
-   .members-panel-* pro fundo/borda/lista, só a busca e o avatarzinho
-   redondo são próprios daqui. */
+/* Painel de Amigos (components/FriendsPanel.tsx, antigo "Contatos")
+   -- reaproveita .members-panel-* pro fundo/borda/lista, só as
+   abas/busca/avatarzinho redondo são próprios daqui. */
+.contacts-panel-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.contacts-panel-tab {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #a89cc4;
+}
+
+.contacts-panel-tab.on {
+  background: #fff;
+  color: #17111f;
+  border-color: transparent;
+}
+
 .contacts-panel-search {
   width: 100%;
   box-sizing: border-box;

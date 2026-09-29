@@ -49,7 +49,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 import SettingsPanel from "@/components/SettingsPanel";
-import ContactsPanel, { type ContactUser } from "@/components/ContactsPanel";
+import FriendsPanel, { type ContactUser } from "@/components/FriendsPanel";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -74,6 +74,11 @@ type ConversationSummary = {
   id: string;
   name: string;
   kind: "direct" | "group";
+  // "company" (padrão de sempre, sem trava) ou "private" (só entre
+  // amigos mútuos) -- ver comentário grande em server/chatStore.js/
+  // getOrCreateDirectConversation e a aba "Conversas privadas" em
+  // LobbyChatPanel mais abaixo.
+  lane: "company" | "private";
   participants: { id: string; name?: string }[];
   lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
 };
@@ -799,6 +804,11 @@ function LobbyChatPanel({
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  // duas abas (pedido do Douglas, 29/set: "vao ter duas abas nas
+  // conversas / EmpresaTal / Conversas Privadas") -- mesma ideia do
+  // ChatDrawer de dentro da sala (ver components/GameRoom.tsx),
+  // filtra a lista já pronta que o Lobby busca via GET /chat/summary.
+  const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
 
   // mesma ideia do polling de conversas lá no componente Lobby (ver
   // comentário grande perto do useEffect que busca /chat/summary):
@@ -880,25 +890,53 @@ function LobbyChatPanel({
         </div>
 
         {!activeId ? (
-          !conversations || conversations.length === 0 ? (
-            <p className="lobby-panel-empty">Nenhuma conversa ainda. Entre na sala pra começar uma.</p>
-          ) : (
-            <ul className="lobby-conv-list">
-              {conversations.map((c) => (
-                <li key={c.id}>
-                  <button type="button" className="lobby-conv-item" onClick={() => setActiveId(c.id)}>
-                    <span className="lobby-conv-name">{conversationTitle(c)}</span>
-                    {c.lastMessage && (
-                      <span className="lobby-conv-preview">
-                        {c.lastMessage.senderId === myUserId ? "Você: " : ""}
-                        {c.lastMessage.kind === "text" ? c.lastMessage.text : "anexo enviado"}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )
+          <>
+            <div className="lobby-lane-tabs">
+              <button
+                type="button"
+                className={`lobby-lane-tab${laneFilter === "company" ? " lobby-lane-tab-active" : ""}`}
+                onClick={() => setLaneFilter("company")}
+              >
+                Empresa
+              </button>
+              <button
+                type="button"
+                className={`lobby-lane-tab${laneFilter === "private" ? " lobby-lane-tab-active" : ""}`}
+                onClick={() => setLaneFilter("private")}
+              >
+                Conversas privadas
+              </button>
+            </div>
+            {(() => {
+              const laneConversations = (conversations ?? []).filter((c) => c.lane === laneFilter);
+              if (laneConversations.length === 0) {
+                return (
+                  <p className="lobby-panel-empty">
+                    {laneFilter === "private"
+                      ? "Nenhuma conversa privada ainda. Vire amigo de alguém no painel de Amigos pra conversar aqui."
+                      : "Nenhuma conversa ainda. Entre na sala pra começar uma."}
+                  </p>
+                );
+              }
+              return (
+                <ul className="lobby-conv-list">
+                  {laneConversations.map((c) => (
+                    <li key={c.id}>
+                      <button type="button" className="lobby-conv-item" onClick={() => setActiveId(c.id)}>
+                        <span className="lobby-conv-name">{conversationTitle(c)}</span>
+                        {c.lastMessage && (
+                          <span className="lobby-conv-preview">
+                            {c.lastMessage.senderId === myUserId ? "Você: " : ""}
+                            {c.lastMessage.kind === "text" ? c.lastMessage.text : "anexo enviado"}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+          </>
         ) : (
           <>
             <div className="lobby-message-list">
@@ -1994,11 +2032,15 @@ export default function Lobby({
     };
   }, []);
 
-  // "Conversar" no painel de Contatos -- cria (ou acha) a conversa
-  // direta via POST /chat/direct (sem WebSocket, mesma arquitetura do
-  // resto do Lobby, ver comentário grande no topo do arquivo), soma o
-  // resultado na lista de conversas (upsert por id, pra não duplicar
-  // se já existia) e manda o LobbyChatPanel abrir JÁ nela.
+  // "Conversar" no painel de Amigos (antigo "Contatos", ver
+  // FriendsPanel.tsx) -- cria (ou acha) a conversa direta via POST
+  // /chat/direct (sem WebSocket, mesma arquitetura do resto do Lobby,
+  // ver comentário grande no topo do arquivo), soma o resultado na
+  // lista de conversas (upsert por id, pra não duplicar se já
+  // existia) e manda o LobbyChatPanel abrir JÁ nela. Lane sempre
+  // "private" -- esse painel só lista amigo mútuo (ver aba "Conversas
+  // privadas" em LobbyChatPanel mais abaixo e a mesma trava do
+  // servidor em POST /chat/direct).
   async function handleStartConversation(targetUserId: string) {
     if (!myUserId || contactsBusy) return;
     setContactsBusy(true);
@@ -2006,7 +2048,7 @@ export default function Lobby({
       const res = await fetch(`${REALTIME_HTTP_BASE}/chat/direct`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: myUserId, userName: myName, targetUserId }),
+        body: JSON.stringify({ userId: myUserId, userName: myName, targetUserId, lane: "private" }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -2932,8 +2974,8 @@ export default function Lobby({
           type="button"
           className={contactsOpen ? "av-btn on" : "av-btn"}
           onClick={() => setContactsOpen((v) => !v)}
-          aria-label={contactsOpen ? "Fechar contatos" : "Abrir contatos"}
-          data-tooltip={contactsOpen ? "Fechar contatos" : "Contatos"}
+          aria-label={contactsOpen ? "Fechar amigos" : "Abrir amigos"}
+          data-tooltip={contactsOpen ? "Fechar amigos" : "Amigos"}
         >
           <ContactsIcon />
         </button>
@@ -2981,12 +3023,10 @@ export default function Lobby({
         />
       )}
       {contactsOpen && (
-        <ContactsPanel
-          users={directory ?? []}
-          myUserId={myUserId}
+        <FriendsPanel
+          accountAccessToken={accountAccessToken}
           onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
           onClose={() => setContactsOpen(false)}
-          loading={directory === null}
         />
       )}
       {agendaPanelOpen && (

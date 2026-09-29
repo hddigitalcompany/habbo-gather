@@ -148,14 +148,29 @@ export function listAllUsers() {
   }));
 }
 
-function directKeyFor(userIdA, userIdB) {
-  return [userIdA, userIdB].sort().join("::");
+// "lane" (29/set, pedido do Douglas: "vao ter duas abas nas
+// conversas / EmpresaTal / Conversas Privadas / empresa, sem
+// necessidade de amigo, qualquer um dentro da empresa chama qualquer
+// um / conversas privadas e so desses amigos") -- "company" é o
+// comportamento de SEMPRE desse arquivo (qualquer um conversa com
+// qualquer um, sem trava nenhuma) e continua exatamente assim, só
+// ganhou um nome; "private" é NOVO e só pode ser criada entre amigos
+// mútuos (ver areMutualFriends abaixo, chamada pelos call sites em
+// server/index.js ANTES de chegar aqui -- essa função aqui não
+// confere nada, só guarda o rótulo). O par de usuários pode ter as
+// DUAS conversas ao mesmo tempo (uma "company", uma "private") --
+// por isso o directKey agora inclui a lane, senão a segunda
+// conversa "roubaria" o histórico da primeira.
+function directKeyFor(userIdA, userIdB, lane) {
+  return [lane, ...[userIdA, userIdB].sort()].join("::");
 }
 
-/** Acha (ou cria) a conversa direta entre dois usuários -- sempre a
- * MESMA conversa pro mesmo par, não importa quem abriu primeiro. */
-export function getOrCreateDirectConversation(userIdA, userIdB) {
-  const key = directKeyFor(userIdA, userIdB);
+/** Acha (ou cria) a conversa direta entre dois usuários NUMA lane --
+ * sempre a MESMA conversa pro mesmo par+lane, não importa quem abriu
+ * primeiro. `lane` default "company" mantém o comportamento de
+ * sempre pra quem já chama isso sem saber da lane nova. */
+export function getOrCreateDirectConversation(userIdA, userIdB, lane = "company") {
+  const key = directKeyFor(userIdA, userIdB, lane);
   const existing = Object.values(store.conversations).find(
     (c) => c.kind === "direct" && c.directKey === key
   );
@@ -165,6 +180,7 @@ export function getOrCreateDirectConversation(userIdA, userIdB) {
     id: randomUUID(),
     kind: "direct",
     directKey: key,
+    lane,
     name: null,
     participantIds: [userIdA, userIdB],
     createdBy: userIdA,
@@ -175,6 +191,25 @@ export function getOrCreateDirectConversation(userIdA, userIdB) {
   store.messages[conv.id] = [];
   persist();
   return conv;
+}
+
+/** Confere se dois usuários são amigos mútuos (os dois se seguem, ver
+ * tabela public.followers / app/api/friends/**) -- só usado pra
+ * travar a criação de conversa na lane "private" (ver comentário
+ * grande acima); "company" nunca chama isso. Sem Supabase configurado
+ * (dev local sem .env), deixa passar -- mesma postura permissiva do
+ * resto desse arquivo quando cai pro arquivo local. */
+export async function areMutualFriends(userIdA, userIdB) {
+  if (!admin) return true;
+  try {
+    const [a, b] = await Promise.all([
+      admin.from("followers").select("follower_id").eq("follower_id", userIdA).eq("followed_id", userIdB).maybeSingle(),
+      admin.from("followers").select("follower_id").eq("follower_id", userIdB).eq("followed_id", userIdA).maybeSingle(),
+    ]);
+    return !!a.data && !!b.data;
+  } catch {
+    return false;
+  }
 }
 
 export function createGroupConversation({ name, participantIds, createdBy }) {
@@ -224,6 +259,11 @@ export function listConversationsForUser(userId) {
       return {
         id: c.id,
         kind: c.kind,
+        // conversas criadas ANTES dessa lane existir não têm o campo
+        // -- trata como "company", que é o comportamento que elas
+        // sempre tiveram (ver comentário grande em
+        // getOrCreateDirectConversation acima).
+        lane: c.lane || "company",
         name: c.name,
         participantIds: c.participantIds,
         participants: c.participantIds

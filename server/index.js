@@ -1066,7 +1066,7 @@ function handleGetUsersDirectory(req, res) {
  * de startDirectWith em GameRoom.tsx, só que sem WebSocket (ver
  * comentário grande no topo de components/Lobby.tsx). */
 function handlePostChatDirect(req, res) {
-  readJsonBody(req, res).then((body) => {
+  readJsonBody(req, res).then(async (body) => {
     if (!body) return;
     const { userId, userName, targetUserId } = body;
     if (typeof userId !== "string" || !userId || typeof targetUserId !== "string" || !targetUserId) {
@@ -1079,9 +1079,20 @@ function handlePostChatDirect(req, res) {
       res.end("Não dá pra conversar com você mesmo.");
       return;
     }
+    // lane "private" (aba "Conversas Privadas", ver comentário grande
+    // em chatStore.getOrCreateDirectConversation) só é criável entre
+    // amigos mútuos -- pedido do Douglas: "conversas privadas e so
+    // desses amigos". Qualquer outro valor (ou ausente) cai pra
+    // "company", que é o comportamento de sempre (sem trava).
+    const lane = body.lane === "private" ? "private" : "company";
+    if (lane === "private" && !(await chatStore.areMutualFriends(userId, targetUserId))) {
+      res.writeHead(403, corsHeaders());
+      res.end("Só dá pra abrir conversa privada com quem é amigo mútuo.");
+      return;
+    }
     const senderName = typeof userName === "string" ? userName.slice(0, 80) : "";
     if (senderName) chatStore.upsertUser(userId, { name: senderName });
-    const conv = chatStore.getOrCreateDirectConversation(userId, targetUserId);
+    const conv = chatStore.getOrCreateDirectConversation(userId, targetUserId, lane);
     const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conv.id);
     // avisa o OUTRO participante em tempo real, se ele já tiver a sala
     // aberta em outra aba (mesmo "chat:conversation" que o WebSocket
@@ -2053,9 +2064,22 @@ wss.on("connection", async (ws, req) => {
       case "chat:create_direct": {
         if (typeof data.targetUserId !== "string" || !data.targetUserId) break;
         if (data.targetUserId === player.userId) break;
-        const conv = chatStore.getOrCreateDirectConversation(player.userId, data.targetUserId);
-        sendConversationTo(player.userId, conv.id);
-        sendConversationTo(data.targetUserId, conv.id);
+        // mesma trava/mesmo motivo do POST /chat/direct em cima (lane
+        // "private" só entre amigos mútuos) -- async porque confere
+        // a tabela followers no Supabase, ver comentário grande sobre
+        // esse padrão de IIFE no topo do "identify" (não dá pra usar
+        // await direto aqui, o handler de "message" é síncrono).
+        const targetUserId = data.targetUserId;
+        const lane = data.lane === "private" ? "private" : "company";
+        (async () => {
+          if (lane === "private" && !(await chatStore.areMutualFriends(player.userId, targetUserId))) {
+            ws.send(JSON.stringify({ type: "error", message: "Só dá pra abrir conversa privada com quem é amigo mútuo." }));
+            return;
+          }
+          const conv = chatStore.getOrCreateDirectConversation(player.userId, targetUserId, lane);
+          sendConversationTo(player.userId, conv.id);
+          sendConversationTo(targetUserId, conv.id);
+        })();
         break;
       }
       case "chat:create_group": {
