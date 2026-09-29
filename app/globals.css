@@ -592,18 +592,18 @@ body {
 .chat-lane-tab {
   flex: 1;
   border: none;
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   padding: 7px 8px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  color: rgba(0, 0, 0, 0.55);
+  color: #a99fc2;
 }
 
 .chat-lane-tab-active {
-  background: #111;
-  color: #fff;
+  background: #fff;
+  color: #1c162a;
 }
 
 .chat-conv-list {
@@ -6057,6 +6057,19 @@ body {
   background: rgba(0, 0, 0, 0.22);
   border-radius: 10px;
   padding: 8px 10px;
+}
+
+/* linha clicável (abre o card de perfil da pessoa, ver
+   components/ProfileViewCard.tsx e components/FriendsPanel.tsx) --
+   só usada no painel de Amigos, não no de Membros (ver
+   RoomMembersPanel, que reaproveita .members-panel-row sem essa
+   classe e continua sem clique nenhum na linha). */
+.members-panel-row-clickable {
+  cursor: pointer;
+}
+
+.members-panel-row-clickable:hover {
+  background: rgba(0, 0, 0, 0.32);
 }
 
 .members-panel-name {

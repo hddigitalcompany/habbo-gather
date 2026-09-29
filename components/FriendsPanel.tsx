@@ -34,6 +34,7 @@
 // idêntica (fundo/borda/cabeçalho/lista) -- busca/avatar/abas são
 // próprias daqui (.contacts-panel-*), ver app/globals.css.
 import { useEffect, useState } from "react";
+import ProfileViewCard from "@/components/ProfileViewCard";
 
 // mantido pro resto do app (Lobby.tsx/GameRoom.tsx) continuar tipando
 // o diretório platform-wide de GET /users/directory, que NÃO mudou --
@@ -58,6 +59,10 @@ export default function FriendsPanel({
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchUser[] | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  // clicar numa linha (fora do botão) abre o perfil da pessoa --
+  // pedido do Douglas, 29/set: "quero clicar, e abrir o perfil da
+  // pessoa" (ver components/ProfileViewCard.tsx).
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
 
   function reloadFriends() {
     if (!accountAccessToken) return;
@@ -199,7 +204,11 @@ export default function FriendsPanel({
           ) : (
             <ul className="members-panel-list">
               {friends.map((u) => (
-                <li key={u.userId} className="members-panel-row">
+                <li
+                  key={u.userId}
+                  className="members-panel-row members-panel-row-clickable"
+                  onClick={() => setViewingUserId(u.userId)}
+                >
                   <span className="contacts-panel-identity">
                     <span className="contacts-panel-avatar" style={{ background: "#5a4b7c" }}>
                       {u.photoUrl ? (
@@ -211,7 +220,13 @@ export default function FriendsPanel({
                     </span>
                     <span className="members-panel-name">{u.name || "(sem nome)"}</span>
                   </span>
-                  <button type="button" onClick={() => onStartConversation(u.userId, u.name)}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartConversation(u.userId, u.name);
+                    }}
+                  >
                     Conversar
                   </button>
                 </li>
@@ -225,7 +240,11 @@ export default function FriendsPanel({
         ) : (
           <ul className="members-panel-list">
             {searchResults.map((u) => (
-              <li key={u.userId} className="members-panel-row">
+              <li
+                key={u.userId}
+                className="members-panel-row members-panel-row-clickable"
+                onClick={() => setViewingUserId(u.userId)}
+              >
                 <span className="contacts-panel-identity">
                   <span className="contacts-panel-avatar" style={{ background: "#5a4b7c" }}>
                     {u.photoUrl ? (
@@ -237,7 +256,14 @@ export default function FriendsPanel({
                   </span>
                   <span className="members-panel-name">{u.name || "(sem nome)"}</span>
                 </span>
-                <button type="button" disabled={busyUserId === u.userId} onClick={() => toggleFollow(u.userId)}>
+                <button
+                  type="button"
+                  disabled={busyUserId === u.userId}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFollow(u.userId);
+                  }}
+                >
                   {u.following ? "Seguindo" : "Seguir"}
                 </button>
               </li>
@@ -245,6 +271,19 @@ export default function FriendsPanel({
           </ul>
         )}
       </div>
+
+      {viewingUserId && accountAccessToken && (
+        <ProfileViewCard
+          userId={viewingUserId}
+          accountAccessToken={accountAccessToken}
+          onClose={() => setViewingUserId(null)}
+          onStartConversation={(targetUserId, targetName) => {
+            setViewingUserId(null);
+            onStartConversation(targetUserId, targetName);
+          }}
+          onFollowChanged={reloadFriends}
+        />
+      )}
     </div>
   );
 }
