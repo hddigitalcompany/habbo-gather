@@ -3656,6 +3656,10 @@ body {
    em texto "Habbo-gather", só a aba "Meus espaços" por enquanto -- ver
    comentário grande onde spacesMenuOpen é declarado em Lobby.tsx) --
    sem reproduzir a marca/logo de verdade da Pepsi, só a diagramação. */
+/* 28/set: "o espaco da curto ainda" + lista das 4 abas + "centralize"
+   -- vira grid de 3 colunas (logo | menu | [coluna vazia, reservada
+   pra ação futura do lado direito, tipo um botao]) pra o menu ficar
+   de verdade no CENTRO da barra, não só colado depois da logo. */
 .lobby-topbar {
   position: absolute;
   top: 0;
@@ -3663,15 +3667,16 @@ body {
   right: 0;
   z-index: 501;
   height: 88px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 64px;
   padding: 0 48px;
   background: linear-gradient(100deg, #16224f 0%, #223a8f 55%, #3f5fc4 100%);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .lobby-topbar-logo {
+  justify-self: start;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 1px;
@@ -3680,6 +3685,7 @@ body {
 }
 
 .lobby-topbar-nav {
+  justify-self: center;
   display: flex;
   align-items: center;
   gap: 36px;
@@ -3731,6 +3737,23 @@ body {
 .lobby-topbar-tab.active > * {
   position: relative;
   z-index: 1;
+}
+
+/* abas ainda sem função de verdade (28/set: "espacos publicos |
+   eventos | Empresas Posicionadas") -- só "Meus espaços" já tem
+   conteúdo (ver spacesMenuOpen em Lobby.tsx); os outros três aparecem
+   na barra pra fechar o menu pedido, mas ficam "em breve" (mesma ideia
+   do botão de tela do av-bar, ver .lobby-av-btn-inert) até virarem
+   telas de verdade. Fica DEPOIS de .lobby-topbar-tab:hover de
+   propósito, pra vencer o empate de especificidade e não deixar o
+   hover branco escapar num botão que não faz nada ainda. */
+.lobby-topbar-tab-inert {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.lobby-topbar-tab-inert:hover {
+  color: #c7d1f0;
 }
 
 .lobby-topbar-chevron {

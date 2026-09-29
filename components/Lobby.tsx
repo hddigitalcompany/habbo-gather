@@ -943,6 +943,42 @@ export default function Lobby({
               </>
             )}
           </div>
+
+          {/* 28/set, pedido do Douglas: "meus espacos | espacos
+              publicos | eventos | Empresas Posicionadas" -- essas três
+              ainda não têm tela nenhuma por trás (ver comentário
+              grande de .lobby-topbar-tab-inert em app/globals.css),
+              então ficam visíveis pra fechar o menu pedido mas não
+              fazem nada ainda -- mesmo espírito do botão de tela do
+              av-bar (ScreenIcon), inclusive sem usar `disabled` nativo
+              de propósito, pra não sumir o tooltip. */}
+          <button
+            type="button"
+            className="lobby-topbar-tab lobby-topbar-tab-inert"
+            onClick={(e) => e.preventDefault()}
+            aria-disabled="true"
+            data-tooltip="Em breve"
+          >
+            <span className="lobby-topbar-tab-label">Espaços públicos</span>
+          </button>
+          <button
+            type="button"
+            className="lobby-topbar-tab lobby-topbar-tab-inert"
+            onClick={(e) => e.preventDefault()}
+            aria-disabled="true"
+            data-tooltip="Em breve"
+          >
+            <span className="lobby-topbar-tab-label">Eventos</span>
+          </button>
+          <button
+            type="button"
+            className="lobby-topbar-tab lobby-topbar-tab-inert"
+            onClick={(e) => e.preventDefault()}
+            aria-disabled="true"
+            data-tooltip="Em breve"
+          >
+            <span className="lobby-topbar-tab-label">Empresas Posicionadas</span>
+          </button>
         </nav>
       </div>
 
