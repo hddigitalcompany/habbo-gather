@@ -262,7 +262,6 @@ type CompanyProfile = {
   cnpj: string;
   handle: string;
   bio: string;
-  following: number;
   followers: number;
   link: string;
   logoUrl: string;
@@ -279,7 +278,6 @@ const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   cnpj: "",
   handle: "empresaexemplo",
   bio: "Espaço reservado para a empresa patrocinadora em destaque na plataforma.",
-  following: 24,
   followers: 57,
   link: "habbo-gather.com/empresas",
   logoUrl: "",
@@ -335,7 +333,14 @@ function compressSquarePhotoToDataUrl(file: File, target = 240): Promise<string>
 // proporção original da foto (o CSS do card usa background-size:cover
 // pra preencher a faixa clara de cima, então não precisa vir
 // pré-cortada num formato exato).
-function compressBannerPhotoToDataUrl(file: File, maxWidth = 640, maxHeight = 320): Promise<string> {
+//
+// 29/set: pedido do Douglas "1200x400 me parece grande demais pro
+// tamanho do banner no card" -- 1200x400 (proporção 3:1) era bem mais
+// largo/achatado que a faixa de verdade do card (.company-card-top,
+// 290px de largura x 130px de altura mínima = proporção ~2.23:1).
+// 580x260 é EXATAMENTE 2x esse tamanho real (retina), então
+// recomendado/teto de compressão agora batem com o card de verdade.
+function compressBannerPhotoToDataUrl(file: File, maxWidth = 580, maxHeight = 260): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -1331,12 +1336,14 @@ export default function Lobby({
               {companyProfile.name}
               <VerifiedBadge />
             </p>
-            <p className="company-card-handle">@{companyProfile.handle}</p>
+            <p className="company-card-handle">@{companyProfile.handle.replace(/^@/, "")}</p>
             <p className="company-card-bio">{companyProfile.bio}</p>
+            {/* pedido do Douglas: "so vai ter Seguidores (o perfil da
+                empresa nao segue ninguem)" -- perfil de empresa não
+                segue outras contas, então só faz sentido mostrar
+                Seguidores (tirei "Seguindo" e o campo `following`
+                inteiro do CompanyProfile). */}
             <p className="company-card-stats">
-              <span>
-                <strong>{companyProfile.following}</strong> Seguindo
-              </span>
               <span>
                 <strong>{companyProfile.followers}</strong> Seguidores
               </span>
@@ -1394,7 +1401,7 @@ export default function Lobby({
             <div className="company-edit-section">
               <div className="company-edit-section-head">
                 <h3>Foto de banner</h3>
-                <span className="company-edit-hint">Tamanho recomendado: 1200 x 400</span>
+                <span className="company-edit-hint">Tamanho recomendado: 580 x 260</span>
               </div>
               <button
                 type="button"
@@ -1466,6 +1473,24 @@ export default function Lobby({
                       value={companyProfile.name}
                       maxLength={60}
                       onChange={(e) => setCompanyProfile((prev) => ({ ...prev, name: e.target.value }))}
+                    />
+                  </label>
+
+                  {/* pedido do Douglas: "inclusive adiciona preencher
+                      o @ nas config" -- campo novo, faltava dar pra
+                      editar o @arroba mostrado no card (antes só vinha
+                      do molde fixo). Mesmo padrão do campo de
+                      Instagram em GameRoom.tsx: guarda como a pessoa
+                      digitou (com ou sem @), só tira o @ na hora de
+                      EXIBIR (ver company-card-handle acima). */}
+                  <label className="company-edit-field">
+                    <span>Nome de usuário (@)</span>
+                    <input
+                      className="company-edit-input"
+                      value={companyProfile.handle}
+                      placeholder="empresaexemplo"
+                      maxLength={30}
+                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, handle: e.target.value }))}
                     />
                   </label>
 
