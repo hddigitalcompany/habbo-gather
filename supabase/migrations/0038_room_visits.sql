@@ -28,3 +28,12 @@ create table if not exists public.room_visits (
 -- ordenar "mais recente primeiro" pro dropdown é a única leitura que
 -- essa tabela precisa servir rápido.
 create index if not exists room_visits_user_visited_idx on public.room_visits (user_id, visited_at desc);
+
+alter table public.room_visits enable row level security;
+
+-- sem policy nenhuma de leitura/escrita pro público, de propósito --
+-- só a service role mexe aqui (POST /api/room/visit / GET
+-- /api/room/visits), mesma regra de rooms/room_layout_state acima
+-- (ver comentário deles). Faltou nessa migration na primeira versão
+-- (pego pelo aviso "Potential issue detected" do editor SQL do
+-- Supabase) -- corrigido antes de rodar em produção.
