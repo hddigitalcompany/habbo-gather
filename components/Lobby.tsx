@@ -746,6 +746,10 @@ function LobbyChatPanel({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
+  // mesma ideia do polling de conversas lá no componente Lobby (ver
+  // comentário grande perto do useEffect que busca /chat/summary):
+  // sem isso, uma mensagem nova mandada pela outra pessoa só aparecia
+  // se você fechasse e abrisse o painel de novo.
   useEffect(() => {
     if (!activeId) {
       setMessages(null);
@@ -753,18 +757,29 @@ function LobbyChatPanel({
     }
     let cancelled = false;
     setMessages(null);
-    fetch(
-      `${REALTIME_HTTP_BASE}/chat/messages?conversationId=${encodeURIComponent(activeId)}&userId=${encodeURIComponent(myUserId)}`
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setMessages(Array.isArray(data?.messages) ? data.messages : []);
-      })
-      .catch(() => {
-        if (!cancelled) setMessages([]);
-      });
+    // guarda o id numa const local pra TS enxergar que continua
+    // string (não string|null) dentro da closure de fetchMessages.
+    const conversationId = activeId;
+
+    function fetchMessages() {
+      fetch(
+        `${REALTIME_HTTP_BASE}/chat/messages?conversationId=${encodeURIComponent(conversationId)}&userId=${encodeURIComponent(myUserId)}`
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled) setMessages(Array.isArray(data?.messages) ? data.messages : []);
+        })
+        .catch(() => {
+          if (!cancelled) setMessages([]);
+        });
+    }
+
+    fetchMessages();
+    const messagesPoll = setInterval(fetchMessages, 4000);
+
     return () => {
       cancelled = true;
+      clearInterval(messagesPoll);
     };
   }, [activeId, myUserId]);
 
@@ -1544,6 +1559,17 @@ export default function Lobby({
     };
   }, []);
 
+  // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
+  // causa raiz: o Lobby não abre WebSocket de propósito (ver
+  // comentário grande no topo de server/index.js -- não virar
+  // presença fantasma na sala), então o resumo de conversas só era
+  // buscado UMA vez ao montar. Se alguém iniciava uma conversa com
+  // você enquanto você tava parado no Lobby, ela simplesmente nunca
+  // aparecia até recarregar a página inteira -- não é a mesma causa
+  // do bug da agenda (aquele era CSS/breakpoint), mas é a mesma
+  // categoria de sintoma ("não aparece fora da sala"). Fix: reconsulta
+  // /chat/summary de tempos em tempos (mesmo padrão de polling leve
+  // usado no resto do Lobby REST-only, sem abrir socket nenhum).
   useEffect(() => {
     let cancelled = false;
     if (!myUserId) {
@@ -1551,14 +1577,21 @@ export default function Lobby({
       setCalls([]);
       return;
     }
-    fetch(`${REALTIME_HTTP_BASE}/chat/summary?userId=${encodeURIComponent(myUserId)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
-      })
-      .catch(() => {
-        if (!cancelled) setConversations([]);
-      });
+
+    function fetchConversations() {
+      fetch(`${REALTIME_HTTP_BASE}/chat/summary?userId=${encodeURIComponent(myUserId)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled) setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
+        })
+        .catch(() => {
+          if (!cancelled) setConversations([]);
+        });
+    }
+
+    fetchConversations();
+    const conversationsPoll = setInterval(fetchConversations, 6000);
+
     fetch(`${REALTIME_HTTP_BASE}/agenda/summary?userId=${encodeURIComponent(myUserId)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -1567,8 +1600,10 @@ export default function Lobby({
       .catch(() => {
         if (!cancelled) setCalls([]);
       });
+
     return () => {
       cancelled = true;
+      clearInterval(conversationsPoll);
     };
   }, [myUserId]);
 
