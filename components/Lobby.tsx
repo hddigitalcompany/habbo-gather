@@ -1470,7 +1470,7 @@ export default function Lobby({
                       digitou (com ou sem @), só tira o @ na hora de
                       EXIBIR (ver company-card-handle acima). */}
                   <label className="company-edit-field">
-                    <span>Nome de usuário (@)</span>
+                    <span>Rede social da empresa</span>
                     <input
                       className="company-edit-input"
                       value={companyProfile.handle}
