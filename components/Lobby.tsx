@@ -1479,6 +1479,23 @@ export default function Lobby({
                       onChange={(e) => setCompanyProfile((prev) => ({ ...prev, handle: e.target.value }))}
                     />
                   </label>
+
+                  {/* pedido do Douglas: "o link da empresa tambem,
+                      campo pra adicionar" -- companyProfile.link já
+                      existia e já aparecia no card (ver
+                      company-card-link, ícone + texto embaixo dos
+                      stats), só faltava um jeito de editar; antes só
+                      vinha do molde fixo. */}
+                  <label className="company-edit-field">
+                    <span>Link da empresa</span>
+                    <input
+                      className="company-edit-input"
+                      value={companyProfile.link}
+                      placeholder="habbo-gather.com/empresas"
+                      maxLength={80}
+                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, link: e.target.value }))}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
