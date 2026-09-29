@@ -3654,41 +3654,81 @@ body {
   align-items: center;
   justify-content: center;
   background: linear-gradient(100deg, #16224f 0%, #223a8f 55%, #3f5fc4 100%);
-  padding: 104px 16px 16px;
+  padding: 128px 16px 16px;
 }
 
-/* barra de topo do Lobby -- pedido do Douglas (28/set): "copie
-   exatamente o layout deste topo, estilo, espacamento" (print de
-   referência do site da Pepsi) -- gradiente diagonal, barra alta,
-   respiro generoso, texto do menu em caixa alta espaçada, e o "bolinha"
-   atrás da aba ativa (ver .lobby-topbar-tab.active::before), tudo
-   copiando as proporções do print. Só o conteúdo continua nosso (logo
-   em texto "Habbo-gather", só a aba "Meus espaços" por enquanto -- ver
-   comentário grande onde spacesMenuOpen é declarado em Lobby.tsx) --
-   sem reproduzir a marca/logo de verdade da Pepsi, só a diagramação. */
-/* 28/set: "o espaco da curto ainda" + lista das 4 abas + "centralize"
-   -- vira grid de 3 colunas (logo | menu | [coluna vazia, reservada
-   pra ação futura do lado direito, tipo um botao]) pra o menu ficar
-   de verdade no CENTRO da barra, não só colado depois da logo. */
+/* barra de topo do Lobby -- pedido do Douglas (28/set, print de
+   referência de um app "Socialize"/Pixbling): "faca a barra superior
+   com este efeito de card, iphone com blur" -- vidro fosco flutuando
+   SOBRE o gradiente de fundo (ver .lobby-backdrop acima), não mais
+   colada/sem-costura na tela como antes: cantos arredondados, borda
+   clara fina (o "brilho" de borda de vidro), sombra por baixo pra
+   flutuar de verdade, backdrop-filter:blur borrando o gradiente por
+   trás -- e as 3 bolinhas vermelha/amarela/verde do canto esquerdo
+   (estilo "semáforo" de janela de Mac/iPhone), igual ao cartão do
+   print. */
 .lobby-topbar {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 16px;
+  left: 16px;
+  right: 16px;
   z-index: 501;
-  height: 88px;
+  height: 84px;
+  max-width: 1180px;
+  margin: 0 auto;
   display: grid;
+  /* MESMA ideia de "1fr auto 1fr" de antes (coluna vazia à direita
+     balanceando a largura do grupo logo+bolinhas à esquerda) pra
+     "Meus espaços"/menu continuar de verdade CENTRALIZADO na barra
+     (pedido anterior do Douglas), não só dentro do espaço sobrando. */
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0 48px;
-  /* sem fundo/sombra próprios de propósito -- ver comentário grande
-     em .lobby-backdrop acima, é o MESMO gradiente aparecendo por
-     trás, sem costura entre a barra e o resto da tela. */
-  background: transparent;
+  gap: 24px;
+  padding: 0 32px;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(90, 110, 190, 0.4), rgba(30, 40, 90, 0.35));
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 20px 50px rgba(5, 8, 30, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+}
+
+/* "semáforo" decorativo (vermelho/amarelo/verde), mesmo estilo dos
+   3 pontinhos de canto de janela do print de referência -- só
+   enfeite, sem função (não tem "janela" nenhuma pra fechar/minimizar
+   aqui). */
+.lobby-topbar-dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.lobby-topbar-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.lobby-topbar-dot-red {
+  background: #ff5f57;
+}
+
+.lobby-topbar-dot-yellow {
+  background: #ffbd2e;
+}
+
+.lobby-topbar-dot-green {
+  background: #28c840;
+}
+
+.lobby-topbar-logo-group {
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
 
 .lobby-topbar-logo {
-  justify-self: start;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 1px;
