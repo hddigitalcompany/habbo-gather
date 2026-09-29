@@ -5067,17 +5067,40 @@ body {
   display: block;
 }
 
+/* 29/set (2): Douglas mandou o print de novo, apontando pro card
+   "Entrar na sala": "copie exatamente o que tem aqui... estilo fonte,
+   cores, blur, tudo" -- a caixa vazia (sem piso ainda desenhado / ainda
+   carregando) no print é um placeholder de câmera com um brilho suave
+   desfocado atrás do ícone, não texto. position:relative +
+   overflow:hidden pra recortar o glow (::lobby-preview-empty-glow,
+   ver abaixo) igual ao resto dos "brilhos" desse app (mesma técnica de
+   sempre: blob com blur, clipado pelo pai). O ícone (CamIcon, ver
+   RoomPreview em Lobby.tsx) fica por cima com z-index. */
 .lobby-preview-empty {
+  position: relative;
+  overflow: hidden;
   width: 264px;
   max-width: 100%;
   height: 168px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
-  font-size: 12px;
-  color: #8a80a8;
-  text-align: center;
+  color: #cfc9e0;
+}
+
+.lobby-preview-empty svg {
+  position: relative;
+  z-index: 1;
+}
+
+.lobby-preview-empty-glow {
+  position: absolute;
+  inset: -20%;
+  z-index: 0;
+  background:
+    radial-gradient(closest-side, rgba(93, 131, 255, 0.45), transparent),
+    radial-gradient(closest-side at 70% 70%, rgba(124, 92, 255, 0.3), transparent);
+  filter: blur(30px);
 }
 
 /* "letreiro" do hotel -- placa com borda em degradê violeta, letras
@@ -5088,18 +5111,22 @@ body {
    grande em .lobby-backdrop). */
 .lobby-sign {
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px 22px;
   margin-bottom: 18px;
-  border-radius: 10px;
+  border-radius: 999px;
   background: rgba(20, 20, 45, 0.05);
   border: 1px solid rgba(20, 20, 45, 0.1);
   box-shadow: none;
+  color: #14121f;
 }
 
 .lobby-sign-text {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   color: #14121f;
   text-shadow: none;
 }
@@ -5591,8 +5618,16 @@ body {
   cursor: default;
 }
 
+/* 29/set (2): Douglas mandou o print de novo, agora apontando pro
+   card "Entrar na sala": "copie exatamente o que tem aqui... estilo
+   fonte, cores, blur, tudo" -- botão preto (era roxo #7c5cff) + seta
+   do lado do texto (não tinha), igual ao print. */
 .lobby-enter-btn {
-  background: #7c5cff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #14121f;
   border: none;
   border-radius: 999px;
   color: #fff;
@@ -5603,7 +5638,7 @@ body {
 }
 
 .lobby-enter-btn:hover {
-  background: #8c6dff;
+  background: #26232f;
 }
 
 .lobby-signout-btn {

@@ -136,17 +136,28 @@ function floorTone(styleId: string): string {
  * sala vazia de propósito), mostra um placeholder simples em vez de um
  * SVG vazio esquisito. */
 function RoomPreview({ room, loading }: { room: RoomShape; loading: boolean }) {
+  // 29/set (2): Douglas mandou o print de referência de novo, agora
+  // apontando direto pro card "Entrar na sala": "copie exatamente o
+  // que tem aqui... estilo fonte, cores, blur, tudo" -- a caixa de
+  // prévia no print é um placeholder de câmera (ícone grande + fundo
+  // escuro com um brilho suave desfocado atrás), não o mapinha
+  // abstrato de piso/paredes. Só troquei o CONTEÚDO desses dois
+  // estados vazios (sem piso ainda / carregando) pelo ícone -- o
+  // mapinha de verdade (piso+paredes+móveis, abaixo) continua intocado,
+  // ele é a prévia de verdade quando já tem dado real pra mostrar.
   if (loading) {
     return (
       <div className="lobby-preview lobby-preview-empty">
-        <span>Carregando prévia da sala…</span>
+        <span className="lobby-preview-empty-glow" />
+        <CamIcon off={false} size={40} />
       </div>
     );
   }
   if (!room || room.floor.length === 0) {
     return (
       <div className="lobby-preview lobby-preview-empty">
-        <span>Sala ainda sem piso desenhado.</span>
+        <span className="lobby-preview-empty-glow" />
+        <CamIcon off={false} size={40} />
       </div>
     );
   }
@@ -615,9 +626,9 @@ function MicIcon({ off }: { off: boolean }) {
   );
 }
 
-function CamIcon({ off }: { off: boolean }) {
+function CamIcon({ off, size = 19 }: { off: boolean; size?: number }) {
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <rect x="3" y="6.5" width="12.5" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
       <path
         d="m15.5 10.8 4.4-2.6a.8.8 0 0 1 1.2.7v6.2a.8.8 0 0 1-1.2.7l-4.4-2.6"
@@ -2298,7 +2309,13 @@ export default function Lobby({
       </div>
 
       <div className="lobby-card">
+        {/* 29/set (2): Douglas mandou o print de novo, agora apontando
+            pro card "Entrar na sala": "copie exatamente o que tem
+            aqui... estilo fonte, cores, blur, tudo" -- ícone de câmera
+            na pilula (não tinha), botão preto (era roxo), setinha no
+            botão (não tinha). */}
         <div className="lobby-sign">
+          <CamIcon off={false} />
           <span className="lobby-sign-text">SALA VIRTUAL</span>
         </div>
         <p className="lobby-greeting">Bem-vindo(a), {displayName}!</p>
@@ -2311,6 +2328,7 @@ export default function Lobby({
 
         <button type="button" className="lobby-enter-btn" onClick={handleEnter}>
           Entrar na sala
+          <ChevronRightIcon />
         </button>
         {onSignOut && (
           <button type="button" className="lobby-signout-btn" onClick={onSignOut}>
