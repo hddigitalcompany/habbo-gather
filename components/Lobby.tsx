@@ -368,28 +368,39 @@ function ChevronRightIcon() {
   );
 }
 
-// MESMO ícone de "trocar foto" (profile-photo-edit) do editor de
-// perfil dentro da sala em GameRoom.tsx -- copiado (não importada,
-// mesmo motivo de sempre) pros botões de trocar logo/banner aqui.
-function BrushIcon() {
+// mesma seta, apontando pro outro lado -- vira o ícone da setinha do
+// card da Empresa quando a aba de edição já tá aberta (fecha em vez
+// de abrir).
+function ChevronLeftIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 20c0-3.2 1.3-5 4-5s3 1.8 3 3.5S9.5 21 8 21c-1.8 0-2.4-1-4-1Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m10.5 14.5 7.3-7.3a2 2 0 0 0 0-2.8l-.2-.2a2 2 0 0 0-2.8 0L7.5 11.5"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
+// ícone de câmera -- pedido do Douglas: print de referência da aba de
+// edição usa esse ícone (não um pincel) nos botões de trocar foto de
+// perfil/banner. `size` opcional porque é usado em dois tamanhos: nos
+// botõezinhos redondos de canto e no convite grande centralizado em
+// cima do banner.
+function CameraIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+// MESMO ícone de "trocar foto" (profile-photo-edit) do editor de
+// perfil dentro da sala em GameRoom.tsx -- copiado (não importada,
+// mesmo motivo de sempre) pros botões de trocar logo/banner aqui.
 function VerifiedBadge() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="company-card-verified">
@@ -1292,7 +1303,7 @@ export default function Lobby({
           29/set: + a setinha do lado que abre a aba de edição (ver
           companyEditOpen/DEFAULT_COMPANY_PROFILE lá em cima). */}
       <div className="lobby-company-card-pin">
-        <div className="company-card">
+        <div className={companyEditOpen ? "company-card company-card-attached" : "company-card"}>
           {/* 29/set: pedido do Douglas "a frase no caso e a imagem do
               banner, nao e um texto" -- tirei o texto/frase de efeito
               que eu tinha desenhado por cima (era conteúdo INVENTADO
@@ -1337,49 +1348,103 @@ export default function Lobby({
           </div>
         </div>
 
+        {/* 29/set: pedido do Douglas, com print de referência de uma
+            aba "Editar Empresa" (Nome fantasia/CNPJ/permissão/fotos):
+            "quero o card de edicao saindo dessa forma da imagem por
+            baixo do card da empresa, todo em blur escurecido" -- não é
+            mais um modal centralizado com fundo escurecendo a tela
+            inteira (era assim antes); agora é um painel ENCOSTADO no
+            card, mesma altura (o :50%/translateY abaixo é em relação a
+            .lobby-company-card-pin, que já tem a altura certa via
+            top+bottom, ver comentário lá em cima), saindo de trás dele
+            -- .company-card-attached tira o arredondamento do lado
+            direito do card enquanto isso tá aberto, pra emendar sem
+            quina com .company-edit-panel (que já nasce só arredondado
+            do lado direito). Seta vira pra esquerda (fecha) quando já
+            tá aberto. */}
         <button
           type="button"
           className="company-card-edit-trigger"
-          onClick={() => setCompanyEditOpen(true)}
+          onClick={() => setCompanyEditOpen((v) => !v)}
           aria-expanded={companyEditOpen}
-          title="Editar empresa"
-          data-tooltip="Editar empresa"
+          title={companyEditOpen ? "Fechar edição" : "Editar empresa"}
+          data-tooltip={companyEditOpen ? "Fechar edição" : "Editar empresa"}
         >
-          <ChevronRightIcon />
+          {companyEditOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
         </button>
       </div>
 
       {companyEditOpen && (
-        <div className="items-panel-backdrop" onClick={() => setCompanyEditOpen(false)}>
-          <div className="items-panel company-edit-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="items-panel-header">
-              <h2>Editar empresa</h2>
+        <>
+          {/* clique fora fecha -- mas SEM escurecer o resto da tela
+              (o pedido foi só o painel em si ficar "em blur
+              escurecido", não a sala toda por trás dele). */}
+          <div className="company-edit-click-catcher" onClick={() => setCompanyEditOpen(false)} />
+          <div className="company-edit-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="company-edit-header-row">
+              <div>
+                <h2 className="company-edit-title">Editar Empresa</h2>
+                <p className="company-edit-subtitle">Atualize as informações da sua empresa que serão exibidas na plataforma.</p>
+              </div>
               <button type="button" className="items-panel-close" onClick={() => setCompanyEditOpen(false)} title="Fechar">
                 ✕
               </button>
             </div>
 
-            <section className="items-panel-section">
-              <h3>Fotos</h3>
+            <div className="company-edit-section">
+              <div className="company-edit-section-head">
+                <h3>Foto de banner</h3>
+                <span className="company-edit-hint">Tamanho recomendado: 1200 x 400</span>
+              </div>
+              <button
+                type="button"
+                className="company-edit-banner-drop"
+                onClick={() => companyBannerInputRef.current?.click()}
+                style={companyProfile.bannerUrl ? { backgroundImage: `url(${companyProfile.bannerUrl})` } : undefined}
+              >
+                <span className="company-edit-banner-drop-overlay">
+                  <CameraIcon size={22} />
+                  <strong>Alterar banner</strong>
+                  <span>Clique para enviar uma imagem</span>
+                </span>
+              </button>
+              <input
+                ref={companyBannerInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleCompanyBannerChange(file);
+                  e.target.value = "";
+                }}
+              />
+            </div>
 
-              <div className="company-edit-photo-row">
-                <div className="company-edit-photo-field">
-                  <div className="company-edit-photo-preview company-edit-photo-preview-logo">
+            <div className="company-edit-section">
+              <div className="company-edit-section-head">
+                <h3>Foto de perfil</h3>
+                <span className="company-edit-hint">Tamanho recomendado: 400 x 400</span>
+              </div>
+
+              <div className="company-edit-profile-row">
+                <div className="company-edit-logo-drop-wrap">
+                  <button type="button" className="company-edit-logo-drop" onClick={() => companyLogoInputRef.current?.click()}>
                     {companyProfile.logoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={companyProfile.logoUrl} alt="" />
                     ) : (
                       <span>{companyProfile.name.charAt(0)}</span>
                     )}
-                    <button
-                      type="button"
-                      className="company-edit-photo-btn"
-                      onClick={() => companyLogoInputRef.current?.click()}
-                      title="Trocar foto de perfil"
-                    >
-                      <BrushIcon />
-                    </button>
-                  </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="company-edit-logo-drop-btn"
+                    onClick={() => companyLogoInputRef.current?.click()}
+                    title="Trocar foto de perfil"
+                  >
+                    <CameraIcon />
+                  </button>
                   <input
                     ref={companyLogoInputRef}
                     type="file"
@@ -1391,72 +1456,46 @@ export default function Lobby({
                       e.target.value = "";
                     }}
                   />
-                  <span className="company-edit-photo-label">Foto de perfil</span>
                 </div>
 
-                <div className="company-edit-photo-field company-edit-photo-field-banner">
-                  <div className="company-edit-photo-preview company-edit-photo-preview-banner">
-                    {companyProfile.bannerUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={companyProfile.bannerUrl} alt="" />
-                    ) : (
-                      <span>Sem banner</span>
-                    )}
-                    <button
-                      type="button"
-                      className="company-edit-photo-btn"
-                      onClick={() => companyBannerInputRef.current?.click()}
-                      title="Trocar foto de banner"
-                    >
-                      <BrushIcon />
-                    </button>
-                  </div>
-                  <input
-                    ref={companyBannerInputRef}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleCompanyBannerChange(file);
-                      e.target.value = "";
-                    }}
-                  />
-                  <span className="company-edit-photo-label">Foto de banner</span>
+                <div className="company-edit-fields">
+                  <label className="company-edit-field">
+                    <span>Nome fantasia *</span>
+                    <input
+                      className="company-edit-input"
+                      value={companyProfile.name}
+                      maxLength={60}
+                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, name: e.target.value }))}
+                    />
+                  </label>
+
+                  <label className="company-edit-field">
+                    <span>CNPJ *</span>
+                    <input
+                      className="company-edit-input"
+                      value={companyProfile.cnpj}
+                      placeholder="00.000.000/0000-00"
+                      inputMode="numeric"
+                      maxLength={18}
+                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, cnpj: formatCnpj(e.target.value) }))}
+                    />
+                  </label>
                 </div>
               </div>
-            </section>
+            </div>
 
-            <section className="items-panel-section">
-              <h3>Dados da empresa</h3>
+            <div className="company-edit-divider" />
 
-              <label className="settings-field">
-                <span>Nome fantasia</span>
-                <input
-                  className="items-panel-input"
-                  value={companyProfile.name}
-                  maxLength={60}
-                  onChange={(e) => setCompanyProfile((prev) => ({ ...prev, name: e.target.value }))}
-                />
-              </label>
-
-              <label className="settings-field">
-                <span>CNPJ</span>
-                <input
-                  className="items-panel-input"
-                  value={companyProfile.cnpj}
-                  placeholder="00.000.000/0000-00"
-                  inputMode="numeric"
-                  maxLength={18}
-                  onChange={(e) => setCompanyProfile((prev) => ({ ...prev, cnpj: formatCnpj(e.target.value) }))}
-                />
-              </label>
-            </section>
-
-            <section className="items-panel-section">
-              <h3>Permissões de exibição</h3>
-
-              <label className="settings-hint settings-hint-check">
+            <label className="company-edit-permission-row">
+              <div className="company-edit-permission-text">
+                <p className="company-edit-permission-question">
+                  Permitir exibição do nome da empresa do perfil dos colaboradores?
+                </p>
+                <p className="company-edit-permission-hint">
+                  Quando ativado, o nome da sua empresa será exibido no perfil dos colaboradores.
+                </p>
+              </div>
+              <span className="company-edit-toggle">
                 <input
                   type="checkbox"
                   checked={companyProfile.showNameOnEmployeeProfiles}
@@ -1464,11 +1503,25 @@ export default function Lobby({
                     setCompanyProfile((prev) => ({ ...prev, showNameOnEmployeeProfiles: e.target.checked }))
                   }
                 />
-                Permitir exibição do nome da empresa no perfil dos colaboradores?
-              </label>
-            </section>
+                <span className="company-edit-toggle-track">
+                  <span className="company-edit-toggle-thumb" />
+                </span>
+              </span>
+            </label>
+
+            <div className="company-edit-divider" />
+
+            <div className="company-edit-save-row">
+              {/* sem backend de empresa ainda (ver comentário grande
+                  do CompanyProfile lá em cima) -- "Salvar" só fecha o
+                  painel, os dados já estão salvos ao vivo no state
+                  conforme a pessoa digita/troca foto. */}
+              <button type="button" className="company-edit-save-btn" onClick={() => setCompanyEditOpen(false)}>
+                Salvar alterações
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       <div className="lobby-card">

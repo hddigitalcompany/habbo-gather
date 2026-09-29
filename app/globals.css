@@ -3966,18 +3966,19 @@ body {
 }
 
 /* setinha do lado do card -- pedido do Douglas: "quero uma setinha do
-   lado do card da empresa, abrindo a aba de edicao". MESMO estilo
-   redondo/escuro do botão de trocar foto (.profile-photo-edit em
-   GameRoom.tsx) -- só posicionado do LADO do card (não por cima dele),
-   verticalmente centralizado (.lobby-company-card-pin virou a
-   "caixa" de referência com a mudança anterior, top+bottom, então
-   50%/translateY continua certo mesmo o card esticando). */
+   lado do card da empresa, abrindo a aba de edicao". Fica sentada
+   bem na "costura" entre o card (290px + 2px de borda) e o painel de
+   edição (.company-edit-panel, começa logo depois) -- por isso
+   left:292px com translate(-50%,-50%): fica metade sobre o card,
+   metade sobre o painel, funcionando como uma "aba" que puxa um pro
+   outro. z-index mais alto que o painel pra continuar clicável por
+   cima dele quando aberto. */
 .company-card-edit-trigger {
   position: absolute;
   top: 50%;
-  left: calc(290px + 14px);
-  transform: translateY(-50%);
-  z-index: 6;
+  left: 292px;
+  transform: translate(-50%, -50%);
+  z-index: 8;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -3995,89 +3996,6 @@ body {
   background: #7c5cff;
 }
 
-/* aba de edição da empresa (Nome fantasia/CNPJ/fotos/permissão de
-   exibição) -- reaproveita toda a "casca" .items-panel-backdrop/
-   .items-panel/.items-panel-header/.items-panel-section/
-   .items-panel-input já usada por Configurações e pelo Editor de
-   Itens (mesmo request de sempre: reusar o padrão em vez de inventar
-   um novo). */
-.company-edit-photo-row {
-  display: flex;
-  gap: 14px;
-  margin-top: 4px;
-}
-
-.company-edit-photo-field {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.company-edit-photo-field-banner {
-  flex: 1;
-  align-items: stretch;
-}
-
-.company-edit-photo-preview {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #9d90bb;
-  font-size: 11px;
-  text-align: center;
-}
-
-.company-edit-photo-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.company-edit-photo-preview-logo {
-  width: 72px;
-  height: 72px;
-  border-radius: 16px;
-  font-size: 24px;
-  font-weight: 800;
-  color: #cfc4e6;
-}
-
-.company-edit-photo-preview-banner {
-  width: 100%;
-  height: 72px;
-  border-radius: 10px;
-}
-
-.company-edit-photo-btn {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(20, 14, 32, 0.85);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.company-edit-photo-btn:hover {
-  background: #7c5cff;
-}
-
-.company-edit-photo-label {
-  font-size: 11px;
-  color: #9d90bb;
-}
-
 .company-card {
   width: 290px;
   max-width: calc(100vw - 32px);
@@ -4088,6 +4006,334 @@ body {
   overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* enquanto a aba de edição tá aberta, o lado direito do card fica reto
+   (sem arredondar) pra emendar sem quina com .company-edit-panel, que
+   já nasce só arredondado do lado direito -- os dois juntos formam UM
+   contorno só, o painel "saindo de trás" do card (pedido do Douglas). */
+.company-card-attached {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* clique fora do painel fecha, mas SEM escurecer a tela por trás --
+   pedido foi só o painel em si "em blur escurecido", não a sala
+   inteira; por isso é totalmente transparente, só existe pra pegar o
+   clique. z-index abaixo do painel/setinha, acima do resto (mesmo
+   raciocínio de sempre pros outros backdrops). */
+.company-edit-click-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  background: transparent;
+}
+
+/* painel "Editar Empresa" -- pedido do Douglas, com print de
+   referência: "quero o card de edicao saindo dessa forma da imagem
+   por baixo do card da empresa, todo em blur escurecido". Encostado
+   no card (left:292px = largura do card + borda, sem vão), MESMA
+   altura dele (top/bottom copiados de .lobby-company-card-pin), só
+   arredondado do lado direito (ver .company-card-attached acima), e
+   BEM mais escuro/opaco que os outros painéis do app (.items-panel
+   usa um gradiente roxo translúcido; aqui é quase preto, igual o
+   print) -- ainda com blur, só que escurecido como pedido. */
+.company-edit-panel {
+  position: fixed;
+  top: 128px;
+  bottom: 100px;
+  left: 292px;
+  width: 820px;
+  max-width: calc(100vw - 292px - 16px);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 32px;
+  border-radius: 0 20px 20px 0;
+  background: linear-gradient(165deg, rgba(18, 14, 28, 0.94), rgba(6, 5, 10, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  overflow-y: auto;
+  color: #f5f0ff;
+}
+
+@media (max-width: 1300px) {
+  .company-edit-panel {
+    width: calc(100vw - 292px - 16px);
+  }
+}
+
+@media (max-width: 900px) {
+  .company-edit-panel,
+  .company-edit-click-catcher {
+    display: none;
+  }
+}
+
+.company-edit-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.company-edit-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.company-edit-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #9d90bb;
+}
+
+.company-edit-section {
+  margin-bottom: 22px;
+}
+
+.company-edit-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.company-edit-section-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f5f0ff;
+}
+
+.company-edit-hint {
+  font-size: 11.5px;
+  color: #7c7591;
+  white-space: nowrap;
+}
+
+/* faixa grande de banner -- botão inteiro clicável, com a foto (se
+   tiver) preenchendo via cover, e o convite de câmera/texto sempre
+   centralizado por cima (mesmo com foto já escolhida, igual o print
+   de referência). */
+.company-edit-banner-drop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 190px;
+  border-radius: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05) center/cover no-repeat;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.company-edit-banner-drop-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 22px;
+  border-radius: 12px;
+  background: rgba(5, 4, 8, 0.55);
+  color: #fff;
+  font-size: 12.5px;
+}
+
+.company-edit-banner-drop-overlay strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.company-edit-banner-drop-overlay span {
+  color: #cfc4e6;
+}
+
+.company-edit-profile-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.company-edit-logo-drop-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.company-edit-logo-drop {
+  width: 128px;
+  height: 128px;
+  border-radius: 20px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: #f3efe6;
+  color: #0e0d16;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 800;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.company-edit-logo-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.company-edit-logo-drop-btn {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(20, 14, 32, 0.9);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.company-edit-logo-drop-btn:hover {
+  background: #7c5cff;
+}
+
+.company-edit-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.company-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #cfc4e6;
+}
+
+.company-edit-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f5f0ff;
+  font-size: 13.5px;
+  padding: 11px 14px;
+}
+
+.company-edit-input:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.company-edit-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0 20px;
+}
+
+.company-edit-permission-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  cursor: pointer;
+}
+
+.company-edit-permission-question {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.company-edit-permission-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #9d90bb;
+}
+
+/* switch/toggle -- input real escondido só pra manter o comportamento
+   nativo de checkbox (teclado, leitor de tela), estilizado como
+   pílula + bolinha via os irmãos logo depois dele (mesmo truque de
+   sempre de "checkbox invisível + irmão estilizado"). */
+.company-edit-toggle {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.company-edit-toggle input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.company-edit-toggle-track {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  transition: background 0.15s ease;
+}
+
+.company-edit-toggle-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.company-edit-toggle input:checked + .company-edit-toggle-track {
+  background: #2f7dfa;
+}
+
+.company-edit-toggle input:checked + .company-edit-toggle-track .company-edit-toggle-thumb {
+  transform: translateX(20px);
+}
+
+.company-edit-toggle input:focus-visible + .company-edit-toggle-track {
+  outline: 2px solid #7c5cff;
+  outline-offset: 2px;
+}
+
+.company-edit-save-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.company-edit-save-btn {
+  background: #2f7dfa;
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 22px;
+  cursor: pointer;
+}
+
+.company-edit-save-btn:hover {
+  background: #4f92ff;
 }
 
 /* metade clara de cima -- frase de efeito (duas linhas + par de
