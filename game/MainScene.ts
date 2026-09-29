@@ -6991,11 +6991,24 @@ export default class MainScene extends Phaser.Scene {
     // também não usa -- ela PRECISA aceitar clique fora da sala de hoje
     // (é assim que "Adicionar" funciona, ver paintRoomShapeAt); as
     // outras ferramentas continuam usando esse aqui.
+    //
+    // BUG achado com o Douglas ("continua nao adicionando mobis nas
+    // areas novas, tudo que e de piso... so parede que ta entrando"):
+    // esse gate ainda comparava col/row contra o retângulo ESTÁTICO
+    // antigo (GRID_COLS/GRID_ROWS), sobrevivente da conversão pra
+    // formato livre (ver fa4bf7b) -- todo o RESTO do arquivo (hover,
+    // movimento, BFS) já tinha trocado pra isTileInRoom (o Set
+    // roomShape de verdade), MENOS esse aqui. Resultado: piso/área/
+    // móvel clicavam fora do retângulo 13x8 original e não faziam
+    // nada, MESMO num tile que "Adicionar" (Tamanho) já tinha colocado
+    // de verdade dentro da sala -- só parede/porta funcionavam lá
+    // (bypassavam esse gate por inteiro) e "Tamanho" (mesma razão).
+    // Fix: usa isTileInRoom, igual todo o resto.
     if (
       !this.selectedWallTool &&
       !this.selectedDoorTool &&
       !this.selectedRoomShapeTool &&
-      (col < 0 || col > GRID_COLS || row < 0 || row > GRID_ROWS)
+      !this.isTileInRoom(col, row)
     )
       return;
 
