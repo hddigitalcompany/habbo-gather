@@ -5707,6 +5707,31 @@ body {
   cursor: default;
 }
 
+/* 29/set, pedido do Douglas: "se eu entrar na sala de um amigo, a sala
+   dele vai ficar ali, como um link rapido" -- botão de copiar o link
+   de convite da PRÓPRIA sala (ver handleCopyRoomLink/lobby-copy-link-btn
+   em components/Lobby.tsx), só aparece com ela selecionada. Contorno
+   (não preenchido) de propósito -- fica claramente secundário ao botão
+   preto "Entrar na sala" logo acima, mesma family de fonte/tamanho do
+   resto do card. */
+.lobby-copy-link-btn {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 1.5px solid #14121f;
+  border-radius: 999px;
+  color: #14121f;
+  padding: 11px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.lobby-copy-link-btn:hover {
+  background: rgba(20, 18, 31, 0.06);
+}
+
 /* 29/set: "Criar minha sala" (ver needsToCreateRoom em Lobby.tsx) --
    ocupa o mesmo espaço do preview+"Entrar na sala" que substitui,
    estilo discreto/em linha com o resto do card (mesma fonte/cor de

@@ -151,6 +151,11 @@ type RoomTemplate = { id: string; name: string; room_slug: string };
 // /api/room/mine) -- criada por ele mesmo a partir de um RoomTemplate
 // (POST /api/room/create-from-template).
 type MyRoom = { id: string; name: string; room_slug: string };
+// uma sala de OUTRA pessoa que essa conta já visitou por link (ver
+// POST /api/room/visit / GET /api/room/visits) -- mesmo formato de
+// MyRoom acima, é literalmente uma linha de `rooms` (nome/slug
+// atuais, não uma cópia congelada no momento da visita).
+type VisitedRoom = { id: string; name: string; room_slug: string };
 
 const PREVIEW_W = 264;
 const PREVIEW_H = 168;
@@ -1397,6 +1402,20 @@ export default function Lobby({
   // cards enquanto isso, evita clique duplo criando 2 salas.
   const [creatingFromTemplateId, setCreatingFromTemplateId] = useState<string | null>(null);
   const [createRoomError, setCreateRoomError] = useState<string | null>(null);
+  // "Espaços visitados" (pedido do Douglas, 29/set: "se eu entrar na
+  // sala de um amigo, a sala dele vai ficar ali, como um link rapido")
+  // -- salas de OUTRAS pessoas que essa conta já visitou por link (ver
+  // POST /api/room/visit), mais recente primeiro (ver GET
+  // /api/room/visits, efeito mais abaixo). visitSlug vem de
+  // ?visitar=<slug> na URL, lido direto de window.location (não
+  // useSearchParams, pra não precisar de Suspense boundary só por
+  // causa disso, ver efeito logo abaixo) -- é o "link de convite" que
+  // o dono de uma sala copia (ver handleCopyRoomLink mais abaixo) e
+  // manda pra quem quiser, sem precisar gerar código nenhum.
+  const [visitedRooms, setVisitedRooms] = useState<VisitedRoom[] | null>(null);
+  const [visitedMenuOpen, setVisitedMenuOpen] = useState(false);
+  const [visitSlug, setVisitSlug] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
   // mais abaixo/ROOM_SLUGS acima) -- vazio até confirmar algo válido
   // (nunca cai em "mapa-modelo"/"sala-principal" por padrão pra quem
@@ -1629,6 +1648,18 @@ export default function Lobby({
     };
   }, []);
 
+  // ?visitar=<room_slug> na URL (ver comentário grande de visitSlug
+  // acima) -- lido direto de window.location em vez de useSearchParams
+  // de propósito: só client-side (roda uma vez ao montar, igual todo
+  // outro fetch aqui), sem exigir Suspense boundary em app/page.tsx só
+  // por causa de um parâmetro que a imensa maioria das visitas ao
+  // Lobby nem tem.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const v = new URLSearchParams(window.location.search).get("visitar");
+    if (v && v.trim()) setVisitSlug(v.trim());
+  }, []);
+
   // refaz a busca do "mapinha" toda vez que a seleção em "Meus espaços"
   // muda (ver selectedRoomSlug acima) -- cada slug tem seu PRÓPRIO piso/
   // parede/mobília agora (ver comentário grande "MULTI-SALA" em
@@ -1742,6 +1773,63 @@ export default function Lobby({
     };
   }, [accountAccessToken]);
 
+  // busca a lista de "Espaços visitados" (GET /api/room/visits, ver
+  // VisitedRoom acima) -- sem token, ninguém tem histórico nenhum
+  // (precisa de conta, ver room_visits.user_id).
+  useEffect(() => {
+    let cancelled = false;
+    if (!accountAccessToken) {
+      setVisitedRooms(null);
+      return;
+    }
+    fetch("/api/room/visits", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setVisitedRooms(Array.isArray(data?.visits) ? data.visits : []);
+      })
+      .catch(() => {
+        if (!cancelled) setVisitedRooms([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken]);
+
+  // resolve o ?visitar=<slug> lido acima (ver efeito de visitSlug) --
+  // POST /api/room/visit confere se é uma sala de CLIENTE de verdade
+  // (recusa sala-principal/mapa-modelo e slugs inventados, ver
+  // comentário grande na rota) e só DEPOIS de confirmado é que
+  // selectedRoomSlug muda -- nunca confia direto no que veio da URL.
+  // Precisa de conta (sem token não tem como registrar a visita nem
+  // saber se a sala existe de verdade).
+  useEffect(() => {
+    if (!visitSlug || !accountAccessToken) return;
+    let cancelled = false;
+    fetch("/api/room/visit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+      body: JSON.stringify({ roomSlug: visitSlug }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || typeof data?.room?.room_slug !== "string") return;
+        userPickedRoomRef.current = true;
+        setSelectedRoomSlug(data.room.room_slug);
+        // já bota o atalho na lista na hora, sem esperar reabrir o
+        // Lobby de novo pra ele aparecer em "Espaços visitados"
+        // (ownRoom: é a sala de quem tá pedindo, não é "visita" --
+        // não deve entrar na lista).
+        if (!data.ownRoom) {
+          const visited: VisitedRoom = { id: data.room.id, name: String(data.room.name ?? "Sala"), room_slug: data.room.room_slug };
+          setVisitedRooms((prev) => [visited, ...(prev ?? []).filter((r) => r.id !== visited.id)]);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [visitSlug, accountAccessToken]);
+
   // catálogo de modelos publicados (GET /api/room/templates, ver
   // RoomTemplate acima) -- público/barato, busca sempre; só é
   // renderizado de fato quando needsToCreateRoom abaixo é true.
@@ -1790,6 +1878,29 @@ export default function Lobby({
     }
   }
 
+  /** Copia pra área de transferência o link que qualquer conta pode
+   * abrir pra visitar a sala PRÓPRIA de quem tá logado agora (ver POST
+   * /api/room/visit / comentário grande de visitSlug lá em cima) --
+   * pedido do Douglas: "se eu entrar na sala de um amigo, a sala dele
+   * vai ficar ali, como um link rapido". Só existe botão pra isso
+   * quando a sala selecionada É a própria (myRoom) -- ver JSX mais
+   * abaixo -- não faz sentido "convidar" pra Sala Principal/Mapa
+   * Modelo por aqui (ver RESERVED_SLUGS na rota, que recusaria mesmo
+   * assim). */
+  async function handleCopyRoomLink() {
+    if (!myRoom || typeof window === "undefined") return;
+    const url = `${window.location.origin}${window.location.pathname}?visitar=${encodeURIComponent(myRoom.room_slug)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // clipboard bloqueado (permissão do navegador, http sem TLS,
+      // etc.) -- sem fallback silencioso melhor que isso hoje; a
+      // pessoa pode selecionar o link manualmente se precisar.
+    }
+  }
+
   // itens do TIME do Douglas realmente mostrados no dropdown "Meus
   // espaços" (ver comentário grande "teamOnly" em ROOM_SLUGS acima) --
   // quem não é do time (owner/member) não vê nenhum dos dois.
@@ -1802,6 +1913,13 @@ export default function Lobby({
     myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo"
       ? [...visibleRoomSlugs, { slug: myRoom.room_slug, label: myRoom.name, teamOnly: false }]
       : visibleRoomSlugs;
+  // itens do dropdown "Espaços visitados" (ver VisitedRoom acima) --
+  // filtra fora qualquer coisa que já apareça em "Meus espaços" (ex:
+  // visitou a própria sala em algum momento por engano, ou virou dono
+  // de uma sala que também tinha visitado antes de ser dono).
+  const dropdownEntriesVisited = (visitedRooms ?? []).filter(
+    (r) => !dropdownEntries.some((d) => d.slug === r.room_slug)
+  );
   // ainda checando acesso (papel + sala própria) -- evita mostrar "criar
   // minha sala" só pra sumir 1 segundo depois quando descobre que a
   // pessoa já é do time/já tem sala.
@@ -2062,6 +2180,63 @@ export default function Lobby({
                         }}
                       >
                         {r.label}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 29/set, pedido do Douglas: "aqui encima, do lado de meus
+              espacos, cria uma nova / espacos visitados" -- salas de
+              OUTRAS pessoas que essa conta já visitou por link (ver
+              VisitedRoom/dropdownEntriesVisited acima e POST
+              /api/room/visit). Mesmo padrão de dropdown de "Meus
+              espaços" acima (clicar troca só a seleção, "Entrar na
+              sala" continua sendo o botão lá embaixo), só que NUNCA
+              "active" (não é uma seção fixa como "Meus espaços", só
+              mais uma aba clicável, igual visualmente às inertes ao
+              lado até ter algo pra mostrar). */}
+          <div className="lobby-topbar-tab-wrap">
+            <button
+              type="button"
+              className="lobby-topbar-tab"
+              onClick={() => setVisitedMenuOpen((v) => !v)}
+              aria-expanded={visitedMenuOpen}
+            >
+              <span className="lobby-topbar-tab-label">Espaços visitados</span>
+              <span className={visitedMenuOpen ? "lobby-topbar-chevron open" : "lobby-topbar-chevron"}>
+                <ChevronIcon />
+              </span>
+            </button>
+            {visitedMenuOpen && (
+              <>
+                <div className="lobby-topbar-dropdown-backdrop" onClick={() => setVisitedMenuOpen(false)} />
+                <div className="lobby-topbar-dropdown">
+                  {!accountAccessToken ? (
+                    <p className="lobby-topbar-dropdown-empty">Crie uma conta pra guardar espaços visitados.</p>
+                  ) : dropdownEntriesVisited.length === 0 ? (
+                    <p className="lobby-topbar-dropdown-empty">
+                      {visitedRooms === null ? "Carregando…" : "Nenhum espaço visitado ainda."}
+                    </p>
+                  ) : (
+                    dropdownEntriesVisited.map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        className={
+                          r.room_slug === selectedRoomSlug
+                            ? "lobby-topbar-dropdown-item active"
+                            : "lobby-topbar-dropdown-item"
+                        }
+                        onClick={() => {
+                          userPickedRoomRef.current = true;
+                          setSelectedRoomSlug(r.room_slug);
+                          setVisitedMenuOpen(false);
+                        }}
+                      >
+                        {r.name}
                       </button>
                     ))
                   )}
@@ -2662,6 +2837,16 @@ export default function Lobby({
               Entrar na sala
               <ChevronRightIcon />
             </button>
+
+            {/* só aparece com a sala PRÓPRIA selecionada (ver
+                handleCopyRoomLink acima) -- é o link que qualquer amigo
+                pode abrir pra entrar direto nela e virar um atalho em
+                "Espaços visitados" (pedido do Douglas, 29/set). */}
+            {myRoom && selectedRoomSlug === myRoom.room_slug && (
+              <button type="button" className="lobby-copy-link-btn" onClick={handleCopyRoomLink}>
+                {linkCopied ? "Link copiado!" : "Copiar link pra convidar"}
+              </button>
+            )}
           </>
         )}
         {onSignOut && (
