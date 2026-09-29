@@ -2327,7 +2327,11 @@ export default function Lobby({
           do .lobby-card de propósito (esse aqui é "absolute" relativo
           à tela inteira, igual dentro da sala; dentro do card ficaria
           preso ao centro). */}
-      <div className="av-bar">
+      {/* 29/set (2): "lobby-av-bar-light" só existe pra clarear essa
+          barra aqui do Lobby (ver comentário grande em .av-bar.lobby-av-bar-light
+          em globals.css) -- a classe base .av-bar continua igual pra
+          quando essa mesma barra aparece de dentro da sala de verdade. */}
+      <div className="av-bar lobby-av-bar-light">
         <button
           type="button"
           className={micOn ? "av-btn" : "av-btn off"}

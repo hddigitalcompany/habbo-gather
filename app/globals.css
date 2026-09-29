@@ -375,6 +375,34 @@ body {
   background: #8c6dff;
 }
 
+/* 29/set (2): variante CLARA da .av-bar, só pro Lobby -- Douglas
+   mandou print de referência (mockup claro) e pediu "gostei desse
+   estilo, consegue?" (tema claro em tudo). .av-bar/.av-btn são
+   compartilhadas com a barra de DENTRO da sala de verdade (GameRoom.tsx,
+   pixel art escura) -- por isso NÃO mudei a classe base (deixaria a
+   barra de dentro da sala branca também, sem ter sido pedido). Em vez
+   disso, o Lobby soma essa classe extra só nele (ver .av-bar no JSX
+   de components/Lobby.tsx) e só ela é sobrescrita aqui -- a sala
+   continua exatamente igual. :not(.off):not(.on) deixa os estados
+   "desligado"/"ativo" (vermelho/roxo sólido) sozinhos, sem herdar a
+   cor de ícone escura daqui. */
+.av-bar.lobby-av-bar-light {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(20, 20, 45, 0.08);
+  box-shadow:
+    0 10px 30px rgba(20, 20, 60, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.lobby-av-bar-light .av-btn:not(.off):not(.on) {
+  background: rgba(20, 20, 45, 0.05);
+  color: #33303f;
+}
+
+.lobby-av-bar-light .av-btn:not(.off):not(.on):hover {
+  background: rgba(20, 20, 45, 0.1);
+}
+
 /* Balão de dica "estilo Apple" (dock do macOS/Control Center): pill
    escura com o rótulo, aparece ACIMA do botão com uma setinha apontando
    pra baixo, em vez do tooltip feio/lento nativo do navegador (title=).
@@ -3663,13 +3691,27 @@ body {
      valor novo. Continua centralizado verticalmente (align-items
      não mudou). */
   justify-content: flex-end;
-  /* imagem de fundo mandada pelo Douglas: "coloque essa imagem de
-     fundo no lobby" (degradê azul/preto desfocado). background-color
-     como fallback enquanto a imagem carrega / se falhar, e
-     background-size:cover + position:center pra preencher a tela
-     inteira sem distorcer, igual o gradiente que ela substitui. */
-  background-color: #0b0f22;
-  background-image: url("/assets/lobby-bg.jpg");
+  /* 29/set (2): Douglas mandou um print de referência (mockup claro,
+     branco, com um brilho azulado difuso no canto inferior direito) e
+     pediu "gostei desse estilo, consegue?" -- confirmado que é pra
+     TROCAR TUDO pro tema claro (não só alguns detalhes). Fundo escuro
+     (lobby-bg.jpg) trocado por um degradê claro com o mesmo "blob"
+     azulado desfocado no canto, só que feito 100% em CSS (radial-
+     gradient) em vez de imagem -- não precisa de asset novo nem
+     esperar o Douglas subir nada. IMPORTANTE: esse re-tema cobre só a
+     TELA DO LOBBY em si (aqui, .lobby-topbar, .company-card,
+     .lobby-agenda-day-card, .lobby-card, e a variante clara da av-bar
+     -- ver .lobby-av-bar-light) -- NÃO toquei em .lobby-panel/
+     .members-panel/.items-panel/.settings-panel/.company-edit-panel:
+     os dois do meio (.members-panel, .items-panel) são compartilhados
+     com a SALA de verdade (GameRoom.tsx, pixel art escura) e mudar a
+     cor deles mudaria a cara de dentro da sala também, que não tava
+     no print e o Douglas não pediu. */
+  background-color: #eef1fb;
+  background-image:
+    radial-gradient(1100px 760px at 90% 94%, rgba(79, 125, 251, 0.38), transparent 60%),
+    radial-gradient(760px 560px at 102% 104%, rgba(29, 16, 74, 0.3), transparent 55%),
+    linear-gradient(180deg, #f8f9fd 0%, #eef1fb 100%);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -3725,14 +3767,16 @@ body {
      background usado agora em .lobby-panel/.lobby-card/
      .members-panel/.items-panel (era roxo antes, neutralizado
      junto). */
-  background: linear-gradient(165deg, rgba(150, 150, 158, 0.16), rgba(20, 20, 24, 0.1));
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  /* 29/set (2): vidro fosco cinza-escuro trocado por vidro claro --
+     ver comentário grande em .lobby-backdrop sobre o pedido "gostei
+     desse estilo, consegue?" (tema claro em tudo). */
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(20, 20, 45, 0.08);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    inset 0 0 50px rgba(0, 0, 0, 0.28),
-    0 20px 50px rgba(5, 8, 30, 0.4);
-  backdrop-filter: blur(22px) saturate(120%);
-  -webkit-backdrop-filter: blur(22px) saturate(120%);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 20px 50px rgba(20, 20, 60, 0.12);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
 }
 
 .lobby-topbar-logo-group {
@@ -3748,7 +3792,7 @@ body {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: #ffffff;
+  color: #14121f;
   white-space: nowrap;
 }
 
@@ -3780,16 +3824,16 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(20, 20, 45, 0.05);
+  border: 1px solid rgba(20, 20, 45, 0.1);
   border-radius: 999px;
   padding: 6px 14px 6px 6px;
   cursor: pointer;
-  color: #ffffff;
+  color: #14121f;
 }
 
 .lobby-topbar-account:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(20, 20, 45, 0.09);
 }
 
 .lobby-topbar-account-avatar {
@@ -3850,14 +3894,16 @@ body {
      MESMO vidro fosco cinza neutro usado no resto agora (topbar,
      cards da agenda, lobby-panel/lobby-card/members-panel/
      items-panel). */
-  background: linear-gradient(165deg, rgba(150, 150, 158, 0.14), rgba(20, 20, 24, 0.1));
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  /* 29/set (2): mesma troca pro tema claro (ver .lobby-backdrop) --
+     fica branco translúcido, faixa colorida da borda esquerda (ver
+     ::before abaixo) continua igual, é o "pop" de cor do card. */
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(20, 20, 45, 0.08);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 0 50px rgba(0, 0, 0, 0.32),
-    0 24px 60px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(24px) saturate(120%);
-  -webkit-backdrop-filter: blur(24px) saturate(120%);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 24px 60px rgba(20, 20, 60, 0.18);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
   overflow: hidden;
 }
 
@@ -3878,7 +3924,7 @@ body {
   font-size: 22px;
   line-height: 1.2;
   font-weight: 800;
-  color: #ffffff;
+  color: #14121f;
   overflow-wrap: break-word;
 }
 
@@ -3886,7 +3932,7 @@ body {
   margin: 0 0 14px;
   font-size: 12.5px;
   line-height: 1.5;
-  color: #b7b2c9;
+  color: #6b6780;
 }
 
 .lobby-account-card-tags {
@@ -3899,9 +3945,9 @@ body {
 .lobby-account-card-tag {
   font-size: 11px;
   font-weight: 600;
-  color: #e7e4f2;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #33303f;
+  background: rgba(20, 20, 45, 0.05);
+  border: 1px solid rgba(20, 20, 45, 0.1);
   border-radius: 999px;
   padding: 4px 10px;
   white-space: nowrap;
@@ -4037,8 +4083,12 @@ body {
   flex-direction: column;
   border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* 29/set (2): tema claro (ver .lobby-backdrop) -- sombra mais suave
+     e borda escura bem sutil (a clara sumia contra o fundo branco
+     novo). O card em si (topo claro / metade preta embaixo) já bate
+     com o print de referência sem mais nada mudar. */
+  box-shadow: 0 20px 50px rgba(20, 20, 60, 0.15);
+  border: 1px solid rgba(20, 20, 45, 0.08);
 }
 
 /* enquanto a aba de edição tá aberta, o lado direito do card fica reto
@@ -4632,7 +4682,9 @@ body {
   gap: 6px;
   background: transparent;
   border: none;
-  color: #c7d1f0;
+  /* 29/set (2): tema claro (ver .lobby-backdrop) -- texto escuro
+     acinzentado em vez de claro-azulado. */
+  color: #5b5770;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.6px;
@@ -4642,15 +4694,17 @@ body {
 }
 
 .lobby-topbar-tab:hover {
-  color: #ffffff;
+  color: #14121f;
 }
 
 .lobby-topbar-tab.active {
-  color: #ffffff;
+  color: #14121f;
 }
 
 /* "bolinha" atrás do texto da aba ativa, mesma ideia do círculo claro
-   atrás de "PRODUCTS" no print de referência. */
+   atrás de "PRODUCTS" no print de referência -- no tema claro vira um
+   cinza bem sutil (a versão branca original desaparecia num fundo já
+   branco). */
 .lobby-topbar-tab.active::before {
   content: "";
   position: absolute;
@@ -4660,7 +4714,7 @@ body {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 45, 0.06);
   z-index: 0;
 }
 
@@ -4683,7 +4737,7 @@ body {
 }
 
 .lobby-topbar-tab-inert:hover {
-  color: #c7d1f0;
+  color: #5b5770;
 }
 
 .lobby-topbar-chevron {
@@ -4711,11 +4765,12 @@ body {
   left: 0;
   z-index: 12;
   min-width: 200px;
-  background: rgba(20, 26, 56, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  /* 29/set (2): tema claro (ver .lobby-backdrop) */
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(20, 20, 45, 0.1);
   border-radius: 12px;
   padding: 6px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 30px rgba(20, 20, 60, 0.18);
 }
 
 .lobby-topbar-dropdown-item {
@@ -4724,20 +4779,20 @@ body {
   background: transparent;
   border: none;
   border-radius: 8px;
-  color: #c7d1f0;
+  color: #5b5770;
   font-size: 13px;
   padding: 8px 10px;
   cursor: pointer;
 }
 
 .lobby-topbar-dropdown-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(20, 20, 45, 0.06);
 }
 
 .lobby-topbar-dropdown-item.active {
-  color: #ffffff;
+  color: #14121f;
   font-weight: 700;
-  background: rgba(63, 95, 196, 0.35);
+  background: rgba(124, 92, 255, 0.14);
 }
 
 /* 28/set, pedido do Douglas com print de referência (card de "Messages"
@@ -4823,14 +4878,15 @@ body {
      agora em .lobby-panel/.lobby-card/.members-panel/.items-panel
      (era roxo antes, neutralizado junto) e na barra superior
      (.lobby-topbar). */
-  background: linear-gradient(165deg, rgba(150, 150, 158, 0.14), rgba(20, 20, 24, 0.1));
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 0 50px rgba(0, 0, 0, 0.32),
-    0 24px 60px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(24px) saturate(120%);
-  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  /* 29/set (2): Douglas mandou print de referência (mockup claro) e
+     pediu "gostei desse estilo, consegue?" -- trocar TUDO pro tema
+     claro (ver comentário grande em .lobby-backdrop). Cards viram
+     branco sólido com sombra suave, sem precisar mais de blur (fundo
+     já é opaco, backdrop-filter não tinha mais nada visível pra
+     borrar). */
+  background: #ffffff;
+  border: 1px solid rgba(20, 20, 45, 0.07);
+  box-shadow: 0 18px 40px rgba(20, 20, 60, 0.1);
 }
 
 .lobby-agenda-day-left {
@@ -4873,7 +4929,7 @@ body {
   margin: 0;
   font-size: 11.5px;
   font-weight: 700;
-  color: #f0edf9;
+  color: #5b5770;
   text-align: center;
   line-height: 1.2;
 }
@@ -4881,8 +4937,8 @@ body {
 .lobby-agenda-day-count {
   font-size: 10.5px;
   font-weight: 700;
-  color: #cfc4e6;
-  background: rgba(255, 255, 255, 0.08);
+  color: #5b5770;
+  background: rgba(20, 20, 45, 0.06);
   border-radius: 999px;
   padding: 3px 9px;
   white-space: nowrap;
@@ -4903,7 +4959,7 @@ body {
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #9d8fc9;
+  color: #9992ad;
 }
 
 /* dia sem nenhum compromisso -- pedido do Douglas: "mantenha os cards
@@ -4917,7 +4973,7 @@ body {
   display: flex;
   align-items: center;
   font-size: 12px;
-  color: #8b7fb0;
+  color: #9992ad;
 }
 
 /* pedido do Douglas: "se passar de 3 eventos, scrol ativa dentro do
@@ -4941,7 +4997,7 @@ body {
 }
 
 .lobby-agenda-day-events::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 45, 0.18);
   border-radius: 999px;
 }
 
@@ -4966,7 +5022,7 @@ body {
   margin: 0;
   font-size: 12px;
   font-weight: 800;
-  color: #ffffff;
+  color: #14121f;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4975,19 +5031,19 @@ body {
 .lobby-agenda-event-time {
   margin: 2px 0 0;
   font-size: 11px;
-  color: #b7b2c9;
+  color: #6b6780;
 }
 
 .lobby-card {
   width: 400px;
   max-width: 100%;
-  background: linear-gradient(160deg, rgba(150, 150, 158, 0.28), rgba(20, 20, 24, 0.38));
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  /* 29/set (2): tema claro (ver .lobby-backdrop) -- branco sólido,
+     sombra suave em vez do vidro escuro. */
+  background: #ffffff;
+  border: 1px solid rgba(20, 20, 45, 0.07);
   border-radius: 20px;
   padding: 28px 24px 24px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 0 20px 50px rgba(20, 20, 60, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -5026,29 +5082,33 @@ body {
 
 /* "letreiro" do hotel -- placa com borda em degradê violeta, letras
    espaçadas tipo neon, sem precisar de nenhum asset novo. */
+/* 29/set (2): "letreiro" neon roxo trocado pela pilula clara do
+   print de referência (texto escuro em cima de um chip cinza claro,
+   sem brilho/glow -- o app inteiro virou tema claro, ver comentário
+   grande em .lobby-backdrop). */
 .lobby-sign {
   align-self: center;
   padding: 10px 22px;
   margin-bottom: 18px;
   border-radius: 10px;
-  background: linear-gradient(180deg, rgba(124, 92, 255, 0.25), rgba(124, 92, 255, 0.05));
-  border: 1px solid rgba(156, 130, 255, 0.55);
-  box-shadow: 0 0 18px rgba(124, 92, 255, 0.35), inset 0 0 12px rgba(124, 92, 255, 0.15);
+  background: rgba(20, 20, 45, 0.05);
+  border: 1px solid rgba(20, 20, 45, 0.1);
+  box-shadow: none;
 }
 
 .lobby-sign-text {
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 3px;
-  color: #e7defc;
-  text-shadow: 0 0 10px rgba(156, 130, 255, 0.7);
+  color: #14121f;
+  text-shadow: none;
 }
 
 .lobby-greeting {
   margin: 0 0 10px;
   font-size: 16px;
   font-weight: 700;
-  color: #f5f0ff;
+  color: #14121f;
 }
 
 .lobby-presence {
@@ -5058,7 +5118,7 @@ body {
   gap: 7px;
   margin: 0 0 22px;
   font-size: 13px;
-  color: #cfc4e6;
+  color: #6b6780;
 }
 
 .lobby-presence-dot {
@@ -5551,7 +5611,7 @@ body {
   width: 100%;
   background: transparent;
   border: none;
-  color: #9fb4ff;
+  color: #8b879c;
   font-size: 13px;
   text-align: center;
   padding: 14px 0 0;
