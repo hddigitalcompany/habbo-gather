@@ -3859,14 +3859,26 @@ body {
   background: rgba(63, 95, 196, 0.35);
 }
 
+/* 28/set, pedido do Douglas com print de referência (card de "Messages"
+   flutuando bem transparente/embaçado num cômodo real): "nessa pegada
+   os cards" -- MESMA ideia de vidro fosco já usada na barra de topo
+   (ver .lobby-topbar), agora nos cards/painéis flutuantes: bem mais
+   transparente que antes (dava pra quase não ver o fundo através do
+   card roxo-escuro quase opaco), com blur de verdade por trás. Vale
+   pro card principal do lobby E pros painéis que abrem por cima dele
+   (.lobby-panel, .members-panel, .items-panel/.settings-panel logo
+   abaixo -- os dois últimos são compartilhados com a sala de verdade
+   também, GameRoom.tsx). */
 .lobby-card {
   width: 400px;
   max-width: 100%;
-  background: rgba(28, 22, 42, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(160deg, rgba(110, 90, 170, 0.28), rgba(20, 16, 31, 0.38));
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   padding: 28px 24px 24px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -4017,10 +4029,12 @@ body {
   max-height: min(520px, calc(100vh - 64px));
   display: flex;
   flex-direction: column;
-  background: rgba(28, 22, 42, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(160deg, rgba(110, 90, 170, 0.3), rgba(20, 16, 31, 0.42));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
   overflow: hidden;
 }
 
@@ -4336,10 +4350,13 @@ body {
   max-width: 100%;
   max-height: 80vh;
   overflow-y: auto;
-  background: rgba(28, 22, 42, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(110, 90, 170, 0.3), rgba(20, 16, 31, 0.42));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
   padding: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 
 .members-panel-header {
@@ -4543,10 +4560,13 @@ body {
      rolando DENTRO da janela, só que a janela em si fica menor. */
   max-height: 70vh;
   overflow-y: auto;
-  background: rgba(28, 22, 42, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(110, 90, 170, 0.3), rgba(20, 16, 31, 0.42));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
   padding: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 
 .items-panel-header {
