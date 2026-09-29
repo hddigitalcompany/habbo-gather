@@ -3663,10 +3663,6 @@ body {
      valor novo. Continua centralizado verticalmente (align-items
      não mudou). */
   justify-content: flex-end;
-  /* agora tem 2 filhos no fluxo (a prévia da agenda + .lobby-card) --
-     gap entre os dois, mesmo valor padrão de 16px usado no resto do
-     layout. */
-  gap: 16px;
   /* imagem de fundo mandada pelo Douglas: "coloque essa imagem de
      fundo no lobby" (degradê azul/preto desfocado). background-color
      como fallback enquanto a imagem carrega / se falhar, e
@@ -4722,53 +4718,56 @@ body {
    abaixo -- os dois últimos são compartilhados com a sala de verdade
    também, GameRoom.tsx). */
 /* prévia da agenda -- pedido do Douglas, print de referência (3
-   cards de dia + botão "Abrir minha agenda" embaixo). Escondida em
-   telas menores (mesmo espírito de .company-card-pin/.company-edit-panel
-   sumirem em telas estreitas) -- 3 cards de 270px + o card da Sala
-   (400px) + o card da empresa (290px) juntos só cabem confortável em
-   telas bem largas; a agenda continua acessível pelo ícone dela na
-   av-bar mesmo com isso escondido. */
+   cards de dia). 29/set (2): "remova o botao abrir minha agenda,
+   mantenha apenas os cards da agenda, alinhe os cards com o card da
+   empresa embaixo, mantenha a altura fixa, se passar de 3 eventos,
+   scrol ativa dentro do card" -- reescrito:
+   - Virou position:fixed (mesmo esquema de .company-card-pin) em vez
+     de filho do flex de .lobby-backdrop -- só assim dá pra alinhar a
+     borda de BAIXO com o card da empresa (bottom:100px nos dois,
+     mesma distância do av-bar) independente de onde o card da Sala
+     cai (esse continua centralizado verticalmente, sem mexer).
+   - left:322px = 16 (inset padrão) + 290 (largura do card da
+     empresa) + 16 (gap padrão) -- encosta logo depois do card da
+     empresa, mesma lógica de espaçamento usada no resto do layout.
+   - max-width com min()/calc() garante que nunca encosta no card da
+     Sala (400px + 16px de inset na direita), encolhendo sozinho
+     conforme a tela -- e os cards de dia rolam pro lado
+     (overflow-x) quando não cabem todos, em vez de sumir (era o bug
+     "e nao apareceu no lobby" de antes). Escondida de vez só em
+     telas bem estreitas, igual .company-card-pin (900px). */
 .lobby-agenda-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  flex: 1 1 auto;
-  /* min-width:0 é o que deixa um filho de flex encolher além do
-     tamanho do conteúdo -- sem isso, o navegador nunca deixava esse
-     bloco ficar menor que os 3 cards juntos, e como .lobby-backdrop
-     não quebra linha, ele simplesmente sumia (ou ficava cortado) em
-     telas mais estreitas. 29/set: Douglas reportou "e nao apareceu no
-     lobby" -- a barreira de max-width:1300px que existia aqui (fixa,
-     tudo ou nada) provavelmente era mais larga que a tela dele; troca
-     pra isso encolher de verdade + rolar por dentro (ver
-     .lobby-agenda-preview-cards) em vez de só sumir. */
-  min-width: 0;
-  max-width: 860px;
-}
-
-@media (max-width: 760px) {
-  .lobby-agenda-preview {
-    display: none;
-  }
-}
-
-.lobby-agenda-preview-cards {
+  position: fixed;
+  left: 322px;
+  bottom: 100px;
+  z-index: 5;
   display: flex;
   gap: 16px;
+  max-width: min(860px, calc(100vw - 754px));
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 
-.lobby-agenda-preview-cards::-webkit-scrollbar {
+.lobby-agenda-preview::-webkit-scrollbar {
   display: none;
+}
+
+@media (max-width: 900px) {
+  .lobby-agenda-preview {
+    display: none;
+  }
 }
 
 .lobby-agenda-day-card {
   width: 270px;
-  /* não deixa o card espremer (senão o texto vira sopa de letrinhas
-     antes de rolar) -- fica no tamanho natural e quem não couber
-     rola, ver overflow-x:auto no pai (.lobby-agenda-preview-cards). */
+  /* altura FIXA (pedido do Douglas) -- não estica mais com a
+     quantidade de eventos, quem passar de 3 rola por dentro (ver
+     .lobby-agenda-day-events). Não deixa o card espremer na
+     horizontal também (senão o texto vira sopa de letrinhas antes de
+     rolar) -- fica no tamanho natural e quem não couber rola, ver
+     overflow-x:auto no pai (.lobby-agenda-preview). */
+  height: 178px;
   flex-shrink: 0;
   display: flex;
   gap: 14px;
@@ -4850,14 +4849,29 @@ body {
   color: #9d8fc9;
 }
 
+/* pedido do Douglas: "se passar de 3 eventos, scrol ativa dentro do
+   card" -- max-height calibrado pra caber exatamente 3 linhas de
+   evento (título+horário, ~29.5px cada, + 8px de gap entre elas:
+   3*29.5 + 2*8 ≈ 104px); o 4º evento em diante só aparece rolando,
+   sem esticar a altura fixa do card (.lobby-agenda-day-card). */
 .lobby-agenda-day-events {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 4px 0 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow: hidden;
+  max-height: 104px;
+  overflow-y: auto;
+}
+
+.lobby-agenda-day-events::-webkit-scrollbar {
+  width: 4px;
+}
+
+.lobby-agenda-day-events::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
 }
 
 .lobby-agenda-event-item {
@@ -4891,44 +4905,6 @@ body {
   margin: 2px 0 0;
   font-size: 11px;
   color: #b7b2c9;
-}
-
-.lobby-agenda-preview-empty {
-  margin: 0;
-  padding: 18px 20px;
-  border-radius: 16px;
-  background: rgba(20, 16, 31, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #cfc4e6;
-  font-size: 13px;
-  text-align: center;
-}
-
-.lobby-agenda-open-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 13px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(15, 12, 24, 0.55);
-  color: #ffffff;
-  font-size: 13.5px;
-  font-weight: 700;
-  cursor: pointer;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-.lobby-agenda-open-btn:hover {
-  background: rgba(124, 92, 255, 0.25);
-  border-color: rgba(124, 92, 255, 0.5);
-}
-
-.lobby-agenda-open-btn svg {
-  width: 16px;
-  height: 16px;
 }
 
 .lobby-card {

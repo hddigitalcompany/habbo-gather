@@ -2186,63 +2186,56 @@ export default function Lobby({
         </>
       )}
 
-      {/* pedido do Douglas, com print de referência (3 cards "29 Set /
-          30 Set / 02 Out", cada um com PRÓXIMOS + lista de eventos +
-          contagem, e um botão "Abrir minha agenda" embaixo): "faca uma
-          previa da agenda conforme a foto enviada, embaixo um botao
-          direto pra agenda dele abrindo todas as funcionalidades
-          dela". Os dados são os `calls` de verdade (mesmo
-          /agenda/summary que já alimenta o LobbyAgendaPanel/av-bar --
-          ver agendaPreviewDays acima), então o que aparece aqui é
-          real, não mockado. O botão só abre o MESMO
-          LobbyAgendaPanel de sempre (setAgendaPanelOpen(true)) --
-          "todas as funcionalidades dela" já existem lá (aceitar/
-          recusar compromisso etc), não precisa duplicar nada. Fica
-          antes de .lobby-card no fluxo do flex (justify-content:
-          flex-end em .lobby-backdrop), então os dois ficam colados um
-          no outro, encostados na borda direita junto. */}
-      <div className="lobby-agenda-preview">
-        {agendaPreviewDays.length > 0 ? (
-          <div className="lobby-agenda-preview-cards">
-            {agendaPreviewDays.map((items) => {
-              const badge = formatAgendaDayBadge(items[0].startTs);
-              return (
-                <div key={items[0].id} className="lobby-agenda-day-card">
-                  <div className="lobby-agenda-day-left">
-                    <div className="lobby-agenda-day-badge">
-                      <span className="lobby-agenda-day-badge-num">{badge.day}</span>
-                      <span className="lobby-agenda-day-badge-month">{badge.month}</span>
-                    </div>
-                    <p className="lobby-agenda-day-weekday">{badge.weekday}</p>
-                    <span className="lobby-agenda-day-count">
-                      {items.length} {items.length === 1 ? "evento" : "eventos"}
-                    </span>
+      {/* pedido do Douglas: "remova o botao abrir minha agenda,
+          mantenha apenas os cards da agenda, alinhe os cards com o
+          card da empresa embaixo, mantenha a altura fixa, se passar
+          de 3 eventos, scrol ativa dentro do card" -- só os cards
+          agora (sem botão, sem estado "vazio" escrito -- se não tem
+          NENHUM dia com compromisso futuro, não renderiza nada). Saiu
+          do fluxo do flex de .lobby-backdrop (virou position:fixed,
+          mesmo esquema de .lobby-company-card-pin) pra poder alinhar
+          a borda de BAIXO com o card da empresa (bottom:100px nos
+          dois -- mesma distância do av-bar, ver comentário em
+          .company-card-pin) em vez de ficar preso à centralização
+          vertical do card da Sala. Altura de cada card agora é FIXA
+          (.lobby-agenda-day-card) -- a lista de eventos rola por
+          dentro (overflow-y) quando passa de 3, em vez de esticar o
+          card (ver .lobby-agenda-day-events). Dados reais, mesmo
+          `calls` de sempre (ver agendaPreviewDays acima). */}
+      {agendaPreviewDays.length > 0 && (
+        <div className="lobby-agenda-preview">
+          {agendaPreviewDays.map((items) => {
+            const badge = formatAgendaDayBadge(items[0].startTs);
+            return (
+              <div key={items[0].id} className="lobby-agenda-day-card">
+                <div className="lobby-agenda-day-left">
+                  <div className="lobby-agenda-day-badge">
+                    <span className="lobby-agenda-day-badge-num">{badge.day}</span>
+                    <span className="lobby-agenda-day-badge-month">{badge.month}</span>
                   </div>
-                  <div className="lobby-agenda-day-right">
-                    <span className="lobby-agenda-day-label">Próximos</span>
-                    <ul className="lobby-agenda-day-events">
-                      {items.slice(0, 4).map((call, i) => (
-                        <li key={call.id} className={`lobby-agenda-event-item tone-${i % 4}`}>
-                          <p className="lobby-agenda-event-title">{call.title}</p>
-                          <p className="lobby-agenda-event-time">
-                            {formatAgendaEventTime(call.startTs, call.durationMinutes)}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <p className="lobby-agenda-day-weekday">{badge.weekday}</p>
+                  <span className="lobby-agenda-day-count">
+                    {items.length} {items.length === 1 ? "evento" : "eventos"}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="lobby-agenda-preview-empty">Nenhum compromisso agendado.</p>
-        )}
-        <button type="button" className="lobby-agenda-open-btn" onClick={() => setAgendaPanelOpen(true)}>
-          <AgendaIcon />
-          Abrir minha agenda
-        </button>
-      </div>
+                <div className="lobby-agenda-day-right">
+                  <span className="lobby-agenda-day-label">Próximos</span>
+                  <ul className="lobby-agenda-day-events">
+                    {items.map((call, i) => (
+                      <li key={call.id} className={`lobby-agenda-event-item tone-${i % 4}`}>
+                        <p className="lobby-agenda-event-title">{call.title}</p>
+                        <p className="lobby-agenda-event-time">
+                          {formatAgendaEventTime(call.startTs, call.durationMinutes)}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="lobby-card">
         <div className="lobby-sign">
