@@ -254,10 +254,18 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
 // da empresa" (CNPJ removido depois, ver "Tira o cnpj da empresa" --
 // campo/formatCnpj/tipo saíram todos) -- virou estado editável
 // (companyProfile/setCompanyProfile) em vez de const fixa, pra edição
-// realmente refletir no card ao vivo. Continua tudo local (useState, sem
-// persistir em lugar nenhum) pelo MESMO motivo do comentário acima:
-// não tem backend de empresa ainda -- quando existir, isso troca pra
-// vir/salvar no banco em vez de só na memória da aba.
+// realmente refletir no card ao vivo. Continua tudo local (sem
+// backend de empresa ainda, mesmo motivo do comentário acima) --
+// quando existir, isso troca pra vir/salvar no banco de verdade.
+//
+// 29/set (2): Douglas reportou "quando eu salvo as edicoes, nao
+// mantem no card, atualizo e some" -- as edições já aplicavam ao vivo
+// no card, mas só existiam em memória (useState puro), então um F5
+// resetava tudo pro molde padrão. Adicionado localStorage (mesmo
+// padrão de getStoredMicOn/setStoredMicOn em lib/mediaPrefs.ts) só pra
+// sobreviver a refresh/fechar aba NESTE navegador -- ainda não é um
+// backend de verdade (não sincroniza entre dispositivos/pessoas), só
+// resolve o "some ao atualizar".
 type CompanyProfile = {
   name: string;
   handle: string;
@@ -288,6 +296,37 @@ const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   category: [],
   showNameOnEmployeeProfiles: true,
 };
+
+const COMPANY_PROFILE_STORAGE_KEY = "habbo-gather-company-profile";
+
+// lê o que foi salvo no navegador; se não tiver nada, der erro (aba
+// anônima com storage bloqueado) ou vier de uma versão antiga sem
+// algum campo novo, cai pro molde padrão nesse(s) campo(s) em vez de
+// quebrar (spread do DEFAULT primeiro, sobrescrito pelo que veio salvo).
+function loadStoredCompanyProfile(): CompanyProfile {
+  if (typeof window === "undefined") return DEFAULT_COMPANY_PROFILE;
+  try {
+    const raw = window.localStorage.getItem(COMPANY_PROFILE_STORAGE_KEY);
+    if (!raw) return DEFAULT_COMPANY_PROFILE;
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_COMPANY_PROFILE,
+      ...parsed,
+      category: Array.isArray(parsed?.category) ? parsed.category : [],
+    };
+  } catch {
+    return DEFAULT_COMPANY_PROFILE;
+  }
+}
+
+function saveStoredCompanyProfile(profile: CompanyProfile) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+  } catch {
+    // storage indisponível/cheio (aba anônima, quota) -- só não persiste
+  }
+}
 
 // pedido do Douglas: "uma caixa de selecao, escrita Posicione a sua
 // empresa:" + a lista de categorias exata que ele mandou.
@@ -356,6 +395,29 @@ const COMPANY_CATEGORIES = [
   "Serviços Profissionais",
   "Outros",
 ];
+
+// pedido do Douglas: 4 artes (gradientes) que ele subiu pra por de
+// fundo dos "quadradinhos" de posicionamento -- e "faca sorteio
+// aleatório" pra decidir qual arte vai em cada quadradinho. Sorteio
+// ESTÁVEL (não Math.random() puro): cada categoria sempre cai na
+// mesma arte (senão reembaralha a cada digitação/re-render, ficando
+// piscando). O "aleatório" está em qual arte cada categoria pegou --
+// isso sim foi sorteado (índice inicial abaixo), não numa ordem óbvia
+// tipo "primeira categoria = primeira arte".
+const COMPANY_POSITION_BACKGROUNDS = [
+  "/assets/positions/position-bg-green.jpg",
+  "/assets/positions/position-bg-purple.jpg",
+  "/assets/positions/position-bg-red.jpg",
+  "/assets/positions/position-bg-orange.jpg",
+];
+
+function companyPositionBackgroundFor(category: string): string {
+  let hash = 0;
+  for (let i = 0; i < category.length; i++) {
+    hash = (hash * 31 + category.charCodeAt(i)) >>> 0;
+  }
+  return COMPANY_POSITION_BACKGROUNDS[hash % COMPANY_POSITION_BACKGROUNDS.length];
+}
 
 // mesma ideia de compressPhotoToDataUrl em GameRoom.tsx (recorta
 // quadrado central, reamostra, exporta JPEG pequeno) -- copiada (não
@@ -910,8 +972,20 @@ export default function Lobby({
   // setinha do lado do card (ver DEFAULT_COMPANY_PROFILE/CompanyProfile
   // lá em cima pra entender por que os dados ficam em state em vez de
   // const fixa).
-  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(DEFAULT_COMPANY_PROFILE);
+  // lazy init (função, não valor) -- só lê localStorage na primeira
+  // renderização, evita reler a cada render.
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(loadStoredCompanyProfile);
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
+
+  // Douglas: "quando eu salvo as edicoes, nao mantem no card,
+  // atualizo e some" -- salva no localStorage toda vez que
+  // companyProfile mudar (inclusive fotos, já em base64 comprimido,
+  // ver compressSquarePhotoToDataUrl/compressBannerPhotoToDataUrl),
+  // não só quando clica em "Salvar alterações" (que só fecha o
+  // painel -- os campos já aplicavam ao vivo antes disso).
+  useEffect(() => {
+    saveStoredCompanyProfile(companyProfile);
+  }, [companyProfile]);
   // dropdown de "Posicione a sua empresa:" -- Douglas pediu multi-seleção
   // ("deixei marcar varias opcoes"), então é um checklist dentro de um
   // dropdown, não um <select> nativo (que só permite uma opção por vez).
@@ -1443,7 +1517,11 @@ export default function Lobby({
             {companyProfile.category.length > 0 && (
               <div className="company-card-positions">
                 {companyProfile.category.map((cat) => (
-                  <div key={cat} className="company-card-position-card">
+                  <div
+                    key={cat}
+                    className="company-card-position-card"
+                    style={{ backgroundImage: `url(${companyPositionBackgroundFor(cat)})` }}
+                  >
                     <span className="company-card-position-name">{cat}</span>
                   </div>
                 ))}
