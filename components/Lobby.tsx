@@ -1425,6 +1425,30 @@ export default function Lobby({
               <LinkIcon />
               {companyProfile.link}
             </p>
+
+            {/* pedido do Douglas (print de referência com cards
+                empilhados tipo carrossel): "abaixo do link, crie cards
+                com os posicionamentos da empresa, que rolam pro lado
+                direito caso tenha mais de um, com nomes em negrito,
+                quadradinhos, e eu vou subir artes pra por de fundo dos
+                quadradinhos" -- um quadradinho por categoria marcada
+                em companyProfile.category (ver "Posicione a sua
+                empresa:" no painel de edição). Por enquanto sem arte
+                de fundo (isso o Douglas falou que sobe depois), só o
+                fundo placeholder + nome em negrito; quando ele subir
+                as artes dá pra plugar via background-image igual já
+                é feito com bannerUrl/logoUrl acima. Rola só se não
+                couber tudo (overflow-x + nowrap), sem crescer a altura
+                do card. */}
+            {companyProfile.category.length > 0 && (
+              <div className="company-card-positions">
+                {companyProfile.category.map((cat) => (
+                  <div key={cat} className="company-card-position-card">
+                    <span className="company-card-position-name">{cat}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

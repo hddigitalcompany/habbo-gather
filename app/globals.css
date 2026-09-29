@@ -4543,6 +4543,51 @@ body {
   color: #7fb0ff;
 }
 
+/* "quadradinhos" dos posicionamentos da empresa (Direct Response,
+   E-commerce etc, escolhidos no multi-select "Posicione a sua
+   empresa:") -- fileira horizontal, rola pro lado se não couber tudo
+   (não deixa a altura do card crescer). Scrollbar escondida (é um
+   carrossel, não uma lista pra scrollar "visivelmente" com barra). */
+.company-card-positions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.company-card-positions::-webkit-scrollbar {
+  display: none;
+}
+
+/* fundo placeholder (gradiente) até o Douglas subir as artes de
+   verdade -- aí é só trocar por background-image aqui, mesmo padrão
+   de bannerUrl/logoUrl no resto do card. */
+.company-card-position-card {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  text-align: center;
+  background: linear-gradient(155deg, #2a2340, #14101f);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-size: cover;
+  background-position: center;
+}
+
+.company-card-position-name {
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+
 .lobby-topbar-tab-wrap {
   position: relative;
 }
