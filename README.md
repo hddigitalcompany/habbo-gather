@@ -39,6 +39,25 @@ construído, o resto do produto (empresas/perfis/eventos, ver Lobby.tsx)
 já é multi-usuário -- só a sala 3D em si que continua sendo essa única
 instância compartilhada.
 
+**"Modelo Publicado" vs. "Modelo de edições" (discutido 29/set, adiado):**
+a ideia de aparecerem como 2 cards separados em "Meus Espaços" foi
+cogitada, mas Douglas: "isso e apenas pra funcionalidades, nao pra
+decoracoes" -- ou seja, o que precisa ficar isolado é o CÓDIGO
+(funcionalidade nova podendo quebrar sem afetar quem já usa o
+produto), não o piso/parede/móvel de uma sala. Isso só existe de
+verdade com 2 AMBIENTES separados (é o staging documentado logo
+abaixo -- branch/Vercel/Render/Supabase próprios), não com 2 linhas de
+sala no mesmo banco/deploy (isso só separaria decoração, e um bug de
+funcionalidade continuaria afetando as duas igual, por rodarem no
+mesmo servidor). Decisão do Douglas: **por enquanto continua tudo
+direto na sala modelo única de hoje** -- "vamos continuar aqui, quando
+a gente chegar num padrao basico, a gente duplica e joga os testes pra
+la" (29/set). Ou seja: só quando o conjunto de funcionalidades atingir
+um patamar mais estável é que vale montar o staging de verdade (ver
+checklist na seção "Staging" abaixo) e passar a testar coisa nova lá
+antes de ir pra produção -- até lá, nada de "Meus Espaços" com 2
+cards, nada de staging montado ainda.
+
 ## Como rodar na sua máquina
 
 Pré-requisitos: [Node.js](https://nodejs.org) instalado (versão 18 ou mais
