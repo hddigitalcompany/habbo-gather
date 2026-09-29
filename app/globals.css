@@ -3926,9 +3926,23 @@ body {
    barra flutuante (mesmo respiro de 16px que ela usa nas bordas,
    começando logo abaixo dela). Some em telas estreitas pra não
    sobrepor o card central da sala. */
+/* 29/set: pedido do Douglas "faca o card ate embaixo, amntendo a
+   mesma distancia do balao inferior, copia a distancia do balao de
+   cima" -- antes o card só tinha `top`, então sobrava uma folga vazia
+   enorme entre ele e a .av-bar (balão inferior, os botões de
+   mic/câmera/etc). Agora o wrapper tem `top` E `bottom`, esticando o
+   card pra baixo até uma distância da .av-bar igual à distância que
+   já tinha da .lobby-topbar em cima:
+   - topo: .lobby-topbar acaba em top:16px + height:84px = 100px: o
+     wrapper começa em top:128px, folga de 28px.
+   - baixo: .av-bar começa em bottom:16px + height:56px (42px de
+     botão + 7px de padding em cima/embaixo) = 72px do fundo da tela:
+     o wrapper termina em bottom:100px (72 + 28), a MESMA folga de
+     28px. */
 .lobby-company-card-pin {
   position: fixed;
   top: 128px;
+  bottom: 100px;
   left: 16px;
   z-index: 5;
 }
@@ -3942,6 +3956,9 @@ body {
 .company-card {
   width: 290px;
   max-width: calc(100vw - 32px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   border-radius: 20px;
   overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
@@ -4002,7 +4019,11 @@ body {
 }
 
 /* metade preta de baixo -- nome + selo, @arroba, bio, stats, link. */
+/* flex:1 -- é essa metade preta que cresce pra esticar o card até
+   embaixo (a metade clara de cima continua do tamanho natural dela,
+   ver .company-card-top). */
 .company-card-bottom {
+  flex: 1;
   background: #0e0d16;
   padding: 34px 20px 20px;
 }
