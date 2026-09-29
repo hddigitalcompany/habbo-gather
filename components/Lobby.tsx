@@ -214,6 +214,16 @@ function RoomPreview({ room, loading }: { room: RoomShape; loading: boolean }) {
 // -- ChatIcon/AgendaIcon lá são funções locais, não exportadas, sem
 // como importar direto sem virar dependência cruzada esquisita) --
 // pedido do Douglas: "mantenha igual de dentro da sala".
+// Setinha do seletor "Meus espaços" na barra de topo (ver comentário
+// grande onde spacesMenuOpen é declarado).
+function ChevronIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <path d="M5 9l7 7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function ChatIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
@@ -609,6 +619,17 @@ export default function Lobby({
   const [contactsOpen, setContactsOpen] = useState(false);
   const [contactsBusy, setContactsBusy] = useState(false);
   const [openChatConversationId, setOpenChatConversationId] = useState<string | null>(null);
+
+  // Barra de topo (28/set, pedido do Douglas com print de referência
+  // do site da Pepsi -- só a DIAGRAMAÇÃO, canto superior esquerdo:
+  // logo à esquerda, abas na mesma linha) -- "Meus espaços" é a
+  // primeira aba, com setinha seletora: hoje só existe UMA sala no
+  // ambiente todo (STORE_SLUG "sala-principal", ver server/chatStore.js
+  // -- ainda não existe conceito de múltiplas salas/organizações no
+  // backend), então o menu lista só ela; o dropdown já fica pronto pra
+  // quando existir mais de uma (aí lista o nome de cada organização,
+  // como o Douglas pediu).
+  const [spacesMenuOpen, setSpacesMenuOpen] = useState(false);
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -887,6 +908,39 @@ export default function Lobby({
 
   return (
     <div className="lobby-backdrop">
+      {/* barra de topo -- pedido do Douglas (28/set, com print de
+          referência do layout da Pepsi): logo no canto esquerdo
+          superior + abas na mesma linha, começando por "Meus
+          espaços". */}
+      <div className="lobby-topbar">
+        <span className="lobby-topbar-logo">Habbo-gather</span>
+        <nav className="lobby-topbar-nav">
+          <div className="lobby-topbar-tab-wrap">
+            <button
+              type="button"
+              className={spacesMenuOpen ? "lobby-topbar-tab active" : "lobby-topbar-tab"}
+              onClick={() => setSpacesMenuOpen((v) => !v)}
+              aria-expanded={spacesMenuOpen}
+            >
+              Meus espaços
+              <span className={spacesMenuOpen ? "lobby-topbar-chevron open" : "lobby-topbar-chevron"}>
+                <ChevronIcon />
+              </span>
+            </button>
+            {spacesMenuOpen && (
+              <>
+                <div className="lobby-topbar-dropdown-backdrop" onClick={() => setSpacesMenuOpen(false)} />
+                <div className="lobby-topbar-dropdown">
+                  <button type="button" className="lobby-topbar-dropdown-item active">
+                    Sala principal
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </nav>
+      </div>
+
       <div className="lobby-card">
         <div className="lobby-sign">
           <span className="lobby-sign-text">SALA VIRTUAL</span>
