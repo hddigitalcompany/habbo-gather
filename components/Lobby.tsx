@@ -1496,6 +1496,26 @@ export default function Lobby({
                       onChange={(e) => setCompanyProfile((prev) => ({ ...prev, link: e.target.value }))}
                     />
                   </label>
+
+                  {/* pedido do Douglas: "faltou o campo da bio
+                      tambem: Descreve o propósito da sua empresa" --
+                      companyProfile.bio já existia e já aparecia no
+                      card (company-card-bio), só faltava editar; sem
+                      campo nenhum antes, vinha só do molde fixo.
+                      Textarea (não input de uma linha) -- mesmo padrão
+                      do campo "Bio" do perfil pessoal em
+                      GameRoom.tsx. */}
+                  <label className="company-edit-field">
+                    <span>Bio</span>
+                    <textarea
+                      className="company-edit-input company-edit-textarea"
+                      value={companyProfile.bio}
+                      placeholder="Descreve o propósito da sua empresa"
+                      maxLength={200}
+                      rows={3}
+                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, bio: e.target.value }))}
+                    />
+                  </label>
                 </div>
               </div>
             </div>

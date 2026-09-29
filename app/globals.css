@@ -4234,6 +4234,15 @@ body {
   padding: 11px 14px;
 }
 
+/* campo de Bio (textarea) -- mesma casca de .company-edit-input, só
+   com resize vertical (não deixa esticar largura, que já é fixa) e
+   fonte herdada (textarea não herda font-family por padrão). */
+.company-edit-textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 70px;
+}
+
 .company-edit-input:focus {
   outline: none;
   border-color: #7c5cff;
