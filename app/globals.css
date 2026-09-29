@@ -3713,14 +3713,50 @@ body {
   gap: 24px;
   padding: 0 32px;
   border-radius: 22px;
-  background: linear-gradient(160deg, rgba(90, 110, 190, 0.4), rgba(30, 40, 90, 0.35));
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 20px 50px rgba(5, 8, 30, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  /* pedido do Douglas: "aplique o mesmo estilo no balao superior" --
+     MESMO efeito "glassmorphism" aplicado nos cards da agenda (vidro
+     bem transparente + brilho colorido desfocado atrás, ver
+     .lobby-topbar-glow logo abaixo -- mesma técnica, não dá pra usar
+     overflow:hidden aqui pros dropdowns (menu "Meus espaços", card da
+     conta) que abrem PRA FORA da barra não ficarem cortados, por isso
+     o brilho vem num wrapper próprio que recorta só ele mesmo). */
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 0 50px rgba(0, 0, 0, 0.3),
+    0 20px 50px rgba(5, 8, 30, 0.45);
   backdrop-filter: blur(22px) saturate(160%);
   -webkit-backdrop-filter: blur(22px) saturate(160%);
 }
 
+/* wrapper próprio SÓ pra recortar o brilho nos cantos arredondados da
+   barra -- overflow:hidden fica aqui, não em .lobby-topbar (senão
+   cortava os dropdowns que abrem pra fora dela). z-index negativo
+   garante que fica atrás das 3 colunas de conteúdo (que ganharam
+   position:relative + z-index:1 -- ver .lobby-topbar-logo-group/-nav/
+   -right-group), mesmo padrão de .lobby-agenda-day-glow. */
+.lobby-topbar-glow-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.lobby-topbar-glow {
+  position: absolute;
+  inset: -60%;
+  background:
+    radial-gradient(circle at 12% 30%, rgba(255, 138, 60, 0.28), transparent 55%),
+    radial-gradient(circle at 88% 75%, rgba(124, 92, 255, 0.35), transparent 55%);
+  filter: blur(34px);
+}
+
 .lobby-topbar-logo-group {
+  position: relative;
+  z-index: 1;
   justify-self: start;
   display: flex;
   align-items: center;
@@ -3736,6 +3772,8 @@ body {
 }
 
 .lobby-topbar-nav {
+  position: relative;
+  z-index: 1;
   justify-self: center;
   display: flex;
   align-items: center;
@@ -3905,6 +3943,8 @@ body {
 /* wrapper da 3ª coluna do grid -- só o card da conta agora (ver
    próximo comentário sobre o card da Empresa ter saído daqui). */
 .lobby-topbar-right-group {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
