@@ -697,15 +697,9 @@ export default function Lobby({
   // tava vazia/reservada, ver comentário grande em app/globals.css).
   const [accountCardOpen, setAccountCardOpen] = useState(false);
 
-  // "card" da Empresa selecionada -- pedido do Douglas (28/set, print
-  // de referência do card "Obrazur" de X/Twitter): "nesse canto quero
-  // o card da Empresa selecionada". Sem backend de empresas ainda
-  // (mesmo estado de "Empresas Posicionadas" na barra, ver
-  // lobby-topbar-tab-inert) -- valores abaixo são só EXEMPLO/molde
-  // pra mostrar o card funcionando; quando existir uma empresa de
-  // verdade cadastrada, isso vira dado real vindo do backend em vez
-  // de constante fixa.
-  const [companyCardOpen, setCompanyCardOpen] = useState(false);
+  // card da Empresa selecionada agora é sempre visível, sem estado de
+  // aberto/fechado (ver .lobby-company-card-pin lá embaixo, perto de
+  // .lobby-card).
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -1069,64 +1063,12 @@ export default function Lobby({
           </button>
         </nav>
 
-        {/* 3ª coluna do grid (canto direito): card da empresa em
-            destaque + card da conta do cliente lado a lado. */}
+        {/* canto direito do topbar: só o card da conta agora -- o card
+            da Empresa saiu daqui (ver .lobby-company-card-pin logo
+            abaixo de .lobby-topbar) porque o Douglas apontou que a
+            posição certa dele é fixa no canto ESQUERDO da tela, não um
+            dropdown do lado direito. */}
         <div className="lobby-topbar-right-group">
-          {/* "card" da Empresa selecionada -- pedido do Douglas: "nesse
-              canto quero o card da Empresa selecionada / Copie
-              EXATAMENTE TUDO". Ver comentário do FEATURED_COMPANY acima
-              sobre por que o conteúdo é um molde/exemplo, não os dados
-              reais da referência. */}
-          <div className="lobby-topbar-company-wrap">
-            <button
-              type="button"
-              className="lobby-topbar-company-chip"
-              onClick={() => setCompanyCardOpen((v) => !v)}
-              aria-expanded={companyCardOpen}
-            >
-              <span className="lobby-topbar-company-chip-logo">{FEATURED_COMPANY.name.charAt(0)}</span>
-              <span className="lobby-topbar-company-chip-name">{FEATURED_COMPANY.name}</span>
-            </button>
-            {companyCardOpen && (
-              <>
-                <div className="company-card-backdrop" onClick={() => setCompanyCardOpen(false)} />
-                <div className="company-card">
-                  <div className="company-card-top">
-                    <p className="company-card-tagline">
-                      {FEATURED_COMPANY.tagline}
-                      <span className="company-card-tagline-dots" aria-hidden="true">
-                        <span />
-                        <span />
-                      </span>
-                      {FEATURED_COMPANY.taglineEnd}
-                    </p>
-                    <div className="company-card-logo-box">{FEATURED_COMPANY.name.charAt(0)}</div>
-                  </div>
-                  <div className="company-card-bottom">
-                    <p className="company-card-name">
-                      {FEATURED_COMPANY.name}
-                      <VerifiedBadge />
-                    </p>
-                    <p className="company-card-handle">@{FEATURED_COMPANY.handle}</p>
-                    <p className="company-card-bio">{FEATURED_COMPANY.bio}</p>
-                    <p className="company-card-stats">
-                      <span>
-                        <strong>{FEATURED_COMPANY.following}</strong> Seguindo
-                      </span>
-                      <span>
-                        <strong>{FEATURED_COMPANY.followers}</strong> Seguidores
-                      </span>
-                    </p>
-                    <p className="company-card-link">
-                      <LinkIcon />
-                      {FEATURED_COMPANY.link}
-                    </p>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
           {/* "card" da conta do cliente -- pedido do Douglas (28/set,
               print de referência de um card "Hello! I'm Max"): "aqui
               nesse canto, faca o card da conta do cliente" + "faca o
@@ -1174,6 +1116,52 @@ export default function Lobby({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* card da Empresa selecionada -- pedido do Douglas: "nesse canto
+          quero o card da Empresa selecionada / Copie EXATAMENTE TUDO"
+          + depois, ao ver o print de referência de novo: "nao e ali
+          que e pra ele estar" (não era pra ficar como dropdown no
+          canto direito, do lado da conta). Fixo no canto ESQUERDO da
+          tela, sempre visível (sem clique pra abrir) -- combina com o
+          nome da aba "Empresas Posicionadas" no topbar: é uma vitrine
+          fixa, não um menu. Ver comentário do FEATURED_COMPANY lá em
+          cima sobre por que o conteúdo é um molde/exemplo, não os
+          dados reais da referência (Obrazur). */}
+      <div className="lobby-company-card-pin">
+        <div className="company-card">
+          <div className="company-card-top">
+            <p className="company-card-tagline">
+              {FEATURED_COMPANY.tagline}
+              <span className="company-card-tagline-dots" aria-hidden="true">
+                <span />
+                <span />
+              </span>
+              {FEATURED_COMPANY.taglineEnd}
+            </p>
+            <div className="company-card-logo-box">{FEATURED_COMPANY.name.charAt(0)}</div>
+          </div>
+          <div className="company-card-bottom">
+            <p className="company-card-name">
+              {FEATURED_COMPANY.name}
+              <VerifiedBadge />
+            </p>
+            <p className="company-card-handle">@{FEATURED_COMPANY.handle}</p>
+            <p className="company-card-bio">{FEATURED_COMPANY.bio}</p>
+            <p className="company-card-stats">
+              <span>
+                <strong>{FEATURED_COMPANY.following}</strong> Seguindo
+              </span>
+              <span>
+                <strong>{FEATURED_COMPANY.followers}</strong> Seguidores
+              </span>
+            </p>
+            <p className="company-card-link">
+              <LinkIcon />
+              {FEATURED_COMPANY.link}
+            </p>
           </div>
         </div>
       </div>

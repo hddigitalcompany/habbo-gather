@@ -3895,8 +3895,8 @@ body {
   background: #f5c542;
 }
 
-/* wrapper da 3ª coluna do grid -- os dois cards (empresa + conta)
-   lado a lado no canto direito da barra. */
+/* wrapper da 3ª coluna do grid -- só o card da conta agora (ver
+   próximo comentário sobre o card da Empresa ter saído daqui). */
 .lobby-topbar-right-group {
   display: flex;
   align-items: center;
@@ -3909,69 +3909,40 @@ body {
    textos, cores, padrao de texto, verificado, tudo" (print de
    referência: card de perfil de marca no X/Twitter). O LAYOUT foi
    copiado exatamente: metade clara em cima com frase de efeito
-   centralizada em caixa alta, logo em caixa arredondada com borda
-   preta, ícones sociais + botão "Seguir", metade preta embaixo com
-   nome + selo verificado azul, @arroba, bio, seguidores/seguindo e
-   link. O CONTEÚDO é um molde/exemplo (ver FEATURED_COMPANY em
-   Lobby.tsx) em vez dos dados reais da empresa do print, porque
-   reproduzir o nome/@arroba/selo verificado de uma empresa real aqui
-   dentro passaria a impressão falsa de que ela é parceira/verificada
-   no habbo-gather. */
-.lobby-topbar-company-wrap {
-  position: relative;
-}
+   centralizada em caixa alta (com o par de pontinhos separador, ver
+   .company-card-tagline-dots), logo em caixa arredondada com borda
+   preta "vazando" pra metade de baixo, metade preta embaixo com nome
+   + selo verificado azul, @arroba, bio, seguidores/seguindo e link. O
+   CONTEÚDO é um molde/exemplo (ver FEATURED_COMPANY em Lobby.tsx) em
+   vez dos dados reais da empresa do print, porque reproduzir o
+   nome/@arroba/selo verificado de uma empresa real aqui dentro
+   passaria a impressão falsa de que ela é parceira/verificada no
+   habbo-gather.
 
-.lobby-topbar-company-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
-  padding: 6px 14px 6px 6px;
-  cursor: pointer;
-  color: #ffffff;
-}
-
-.lobby-topbar-company-chip:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.lobby-topbar-company-chip-logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #ffffff;
-  color: #0e0d16;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.lobby-topbar-company-chip-name {
-  font-size: 13px;
-  font-weight: 600;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.company-card-backdrop {
+   Primeira versão era um dropdown que abria clicando num chip no
+   canto DIREITO da barra (do lado do card da conta) -- o Douglas
+   apontou de volta pro print original e disse "nao e ali que e pra
+   ele estar": no print o card fica fixo no canto ESQUERDO da tela,
+   sempre visível (nunca fechado), o que também combina mais com o
+   nome da aba "Empresas Posicionadas" (uma vitrine fixa, não um
+   menu). .lobby-company-card-pin below fixa ele ali, por baixo da
+   barra flutuante (mesmo respiro de 16px que ela usa nas bordas,
+   começando logo abaixo dela). Some em telas estreitas pra não
+   sobrepor o card central da sala. */
+.lobby-company-card-pin {
   position: fixed;
-  inset: 0;
-  z-index: 11;
-  background: transparent;
+  top: 128px;
+  left: 16px;
+  z-index: 5;
+}
+
+@media (max-width: 900px) {
+  .lobby-company-card-pin {
+    display: none;
+  }
 }
 
 .company-card {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 12;
   width: 290px;
   max-width: calc(100vw - 32px);
   border-radius: 20px;
