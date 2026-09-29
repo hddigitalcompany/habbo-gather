@@ -4248,6 +4248,90 @@ body {
   border-color: #7c5cff;
 }
 
+/* multi-select de "Posicione a sua empresa:" -- Douglas pediu pra
+   poder marcar várias categorias ("deixei marcar varias opcoes"), daí
+   um dropdown custom (checklist) em vez de <select multiple>, que é
+   feio e péssimo de usar. Trigger reaproveita a casca de
+   .company-edit-input; o texto trunca com ellipsis pra não estourar a
+   largura do campo quando muita coisa tá marcada. */
+.company-edit-category-select {
+  position: relative;
+}
+
+.company-edit-category-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: #f5f0ff;
+}
+
+.company-edit-category-trigger-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-edit-category-trigger svg {
+  flex-shrink: 0;
+  color: #9d8fc9;
+}
+
+/* catcher transparente igual ao padrão de company-edit-click-catcher,
+   só que em z-index mais alto (fica dentro do painel, que já é
+   position:fixed) pra fechar o dropdown ao clicar fora dele sem fechar
+   o painel de edição inteiro. */
+.company-edit-category-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+}
+
+.company-edit-category-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(14, 11, 22, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+}
+
+.company-edit-category-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #e7e0f7;
+  cursor: pointer;
+}
+
+.company-edit-category-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.company-edit-category-option input {
+  accent-color: #7c5cff;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .company-edit-divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.1);

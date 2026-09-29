@@ -266,6 +266,10 @@ type CompanyProfile = {
   link: string;
   logoUrl: string;
   bannerUrl: string;
+  // "Posicione a sua empresa:" (categoria/segmento) -- multi-select,
+  // Douglas pediu pra poder marcar varias opcoes. Ver COMPANY_CATEGORIES
+  // logo abaixo.
+  category: string[];
   // "Permitir exibicao do nome da empresa do perfil dos
   // colaboradores?" -- também só fica guardado localmente por
   // enquanto (mesmo motivo acima); o perfil dos colaboradores ainda
@@ -281,8 +285,77 @@ const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   link: "habbo-gather.com/empresas",
   logoUrl: "",
   bannerUrl: "",
+  category: [],
   showNameOnEmployeeProfiles: true,
 };
+
+// pedido do Douglas: "uma caixa de selecao, escrita Posicione a sua
+// empresa:" + a lista de categorias exata que ele mandou.
+const COMPANY_CATEGORIES = [
+  "Direct Response",
+  "Dropshipping",
+  "E-commerce",
+  "Disparos SMS",
+  "E-mail Marketing",
+  "Marketing Digital",
+  "Agência de Marketing",
+  "Agência de Publicidade",
+  "Social Media",
+  "Tráfego Pago",
+  "Copywriting",
+  "Infoprodutos",
+  "Afiliados",
+  "SaaS",
+  "Software / Tecnologia",
+  "Desenvolvimento de Software",
+  "Desenvolvimento Web",
+  "Desenvolvimento de Apps",
+  "Inteligência Artificial",
+  "Automação",
+  "Telecomunicações",
+  "Call Center",
+  "BPO",
+  "Empresas Remotas",
+  "Consultoria",
+  "Assessoria",
+  "Contabilidade",
+  "Jurídico",
+  "Recursos Humanos",
+  "Recrutamento",
+  "Educação",
+  "Cursos Online",
+  "Saúde",
+  "Estética e Beleza",
+  "Fitness",
+  "Alimentação",
+  "Restaurantes",
+  "Moda e Vestuário",
+  "Varejo",
+  "Atacado",
+  "Distribuidora",
+  "Importação e Exportação",
+  "Logística",
+  "Transportes",
+  "Imobiliário",
+  "Construção Civil",
+  "Arquitetura",
+  "Engenharia",
+  "Serviços Financeiros",
+  "Fintech",
+  "Seguros",
+  "Turismo",
+  "Hotelaria",
+  "Eventos",
+  "Entretenimento",
+  "Games",
+  "Produtora Audiovisual",
+  "Design",
+  "Indústria",
+  "Agronegócio",
+  "Energia",
+  "Serviços Profissionais",
+  "Outros",
+];
 
 // mesma ideia de compressPhotoToDataUrl em GameRoom.tsx (recorta
 // quadrado central, reamostra, exporta JPEG pequeno) -- copiada (não
@@ -839,6 +912,10 @@ export default function Lobby({
   // const fixa).
   const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(DEFAULT_COMPANY_PROFILE);
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  // dropdown de "Posicione a sua empresa:" -- Douglas pediu multi-seleção
+  // ("deixei marcar varias opcoes"), então é um checklist dentro de um
+  // dropdown, não um <select> nativo (que só permite uma opção por vez).
+  const [companyCategoryOpen, setCompanyCategoryOpen] = useState(false);
   const companyLogoInputRef = useRef<HTMLInputElement>(null);
   const companyBannerInputRef = useRef<HTMLInputElement>(null);
 
@@ -858,6 +935,16 @@ export default function Lobby({
     } catch (e) {
       console.warn("Não deu pra processar o banner da empresa", e);
     }
+  }
+
+  function toggleCompanyCategory(cat: string) {
+    setCompanyProfile((prev) => {
+      const already = prev.category.includes(cat);
+      return {
+        ...prev,
+        category: already ? prev.category.filter((c) => c !== cat) : [...prev.category, cat],
+      };
+    });
   }
 
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
@@ -1515,6 +1602,54 @@ export default function Lobby({
                       rows={3}
                       onChange={(e) => setCompanyProfile((prev) => ({ ...prev, bio: e.target.value }))}
                     />
+                  </label>
+
+                  {/* pedido do Douglas: "uma caixa de selecao, escrita
+                      Posicione a sua empresa:" com a lista de ~61
+                      categorias -- e depois "deixei marcar varias
+                      opcoes", ou seja é multi-seleção (não dá pra usar
+                      um <select> nativo, que só permite 1 valor).
+                      Dropdown custom: botão mostra as categorias
+                      escolhidas (ou um placeholder), clique abre um
+                      checklist com todas as opções de
+                      COMPANY_CATEGORIES (definida lá em cima, perto de
+                      DEFAULT_COMPANY_PROFILE). Mesmo padrão de
+                      catcher/stopPropagation já usado pro próprio
+                      painel de edição (company-edit-click-catcher). */}
+                  <label className="company-edit-field">
+                    <span>Posicione a sua empresa:</span>
+                    <div className="company-edit-category-select">
+                      <button
+                        type="button"
+                        className="company-edit-input company-edit-category-trigger"
+                        onClick={() => setCompanyCategoryOpen((v) => !v)}
+                        aria-expanded={companyCategoryOpen}
+                      >
+                        <span className="company-edit-category-trigger-text">
+                          {companyProfile.category.length > 0
+                            ? companyProfile.category.join(", ")
+                            : "Selecione uma ou mais categorias"}
+                        </span>
+                        <ChevronIcon />
+                      </button>
+                      {companyCategoryOpen && (
+                        <>
+                          <div className="company-edit-category-catcher" onClick={() => setCompanyCategoryOpen(false)} />
+                          <div className="company-edit-category-list" onClick={(e) => e.stopPropagation()}>
+                            {COMPANY_CATEGORIES.map((cat) => (
+                              <label key={cat} className="company-edit-category-option">
+                                <input
+                                  type="checkbox"
+                                  checked={companyProfile.category.includes(cat)}
+                                  onChange={() => toggleCompanyCategory(cat)}
+                                />
+                                <span>{cat}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </label>
                 </div>
               </div>
