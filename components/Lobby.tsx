@@ -233,6 +233,80 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
   focus: "Foco",
 };
 
+// "card" da Empresa selecionada -- pedido do Douglas: "nesse canto
+// quero o card da Empresa selecionada" (print de referência: card
+// estilo perfil do X/Twitter de uma marca real, "Obrazur"). Copiei o
+// LAYOUT/estilo exatamente (fundo claro em cima com frase de efeito,
+// ícones sociais + botão "Seguir", metade preta embaixo com logo,
+// nome + selo verificado, @arroba, bio, seguidores/seguindo, link) --
+// mas troquei o CONTEÚDO da Obrazur (nome, @arroba, bio e números de
+// verdade dela) por um exemplo/molde: reproduzir a identidade real de
+// outra empresa (nome, @arroba, contagem de seguidores, selo
+// verificado) aqui dentro passaria a impressão de que ela é
+// patrocinadora/parceira do habbo-gather, o que não é verdade. Quando
+// existir uma empresa de verdade cadastrada (ver "Empresas
+// Posicionadas" na barra, ainda sem backend), esses campos viram dado
+// real vindo dela, não mais esse molde fixo.
+const FEATURED_COMPANY = {
+  name: "Empresa Exemplo",
+  handle: "empresaexemplo",
+  tagline: "MARCA EM DESTAQUE",
+  taglineEnd: "AQUI VOCÊ BRILHA.",
+  bio: "Espaço reservado para a empresa patrocinadora em destaque na plataforma.",
+  following: 0,
+  followers: 0,
+  link: "habbo-gather.com/empresas",
+};
+
+function XSocialIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M18.9 2H22l-7.6 8.7L23.3 22H16.6l-5.2-6.8L5.4 22H2.3l8.1-9.3L1.5 2h6.9l4.7 6.2L18.9 2Zm-1.2 18h1.7L7.4 4h-1.8l12.1 16Z" />
+    </svg>
+  );
+}
+
+function LinkedInSocialIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM3 9h4v12H3V9Zm7 0h3.8v1.7h.05c.53-.95 1.83-1.95 3.77-1.95 4.03 0 4.78 2.5 4.78 5.75V21h-4v-5.6c0-1.34-.02-3.06-1.87-3.06-1.87 0-2.16 1.46-2.16 2.96V21h-4V9Z" />
+    </svg>
+  );
+}
+
+function ButterflySocialIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 6.2C10.6 3.9 7.4 2.3 4.9 2c-.5 2.9.3 6.6 2.8 8.4-2 .1-3.9 1.1-3.9 3.4 0 2.3 2.1 3 3.6 3-1 .6-1.4 1.5-.9 2.6 1.7-.2 3.6-1.2 4.5-2.7.9 1.5 2.8 2.5 4.5 2.7.5-1.1.1-2-.9-2.6 1.5 0 3.6-.7 3.6-3 0-2.3-1.9-3.3-3.9-3.4 2.5-1.8 3.3-5.5 2.8-8.4-2.5.3-5.7 1.9-7.1 4.2Z" />
+    </svg>
+  );
+}
+
+function VerifiedBadge() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="company-card-verified">
+      <path
+        d="m12 2 2.4 1.4 2.8-.3 1.1 2.6 2.6 1.1-.3 2.8L22 12l-1.4 2.4.3 2.8-2.6 1.1-1.1 2.6-2.8-.3L12 22l-2.4-1.4-2.8.3-1.1-2.6-2.6-1.1.3-2.8L2 12l1.4-2.4-.3-2.8 2.6-1.1 1.1-2.6 2.8.3L12 2Z"
+        fill="#3897f0"
+      />
+      <path d="m8.2 12.2 2.4 2.4 5-5.2" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M9.5 14.5 14.5 9.5M8 17l-2.5 2.5a3.5 3.5 0 0 1-5-5L3 12M16 7l2.5-2.5a3.5 3.5 0 0 1 5 5L21 12"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function ChatIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
@@ -646,6 +720,16 @@ export default function Lobby({
   // aberto". Fica no canto direito da barra (3ª coluna do grid, que já
   // tava vazia/reservada, ver comentário grande em app/globals.css).
   const [accountCardOpen, setAccountCardOpen] = useState(false);
+
+  // "card" da Empresa selecionada -- pedido do Douglas (28/set, print
+  // de referência do card "Obrazur" de X/Twitter): "nesse canto quero
+  // o card da Empresa selecionada". Sem backend de empresas ainda
+  // (mesmo estado de "Empresas Posicionadas" na barra, ver
+  // lobby-topbar-tab-inert) -- valores abaixo são só EXEMPLO/molde
+  // pra mostrar o card funcionando; quando existir uma empresa de
+  // verdade cadastrada, isso vira dado real vindo do backend em vez
+  // de constante fixa.
+  const [companyCardOpen, setCompanyCardOpen] = useState(false);
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -1009,54 +1093,121 @@ export default function Lobby({
           </button>
         </nav>
 
-        {/* "card" da conta do cliente -- pedido do Douglas (28/set,
-            print de referência de um card "Hello! I'm Max"): "aqui
-            nesse canto, faca o card da conta do cliente" + "faca o
-            'card' do perfil do usuario aberto". Fica na 3ª coluna do
-            grid (canto direito, já reservada). */}
-        <div className="lobby-topbar-account-wrap">
-          <button
-            type="button"
-            className="lobby-topbar-account"
-            onClick={() => setAccountCardOpen((v) => !v)}
-            aria-expanded={accountCardOpen}
-          >
-            <span className="lobby-topbar-account-avatar">
-              {accountProfile?.photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={accountProfile.photoUrl} alt="" />
-              ) : (
-                accountInitial
-              )}
-            </span>
-            <span className="lobby-topbar-account-name">{displayName}</span>
-          </button>
-          {accountCardOpen && (
-            <>
-              <div className="lobby-account-card-backdrop" onClick={() => setAccountCardOpen(false)} />
-              <div className="lobby-account-card">
-                {/* pedido do Douglas: "tire o olha sou deixe apenas o nome". */}
-                <p className="lobby-account-card-greeting">{displayName}</p>
-                {accountBio && <p className="lobby-account-card-bio">{accountBio}</p>}
-                <div className="lobby-account-card-tags">
-                  <span className="lobby-account-card-tag lobby-account-card-tag-status">
-                    <span className={`lobby-account-card-status-dot ${accountStatusId}`} />
-                    {accountStatusLabel}
-                  </span>
-                  {accountInstagram && (
-                    <a
-                      className="lobby-account-card-tag"
-                      href={`https://instagram.com/${accountInstagram}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      @{accountInstagram}
-                    </a>
-                  )}
+        {/* 3ª coluna do grid (canto direito): card da empresa em
+            destaque + card da conta do cliente lado a lado. */}
+        <div className="lobby-topbar-right-group">
+          {/* "card" da Empresa selecionada -- pedido do Douglas: "nesse
+              canto quero o card da Empresa selecionada / Copie
+              EXATAMENTE TUDO". Ver comentário do FEATURED_COMPANY acima
+              sobre por que o conteúdo é um molde/exemplo, não os dados
+              reais da referência. */}
+          <div className="lobby-topbar-company-wrap">
+            <button
+              type="button"
+              className="lobby-topbar-company-chip"
+              onClick={() => setCompanyCardOpen((v) => !v)}
+              aria-expanded={companyCardOpen}
+            >
+              <span className="lobby-topbar-company-chip-logo">{FEATURED_COMPANY.name.charAt(0)}</span>
+              <span className="lobby-topbar-company-chip-name">{FEATURED_COMPANY.name}</span>
+            </button>
+            {companyCardOpen && (
+              <>
+                <div className="company-card-backdrop" onClick={() => setCompanyCardOpen(false)} />
+                <div className="company-card">
+                  <div className="company-card-top">
+                    <p className="company-card-tagline">
+                      {FEATURED_COMPANY.tagline}
+                      <br />
+                      {FEATURED_COMPANY.taglineEnd}
+                    </p>
+                    <div className="company-card-logo-box">{FEATURED_COMPANY.name.charAt(0)}</div>
+                    <div className="company-card-socials">
+                      <span className="company-card-social-icon">
+                        <XSocialIcon />
+                      </span>
+                      <span className="company-card-social-icon">
+                        <LinkedInSocialIcon />
+                      </span>
+                      <span className="company-card-social-icon">
+                        <ButterflySocialIcon />
+                      </span>
+                      <span className="company-card-follow-btn">Seguir</span>
+                    </div>
+                  </div>
+                  <div className="company-card-bottom">
+                    <p className="company-card-name">
+                      {FEATURED_COMPANY.name}
+                      <VerifiedBadge />
+                    </p>
+                    <p className="company-card-handle">@{FEATURED_COMPANY.handle}</p>
+                    <p className="company-card-bio">{FEATURED_COMPANY.bio}</p>
+                    <p className="company-card-stats">
+                      <span>
+                        <strong>{FEATURED_COMPANY.following}</strong> Seguindo
+                      </span>
+                      <span>
+                        <strong>{FEATURED_COMPANY.followers}</strong> Seguidores
+                      </span>
+                    </p>
+                    <p className="company-card-link">
+                      <LinkIcon />
+                      {FEATURED_COMPANY.link}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
+
+          {/* "card" da conta do cliente -- pedido do Douglas (28/set,
+              print de referência de um card "Hello! I'm Max"): "aqui
+              nesse canto, faca o card da conta do cliente" + "faca o
+              'card' do perfil do usuario aberto". */}
+          <div className="lobby-topbar-account-wrap">
+            <button
+              type="button"
+              className="lobby-topbar-account"
+              onClick={() => setAccountCardOpen((v) => !v)}
+              aria-expanded={accountCardOpen}
+            >
+              <span className="lobby-topbar-account-avatar">
+                {accountProfile?.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={accountProfile.photoUrl} alt="" />
+                ) : (
+                  accountInitial
+                )}
+              </span>
+              <span className="lobby-topbar-account-name">{displayName}</span>
+            </button>
+            {accountCardOpen && (
+              <>
+                <div className="lobby-account-card-backdrop" onClick={() => setAccountCardOpen(false)} />
+                <div className="lobby-account-card">
+                  {/* pedido do Douglas: "tire o olha sou deixe apenas o nome". */}
+                  <p className="lobby-account-card-greeting">{displayName}</p>
+                  {accountBio && <p className="lobby-account-card-bio">{accountBio}</p>}
+                  <div className="lobby-account-card-tags">
+                    <span className="lobby-account-card-tag lobby-account-card-tag-status">
+                      <span className={`lobby-account-card-status-dot ${accountStatusId}`} />
+                      {accountStatusLabel}
+                    </span>
+                    {accountInstagram && (
+                      <a
+                        className="lobby-account-card-tag"
+                        href={`https://instagram.com/${accountInstagram}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        @{accountInstagram}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

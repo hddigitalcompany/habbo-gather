@@ -3739,7 +3739,6 @@ body {
    coleta. */
 .lobby-topbar-account-wrap {
   position: relative;
-  justify-self: end;
 }
 
 .lobby-topbar-account {
@@ -3885,6 +3884,213 @@ body {
 
 .lobby-account-card-status-dot.focus {
   background: #f5c542;
+}
+
+/* wrapper da 3ª coluna do grid -- os dois cards (empresa + conta)
+   lado a lado no canto direito da barra. */
+.lobby-topbar-right-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+}
+
+/* "card" da Empresa selecionada -- pedido do Douglas: "nesse canto
+   quero o card da Empresa selecionada / Copie EXATAMENTE TUDO, ate os
+   textos, cores, padrao de texto, verificado, tudo" (print de
+   referência: card de perfil de marca no X/Twitter). O LAYOUT foi
+   copiado exatamente: metade clara em cima com frase de efeito
+   centralizada em caixa alta, logo em caixa arredondada com borda
+   preta, ícones sociais + botão "Seguir", metade preta embaixo com
+   nome + selo verificado azul, @arroba, bio, seguidores/seguindo e
+   link. O CONTEÚDO é um molde/exemplo (ver FEATURED_COMPANY em
+   Lobby.tsx) em vez dos dados reais da empresa do print, porque
+   reproduzir o nome/@arroba/selo verificado de uma empresa real aqui
+   dentro passaria a impressão falsa de que ela é parceira/verificada
+   no habbo-gather. */
+.lobby-topbar-company-wrap {
+  position: relative;
+}
+
+.lobby-topbar-company-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 6px 14px 6px 6px;
+  cursor: pointer;
+  color: #ffffff;
+}
+
+.lobby-topbar-company-chip:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.lobby-topbar-company-chip-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  color: #0e0d16;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lobby-topbar-company-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-card-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  background: transparent;
+}
+
+.company-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 12;
+  width: 290px;
+  max-width: calc(100vw - 32px);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* metade clara de cima -- frase de efeito + logo + ícones sociais. */
+.company-card-top {
+  position: relative;
+  background: #f3efe6;
+  padding: 28px 18px 40px;
+  text-align: center;
+}
+
+.company-card-tagline {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6b6558;
+  line-height: 1.6;
+}
+
+.company-card-logo-box {
+  position: absolute;
+  left: 50%;
+  bottom: -26px;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: #f3efe6;
+  border: 3px solid #0e0d16;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0e0d16;
+}
+
+.company-card-socials {
+  position: absolute;
+  right: 16px;
+  bottom: -16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.company-card-social-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(14, 13, 22, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0e0d16;
+}
+
+.company-card-follow-btn {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #0e0d16;
+  border-radius: 999px;
+  padding: 7px 16px;
+  white-space: nowrap;
+}
+
+/* metade preta de baixo -- nome + selo, @arroba, bio, stats, link. */
+.company-card-bottom {
+  background: #0e0d16;
+  padding: 34px 20px 20px;
+}
+
+.company-card-name {
+  margin: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 17px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.company-card-verified {
+  flex-shrink: 0;
+}
+
+.company-card-handle {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: #8b8798;
+}
+
+.company-card-bio {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #d7d3e2;
+}
+
+.company-card-stats {
+  display: flex;
+  gap: 16px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: #b7b2c9;
+}
+
+.company-card-stats strong {
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.company-card-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: #7fb0ff;
 }
 
 .lobby-topbar-tab-wrap {
