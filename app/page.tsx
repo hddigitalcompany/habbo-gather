@@ -43,6 +43,7 @@ export default function Home() {
             <Lobby
               accountUserId={auth.accountUserId}
               accountProfile={auth.accountProfile}
+              accountAccessToken={auth.accountAccessToken}
               onEnter={(slug) => {
                 setRoomSlug(slug);
                 setEntered(true);

@@ -126,9 +126,21 @@ type RoomShape = {
 // nenhum. slug É o valor mandado pro servidor (PartySocket.room e
 // "?room=" nas chamadas REST, ver roomSlug em GameRoom.tsx), label é
 // só o texto do botão.
-const ROOM_SLUGS: { slug: string; label: string }[] = [
-  { slug: "sala-principal", label: "Sala principal" },
-  { slug: "mapa-modelo", label: "Mapa modelo" },
+// ownerOnly: true -- pedido do Douglas (29/set): "seguinte o cliente so
+// vai ver Mapa modelo, apenas eu vejo o Mapa Publicado" -- "Sala
+// principal" (Mapa Publicada, onde as funcionalidades são testadas/
+// construídas, ver README) só aparece no dropdown pra quem é OWNER da
+// sala (mesmo papel de sempre, ver isOwner/fetch de /api/room/members
+// mais abaixo); "Mapa modelo" aparece pra todo mundo. Isso é só
+// visibilidade de TELA (o dropdown não lista/oferece o botão) -- não é
+// uma trava de servidor nova (o servidor sempre aceitou qualquer slug,
+// ver comentário grande "MULTI-SALA" em server/roomStore.js), então
+// não é uma garantia de segurança de verdade contra alguém client-side
+// forçando a URL/room manualmente -- é o mesmo nível de confiança que
+// canEditRoom em GameRoom.tsx já usa pra esconder o editor de espaço.
+const ROOM_SLUGS: { slug: string; label: string; ownerOnly: boolean }[] = [
+  { slug: "sala-principal", label: "Sala principal", ownerOnly: true },
+  { slug: "mapa-modelo", label: "Mapa modelo", ownerOnly: false },
 ];
 
 const PREVIEW_W = 264;
@@ -1336,19 +1348,38 @@ function LobbyAgendaPanel({
 export default function Lobby({
   accountUserId,
   accountProfile,
+  accountAccessToken,
   onEnter,
   onSignOut,
 }: {
   accountUserId: string | null;
   accountProfile: Partial<AccountProfile> | null;
+  accountAccessToken?: string | null;
   onEnter: (roomSlug: string) => void;
   onSignOut: (() => void) | null;
 }) {
   const [presence, setPresence] = useState<PresenceInfo>(null);
+  // dono da sala ou não (ver comentário grande "ownerOnly" em
+  // ROOM_SLUGS acima) -- MESMA fonte que GameRoom.tsx já usa pra
+  // canEditRoom (GET /api/room/members com o access token, ver efeito
+  // logo abaixo), só que buscado aqui no Lobby (ANTES de entrar em
+  // sala nenhuma) porque é o que decide quais itens de "Meus espaços"
+  // aparecem. Começa false de propósito (esconde "Sala principal" até
+  // confirmar que é dono, nunca o contrário -- evita um flash do botão
+  // aparecendo e sumindo pra quem não é dono).
+  const [isOwner, setIsOwner] = useState(false);
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
-  // mais abaixo/ROOM_SLUGS acima) -- "sala-principal" (Mapa Publicada)
-  // por padrão, mesmo espaço de sempre pra quem nunca mexeu no menu.
-  const [selectedRoomSlug, setSelectedRoomSlug] = useState<string>(ROOM_SLUGS[0].slug);
+  // mais abaixo/ROOM_SLUGS acima) -- "mapa-modelo" por padrão (visível
+  // pra todo mundo); vira "sala-principal" sozinho quando confirma que
+  // é o dono (ver efeito logo abaixo), preservando o comportamento de
+  // sempre pro Douglas, mas só DEPOIS de confirmar (nunca busca/mostra
+  // o preview da Sala principal pra quem não é dono, nem por um
+  // instante).
+  const [selectedRoomSlug, setSelectedRoomSlug] = useState<string>("mapa-modelo");
+  // true assim que a pessoa mexe no dropdown à mão -- trava o efeito
+  // de auto-selecionar "sala-principal" pro dono acima de rodar de
+  // novo depois (ver comentário dele) e atropelar uma escolha manual.
+  const userPickedRoomRef = useRef(false);
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
@@ -1599,6 +1630,41 @@ export default function Lobby({
     };
   }, [selectedRoomSlug]);
 
+  // confere se é dono da sala (ver comentário grande "ownerOnly" em
+  // ROOM_SLUGS/isOwner acima) -- mesma rota que GameRoom.tsx usa pra
+  // canEditRoom (GET /api/room/members), só que chamada aqui no Lobby.
+  // Sem token (visitante sem conta, ou conta ainda carregando), nunca é
+  // dono -- fica no "mapa-modelo" padrão, mesmo comportamento de visitante
+  // de sempre.
+  useEffect(() => {
+    let cancelled = false;
+    if (!accountAccessToken) {
+      setIsOwner(false);
+      return;
+    }
+    fetch("/api/room/members", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const owner = data?.role === "owner";
+        setIsOwner(owner);
+        // dono cai direto na Sala principal por padrão (comportamento de
+        // sempre), a menos que já tenha escolhido algo no dropdown à mão.
+        if (owner && !userPickedRoomRef.current) setSelectedRoomSlug("sala-principal");
+      })
+      .catch(() => {
+        if (!cancelled) setIsOwner(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken]);
+
+  // itens realmente mostrados no dropdown "Meus espaços" (ver
+  // comentário grande "ownerOnly" em ROOM_SLUGS acima) -- quem não é
+  // dono só vê "Mapa modelo".
+  const visibleRoomSlugs = ROOM_SLUGS.filter((r) => !r.ownerOnly || isOwner);
+
   // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
   // causa raiz: o Lobby não abre WebSocket de propósito (ver
   // comentário grande no topo de server/index.js -- não virar
@@ -1826,7 +1892,7 @@ export default function Lobby({
                       SELEÇÃO (selectedRoomSlug) -- entrar de verdade
                       continua sendo o botão "Entrar na sala" lá embaixo
                       (handleEnter), mesmo fluxo de sempre. */}
-                  {ROOM_SLUGS.map((r) => (
+                  {visibleRoomSlugs.map((r) => (
                     <button
                       key={r.slug}
                       type="button"
@@ -1836,6 +1902,7 @@ export default function Lobby({
                           : "lobby-topbar-dropdown-item"
                       }
                       onClick={() => {
+                        userPickedRoomRef.current = true;
                         setSelectedRoomSlug(r.slug);
                         setSpacesMenuOpen(false);
                       }}
