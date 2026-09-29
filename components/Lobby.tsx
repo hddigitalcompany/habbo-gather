@@ -114,39 +114,43 @@ type RoomShape = {
   walls: WallSegment[];
 } | null;
 
-// espaços clicáveis em "Meus espaços" (ver dropdown mais abaixo) --
-// pedido do Douglas (29/set): "Mapa de teste (depois) / Mapa publicada
-// (essa) / Mapa modelo (ja pode criar um, mesmo que sem decoracao, so
-// pra gente estruturar como vai ser pros clientes)". "Mapa de teste"
-// fica de fora por enquanto (adiado, ver README -- "duplica e joga os
-// testes pra la" só quando a base ficar mais estável); os 2 daqui já
-// existem de verdade no servidor (ver DEFAULT_ROOM_SLUG/comentário
-// grande "MULTI-SALA" em server/roomStore.js) -- "mapa-modelo" nasce
-// vazio na primeira vez que alguém entra nele, sem passo manual
-// nenhum. slug É o valor mandado pro servidor (PartySocket.room e
-// "?room=" nas chamadas REST, ver roomSlug em GameRoom.tsx), label é
-// só o texto do botão.
-// teamOnly: true -- pedido do Douglas (29/set): "seguinte o cliente so
-// vai ver Mapa modelo, apenas eu vejo o Mapa Publicado... minha equipe
-// vai entrar na minha sala por link de convidado" -- "Sala principal"
-// (Mapa Publicada, a sala PRIVADA do Douglas, onde as funcionalidades
-// são testadas/construídas, ver README) só aparece no dropdown pra
-// quem já é do time dele: role "owner" (ele mesmo) OU "member" (quem
-// redimiu um convite dele, ver app/api/room/invite/redeem/route.ts --
-// esse convite JÁ existe e já é assim que o time entra, não é feature
-// nova). Um "visitor" (cliente qualquer, sem convite nenhum) só vê
-// "Mapa modelo". Ver roomRole/canSeeSalaPrincipal no fetch de
-// /api/room/members mais abaixo. Isso é só visibilidade de TELA (o
-// dropdown não lista/oferece o botão) -- não é uma trava de servidor
-// nova (o servidor sempre aceitou qualquer slug, ver comentário grande
-// "MULTI-SALA" em server/roomStore.js), então não é uma garantia de
-// segurança de verdade contra alguém client-side forçando a URL/room
-// manualmente -- é o mesmo nível de confiança que canEditRoom em
-// GameRoom.tsx já usa pra esconder o editor de espaço.
+// espaços FIXOS do TIME do Douglas em "Meus espaços" (ver dropdown
+// mais abaixo) -- CORRIGIDO 29/set: "seguinte o cliente so vai ver
+// Mapa modelo, apenas eu vejo o Mapa Publicado... Cada cliente vai ter
+// a sua sala, nao só essa que eu crio... O cara entra, ele tem a sala
+// dele la que ele escolher dentre os modelos... A minha e so minha,
+// minha equipe vai entrar na minha sala por link de convidado". Isso
+// muda o que "Mapa modelo" significa aqui: ele NÃO é mais uma sala
+// compartilhada que qualquer visitante entra direto -- é a área onde
+// o Douglas (e o time dele) CONSTRÓI/decora os modelos que os
+// clientes só COPIAM (ver "Criar minha sala" mais abaixo, POST
+// /api/room/create-from-template) -- por isso teamOnly:true nos DOIS
+// agora, igual "Sala principal". Um "visitor" de verdade (cliente sem
+// convite pro time) não vê NENHUM dos dois aqui -- ele ganha a PRÓPRIA
+// sala (myRoom, ver fetch de /api/room/mine mais abaixo) e, antes
+// disso, o fluxo de "Criar minha sala" (templateChoices, GET
+// /api/room/templates). role "owner" (o Douglas) e "member" (quem
+// redimiu o convite dele, ver app/api/room/invite/redeem/route.ts --
+// esse convite JÁ existe, não é feature nova) continuam vendo os 2
+// daqui, mesmo comportamento de sempre. Isso é só visibilidade de
+// TELA (o dropdown não lista/oferece o botão) -- não é uma trava de
+// servidor nova (o servidor sempre aceitou qualquer slug, ver
+// comentário grande "MULTI-SALA" em server/roomStore.js), então não é
+// uma garantia de segurança de verdade contra alguém client-side
+// forçando a URL/room manualmente -- é o mesmo nível de confiança que
+// canEditRoom em GameRoom.tsx já usa pra esconder o editor de espaço.
 const ROOM_SLUGS: { slug: string; label: string; teamOnly: boolean }[] = [
   { slug: "sala-principal", label: "Sala principal", teamOnly: true },
-  { slug: "mapa-modelo", label: "Mapa modelo", teamOnly: false },
+  { slug: "mapa-modelo", label: "Mapa modelo", teamOnly: true },
 ];
+
+// um modelo publicado (ver GET /api/room/templates) -- é o que aparece
+// pro cliente escolher em "Criar minha sala".
+type RoomTemplate = { id: string; name: string; room_slug: string };
+// a sala PRÓPRIA do cliente, se ele já tiver uma (ver GET
+// /api/room/mine) -- criada por ele mesmo a partir de um RoomTemplate
+// (POST /api/room/create-from-template).
+type MyRoom = { id: string; name: string; room_slug: string };
 
 const PREVIEW_W = 264;
 const PREVIEW_H = 168;
@@ -1373,22 +1377,38 @@ export default function Lobby({
   // até confirmar owner/member, nunca o contrário -- evita um flash do
   // botão aparecendo e sumindo pra quem não devia ver).
   const [roomRole, setRoomRole] = useState<"owner" | "member" | "visitor">("visitor");
-  // "Sala principal" (Mapa Publicada) é a sala PRIVADA do Douglas --
-  // só ele (owner) e quem ele convidou pro time (member, ver comentário
-  // grande "teamOnly" acima) enxergam ela em "Meus espaços". Um
-  // "visitor" (cliente qualquer) nunca vê.
+  const [roomRoleLoading, setRoomRoleLoading] = useState(true);
+  // "Sala principal"/"Mapa modelo" são do TIME do Douglas -- só ele
+  // (owner) e quem ele convidou (member, ver comentário grande
+  // "teamOnly" acima) enxergam eles em "Meus espaços". Um "visitor"
+  // (cliente qualquer) nunca vê nenhum dos dois.
   const canSeeSalaPrincipal = roomRole === "owner" || roomRole === "member";
+  // a sala PRÓPRIA do cliente (ver MyRoom acima/fetch de
+  // /api/room/mine mais abaixo) -- null enquanto ele ainda não criou
+  // uma (ver "Criar minha sala" mais abaixo).
+  const [myRoom, setMyRoom] = useState<MyRoom | null>(null);
+  const [myRoomLoading, setMyRoomLoading] = useState(true);
+  // catálogo de modelos publicados (GET /api/room/templates) -- pra
+  // tela de "Criar minha sala" escolher um. Busca sempre (é público,
+  // barato), só é USADO quando needsToCreateRoom abaixo é true.
+  const [templates, setTemplates] = useState<RoomTemplate[] | null>(null);
+  // id do template sendo clonado agora (POST
+  // /api/room/create-from-template em andamento) -- desabilita os
+  // cards enquanto isso, evita clique duplo criando 2 salas.
+  const [creatingFromTemplateId, setCreatingFromTemplateId] = useState<string | null>(null);
+  const [createRoomError, setCreateRoomError] = useState<string | null>(null);
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
-  // mais abaixo/ROOM_SLUGS acima) -- "mapa-modelo" por padrão (visível
-  // pra todo mundo); vira "sala-principal" sozinho quando confirma
-  // owner/member (ver efeito logo abaixo), preservando o comportamento
-  // de sempre pro time do Douglas, mas só DEPOIS de confirmar (nunca
-  // busca/mostra o preview da Sala principal pra quem não devia ver,
-  // nem por um instante).
-  const [selectedRoomSlug, setSelectedRoomSlug] = useState<string>("mapa-modelo");
-  // true assim que a pessoa mexe no dropdown à mão -- trava o efeito
-  // de auto-selecionar "sala-principal" pro dono acima de rodar de
-  // novo depois (ver comentário dele) e atropelar uma escolha manual.
+  // mais abaixo/ROOM_SLUGS acima) -- vazio até confirmar algo válido
+  // (nunca cai em "mapa-modelo"/"sala-principal" por padrão pra quem
+  // pode não ter acesso a nenhum dos dois, ver efeitos logo abaixo).
+  // Vira "sala-principal" sozinho pro time do Douglas, ou o slug da
+  // MyRoom sozinho pra quem já tem sala própria -- mas só DEPOIS de
+  // confirmar (nunca busca/mostra o preview de uma sala que a pessoa
+  // não devia ver, nem por um instante).
+  const [selectedRoomSlug, setSelectedRoomSlug] = useState<string>("");
+  // true assim que a pessoa mexe no dropdown à mão -- trava os efeitos
+  // de auto-seleção acima de rodar de novo depois e atropelar uma
+  // escolha manual.
   const userPickedRoomRef = useRef(false);
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
@@ -1586,6 +1606,9 @@ export default function Lobby({
   }
 
   function handleEnter() {
+    // defesa a mais (o botão já fica disabled sem seleção, ver JSX
+    // mais abaixo) -- nunca entra em sala nenhuma sem slug de verdade.
+    if (!selectedRoomSlug) return;
     // solta a câmera/mic do Lobby ANTES de entrar -- o GameRoom pede a
     // dele própria (ver requestMedia lá), sem isso os dois ficariam
     // segurando o mesmo dispositivo ao mesmo tempo por um instante.
@@ -1611,8 +1634,16 @@ export default function Lobby({
   // parede/mobília agora (ver comentário grande "MULTI-SALA" em
   // server/roomStore.js), então o preview precisa mandar "?room=" igual
   // GameRoom.tsx faz (ver roomApiPath lá), senão mostraria sempre o
-  // preview da sala padrão mesmo com "Mapa modelo" selecionado.
+  // preview da sala padrão mesmo com outra selecionada. selectedRoomSlug
+  // vazio (ainda confirmando acesso, ver efeitos de roomRole/myRoom
+  // abaixo, ou cliente sem sala nenhuma ainda) -- não busca NADA, pra
+  // nunca vazar sequer o preview de uma sala que a pessoa não devia ver.
   useEffect(() => {
+    if (!selectedRoomSlug) {
+      setRoom(null);
+      setRoomLoading(false);
+      return;
+    }
     let cancelled = false;
     setRoomLoading(true);
     const qs = `?room=${encodeURIComponent(selectedRoomSlug)}`;
@@ -1644,12 +1675,12 @@ export default function Lobby({
   // em ROOM_SLUGS/roomRole acima) -- mesma rota que GameRoom.tsx usa pra
   // canEditRoom (GET /api/room/members), só que chamada aqui no Lobby.
   // Sem token (visitante sem conta, ou conta ainda carregando), fica
-  // "visitor" -- fica no "mapa-modelo" padrão, mesmo comportamento de
-  // cliente/visitante de sempre.
+  // "visitor" na hora (nada pra esperar).
   useEffect(() => {
     let cancelled = false;
     if (!accountAccessToken) {
       setRoomRole("visitor");
+      setRoomRoleLoading(false);
       return;
     }
     fetch("/api/room/members", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
@@ -1667,16 +1698,118 @@ export default function Lobby({
       })
       .catch(() => {
         if (!cancelled) setRoomRole("visitor");
+      })
+      .finally(() => {
+        if (!cancelled) setRoomRoleLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [accountAccessToken]);
 
-  // itens realmente mostrados no dropdown "Meus espaços" (ver
-  // comentário grande "teamOnly" em ROOM_SLUGS acima) -- quem não é do
-  // time do Douglas (owner/member) só vê "Mapa modelo".
+  // busca a sala PRÓPRIA do cliente (ver MyRoom/GET /api/room/mine
+  // acima) -- sem token, nunca tem (precisa de conta, ver
+  // owner_user_id em public.rooms). Pro Douglas essa rota já devolve a
+  // própria Sala principal (ver comentário em app/api/room/mine),
+  // então esse efeito cai direto pra ela também, sem precisar de
+  // tratamento especial aqui.
+  useEffect(() => {
+    let cancelled = false;
+    if (!accountAccessToken) {
+      setMyRoom(null);
+      setMyRoomLoading(false);
+      return;
+    }
+    fetch("/api/room/mine", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const found: MyRoom | null =
+          data?.room && typeof data.room.room_slug === "string" && typeof data.room.id === "string"
+            ? { id: data.room.id, name: String(data.room.name ?? "Minha sala"), room_slug: data.room.room_slug }
+            : null;
+        setMyRoom(found);
+        if (found && !userPickedRoomRef.current) setSelectedRoomSlug(found.room_slug);
+      })
+      .catch(() => {
+        if (!cancelled) setMyRoom(null);
+      })
+      .finally(() => {
+        if (!cancelled) setMyRoomLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken]);
+
+  // catálogo de modelos publicados (GET /api/room/templates, ver
+  // RoomTemplate acima) -- público/barato, busca sempre; só é
+  // renderizado de fato quando needsToCreateRoom abaixo é true.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/room/templates")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setTemplates(Array.isArray(data?.templates) ? data.templates : []);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Copia um modelo publicado pra virar a sala PRÓPRIA do cliente (ver
+   * comentário grande em app/api/room/create-from-template/route.ts) --
+   * pedido do Douglas: "as pessoas so copiam a sala modelo, pra eles,
+   * ai se cria o mapa pra eles vinculado ao id deles". */
+  async function handleCreateRoomFromTemplate(templateId: string) {
+    if (!accountAccessToken || creatingFromTemplateId) return;
+    setCreatingFromTemplateId(templateId);
+    setCreateRoomError(null);
+    try {
+      const res = await fetch("/api/room/create-from-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ templateId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || typeof data?.room?.room_slug !== "string") {
+        setCreateRoomError(typeof data?.error === "string" ? data.error : "Não deu pra criar sua sala agora.");
+        return;
+      }
+      const created: MyRoom = { id: data.room.id, name: String(data.room.name ?? "Minha sala"), room_slug: data.room.room_slug };
+      setMyRoom(created);
+      userPickedRoomRef.current = true;
+      setSelectedRoomSlug(created.room_slug);
+    } catch {
+      setCreateRoomError("Não deu pra criar sua sala agora.");
+    } finally {
+      setCreatingFromTemplateId(null);
+    }
+  }
+
+  // itens do TIME do Douglas realmente mostrados no dropdown "Meus
+  // espaços" (ver comentário grande "teamOnly" em ROOM_SLUGS acima) --
+  // quem não é do time (owner/member) não vê nenhum dos dois.
   const visibleRoomSlugs = ROOM_SLUGS.filter((r) => !r.teamOnly || canSeeSalaPrincipal);
+  // + a sala PRÓPRIA do cliente, se tiver uma (myRoom) -- exceto pro
+  // Douglas, cuja "mine" já É a Sala principal (ver comentário em
+  // app/api/room/mine/route.ts) -- sem esse "except" ela apareceria
+  // duplicada no dropdown dele.
+  const dropdownEntries =
+    myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo"
+      ? [...visibleRoomSlugs, { slug: myRoom.room_slug, label: myRoom.name, teamOnly: false }]
+      : visibleRoomSlugs;
+  // ainda checando acesso (papel + sala própria) -- evita mostrar "criar
+  // minha sala" só pra sumir 1 segundo depois quando descobre que a
+  // pessoa já é do time/já tem sala.
+  const stillCheckingRoomAccess = roomRoleLoading || myRoomLoading;
+  // cliente de verdade: não é do time do Douglas E ainda não tem sala
+  // própria -- mostra "Criar minha sala" (ver JSX mais abaixo) no lugar
+  // do preview/"Entrar na sala" normal.
+  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRoom;
 
   // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
   // causa raiz: o Lobby não abre WebSocket de propósito (ver
@@ -1895,34 +2028,43 @@ export default function Lobby({
               <>
                 <div className="lobby-topbar-dropdown-backdrop" onClick={() => setSpacesMenuOpen(false)} />
                 <div className="lobby-topbar-dropdown">
-                  {/* 29/set, pedido do Douglas: "Mapa publicada (essa) /
-                      Mapa modelo (ja pode criar um, mesmo que sem
-                      decoracao, so pra gente estruturar como vai ser
-                      pros clientes)" -- 2 espaços clicáveis agora (ver
-                      ROOM_SLUGS no topo do arquivo), no lugar do único
-                      botão fixo "Sala principal" de antes (não
-                      reagia a clique nenhum). Clicar troca só a
-                      SELEÇÃO (selectedRoomSlug) -- entrar de verdade
-                      continua sendo o botão "Entrar na sala" lá embaixo
-                      (handleEnter), mesmo fluxo de sempre. */}
-                  {visibleRoomSlugs.map((r) => (
-                    <button
-                      key={r.slug}
-                      type="button"
-                      className={
-                        r.slug === selectedRoomSlug
-                          ? "lobby-topbar-dropdown-item active"
-                          : "lobby-topbar-dropdown-item"
-                      }
-                      onClick={() => {
-                        userPickedRoomRef.current = true;
-                        setSelectedRoomSlug(r.slug);
-                        setSpacesMenuOpen(false);
-                      }}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
+                  {/* 29/set, pedido do Douglas -- espaços clicáveis
+                      aqui (ver ROOM_SLUGS/dropdownEntries no topo do
+                      arquivo), no lugar do único botão fixo "Sala
+                      principal" de antes (não reagia a clique nenhum).
+                      "Sala principal"/"Mapa modelo" só aparecem pro
+                      time do Douglas; a sala PRÓPRIA do cliente
+                      (myRoom, quando existe) entra na lista também.
+                      Clicar troca só a SELEÇÃO (selectedRoomSlug) --
+                      entrar de verdade continua sendo o botão "Entrar
+                      na sala" lá embaixo (handleEnter), mesmo fluxo de
+                      sempre. Lista vazia (cliente sem time/sala ainda)
+                      -- ver "Criar minha sala" no card principal, não
+                      aqui. */}
+                  {dropdownEntries.length === 0 ? (
+                    <p className="lobby-topbar-dropdown-empty">
+                      {stillCheckingRoomAccess ? "Carregando…" : "Crie sua sala pra ela aparecer aqui."}
+                    </p>
+                  ) : (
+                    dropdownEntries.map((r) => (
+                      <button
+                        key={r.slug}
+                        type="button"
+                        className={
+                          r.slug === selectedRoomSlug
+                            ? "lobby-topbar-dropdown-item active"
+                            : "lobby-topbar-dropdown-item"
+                        }
+                        onClick={() => {
+                          userPickedRoomRef.current = true;
+                          setSelectedRoomSlug(r.slug);
+                          setSpacesMenuOpen(false);
+                        }}
+                      >
+                        {r.label}
+                      </button>
+                    ))
+                  )}
                 </div>
               </>
             )}
@@ -2464,17 +2606,64 @@ export default function Lobby({
           <span className="lobby-sign-text">SALA VIRTUAL</span>
         </div>
         <p className="lobby-greeting">Bem-vindo(a), {displayName}!</p>
-        <RoomPreview room={room} loading={roomLoading} />
 
-        <p className="lobby-presence">
-          <span className={`lobby-presence-dot${presence && presence.totalOnline > 0 ? " lobby-presence-dot-active" : ""}`} />
-          {presenceText}
-        </p>
+        {/* 29/set, pedido do Douglas: "Cada cliente vai ter a sua
+            sala... O cara entra, ele tem a sala dele la que ele
+            escolher dentre os modelos... as pessoas so copiam a sala
+            modelo, pra eles, ai se cria o mapa pra eles vinculado ao id
+            deles" -- um cliente de verdade (não é do time do Douglas,
+            ver needsToCreateRoom acima) ainda sem sala própria vê ISSO
+            no lugar do preview/"Entrar na sala" normais: escolhe um
+            modelo publicado (GET /api/room/templates) e
+            handleCreateRoomFromTemplate clona ele (POST
+            /api/room/create-from-template) -- assim que responde,
+            myRoom passa a existir e esse bloco some sozinho (needsToCreateRoom
+            vira false), voltando pro fluxo normal de sempre com a sala
+            nova já selecionada. */}
+        {needsToCreateRoom ? (
+          <div className="lobby-create-room">
+            <p className="lobby-create-room-title">Você ainda não tem uma sala</p>
+            {!accountAccessToken ? (
+              <p className="lobby-create-room-hint">Crie uma conta pra ganhar a sua.</p>
+            ) : templates === null ? (
+              <p className="lobby-create-room-hint">Carregando modelos…</p>
+            ) : templates.length === 0 ? (
+              <p className="lobby-create-room-hint">Nenhum modelo publicado ainda.</p>
+            ) : (
+              <>
+                <p className="lobby-create-room-hint">Escolha um modelo pra começar:</p>
+                <div className="lobby-create-room-templates">
+                  {templates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className="lobby-create-room-template-btn"
+                      disabled={creatingFromTemplateId !== null}
+                      onClick={() => handleCreateRoomFromTemplate(t.id)}
+                    >
+                      {creatingFromTemplateId === t.id ? "Criando…" : t.name}
+                    </button>
+                  ))}
+                </div>
+                {createRoomError && <p className="lobby-create-room-error">{createRoomError}</p>}
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            <RoomPreview room={room} loading={roomLoading} />
 
-        <button type="button" className="lobby-enter-btn" onClick={handleEnter}>
-          Entrar na sala
-          <ChevronRightIcon />
-        </button>
+            <p className="lobby-presence">
+              <span className={`lobby-presence-dot${presence && presence.totalOnline > 0 ? " lobby-presence-dot-active" : ""}`} />
+              {presenceText}
+            </p>
+
+            <button type="button" className="lobby-enter-btn" onClick={handleEnter} disabled={!selectedRoomSlug}>
+              Entrar na sala
+              <ChevronRightIcon />
+            </button>
+          </>
+        )}
         {onSignOut && (
           <button type="button" className="lobby-signout-btn" onClick={onSignOut}>
             Sair da conta

@@ -4836,6 +4836,16 @@ body {
   background: rgba(124, 92, 255, 0.14);
 }
 
+/* 29/set: dropdown vazio (cliente sem time/sala própria ainda, ver
+   dropdownEntries em Lobby.tsx) -- mesma tipografia/cor discreta de um
+   estado vazio, só texto, sem virar botão. */
+.lobby-topbar-dropdown-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: #8b87a0;
+  font-size: 12.5px;
+}
+
 /* 28/set, pedido do Douglas com print de referência (card de "Messages"
    flutuando bem transparente/embaçado num cômodo real): "nessa pegada
    os cards" -- MESMA ideia de vidro fosco já usada na barra de topo
@@ -5690,6 +5700,70 @@ body {
 
 .lobby-enter-btn:hover {
   background: #26232f;
+}
+
+.lobby-enter-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 29/set: "Criar minha sala" (ver needsToCreateRoom em Lobby.tsx) --
+   ocupa o mesmo espaço do preview+"Entrar na sala" que substitui,
+   estilo discreto/em linha com o resto do card (mesma fonte/cor de
+   .lobby-greeting/.lobby-presence acima). */
+.lobby-create-room {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 0;
+}
+
+.lobby-create-room-title {
+  margin: 0;
+  color: #14121f;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.lobby-create-room-hint {
+  margin: 0;
+  color: #8b879c;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.lobby-create-room-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lobby-create-room-template-btn {
+  background: #14121f;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  padding: 11px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-create-room-template-btn:hover {
+  background: #26232f;
+}
+
+.lobby-create-room-template-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.lobby-create-room-error {
+  margin: 0;
+  color: #e05c5c;
+  font-size: 12.5px;
+  text-align: center;
 }
 
 .lobby-signout-btn {
