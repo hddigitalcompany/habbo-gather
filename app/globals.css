@@ -3713,51 +3713,26 @@ body {
   gap: 24px;
   padding: 0 32px;
   border-radius: 22px;
-  /* pedido do Douglas: "aplique o mesmo estilo no balao superior" --
-     MESMO efeito "glassmorphism" aplicado nos cards da agenda (vidro
-     bem transparente + brilho colorido desfocado atrás, ver
-     .lobby-topbar-glow logo abaixo -- mesma técnica, não dá pra usar
-     overflow:hidden aqui pros dropdowns (menu "Meus espaços", card da
-     conta) que abrem PRA FORA da barra não ficarem cortados, por isso
-     o brilho vem num wrapper próprio que recorta só ele mesmo). */
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+  /* 29/set: "aplique o mesmo estilo no balao superior" (vidro +
+     brilho colorido) foi revertido logo em seguida -- Douglas viu o
+     resultado colorido (mesmo depois de ajustar o tom, ver "os cards
+     tao meio roxeado") e pediu, com um print de referência (card
+     "Journal" cinza neutro, sem nenhuma cor): "tire, quero o blur
+     pedido esmaecido acizentado, pra que chegue a esse efeito aqui,
+     em TUDO conversas, agenda". Removido o brilho colorido
+     (.lobby-topbar-glow/-glow-wrap, que existiam aqui) -- só o vidro
+     fosco neutro (sem matiz nenhum, cinza puro) ficou. MESMO
+     background usado agora em .lobby-panel/.lobby-card/
+     .members-panel/.items-panel (era roxo antes, neutralizado
+     junto). */
+  background: linear-gradient(165deg, rgba(150, 150, 158, 0.16), rgba(20, 20, 24, 0.1));
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    inset 0 0 50px rgba(0, 0, 0, 0.3),
-    0 20px 50px rgba(5, 8, 30, 0.45);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-}
-
-/* wrapper próprio SÓ pra recortar o brilho nos cantos arredondados da
-   barra -- overflow:hidden fica aqui, não em .lobby-topbar (senão
-   cortava os dropdowns que abrem pra fora dela). z-index negativo
-   garante que fica atrás das 3 colunas de conteúdo (que ganharam
-   position:relative + z-index:1 -- ver .lobby-topbar-logo-group/-nav/
-   -right-group), mesmo padrão de .lobby-agenda-day-glow. */
-.lobby-topbar-glow-wrap {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: 22px;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.lobby-topbar-glow {
-  position: absolute;
-  inset: -60%;
-  /* Douglas: "os cards tao meio roxeado ou impressao minha?" -- não
-     era impressão, o segundo blob era roxo puro (mesmo roxo de marca,
-     124/92/255) num valor forte demais, competindo com o laranja em
-     vez de só complementar -- trocado por um azul-acinzentado bem
-     mais discreto (mais frio/neutro, menos "roxo"), pro laranja
-     dominar igual no print de referência. */
-  background:
-    radial-gradient(circle at 12% 30%, rgba(255, 138, 60, 0.28), transparent 55%),
-    radial-gradient(circle at 88% 75%, rgba(90, 110, 150, 0.18), transparent 55%);
-  filter: blur(34px);
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 50px rgba(0, 0, 0, 0.28),
+    0 20px 50px rgba(5, 8, 30, 0.4);
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-backdrop-filter: blur(22px) saturate(120%);
 }
 
 .lobby-topbar-logo-group {
@@ -4098,7 +4073,7 @@ body {
   flex-direction: column;
   padding: 28px 32px;
   border-radius: 0 20px 20px 0;
-  background: linear-gradient(165deg, rgba(18, 14, 28, 0.94), rgba(6, 5, 10, 0.97));
+  background: linear-gradient(165deg, rgba(24, 24, 26, 0.94), rgba(6, 6, 7, 0.97));
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(28px) saturate(150%);
@@ -4825,48 +4800,25 @@ body {
   padding: 18px;
   border-radius: 18px;
   position: relative;
-  /* segura o brilho (.lobby-agenda-day-glow) dentro da borda
-     arredondada do card, sem vazar quina quadrada pra fora. */
   overflow: hidden;
-  /* pedido do Douglas, com print de referência (card "glassmorphism"
-     premium -- vidro escuro bem transparente com um brilho colorido
-     vazando por trás através do blur): "nao consegue fazer esse
-     efeito no card do calendario??" -- não tem nada de verdade atrás
-     pra vazar (o fundo do Lobby é só a imagem escura de sempre),
-     então o brilho é sintético: um blob radial bem desfocado
-     (.lobby-agenda-day-glow, primeiro filho no JSX, atrás do
-     conteúdo) + o vidro em si bem mais transparente que a versão
-     anterior ("use o estilo blur do editar empresa", que era quase
-     opaca) + um fio de luz no topo (inset no box-shadow) simulando
-     reflexo de borda de vidro. */
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  /* 29/set: o brilho colorido (.lobby-agenda-day-glow, existia aqui)
+     foi removido -- Douglas viu o resultado colorido (mesmo depois de
+     ajustar o tom, ver "os cards tao meio roxeado") e pediu, com um
+     print de referência (card "Journal" cinza neutro, sem nenhuma
+     cor): "tire, quero o blur pedido esmaecido acizentado, pra que
+     chegue a esse efeito aqui, em TUDO conversas, agenda". Só o vidro
+     fosco neutro ficou (sem matiz nenhum) -- MESMO background usado
+     agora em .lobby-panel/.lobby-card/.members-panel/.items-panel
+     (era roxo antes, neutralizado junto) e na barra superior
+     (.lobby-topbar). */
+  background: linear-gradient(165deg, rgba(150, 150, 158, 0.14), rgba(20, 20, 24, 0.1));
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 0 50px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 50px rgba(0, 0, 0, 0.32),
     0 24px 60px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-}
-
-/* o "brilho" atrás do vidro -- dois blobs radiais desfocados (um
-   quente, um frio, mesmo espírito do print de referência) parados no
-   card (não muda por dia/evento, é só textura). z-index:0 + os dois
-   filhos de conteúdo com z-index:1 garante que fica ATRÁS do
-   texto/badge, na frente só do fundo translúcido do próprio card. */
-.lobby-agenda-day-glow {
-  position: absolute;
-  inset: -20%;
-  z-index: 0;
-  /* Douglas: "os cards tao meio roxeado ou impressao minha?" -- não
-     era impressão, mesmo motivo do brilho da barra superior (ver
-     .lobby-topbar-glow) -- roxo de marca forte demais brigando com o
-     laranja. Trocado por um azul-acinzentado mais discreto. */
-  background:
-    radial-gradient(circle at 22% 78%, rgba(255, 138, 60, 0.55), transparent 55%),
-    radial-gradient(circle at 78% 18%, rgba(90, 110, 150, 0.22), transparent 55%);
-  filter: blur(26px);
-  pointer-events: none;
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
 }
 
 .lobby-agenda-day-left {
@@ -5017,7 +4969,7 @@ body {
 .lobby-card {
   width: 400px;
   max-width: 100%;
-  background: linear-gradient(160deg, rgba(110, 90, 170, 0.28), rgba(20, 16, 31, 0.38));
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.28), rgba(20, 20, 24, 0.38));
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   padding: 28px 24px 24px;
@@ -5174,7 +5126,7 @@ body {
   max-height: min(520px, calc(100vh - 64px));
   display: flex;
   flex-direction: column;
-  background: linear-gradient(160deg, rgba(110, 90, 170, 0.3), rgba(20, 16, 31, 0.42));
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
@@ -5654,7 +5606,7 @@ body {
   max-width: 100%;
   max-height: 80vh;
   overflow-y: auto;
-  background: linear-gradient(160deg, rgba(110, 90, 170, 0.3), rgba(20, 16, 31, 0.42));
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   padding: 18px;
@@ -5864,7 +5816,7 @@ body {
      rolando DENTRO da janela, só que a janela em si fica menor. */
   max-height: 70vh;
   overflow-y: auto;
-  background: linear-gradient(160deg, rgba(110, 90, 170, 0.3), rgba(20, 16, 31, 0.42));
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   padding: 18px;

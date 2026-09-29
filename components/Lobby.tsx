@@ -1714,9 +1714,6 @@ export default function Lobby({
           superior + abas na mesma linha, começando por "Meus
           espaços". */}
       <div className="lobby-topbar">
-        <div className="lobby-topbar-glow-wrap" aria-hidden="true">
-          <div className="lobby-topbar-glow" />
-        </div>
         <div className="lobby-topbar-logo-group">
           {/* semáforo decorativo removido -- pedido do Douglas (28/set):
               "tire isso, esses pontinhos". */}
@@ -2227,7 +2224,6 @@ export default function Lobby({
           const badge = formatAgendaDayBadge(day.ts);
           return (
             <div key={day.key} className="lobby-agenda-day-card">
-              <div className="lobby-agenda-day-glow" aria-hidden="true" />
               <div className="lobby-agenda-day-left">
                 <div className="lobby-agenda-day-badge">
                   <span className="lobby-agenda-day-badge-num">{badge.day}</span>
