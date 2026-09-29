@@ -3636,6 +3636,16 @@ body {
    fundo #14101f) só que com uma "placa de letreiro" pra lembrar
    entrada de hotel, e um pouco mais largo pra caber a linha de
    presença sem quebrar feio. */
+/* 28/set: "deixe toda a tela nesse azul gradiente de fundo" -- MESMO
+   gradiente que já tava só na barra de topo (ver .lobby-topbar logo
+   abaixo) agora cobre a tela inteira, igual ao print de referência
+   completo (o cabeçalho da Pepsi não tem nenhuma borda/sombra
+   separando do resto da página -- é o MESMO gradiente contínuo, sem
+   costura). Por isso .lobby-topbar abaixo fica sem fundo próprio: os
+   dois elementos ocupam exatamente a mesma área no topo (mesmo
+   position/inset), então "transparente" já basta pra deixar esse
+   gradiente único aparecer por trás, sem duplicar/desalinhar o
+   degradê. */
 .lobby-backdrop {
   position: fixed;
   inset: 0;
@@ -3643,7 +3653,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #14101f;
+  background: linear-gradient(100deg, #16224f 0%, #223a8f 55%, #3f5fc4 100%);
   padding: 104px 16px 16px;
 }
 
@@ -3671,8 +3681,10 @@ body {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   padding: 0 48px;
-  background: linear-gradient(100deg, #16224f 0%, #223a8f 55%, #3f5fc4 100%);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* sem fundo/sombra próprios de propósito -- ver comentário grande
+     em .lobby-backdrop acima, é o MESMO gradiente aparecendo por
+     trás, sem costura entre a barra e o resto da tela. */
+  background: transparent;
 }
 
 .lobby-topbar-logo {
