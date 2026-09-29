@@ -945,6 +945,19 @@ export default class MainScene extends Phaser.Scene {
   onDraftRoomShapeChange?: (items: { col: number; row: number }[]) => void;
   /** Definido de fora (GameRoom.tsx) -- avisa quando um clique em "Apagar" (aba "Tamanho") foi bloqueado, com o motivo (ver eraseRoomShapeAt). */
   onRoomShapeEraseBlocked?: (reason: string) => void;
+  // arrasto da ferramenta "Tamanho" (pedido do Douglas: "tem como
+  // adicionar arrastando? clicando de um em um leva mt tempo kkk") --
+  // MESMO esquema de isPaintingFloor/lastPaintedFloorKey acima, só que
+  // pra add/erase de tile de sala em vez de piso. roomShapeDragWarned
+  // evita um alert() (ver onRoomShapeEraseBlocked/GameRoom.tsx) POR
+  // TILE bloqueado durante um arrasto de "Apagar" -- alert() é
+  // SÍNCRONO e trava a página até fechar, então um arrasto passando por
+  // vários tiles bloqueados abriria vários popups em fila, um jeito
+  // horrível de travar o app; agora só avisa 1x por arrasto (reseta no
+  // próximo pointerdown, ver handleEditPointerDown).
+  private isPaintingRoomShape = false;
+  private lastPaintedRoomShapeKey: string | null = null;
+  private roomShapeDragWarned = false;
 
   // --- piso do editor de espaço (aba "Piso", ver selectFloorTool) --
   // draftFloor/draftFloorSprites guardam TODO o piso da sala (tanto o já
@@ -1527,6 +1540,7 @@ export default class MainScene extends Phaser.Scene {
       this.stopAreaPaint();
       this.stopWallPaint();
       this.stopDoorPaint();
+      this.stopRoomShapePaint();
     });
     this.input.on("pointerupoutside", () => {
       this.stopCameraPan();
@@ -1534,6 +1548,7 @@ export default class MainScene extends Phaser.Scene {
       this.stopAreaPaint();
       this.stopWallPaint();
       this.stopDoorPaint();
+      this.stopRoomShapePaint();
     });
 
     // nudge fino do assento (ver "Assento" no editor de espaço) -- só faz
@@ -3313,6 +3328,12 @@ export default class MainScene extends Phaser.Scene {
     this.lastPaintedFloorKey = null;
   }
 
+  private stopRoomShapePaint() {
+    this.isPaintingRoomShape = false;
+    this.lastPaintedRoomShapeKey = null;
+    this.roomShapeDragWarned = false;
+  }
+
   private stopAreaPaint() {
     this.isPaintingArea = false;
     this.lastPaintedAreaKey = null;
@@ -3828,7 +3849,11 @@ export default class MainScene extends Phaser.Scene {
   /** Escolhe a ferramenta "Tamanho" ativa: "add" pinta um tile novo
    * encostado na sala, "erase" apaga um já pintado, null desarma.
    * Mesmo padrão de exclusão mútua das outras ferramentas (ver
-   * selectFloorTool/selectAreaTool/etc. logo abaixo). */
+   * selectFloorTool/selectAreaTool/etc. logo abaixo). Redesenha o
+   * contorno na hora (ver drawEditGrid) -- é ela quem liga/desliga a
+   * tinta azul leve que confirma visualmente quais tiles já são da
+   * sala, então precisa aparecer/sumir NA HORA ao entrar/sair da aba
+   * "Tamanho", sem esperar o próximo clique de add/erase. */
   selectRoomShapeTool(tool: "add" | "erase" | null) {
     this.selectedRoomShapeTool = tool;
     this.selectedCatalogEntry = null;
@@ -3839,6 +3864,7 @@ export default class MainScene extends Phaser.Scene {
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
+    this.drawEditGrid();
   }
 
   /** Algum avatar (local OU remoto) tá em pé nesse tile agora? Não dá
@@ -3937,6 +3963,57 @@ export default class MainScene extends Phaser.Scene {
     this.drawEditGrid();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
     return null;
+  }
+
+  /** Aplica add/erase (ver paintRoomShapeAt/eraseRoomShapeAt acima) em
+   * CADA tile ao longo do caminho entre o último tile tocado no arrasto
+   * e o atual -- pedido do Douglas ("tem como adicionar arrastando?
+   * clicando de um em um leva mt tempo"). Diferente de paintFloorLine
+   * (Bresenham, aceita passo DIAGONAL -- ok pro piso, que não tem
+   * restrição de vizinhança): aqui o caminho precisa ser só ORTOGONAL
+   * (nunca um passo na diagonal), porque "Adicionar" só aceita um tile
+   * novo que encosta em algo que JÁ é da sala (ver roomNeighbors) -- um
+   * pulo diagonal faria o meio do caminho falhar essa checagem mesmo
+   * arrastando por cima de tiles válidos um a um. Anda primeiro na
+   * coluna até alinhar, depois na linha (um "L"), sempre um passo de
+   * cada vez -- cada tile novo sempre encosta no tile anterior (já
+   * pintado nesse mesmo arrasto, ou o ponto de partida). Pro "Apagar",
+   * a checagem de vizinhança não existe, mas o mesmo caminho serve
+   * igual (linha contínua, sem pular tile). Silencioso pra "Adicionar"
+   * (mesmo comportamento de paintRoomShapeAt); pro "Apagar", avisa no
+   * máximo 1x por arrasto via onRoomShapeEraseBlocked (ver
+   * roomShapeDragWarned/handleEditPointerDown -- alert() é síncrono,
+   * várias chamadas em fila travariam a página). */
+  private dragRoomShapeLine(fromCol: number, fromRow: number, toCol: number, toRow: number) {
+    let col = fromCol;
+    let row = fromRow;
+    const stepCol = col < toCol ? 1 : -1;
+    const stepRow = row < toRow ? 1 : -1;
+    while (col !== toCol) {
+      col += stepCol;
+      this.applyRoomShapeTool(col, row);
+    }
+    while (row !== toRow) {
+      row += stepRow;
+      this.applyRoomShapeTool(col, row);
+    }
+  }
+
+  /** Aplica a ferramenta "Tamanho" ativa (add/erase) num tile só --
+   * usado tanto pelo clique único (ver handleEditPointerDown) quanto
+   * pelo arrasto (ver dragRoomShapeLine acima). */
+  private applyRoomShapeTool(col: number, row: number) {
+    if (this.selectedRoomShapeTool === "add") {
+      this.paintRoomShapeAt(col, row);
+      return;
+    }
+    if (this.selectedRoomShapeTool === "erase") {
+      const reason = this.eraseRoomShapeAt(col, row);
+      if (reason && !this.roomShapeDragWarned) {
+        this.onRoomShapeEraseBlocked?.(reason);
+        this.roomShapeDragWarned = true;
+      }
+    }
   }
 
   /** Escolhe a ferramenta de piso ativa: {kind:"paint", entry} pinta esse modelo, {kind:"erase"} apaga, null desarma. Escolher uma ferramenta de piso desarma as outras (móvel/área/mover, ver selectCatalogEntry/selectAreaTool/selectMoveTool) -- só uma ferramenta ativa por vez. */
@@ -6370,7 +6447,20 @@ export default class MainScene extends Phaser.Scene {
    * depende do piso JÁ PINTADO, que muda com o tempo (pintar/apagar
    * tile, ver paintFloorAt, e o piso carregado do banco, ver
    * loadSavedFloor/retryFloorSprites), então o contorno precisa ser
-   * refeito toda vez que isso acontece, não só 1x na criação da cena. */
+   * refeito toda vez que isso acontece, não só 1x na criação da cena.
+   *
+   * Com a ferramenta "Tamanho" armada (selectedRoomShapeTool), TAMBÉM
+   * pinta uma tinta azul bem leve em cima de cada tile já pertencente à
+   * sala -- achado do Douglas testando "Adicionar" ("os tiles novos nao
+   * etao adicionando... fica verdinho quando passa encima mas nao
+   * adiciona quando clica"): o clique tava funcionando (o tile ENTRA em
+   * roomShape, ver paintRoomShapeAt), só que sem NENHUM piso pintado
+   * ali ainda, o tile novo ficava visualmente IDÊNTICO ao vazio fora da
+   * sala (o contorno de 1px 25% opacidade é fraco demais pra notar) --
+   * parecia que nada tinha acontecido. Essa tinta só aparece enquanto a
+   * aba "Tamanho" tá aberta (mesma ideia de DRAFT_AREA_TILE_ALPHA_EDITING
+   * pra área -- só um guia visual de edição, não fica ligada fora
+   * dela), então crescer a sala agora dá uma confirmação óbvia na hora. */
   private drawEditGrid() {
     const wasVisible = this.gridGraphics?.visible ?? false;
     this.gridGraphics?.destroy();
@@ -6385,6 +6475,10 @@ export default class MainScene extends Phaser.Scene {
       const [col, row] = key.split(",").map(Number);
       if (this.editGridHiddenAt(col, row)) continue;
       const { x, y } = tileToWorld(col, row);
+      if (this.selectedRoomShapeTool) {
+        g.fillStyle(0x60a5fa, 0.16);
+        g.fillPoints(tileDiamondCorners(x, y), true);
+      }
       g.strokePoints(tileDiamondCorners(x, y), true);
     }
     this.gridGraphics = g;
@@ -6724,9 +6818,15 @@ export default class MainScene extends Phaser.Scene {
     // clique não faz nada (tile já é da sala ao "Adicionar", ou tile
     // fora da sala ao "Apagar", ou -- só pro "Adicionar" -- um tile sem
     // NENHUM vizinho já na sala, o que viraria uma ilha solta sem
-    // caminho a pé até o resto). Sem arrasto de propósito (mesmo
-    // cuidado da parede -- "colocada com mais cuidado, tile a tile",
-    // crescer/encolher a sala merece a mesma atenção).
+    // caminho a pé até o resto).
+    //
+    // Arrasto (pedido do Douglas: "tem como adicionar arrastando?
+    // clicando de um em um leva mt tempo kkk") -- igual ao piso/área
+    // (paintFloorLine/paintAreaLine): enquanto o botão continuar
+    // pressionado e o cursor entrar num tile novo, aplica a ferramenta
+    // em CADA tile do caminho até lá (dragRoomShapeLine), não só onde o
+    // cursor tá agora -- sem isso um arrasto rápido "pularia" tiles
+    // entre um evento de pointermove e outro, deixando buracos.
     if (this.selectedRoomShapeTool) {
       this.wallHoverGraphics?.setVisible(false);
       this.catalogGhostSprite?.setVisible(false);
@@ -6738,6 +6838,16 @@ export default class MainScene extends Phaser.Scene {
         .fillStyle(valid ? EDIT_HOVER_COLOR_FREE : EDIT_HOVER_COLOR_OCCUPIED, 0.35)
         .fillPoints(tileDiamondCorners(x, y), true)
         .setVisible(true);
+      if (this.isPaintingRoomShape && pointer.isDown) {
+        const key = this.roomTileKey(col, row);
+        if (key !== this.lastPaintedRoomShapeKey) {
+          const [lastCol, lastRow] = this.lastPaintedRoomShapeKey
+            ? this.lastPaintedRoomShapeKey.split(",").map(Number)
+            : [col, row];
+          this.lastPaintedRoomShapeKey = key;
+          this.dragRoomShapeLine(lastCol, lastRow, col, row);
+        }
+      }
       return;
     }
     this.wallHoverGraphics?.setVisible(false);
@@ -6892,17 +7002,19 @@ export default class MainScene extends Phaser.Scene {
     // ferramenta "Tamanho" armada (ver selectRoomShapeTool) -- "add"
     // tenta pintar um tile novo, "erase" tenta apagar um já pintado (os
     // dois são no-op silencioso ou mostram um aviso via
-    // onRoomShapeEraseBlocked, ver paintRoomShapeAt/eraseRoomShapeAt).
-    // Fora daqui em diante o clique é sempre num TILE já validado como
-    // parte da sala (ver gate acima), diferente de add, que pode mirar
-    // qualquer coordenada.
-    if (this.selectedRoomShapeTool === "add") {
-      this.paintRoomShapeAt(col, row);
-      return;
-    }
-    if (this.selectedRoomShapeTool === "erase") {
-      const reason = this.eraseRoomShapeAt(col, row);
-      if (reason) this.onRoomShapeEraseBlocked?.(reason);
+    // onRoomShapeEraseBlocked, ver applyRoomShapeTool/paintRoomShapeAt/
+    // eraseRoomShapeAt). Fora daqui em diante o clique é sempre num
+    // TILE já validado como parte da sala (ver gate acima), diferente
+    // de add, que pode mirar qualquer coordenada.
+    // isPaintingRoomShape/lastPaintedRoomShapeKey armam o ARRASTO (ver
+    // handleEditPointerMove/dragRoomShapeLine) -- pedido do Douglas
+    // ("tem como adicionar arrastando? clicando de um em um leva mt
+    // tempo") -- mesmo esquema de isPaintingFloor pro piso.
+    if (this.selectedRoomShapeTool) {
+      this.isPaintingRoomShape = true;
+      this.lastPaintedRoomShapeKey = this.roomTileKey(col, row);
+      this.roomShapeDragWarned = false;
+      this.applyRoomShapeTool(col, row);
       return;
     }
 
