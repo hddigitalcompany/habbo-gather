@@ -1,14 +1,24 @@
 // POST /api/room/create-from-template -- pedido do Douglas (29/set):
 // "as pessoas so copiam a sala modelo, pra eles, ai se cria o mapa pra
-// eles vinculado ao id deles". Corpo: { templateId }. Cria a sala
-// própria do cliente (linha nova em public.rooms, ver comentário
-// grande em supabase/migrations/0032_rooms.sql) a partir de um modelo
-// publicado (GET /api/room/templates), e clona o LAYOUT inicial dele
-// (piso/parede/porta/área/mobília -- ver room_layout_state, migration
-// 0034) pra um slug novo. Dali em diante as duas salas vivem cada uma
-// por si -- editar o template depois não muda a sala já criada (mesmo
-// contrato descrito no comentário original de source_template_id em
-// 0032_rooms.sql).
+// eles vinculado ao id deles". Corpo: { templateId, companyName }.
+// Cria a sala própria do cliente (linha nova em public.rooms, ver
+// comentário grande em supabase/migrations/0032_rooms.sql) a partir de
+// um modelo publicado (GET /api/room/templates), e clona o LAYOUT
+// inicial dele (piso/parede/porta/área/mobília -- ver
+// room_layout_state, migration 0034) pra um slug novo. Dali em diante
+// as duas salas vivem cada uma por si -- editar o template depois não
+// muda a sala já criada (mesmo contrato descrito no comentário
+// original de source_template_id em 0032_rooms.sql).
+//
+// companyName É OBRIGATÓRIO (29/set (2), pedido do Douglas: "'empresa'
+// tem que virar o Nome da empresa / A pessoa so cria o espaco depois
+// que nomeia a empresa") -- vira o `name` da sala direto (ver comment
+// grande onde é usado, mais abaixo), que por sua vez é o que aparece
+// como rótulo da aba "Empresa" do chat (ver companyName em
+// components/GameRoom.tsx/ChatDrawer e myRoom?.name em
+// components/Lobby.tsx/LobbyChatPanel) -- é por isso que precisa
+// existir ANTES da sala: sem nome de empresa, não tem o que mostrar
+// naquela aba.
 //
 // room_slug da sala nova = o PRÓPRIO id (uuid) dela -- gerado aqui
 // (crypto.randomUUID()) em vez de deixar o Postgres gerar sozinho, só
@@ -36,6 +46,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const templateId = typeof body?.templateId === "string" ? body.templateId.trim() : "";
   if (!templateId) return NextResponse.json({ error: "templateId é obrigatório" }, { status: 400 });
+  const companyName = typeof body?.companyName === "string" ? body.companyName.trim().slice(0, 80) : "";
+  if (!companyName) return NextResponse.json({ error: "nome da empresa é obrigatório" }, { status: 400 });
 
   // idempotente -- se a pessoa já tem sala própria (ex: clicou 2x,
   // ou deu refresh no meio do fluxo), devolve ela de novo em vez de
@@ -62,19 +74,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "modelo não encontrado (ou ainda não publicado)" }, { status: 404 });
   }
 
-  // nome amigável pra sala nova -- melhor esforço (nome do perfil, se
-  // tiver conta com perfil preenchido); sem isso, cai num genérico
-  // simples, nunca bloqueia a criação por causa disso.
-  const profile = await admin.from("profiles").select("name").eq("id", userId).maybeSingle();
-  const ownerName = typeof profile.data?.name === "string" && profile.data.name.trim() ? profile.data.name.trim() : null;
-  const roomName = ownerName ? `Sala de ${ownerName}` : "Minha sala";
-
+  // `name` da sala É o nome da empresa que a pessoa acabou de digitar
+  // (ver comentário grande no topo do arquivo) -- antes era um nome
+  // genérico ("Sala de Fulano"/"Minha sala"); agora é sempre o que a
+  // pessoa nomeou, porque esse mesmo campo é o que aparece pros outros
+  // como rótulo da aba "Empresa" do chat.
   const newRoomId = randomUUID();
   const inserted = await admin
     .from("rooms")
     .insert({
       id: newRoomId,
-      name: roomName,
+      name: companyName,
       owner_user_id: userId,
       is_template: false,
       source_template_id: template.data.id,

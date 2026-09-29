@@ -470,6 +470,16 @@ body {
    Tamanho FIXO (não muda entre lista/nova conversa/conversa aberta,
    mesma lógica do .profile-card.editing) -- só o conteúdo de dentro
    rola. */
+/* MESMO card/vidro do painel de fora da sala (.lobby-panel, ver
+   comentário lá) -- pedido do Douglas 29/set: "a cor do card, nao ta
+   igual de fora, quero igual ao de fora [...] MESMO PADRAO". Antes
+   era uma cor chapada (rgba(28,22,42,0.92)) diferente do gradiente
+   acinzentado que o Lobby usa -- agora os dois usam o mesmo fundo/
+   borda/sombra, só a POSIÇÃO continua diferente de propósito (aqui é
+   um painel flutuante por cima do jogo, sem backdrop, pra não travar
+   o movimento; lá é um modal centralizado com backdrop, ver
+   .lobby-panel-backdrop -- isso é comportamento, não "cor", então não
+   mexi). */
 .chat-drawer {
   position: absolute;
   bottom: 82px;
@@ -481,11 +491,11 @@ body {
   max-height: calc(100vh - 150px);
   display: flex;
   flex-direction: column;
-  background: rgba(28, 22, 42, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   backdrop-filter: blur(22px) saturate(180%);
 }
@@ -5898,6 +5908,64 @@ body {
   color: #e05c5c;
   font-size: 12.5px;
   text-align: center;
+}
+
+/* passo "nome da empresa" (ver comentário grande em companyName,
+   components/Lobby.tsx) -- mesma paleta clara do resto do card de
+   "Criar minha sala". */
+.lobby-create-room-company-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(20, 18, 31, 0.05);
+  border: 1px solid rgba(20, 18, 31, 0.14);
+  border-radius: 12px;
+  color: #14121f;
+  font-size: 13.5px;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.lobby-create-room-company-input::placeholder {
+  color: #b0abc2;
+}
+
+.lobby-create-room-company-input:focus {
+  outline: none;
+  border-color: rgba(124, 92, 255, 0.5);
+}
+
+.lobby-create-room-company-btn {
+  background: #14121f;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  padding: 11px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobby-create-room-company-btn:hover {
+  background: #26232f;
+}
+
+.lobby-create-room-company-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lobby-create-room-back-btn {
+  background: transparent;
+  border: none;
+  color: #8b879c;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+  align-self: center;
+}
+
+.lobby-create-room-back-btn:hover {
+  color: #14121f;
 }
 
 .lobby-signout-btn {

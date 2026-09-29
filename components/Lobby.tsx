@@ -780,6 +780,7 @@ function formatAgendaEventTime(startTs: number, durationMinutes: number): string
 function LobbyChatPanel({
   myUserId,
   myName,
+  companyName,
   conversations,
   onClose,
   onSent,
@@ -787,6 +788,12 @@ function LobbyChatPanel({
 }: {
   myUserId: string;
   myName: string;
+  // nome de verdade da aba "Empresa" (29/set (2), pedido do Douglas:
+  // "'empresa' tem que virar o Nome da empresa") -- vem de myRoom?.name
+  // lá no componente Lobby (a sala PRÓPRIA de quem tá logado, ver GET
+  // /api/room/mine). Sem sala própria ainda (ou carregando), cai pra
+  // "Empresa" mesmo, só como rótulo genérico de fallback.
+  companyName: string | null;
   conversations: ConversationSummary[] | null;
   onClose: () => void;
   onSent: (conversationId: string, message: ChatMessage) => void;
@@ -897,7 +904,7 @@ function LobbyChatPanel({
                 className={`lobby-lane-tab${laneFilter === "company" ? " lobby-lane-tab-active" : ""}`}
                 onClick={() => setLaneFilter("company")}
               >
-                Empresa
+                {companyName || "Empresa"}
               </button>
               <button
                 type="button"
@@ -1440,6 +1447,16 @@ export default function Lobby({
   // cards enquanto isso, evita clique duplo criando 2 salas.
   const [creatingFromTemplateId, setCreatingFromTemplateId] = useState<string | null>(null);
   const [createRoomError, setCreateRoomError] = useState<string | null>(null);
+  // nome da empresa (29/set (2), pedido do Douglas: "'empresa' tem que
+  // virar o Nome da empresa / A pessoa so cria o espaco depois que
+  // nomeia a empresa") -- passo NOVO antes de escolher o modelo: sem
+  // nome confirmado (companyName vazio), mostra o campo de nome em vez
+  // do catálogo de modelos (ver JSX de needsToCreateRoom mais abaixo).
+  // Confirmar só troca a TELA (pro catálogo) -- a empresa só existe de
+  // verdade quando a sala é criada (handleCreateRoomFromTemplate manda
+  // esse nome pro servidor, que grava em rooms.name).
+  const [companyNameDraft, setCompanyNameDraft] = useState("");
+  const [companyName, setCompanyName] = useState("");
   // "Espaços visitados" (pedido do Douglas, 29/set: "se eu entrar na
   // sala de um amigo, a sala dele vai ficar ali, como um link rapido")
   // -- salas de OUTRAS pessoas que essa conta já visitou por link (ver
@@ -1891,14 +1908,14 @@ export default function Lobby({
    * pedido do Douglas: "as pessoas so copiam a sala modelo, pra eles,
    * ai se cria o mapa pra eles vinculado ao id deles". */
   async function handleCreateRoomFromTemplate(templateId: string) {
-    if (!accountAccessToken || creatingFromTemplateId) return;
+    if (!accountAccessToken || creatingFromTemplateId || !companyName.trim()) return;
     setCreatingFromTemplateId(templateId);
     setCreateRoomError(null);
     try {
       const res = await fetch("/api/room/create-from-template", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
-        body: JSON.stringify({ templateId }),
+        body: JSON.stringify({ templateId, companyName: companyName.trim() }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || typeof data?.room?.room_slug !== "string") {
@@ -2854,13 +2871,42 @@ export default function Lobby({
             <p className="lobby-create-room-title">Você ainda não tem uma sala</p>
             {!accountAccessToken ? (
               <p className="lobby-create-room-hint">Crie uma conta pra ganhar a sua.</p>
+            ) : !companyName ? (
+              // passo novo, ANTES do catálogo (ver comentário grande em
+              // companyNameDraft/companyName mais acima): sem nome de
+              // empresa confirmado, nem mostra os modelos ainda.
+              <>
+                <p className="lobby-create-room-hint">Como se chama a sua empresa?</p>
+                <input
+                  type="text"
+                  className="lobby-create-room-company-input"
+                  placeholder="Nome da empresa"
+                  value={companyNameDraft}
+                  maxLength={80}
+                  autoFocus
+                  onChange={(e) => setCompanyNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && companyNameDraft.trim()) setCompanyName(companyNameDraft.trim());
+                  }}
+                />
+                <button
+                  type="button"
+                  className="lobby-create-room-company-btn"
+                  disabled={!companyNameDraft.trim()}
+                  onClick={() => setCompanyName(companyNameDraft.trim())}
+                >
+                  Continuar
+                </button>
+              </>
             ) : templates === null ? (
               <p className="lobby-create-room-hint">Carregando modelos…</p>
             ) : templates.length === 0 ? (
               <p className="lobby-create-room-hint">Nenhum modelo publicado ainda.</p>
             ) : (
               <>
-                <p className="lobby-create-room-hint">Escolha um modelo pra começar:</p>
+                <p className="lobby-create-room-hint">
+                  Escolha um modelo pra começar a sala de <strong>{companyName}</strong>:
+                </p>
                 <div className="lobby-create-room-templates">
                   {templates.map((t) => (
                     <button
@@ -2875,6 +2921,9 @@ export default function Lobby({
                   ))}
                 </div>
                 {createRoomError && <p className="lobby-create-room-error">{createRoomError}</p>}
+                <button type="button" className="lobby-create-room-back-btn" onClick={() => setCompanyName("")}>
+                  ← Trocar nome da empresa
+                </button>
               </>
             )}
           </div>
@@ -3025,6 +3074,7 @@ export default function Lobby({
         <LobbyChatPanel
           myUserId={myUserId}
           myName={myName}
+          companyName={myRoom?.name ?? null}
           conversations={conversations}
           onClose={() => {
             setChatPanelOpen(false);

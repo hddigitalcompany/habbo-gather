@@ -1011,6 +1011,35 @@ export default function GameRoom({
   // dev, e em qualquer ambiente pro DONO DESSA sala -- membro/visitante/
   // dono de OUTRA sala nunca, em lugar nenhum.
   const canEditRoom = IS_ROOM_EDITOR_ENABLED || isCurrentRoomOwner;
+
+  // nome de verdade da aba "Empresa" do chat (29/set (2), pedido do
+  // Douglas: "'empresa' tem que virar o Nome da empresa") -- SEMPRE a
+  // MINHA própria empresa (GET /api/room/mine, mesma rota que o Lobby
+  // usa pra myRoom), não a da sala que eu tô visitando agora --
+  // diferente de isCurrentRoomOwner acima (que é sobre ESSA sala
+  // específica): entrando na sala de outra empresa, meu "Empresa" no
+  // chat continua sendo a MINHA, porque é ali que meu próprio time me
+  // alcança, não importa onde eu esteja andando.
+  const [myCompanyName, setMyCompanyName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!accountAccessToken) {
+      setMyCompanyName(null);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/room/mine", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setMyCompanyName(typeof data?.room?.name === "string" ? data.room.name : null);
+      })
+      .catch(() => {
+        if (!cancelled) setMyCompanyName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccessToken]);
+
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
 
@@ -4671,6 +4700,7 @@ export default function GameRoom({
   const chatDrawerProps = {
     view: chatView,
     onChangeView: setChatView,
+    companyName: myCompanyName,
     conversations,
     activeConversationId,
     onOpenConversation: openConversation,
@@ -7985,6 +8015,7 @@ function PhoneIcon() {
 function ChatDrawer({
   view,
   onChangeView,
+  companyName,
   conversations,
   activeConversationId,
   onOpenConversation,
@@ -8030,6 +8061,10 @@ function ChatDrawer({
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
+  // nome de verdade da aba "Empresa" (29/set (2), ver comentário
+  // grande em myCompanyName mais acima) -- null enquanto carrega ou
+  // sem sala própria ainda, cai pro rótulo genérico "Empresa".
+  companyName: string | null;
   conversations: Conversation[];
   activeConversationId: string | null;
   onOpenConversation: (id: string | null) => void;
@@ -8141,7 +8176,7 @@ function ChatDrawer({
               className={`chat-lane-tab${laneFilter === "company" ? " chat-lane-tab-active" : ""}`}
               onClick={() => setLaneFilter("company")}
             >
-              Empresa
+              {companyName || "Empresa"}
             </button>
             <button
               type="button"
