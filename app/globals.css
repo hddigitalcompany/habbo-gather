@@ -3679,23 +3679,22 @@ body {
 .lobby-topbar {
   position: absolute;
   top: 16px;
+  /* 29/set: pedido do Douglas "alinhe o balao superior com o card da
+     empresa" -- primeira tentativa foi errada (mexi no card pra
+     seguir a centralização da barra); ele corrigiu: "e ao contrario,
+     o balo ate o card, nao o card ate o balao". Ou seja: é a BARRA
+     que tem que encostar no left:16px puro (onde o card já está),
+     não o card acompanhar a centralização dela. Antes a barra tinha
+     right:16px + max-width:1180px + margin:0 auto, que em telas
+     largas centraliza a barra DENTRO desse respiro (sobra a mesma
+     folga dos dois lados) -- por isso a borda esquerda dela não
+     batia com left:16px puro. Trocado por width com min(), que
+     encosta a barra em left:16px sempre e só limita a largura
+     máxima em 1180px, sem centralizar. */
   left: 16px;
-  right: 16px;
-  /* 28/set: "nao ta dando pra abrir as conversas fora da sala" --
-     causa raiz: z-index:501 (mais alto que TUDO no Lobby, inclusive
-     os fundos dos painéis de Conversas/Agenda [.lobby-panel-backdrop,
-     z:60], Contatos/Membros [.members-panel-backdrop, z:400] e
-     Configurações/Itens [.items-panel-backdrop, z:400]) -- a barra
-     ficava por CIMA desses painéis dentro da MESMA stacking context
-     (.lobby-backdrop, position:fixed + z-index, ver logo acima), então
-     em telas mais baixas a barra roubava o clique/cobria o topo do
-     painel que deveria estar por cima dela. Baixado pra abaixo de
-     TODOS os fundos de painel de propósito -- um menu de navegação não
-     deveria nunca ficar por cima de um modal aberto. */
   z-index: 10;
   height: 84px;
-  max-width: 1180px;
-  margin: 0 auto;
+  width: min(1180px, calc(100vw - 32px));
   display: grid;
   /* MESMA ideia de "1fr auto 1fr" de antes (coluna vazia à direita
      balanceando a largura do grupo logo+bolinhas à esquerda) pra
@@ -3929,24 +3928,11 @@ body {
    barra flutuante (mesmo respiro de 16px que ela usa nas bordas,
    começando logo abaixo dela). Some em telas estreitas pra não
    sobrepor o card central da sala. */
-/* mesma "caixa" invisível de centralização que .lobby-topbar usa
-   (left/right:16px + max-width:1180px + margin:0 auto) -- é assim que
-   o card fica alinhado com a borda esquerda da barra em qualquer
-   largura de tela, inclusive telas bem largas onde a barra não
-   encosta no left:16 puro (ela centraliza dentro desse respiro
-   quando sobra espaço). Pedido do Douglas: "alinhe o balao superior
-   com o card da empresa". pointer-events:none na caixa (que é maior
-   que o card em telas largas) + auto só no card, pra essa área vazia
-   não bloquear clique em nada por baixo dela. */
 .lobby-company-card-pin {
   position: fixed;
   top: 128px;
   left: 16px;
-  right: 16px;
-  max-width: 1180px;
-  margin: 0 auto;
   z-index: 5;
-  pointer-events: none;
 }
 
 @media (max-width: 900px) {
@@ -3962,7 +3948,6 @@ body {
   overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  pointer-events: auto;
 }
 
 /* metade clara de cima -- frase de efeito (duas linhas + par de
