@@ -3680,21 +3680,19 @@ body {
   position: absolute;
   top: 16px;
   /* 29/set: pedido do Douglas "alinhe o balao superior com o card da
-     empresa" -- primeira tentativa foi errada (mexi no card pra
-     seguir a centralização da barra); ele corrigiu: "e ao contrario,
-     o balo ate o card, nao o card ate o balao". Ou seja: é a BARRA
-     que tem que encostar no left:16px puro (onde o card já está),
-     não o card acompanhar a centralização dela. Antes a barra tinha
-     right:16px + max-width:1180px + margin:0 auto, que em telas
-     largas centraliza a barra DENTRO desse respiro (sobra a mesma
-     folga dos dois lados) -- por isso a borda esquerda dela não
-     batia com left:16px puro. Trocado por width com min(), que
-     encosta a barra em left:16px sempre e só limita a largura
-     máxima em 1180px, sem centralizar. */
+     empresa" -- a barra tem que encostar no left:16px puro (onde o
+     card já está), não centralizar dentro de um respiro maior. Depois:
+     "faca o mesmo com o balao agora do lado direito" -- mesma lógica
+     pro lado direito: right:16px puro também, sem max-width limitando
+     a barra a ficar mais curta que a tela. Com left E right fixos (e
+     sem width/max-width/margin), a barra estica sozinha de uma borda
+     à outra em qualquer tamanho de tela -- "Meus espaços"/nav continua
+     centralizado de verdade porque o grid abaixo (1fr auto 1fr) sempre
+     centraliza o meio, não importa a largura final da barra. */
   left: 16px;
+  right: 16px;
   z-index: 10;
   height: 84px;
-  width: min(1180px, calc(100vw - 32px));
   display: grid;
   /* MESMA ideia de "1fr auto 1fr" de antes (coluna vazia à direita
      balanceando a largura do grupo logo+bolinhas à esquerda) pra
