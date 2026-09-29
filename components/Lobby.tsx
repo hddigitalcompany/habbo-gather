@@ -1035,10 +1035,8 @@ export default function Lobby({
             <>
               <div className="lobby-account-card-backdrop" onClick={() => setAccountCardOpen(false)} />
               <div className="lobby-account-card">
-                <p className="lobby-account-card-greeting">
-                  <span>Olá!</span>
-                  <span>Sou {displayName}</span>
-                </p>
+                {/* pedido do Douglas: "tire o olha sou deixe apenas o nome". */}
+                <p className="lobby-account-card-greeting">{displayName}</p>
                 {accountBio && <p className="lobby-account-card-bio">{accountBio}</p>}
                 <div className="lobby-account-card-tags">
                   <span className="lobby-account-card-tag lobby-account-card-tag-status">

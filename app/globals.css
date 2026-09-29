@@ -3825,16 +3825,15 @@ body {
   background: linear-gradient(180deg, #5c9bff, #7c5cff 35%, #ff5cf1 65%, #ff9a5c);
 }
 
+/* só o nome agora (pedido do Douglas: "tire o olha sou deixe apenas o
+   nome") -- sem quebra de linha forçada. */
 .lobby-account-card-greeting {
   margin: 0 0 14px;
-  font-size: 24px;
-  line-height: 1.15;
+  font-size: 22px;
+  line-height: 1.2;
   font-weight: 800;
   color: #ffffff;
-}
-
-.lobby-account-card-greeting span {
-  display: block;
+  overflow-wrap: break-word;
 }
 
 .lobby-account-card-bio {
