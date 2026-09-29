@@ -1676,22 +1676,35 @@ export default function Lobby({
   // de verdade -- ver useEffect logo acima) por dia, pega os 3
   // próximos dias que têm pelo menos 1 evento, ordenados por data --
   // é a "previa da agenda" pedida pelo Douglas, mostrada no lobby.
+  // 29/set (3): "mantenha os cards caso nao tenha evento do mesmo
+  // jeito, so com frase, sem eventos hoje e deixe 30 dias rolavel em
+  // lateral também" -- antes só listava dias que TINHAM compromisso
+  // (até 3); agora é uma janela FIXA de 30 dias (hoje + 29 seguintes),
+  // sempre os 30, cada um virando um card mesmo sem nada marcado (ver
+  // isToday/items vazio na renderização -- mostra uma frase em vez da
+  // lista). O scroll lateral pra caber os 30 já existia (ver
+  // .lobby-agenda-preview, overflow-x), só precisava parar de cortar
+  // em 3.
   const agendaPreviewDays = useMemo(() => {
-    if (!calls || calls.length === 0) return [];
-    const now = Date.now();
     const byDay = new Map<string, CallSummary[]>();
-    for (const call of calls) {
-      if (call.startTs < now - 5 * 60 * 1000) continue; // já passou
+    for (const call of calls ?? []) {
       const d = new Date(call.startTs);
       const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
       const list = byDay.get(key);
       if (list) list.push(call);
       else byDay.set(key, [call]);
     }
-    return Array.from(byDay.values())
-      .map((items) => [...items].sort((a, b) => a.startTs - b.startTs))
-      .sort((a, b) => a[0].startTs - b[0].startTs)
-      .slice(0, 3);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const days: { key: string; ts: number; isToday: boolean; items: CallSummary[] }[] = [];
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(todayStart);
+      d.setDate(d.getDate() + i);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const items = (byDay.get(key) || []).slice().sort((a, b) => a.startTs - b.startTs);
+      days.push({ key, ts: d.getTime(), isToday: i === 0, items });
+    }
+    return days;
   }, [calls]);
 
   return (
@@ -2189,53 +2202,65 @@ export default function Lobby({
       {/* pedido do Douglas: "remova o botao abrir minha agenda,
           mantenha apenas os cards da agenda, alinhe os cards com o
           card da empresa embaixo, mantenha a altura fixa, se passar
-          de 3 eventos, scrol ativa dentro do card" -- só os cards
-          agora (sem botão, sem estado "vazio" escrito -- se não tem
-          NENHUM dia com compromisso futuro, não renderiza nada). Saiu
-          do fluxo do flex de .lobby-backdrop (virou position:fixed,
-          mesmo esquema de .lobby-company-card-pin) pra poder alinhar
-          a borda de BAIXO com o card da empresa (bottom:100px nos
-          dois -- mesma distância do av-bar, ver comentário em
-          .company-card-pin) em vez de ficar preso à centralização
-          vertical do card da Sala. Altura de cada card agora é FIXA
-          (.lobby-agenda-day-card) -- a lista de eventos rola por
-          dentro (overflow-y) quando passa de 3, em vez de esticar o
-          card (ver .lobby-agenda-day-events). Dados reais, mesmo
-          `calls` de sempre (ver agendaPreviewDays acima). */}
-      {agendaPreviewDays.length > 0 && (
-        <div className="lobby-agenda-preview">
-          {agendaPreviewDays.map((items) => {
-            const badge = formatAgendaDayBadge(items[0].startTs);
-            return (
-              <div key={items[0].id} className="lobby-agenda-day-card">
-                <div className="lobby-agenda-day-left">
-                  <div className="lobby-agenda-day-badge">
-                    <span className="lobby-agenda-day-badge-num">{badge.day}</span>
-                    <span className="lobby-agenda-day-badge-month">{badge.month}</span>
-                  </div>
-                  <p className="lobby-agenda-day-weekday">{badge.weekday}</p>
+          de 3 eventos, scrol ativa dentro do card" + (29/set 3)
+          "mantenha os cards caso nao tenha evento do mesmo jeito, so
+          com frase, sem eventos hoje e deixe 30 dias rolavel em
+          lateral também" + "use o estilo blur do editar empresa" --
+          janela FIXA de 30 dias (agendaPreviewDays acima, sempre 30,
+          mesmo os sem nada marcado -- esses mostram só uma frase em
+          vez da lista de "Próximos"). Saiu do fluxo do flex de
+          .lobby-backdrop (virou position:fixed, mesmo esquema de
+          .lobby-company-card-pin) pra alinhar a borda de BAIXO com o
+          card da empresa (bottom:100px nos dois -- mesma distância do
+          av-bar). Altura de cada card é FIXA (.lobby-agenda-day-card)
+          -- a lista de eventos rola por dentro (overflow-y) quando
+          passa de 3, e os 30 cards rolam de lado (overflow-x, ver
+          .lobby-agenda-preview). Visual do card copiado de
+          .company-edit-panel (fundo escuro + blur mais forte), em vez
+          do degradê roxo claro de antes. Dados reais, mesmo `calls`
+          de sempre. */}
+      <div className="lobby-agenda-preview">
+        {agendaPreviewDays.map((day) => {
+          const badge = formatAgendaDayBadge(day.ts);
+          return (
+            <div key={day.key} className="lobby-agenda-day-card">
+              <div className="lobby-agenda-day-left">
+                <div className="lobby-agenda-day-badge">
+                  <span className="lobby-agenda-day-badge-num">{badge.day}</span>
+                  <span className="lobby-agenda-day-badge-month">{badge.month}</span>
+                </div>
+                <p className="lobby-agenda-day-weekday">{badge.weekday}</p>
+                {day.items.length > 0 && (
                   <span className="lobby-agenda-day-count">
-                    {items.length} {items.length === 1 ? "evento" : "eventos"}
+                    {day.items.length} {day.items.length === 1 ? "evento" : "eventos"}
                   </span>
-                </div>
-                <div className="lobby-agenda-day-right">
-                  <span className="lobby-agenda-day-label">Próximos</span>
-                  <ul className="lobby-agenda-day-events">
-                    {items.map((call, i) => (
-                      <li key={call.id} className={`lobby-agenda-event-item tone-${i % 4}`}>
-                        <p className="lobby-agenda-event-title">{call.title}</p>
-                        <p className="lobby-agenda-event-time">
-                          {formatAgendaEventTime(call.startTs, call.durationMinutes)}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                )}
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="lobby-agenda-day-right">
+                {day.items.length > 0 ? (
+                  <>
+                    <span className="lobby-agenda-day-label">Próximos</span>
+                    <ul className="lobby-agenda-day-events">
+                      {day.items.map((call, i) => (
+                        <li key={call.id} className={`lobby-agenda-event-item tone-${i % 4}`}>
+                          <p className="lobby-agenda-event-title">{call.title}</p>
+                          <p className="lobby-agenda-event-time">
+                            {formatAgendaEventTime(call.startTs, call.durationMinutes)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="lobby-agenda-day-empty-phrase">
+                    {day.isToday ? "Sem eventos hoje" : "Sem eventos"}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="lobby-card">
         <div className="lobby-sign">

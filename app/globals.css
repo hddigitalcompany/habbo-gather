@@ -4773,11 +4773,15 @@ body {
   gap: 14px;
   padding: 18px;
   border-radius: 18px;
-  background: linear-gradient(160deg, rgba(110, 90, 170, 0.22), rgba(14, 11, 22, 0.62));
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  /* pedido do Douglas: "use o estilo blur do editar empresa" --
+     MESMO fundo/borda/sombra/blur de .company-edit-panel (fundo bem
+     escuro, quase preto, com blur mais forte), em vez do degradê roxo
+     claro que tinha antes aqui. */
+  background: linear-gradient(165deg, rgba(18, 14, 28, 0.94), rgba(6, 5, 10, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
 }
 
 .lobby-agenda-day-left {
@@ -4847,6 +4851,20 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #9d8fc9;
+}
+
+/* dia sem nenhum compromisso -- pedido do Douglas: "mantenha os cards
+   caso nao tenha evento do mesmo jeito, so com frase, sem eventos
+   hoje" -- ocupa o mesmo espaço que PRÓXIMOS+lista ocupariam,
+   centralizado (a coluna da direita é flex column, ver
+   .lobby-agenda-day-right). */
+.lobby-agenda-day-empty-phrase {
+  flex: 1;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: #8b7fb0;
 }
 
 /* pedido do Douglas: "se passar de 3 eventos, scrol ativa dentro do
