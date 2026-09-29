@@ -43,6 +43,16 @@ export async function POST(req: NextRequest) {
   const artRightClosed = typeof body?.art_right_closed === "string" ? body.art_right_closed : null;
   const artRightOpen = typeof body?.art_right_open === "string" ? body.art_right_open : null;
 
+  // "Tamanho no jogo" (ver DoorCatalogEntry.displayWidth em
+  // game/door.ts, pedido do Douglas "quero editar a dimensao... igual
+  // os mobis normais") -- opcional, ausente/null = comportamento de
+  // sempre (encaixa exatamente na aresta, ver addDoorSprite em
+  // MainScene.ts).
+  const displayWidthPx =
+    typeof body?.display_width_px === "number" && Number.isFinite(body.display_width_px)
+      ? Math.round(body.display_width_px)
+      : null;
+
   const insert = {
     label,
     kind,
@@ -50,6 +60,7 @@ export async function POST(req: NextRequest) {
     art_left_open: artLeftOpen,
     art_right_closed: artRightClosed,
     art_right_open: artRightOpen,
+    display_width_px: displayWidthPx,
     created_by: callerId,
   };
 

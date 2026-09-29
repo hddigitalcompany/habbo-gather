@@ -57,6 +57,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!ALLOWED_KINDS.includes(body.kind)) return NextResponse.json({ error: "tipo de porta inválido" }, { status: 400 });
     update.kind = body.kind;
   }
+  // "Tamanho no jogo" (ver DoorCatalogEntry.displayWidth em game/door.ts)
+  // -- número novo grava o ajuste; null explícito (ver "Redefinir
+  // tamanho" em ItemEditor.tsx) volta pro comportamento de sempre
+  // (encaixa exatamente na aresta).
+  if ("display_width_px" in body) {
+    if (body.display_width_px === null) {
+      update.display_width_px = null;
+    } else if (typeof body.display_width_px === "number" && Number.isFinite(body.display_width_px)) {
+      update.display_width_px = Math.round(body.display_width_px);
+    } else {
+      return NextResponse.json({ error: "display_width_px inválido" }, { status: 400 });
+    }
+  }
 
   // imagem nova por campo (re-upload no editar) -- apaga (melhor
   // esforço) a arte ANTIGA no Storage quando troca por uma URL

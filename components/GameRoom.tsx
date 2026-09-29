@@ -1374,7 +1374,7 @@ export default function GameRoom({
     try {
       const { data, error } = await supabase
         .from("room_door_items")
-        .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open");
+        .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open, display_width_px");
       if (error || !data || data.length === 0) return;
       const entries: DoorCatalogEntry[] = data.map(
         (row: {
@@ -1385,6 +1385,7 @@ export default function GameRoom({
           art_left_open: string;
           art_right_closed: string | null;
           art_right_open: string | null;
+          display_width_px: number | null;
         }) => ({
           id: row.id,
           label: row.label,
@@ -1400,6 +1401,11 @@ export default function GameRoom({
               ? { right: { closed: row.art_right_closed, open: row.art_right_open } }
               : {}),
           },
+          // "Tamanho no jogo" (ver DoorCatalogEntry.displayWidth em
+          // game/door.ts) -- null (porta cadastrada antes desse campo
+          // existir, ou nunca ajustada) vira undefined, mesmo fallback
+          // de sempre (encaixa exatamente na aresta, ver addDoorSprite).
+          displayWidth: typeof row.display_width_px === "number" ? row.display_width_px : undefined,
         })
       );
       const updatedIds = registerCustomDoorModels(entries);

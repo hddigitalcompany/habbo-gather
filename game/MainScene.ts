@@ -5218,7 +5218,13 @@ export default class MainScene extends Phaser.Scene {
     const nativeW = source.width || image.width;
     const nativeH = source.height || image.height;
     if (nativeW > 0 && nativeH > 0) {
-      const targetWidth = doorEdgeLengthPx(seg.col, seg.row, seg.side);
+      // largura ajustável (ver DoorCatalogEntry.displayWidth em
+      // game/door.ts, pedido do Douglas "quero editar a dimensao dos
+      // arquivos que subo nelas tambem... igual os mobis normais") --
+      // sem valor configurado (undefined, modelo cadastrado antes desse
+      // campo existir, ou "Tamanho no jogo" nunca mexido), cai pro
+      // comportamento de sempre: encaixa exatamente na aresta.
+      const targetWidth = entry.displayWidth ?? doorEdgeLengthPx(seg.col, seg.row, seg.side);
       image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
     }
     return image;

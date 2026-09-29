@@ -3393,7 +3393,20 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
 // (ver setDisplaySize em addDoorSprite, MainScene.ts), então não faz
 // sentido guardar um arquivo muito maior que isso vezes a folga de
 // nitidez de sempre.
+// Largura de uma aresta da grade (px de tela, mesma unidade de
+// DISPLAY_WIDTH_MIN/MAX) -- valor de sempre pro "Tamanho no jogo" da
+// porta (ver DoorCatalogEntry.displayWidth em game/door.ts) antes desse
+// campo existir, e a referência de "encaixa certinho no vão" mostrada
+// no editor (ver DOOR_STAGE_*/doorStagePreviewSrc mais abaixo).
+const DOOR_EDGE_WIDTH_PX = Math.round(doorEdgeLengthPx(0, 0, "colPlus"));
 const DOOR_ART_MAX_UPLOAD_WIDTH = doorEdgeLengthPx(0, 0, "colPlus") * UPLOAD_SUPERSAMPLE;
+// preview do "Tamanho no jogo" da porta (ver JSX em DoorCreatorPanel) --
+// mesma ideia de STAGE_BASELINE_PAD pro mobi, só que num card MENOR (a
+// porta não precisa do espaço todo reservado pro boneco de referência
+// de mobi/avatar) -- folga em cima generosa (porta costuma ser uma
+// imagem alta), pouca embaixo do tile.
+const DOOR_STAGE_HEIGHT = 320;
+const DOOR_STAGE_BASELINE = 30;
 
 /** Um dos 4 campos de arte de UMA porta -- "left"/"right" é o `facing`
  * (ver DoorFacing em game/door.ts, escolhido como o resto do jogo faz
@@ -3422,6 +3435,7 @@ type CustomDoorRow = {
   art_left_open: string;
   art_right_closed: string | null;
   art_right_open: string | null;
+  display_width_px: number | null;
 };
 
 /**
@@ -3443,6 +3457,17 @@ function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onC
   const [doorFiles, setDoorFiles] = useState<Partial<Record<DoorArtField, File>>>({});
   const [doorPreviews, setDoorPreviews] = useState<Partial<Record<DoorArtField, string>>>({});
   const [doorExisting, setDoorExisting] = useState<Partial<Record<DoorArtField, string>>>({});
+  // "Tamanho no jogo" (pedido do Douglas: "quero editar a dimensao dos
+  // arquivos que subo nelas tambem, com tile e ta; igual os mobis
+  // normais" -- ver comentário grande em DoorCatalogEntry.displayWidth,
+  // game/door.ts). Começa no valor que SEMPRE foi usado até agora (a
+  // largura exata de uma aresta da grade) -- editar sem nunca mexer no
+  // slider salva esse mesmo valor de sempre, então nada muda pra porta
+  // já cadastrada até o Douglas realmente arrastar. Um valor só (não
+  // por lado esq/dir, diferente de tamanho de móvel por direção): os 2
+  // lados são a MESMA porta física, não faz sentido o vão parecer mais
+  // largo de um lado que do outro.
+  const [doorDisplayWidth, setDoorDisplayWidth] = useState<number>(DOOR_EDGE_WIDTH_PX);
   const [doorEditingId, setDoorEditingId] = useState<string | null>(null);
   const [doorSubmitting, setDoorSubmitting] = useState(false);
   const [doorBusyId, setDoorBusyId] = useState<string | null>(null);
@@ -3455,7 +3480,7 @@ function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onC
     if (!supabase) return;
     const { data, error: fetchError } = await supabase
       .from("room_door_items")
-      .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open");
+      .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open, display_width_px");
     if (fetchError) {
       setDoorError(fetchError.message);
       return;
@@ -3473,6 +3498,7 @@ function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onC
       return {};
     });
     setDoorExisting({});
+    setDoorDisplayWidth(DOOR_EDGE_WIDTH_PX);
   }
 
   function startEditDoorItem(item: CustomDoorRow) {
@@ -3490,7 +3516,14 @@ function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onC
       rightClosed: item.art_right_closed ?? undefined,
       rightOpen: item.art_right_open ?? undefined,
     });
+    setDoorDisplayWidth(typeof item.display_width_px === "number" ? item.display_width_px : DOOR_EDGE_WIDTH_PX);
   }
+
+  // preview de referência no stage do "Tamanho no jogo" -- sempre
+  // "Fechada -- lado esquerdo" (o único campo garantido de existir,
+  // obrigatório desde a criação), mesma prioridade de sempre (arquivo
+  // recém-escolhido > URL já salva).
+  const doorStagePreviewSrc = doorPreviews.leftClosed ?? doorExisting.leftClosed;
 
   function handleDoorFileChange(field: DoorArtField, file: File | undefined) {
     setDoorFiles((prev) => ({ ...prev, [field]: file }));
@@ -3521,7 +3554,10 @@ function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onC
     const uploadedPaths: string[] = [];
     try {
       const slug = slugify(doorLabel);
-      const payload: Record<string, unknown> = { label: doorLabel.trim() };
+      const payload: Record<string, unknown> = {
+        label: doorLabel.trim(),
+        display_width_px: Math.round(doorDisplayWidth),
+      };
       if (!doorEditingId) payload.kind = doorKind;
       for (const field of DOOR_ART_FIELDS) {
         const rawFile = doorFiles[field.key];
@@ -3630,6 +3666,78 @@ function DoorCreatorPanel({ accessToken, onChanged }: { accessToken: string; onC
             />
           </label>
         ))}
+
+        {/* "Tamanho no jogo" -- pedido do Douglas: "quero editar a
+            dimensao dos arquivos que subo nelas tambem, com tile e ta;
+            igual os mobis normais" (ver comentário grande em
+            DoorCatalogEntry.displayWidth, game/door.ts). ANTES a
+            largura de exibição era SEMPRE travada exatamente na largura
+            de uma aresta (doorEdgeLengthPx), sem editor nenhum. Mesmo
+            padrão visual do "Tamanho no jogo" de móvel (slider +
+            digitável + preview num tile de referência com régua), só
+            que sem arraste de posição (porta não tem "posição no tile"
+            pra ajustar -- ela é sempre centralizada na aresta) e um
+            valor SÓ (não por lado esq/dir -- os 2 lados são a MESMA
+            porta física, não faz sentido o vão parecer mais largo de um
+            lado que do outro). Preview usa sempre "Fechada -- lado
+            esquerdo" (o único campo obrigatório, garantido de existir)
+            como referência. */}
+        <div className="item-size-card">
+          <div className="item-stage" style={{ height: DOOR_STAGE_HEIGHT }}>
+            <div
+              className="item-stage-tile"
+              style={{ bottom: DOOR_STAGE_BASELINE, width: TILE_WIDTH_PX, height: TILE_HEIGHT_PX }}
+            />
+            {doorStagePreviewSrc ? (
+              <img
+                className="item-stage-item-img"
+                src={doorStagePreviewSrc}
+                alt="Preview da porta"
+                style={{
+                  width: doorDisplayWidth * PREVIEW_SCALE,
+                  bottom: DOOR_STAGE_BASELINE,
+                  transform: "translateX(-50%)",
+                  cursor: "default",
+                }}
+              />
+            ) : (
+              <p className="edit-hint item-size-empty">Escolha a imagem "Fechada -- lado esquerdo" pra ver o preview aqui.</p>
+            )}
+            <StageRuler anchorBottomPx={DOOR_STAGE_BASELINE} />
+          </div>
+        </div>
+
+        <div className="settings-slider-row settings-slider-row-editable">
+          <span className="settings-slider-name">Tamanho no jogo (largura)</span>
+          <input
+            type="range"
+            min={DISPLAY_WIDTH_MIN}
+            max={DISPLAY_WIDTH_MAX}
+            step={DISPLAY_WIDTH_STEP}
+            value={doorDisplayWidth}
+            onChange={(e) => setDoorDisplayWidth(Number(e.target.value))}
+          />
+          <span className="settings-slider-value-field">
+            <input
+              type="number"
+              className="settings-slider-value-input"
+              min={DISPLAY_WIDTH_MIN}
+              max={DISPLAY_WIDTH_MAX}
+              value={doorDisplayWidth}
+              onChange={(e) => setDoorDisplayWidth(Number(e.target.value) || 0)}
+              onBlur={() => setDoorDisplayWidth(clamp(Math.round(doorDisplayWidth), DISPLAY_WIDTH_MIN, DISPLAY_WIDTH_MAX))}
+            />
+            <span>px</span>
+          </span>
+        </div>
+        <div className="item-stage-offset-row">
+          <span>{DOOR_EDGE_WIDTH_PX}px encaixa exatamente no vão da aresta -- maior ou menor que isso, sobra/falta espaço nas laterais.</span>
+          {doorDisplayWidth !== DOOR_EDGE_WIDTH_PX && (
+            <button type="button" className="clear-btn" onClick={() => setDoorDisplayWidth(DOOR_EDGE_WIDTH_PX)}>
+              Redefinir tamanho
+            </button>
+          )}
+        </div>
 
         {doorError && <p className="items-panel-error">{doorError}</p>}
 

@@ -72,6 +72,19 @@ export interface DoorCatalogEntry {
    * fallback de FURNITURE_ART em furniture.ts) até existir a versão
    * espelhada de verdade. */
   art: Partial<Record<DoorFacing, DoorArtSet>>;
+  /** Largura de exibição (px) -- pedido do Douglas: "quero editar a
+   * dimensao dos arquivos que subo nelas tambem, com tile e ta; igual
+   * os mobis normais" (mesma ideia de FurnitureModelDef.displayWidth).
+   * undefined/null = comportamento de sempre (encaixa exatamente na
+   * aresta, ver doorEdgeLengthPx em addDoorSprite, MainScene.ts) --
+   * todo modelo cadastrado ANTES desse campo existir continua assim,
+   * sem precisar reeditar nada. Preenchido = usa esse valor no lugar; a
+   * ALTURA de cada imagem continua calculada pela proporção NATIVA
+   * dela (setDisplaySize só trava a largura), igual já funcionava. Um
+   * valor só pra porta inteira (não por lado esq/dir): os 2 lados são a
+   * MESMA porta física vista de ângulos opostos, não faz sentido o vão
+   * parecer mais largo de um lado que do outro. */
+  displayWidth?: number;
   custom?: boolean;
 }
 
