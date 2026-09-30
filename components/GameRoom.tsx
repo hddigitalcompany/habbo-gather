@@ -4756,6 +4756,17 @@ export default function GameRoom({
     onClose: () => setChatOpen(false),
     pinMode: chatPinMode,
     onToggleSidePin: toggleChatPinSide,
+    // 29/set (11), pedido do Douglas: "quadnoa bro a conversa com uma
+    // pessoa direta / Quero a foto dela ali encima, e essa parte de
+    // cima clicavel, abrindo o perfil dela ali dentro" -- abre o MESMO
+    // ProfileCard que já existe pra qualquer jogador da sala (mesmo
+    // profileCard/setProfileCard usado pelo clique num avatar/
+    // AreaOwnerHoverCard, ver JSX dele mais abaixo) -- participants[].id
+    // de uma conversa "direct" é o MESMO id que remoteProfiles usa
+    // (ver comentário grande de ConversationParticipant no topo do
+    // arquivo), então funciona pra visitante sem conta também (não dá
+    // pra usar o ProfileViewCard "de conta" aqui, ele exige login).
+    onOpenProfile: (playerId: string) => setProfileCard({ playerId, isLocal: false }),
   };
 
   // props do AgendaDrawer -- gaveta própria, separada do chat (ver
@@ -8083,6 +8094,7 @@ function ChatDrawer({
   onClose,
   pinMode,
   onToggleSidePin,
+  onOpenProfile,
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
@@ -8132,6 +8144,9 @@ function ChatDrawer({
   onClose: () => void;
   pinMode: "float" | "side";
   onToggleSidePin: () => void;
+  // 29/set (11): ver comentário grande de onOpenProfile em
+  // chatDrawerProps (components/GameRoom.tsx).
+  onOpenProfile: (playerId: string) => void;
 }) {
   const activeConv = conversations.find((c) => c.id === activeConversationId) ?? null;
   const isRoom = activeConversationId === null;
@@ -8340,7 +8355,33 @@ function ChatDrawer({
             <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeView("list")}>
               <BackIcon />
             </button>
-            {isRoom ? (
+            {/* 29/set (11), pedido do Douglas: "quadnoa bro a conversa
+                com uma pessoa direta / Quero a foto dela ali encima, e
+                essa parte de cima clicavel, abrindo o perfil dela ali
+                dentro" -- só numa conversa "direct" (1 pessoa só, não
+                grupo nem a "Sala"): foto + nome viram um botão só, que
+                chama onOpenProfile com o id do OUTRO participante
+                (participants[] já vem sem mim, ver comentário do tipo
+                Conversation no topo do arquivo). Grupo/Sala continuam
+                sem foto nenhuma (não tem UMA pessoa só pra mostrar). */}
+            {!isRoom && !renamingGroup && activeConv?.kind === "direct" && activeConv.participants[0] ? (
+              <button
+                type="button"
+                className="chat-drawer-header-identity"
+                onClick={() => onOpenProfile(activeConv.participants[0].id)}
+                title="Ver perfil"
+              >
+                <span className="chat-drawer-header-avatar" style={{ background: activeConv.participants[0].color || "#5a4b7c" }}>
+                  {activeConv.participants[0].photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={activeConv.participants[0].photoUrl} alt="" />
+                  ) : (
+                    (activeConv.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
+                  )}
+                </span>
+                <h3>{conversationDisplayName(activeConv)}</h3>
+              </button>
+            ) : isRoom ? (
               <h3>Sala</h3>
             ) : renamingGroup ? (
               <input
