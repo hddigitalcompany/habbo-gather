@@ -146,6 +146,15 @@ type GameRoomProps = {
   // -- ver roomSlug escolhido em app/page.tsx (state novo, setado pelo
   // Lobby) e ROOM_SLUGS em Lobby.tsx.
   roomSlug?: string;
+  // 29/set (8), pedido do Douglas: "clicavel, o X se mantem quando
+  // entra na sala, e ele vira um link de retorno pro lobby" -- o
+  // logo (só o X, ver .room-logo-home-btn no JSX mais abaixo) fica
+  // fixo no canto, igual o topbar do Lobby, e clicar chama isso pra
+  // voltar (ver app/page.tsx, que troca `entered` de volta pra
+  // false). Opcional só pra continuar aceitando <GameRoom /> sem essa
+  // prop (mesmo espírito de onSignOut acima) -- sem ela, o botão
+  // simplesmente não aparece.
+  onBackToLobby?: (() => void) | null;
 };
 
 type RemoteProfile = ProfileFields & { role: string };
@@ -596,6 +605,7 @@ export default function GameRoom({
   accountAccessToken = null,
   onSignOut = null,
   roomSlug = "sala-principal",
+  onBackToLobby = null,
 }: GameRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -4786,6 +4796,21 @@ export default function GameRoom({
 
   return (
     <div className="room-and-editor">
+      {/* 29/set (8), pedido do Douglas: "Aumente o X 1/3 / deixe o
+          tower na altura exatra do X / clicavel, o X se mantem quando
+          entra na sala, e ele vira um link de retorno pro lobby" --
+          MESMO X do topbar do Lobby (components/Lobby.tsx), só que
+          aqui dentro só o mark (sem o texto "Tower", ele não pediu o
+          texto aqui) e na versão CLARA (public/logo-x-light.png --
+          o fundo da sala é escuro, a versão escura do topbar do
+          Lobby ficaria invisível aqui). onBackToLobby vem de
+          app/page.tsx (troca `entered` de volta pra false). */}
+      {onBackToLobby && (
+        <button type="button" className="room-logo-home-btn" onClick={onBackToLobby} title="Voltar pro Lobby">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-x-light.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
+        </button>
+      )}
       {onSignOut && (
         <button type="button" className="account-sign-out-btn" onClick={onSignOut} title="Sair da conta">
           Sair da conta

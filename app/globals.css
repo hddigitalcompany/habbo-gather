@@ -113,7 +113,10 @@ body {
 
 .status-badge {
   position: absolute;
-  top: 12px;
+  /* 29/set (8): desceu de 12px pra abrir espaço pro X clicável novo
+     no canto (ver .room-logo-home-btn), que ocupa esse cantinho
+     agora -- mesma lógica de .presence-badge logo abaixo. */
+  top: 54px;
   left: 12px;
   background: rgba(0, 0, 0, 0.5);
   padding: 4px 10px;
@@ -3930,15 +3933,20 @@ body {
   gap: 8px;
 }
 
+/* 29/set (8), pedido do Douglas: "Aumente o X 1/3 / deixe o tower na
+   altura exatra do X" -- 22px * 4/3 = ~29.3px, arredondado pra 30px.
+   Texto foi pro MESMO tamanho (30px) do mark -- "altura exata"
+   (antes o texto, em 20px, ficava visivelmente menor que o X). */
 .lobby-topbar-logo-mark {
-  height: 22px;
+  height: 30px;
   width: auto;
   display: block;
 }
 
 .lobby-topbar-logo-text {
   font-family: var(--font-raleway), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 20px;
+  font-size: 30px;
+  line-height: 1;
   font-weight: 800;
   letter-spacing: 1px;
   color: #14121f;
@@ -6030,7 +6038,9 @@ body {
    GameRoom.tsx) -- mesmo estilo discreto do .status-badge ao lado. */
 .presence-badge {
   position: absolute;
-  top: 12px;
+  /* 29/set (8): mesma descida de .status-badge, mesmo motivo (ver
+     comentário lá). */
+  top: 54px;
   left: 130px;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 999px;
@@ -6039,6 +6049,41 @@ body {
   padding: 4px 10px;
   white-space: nowrap;
   z-index: 5;
+}
+
+/* 29/set (8), pedido do Douglas: "Aumente o X 1/3 / deixe o tower na
+   altura exatra do X / clicavel, o X se mantem quando entra na sala,
+   e ele vira um link de retorno pro lobby" -- mesmo cantinho onde
+   .status-badge/.presence-badge ficavam antes (por isso as duas
+   desceram, ver acima); position:fixed (não absolute) pra continuar
+   no canto da TELA mesmo com .room-and-editor virando flex-row (ex:
+   "Editar espaço"/chat fixado como sidebar do lado). */
+.room-logo-home-btn {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background: rgba(13, 7, 21, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.room-logo-home-btn:hover {
+  background: rgba(13, 7, 21, 0.92);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.room-logo-home-mark {
+  height: 22px;
+  width: auto;
+  display: block;
 }
 
 /* --- painel "Membros da sala" (ver components/RoomMembersPanel.tsx)

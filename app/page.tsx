@@ -38,6 +38,11 @@ export default function Home() {
               accountAccessToken={auth.accountAccessToken}
               onSignOut={auth.onSignOut}
               roomSlug={roomSlug}
+              // pedido do Douglas (29/set (8)): o X do topo vira link
+              // de volta pro Lobby -- mesma troca de tela que
+              // onEnter faz no sentido contrário (ver comentário
+              // grande de `entered` lá em cima).
+              onBackToLobby={() => setEntered(false)}
             />
           ) : (
             <Lobby
