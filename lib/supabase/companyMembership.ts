@@ -12,12 +12,23 @@
 //   empresa já destacada ANTES ainda é válida, antes de mostrar o
 //   card no perfil de qualquer um -- ver comentário na migration)
 //
-// RESERVED_SLUGS/"is_template" -- mesmo filtro de getOwnedRealRooms em
-// app/api/account/verification/route.ts (não conta a Sala Principal
-// nem o molde de mapa como "empresa de verdade").
+// "is_template" -- nunca conta o molde de mapa (mapa-modelo) como
+// "empresa de verdade", mesmo filtro de getOwnedRealRooms em
+// app/api/account/verification/route.ts.
+//
+// Só "mapa-modelo" fica de fora aqui -- DIFERENTE do RESERVED_SLUGS
+// de verification.ts (que também exclui "sala-principal"). Lá faz
+// sentido: "sala-principal" não pode ser usada pra pedir o selo de
+// empresa verificada (exige contrato social/sócio de verdade). Mas
+// "sala-principal" É a sala oficial única do time do Douglas (Mapa
+// Publicado/"X Tower", ver ROOM_SLUGS em Lobby.tsx) -- já vem com
+// nome/logo/categoria de empresa preenchidos de verdade (bug
+// encontrado 30/set: Hualison configurou tudo isso nela e o card
+// nunca aparecia no perfil por causa desse filtro emprestado sem
+// necessidade, sem motivo real pra continuar excluindo ela aqui).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+const RESERVED_SLUGS = new Set(["mapa-modelo"]);
 
 export type CompanyMembership = {
   roomId: string;
