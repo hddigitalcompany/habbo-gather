@@ -5345,13 +5345,15 @@ export default function GameRoom({
           accountProfile={accountProfile}
           accountAccessToken={accountAccessToken}
           onStartConversation={(targetUserId) => startDirectWith(targetUserId)}
+          onSignOut={onSignOut}
         />
       </div>
-      {onSignOut && (
-        <button type="button" className="account-sign-out-btn" onClick={onSignOut} title="Sair da conta">
-          Sair da conta
-        </button>
-      )}
+      {/* pedido do Douglas, 30/set (9): "coloque o sair da conta dentro
+          das opcoes que abrem clicando no balao foto+nome, por ultimo,
+          e em texto vermelho" -- morava aqui, um botão avulso (que
+          inclusive colidia visualmente com o catálogo depois do
+          "Editar espaço" ficar mais largo), agora é o último item do
+          menu do <AccountCard /> acima (ver comentário grande lá). */}
       {chatOpen && chatPinMode === "side" && <ChatDrawer {...chatDrawerProps} />}
       <div className="room-wrapper">
         <div ref={containerRef} className="phaser-container" />

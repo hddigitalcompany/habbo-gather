@@ -3712,6 +3712,7 @@ export default function Lobby({
             accountProfile={accountProfile}
             accountAccessToken={accountAccessToken ?? null}
             onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
+            onSignOut={onSignOut}
           />
         </div>
       </div>
@@ -4393,11 +4394,11 @@ export default function Lobby({
             )}
           </>
         )}
-        {onSignOut && (
-          <button type="button" className="lobby-signout-btn" onClick={onSignOut}>
-            Sair da conta
-          </button>
-        )}
+        {/* pedido do Douglas, 30/set (9): "coloque o sair da conta
+            dentro das opcoes que abrem clicando no balao foto+nome,
+            por ultimo, e em texto vermelho" -- morava aqui, solto,
+            agora é o último item do menu do <AccountCard /> acima (ver
+            comentário grande lá). */}
       </div>
 
       {/* pedido do Douglas (28/set, com print da av-bar de dentro da

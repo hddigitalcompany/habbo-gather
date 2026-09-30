@@ -43,6 +43,7 @@ export default function AccountCard({
   accountProfile,
   accountAccessToken,
   onStartConversation,
+  onSignOut,
 }: {
   accountUserId: string | null;
   accountProfile: Partial<AccountProfile> | null;
@@ -53,6 +54,16 @@ export default function AccountCard({
   // mas o prop continua obrigatório lá, então aceita opcional aqui e
   // cai num no-op se quem montou não passou nada.
   onStartConversation?: (targetUserId: string, targetName: string) => void;
+  // pedido do Douglas, 30/set (9): "coloque o sair da conta dentro das
+  // opcoes que abrem clicando no balao foto+nome, por ultimo, e em
+  // texto vermelho" -- antes existiam DOIS botões avulsos e soltos na
+  // tela (".lobby-signout-btn" no Lobby, ".account-sign-out-btn" na
+  // sala, esse último colidindo até visualmente com o catálogo depois
+  // que o painel "Editar espaço" ficou mais largo). Agora é só mais um
+  // item desse menu (ver account-card-menu-item-danger em
+  // app/globals.css), então as duas telas ganham o mesmo lugar de
+  // sair sem duplicar nada.
+  onSignOut?: (() => void) | null;
 }) {
   const [cardOpen, setCardOpen] = useState(false);
   const [panel, setPanel] = useState<MenuPanel>(null);
@@ -138,6 +149,18 @@ export default function AccountCard({
               >
                 Selo de verificação
               </button>
+              {onSignOut && (
+                <button
+                  type="button"
+                  className="account-card-menu-item account-card-menu-item-danger"
+                  onClick={() => {
+                    setCardOpen(false);
+                    onSignOut();
+                  }}
+                >
+                  Sair da conta
+                </button>
+              )}
             </div>
           </div>
         </>

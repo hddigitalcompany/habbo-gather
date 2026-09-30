@@ -2218,6 +2218,23 @@ button.chat-picker-item:disabled {
   margin-bottom: 12px;
 }
 
+/* pedido do Douglas, 30/set (9): "enquadre, baixe a linha do
+   catalogo" -- .edit-panel (painel "Editar espaço", dentro da sala) é
+   irmão de .room-wrapper dentro de .room-and-editor (flex row, 100%
+   de largura), então o CANTO SUPERIOR DIREITO desse painel sempre
+   coincide com o canto superior direito da TELA -- exatamente onde o
+   balãozinho foto+nome da conta fica fixo (.room-account-card-pin,
+   top:16px/right:16px, ~42px de altura). Sem essa margem, a fileira de
+   abas (Mobília/Piso/Parede) ficava por baixo dele -- 34px empurra ela
+   pra começar depois dos ~58px que o balão ocupa (mais folga que o
+   suficiente). Escopado só pra ESSE painel (não .edit-section-tabs
+   sozinho, que ItemEditor.tsx também reaproveita noutro contexto sem
+   esse balão fixo em cima -- empurrar ali também seria um espaço vazio
+   à toa). */
+.edit-panel .edit-section-tabs {
+  margin-top: 34px;
+}
+
 .edit-section-tab {
   flex: 1;
   display: flex;
@@ -4730,6 +4747,20 @@ button.chat-picker-item:disabled {
   cursor: default;
 }
 
+/* último item do menu, pedido do Douglas 30/set (9): "coloque o sair
+   da conta dentro das opcoes que abrem clicando no balao foto+nome,
+   por ultimo, e em texto vermelho" -- mesma casca de
+   .account-card-menu-item, só a cor (inclusive no hover, que por
+   padrão ficaria escura igual os outros itens). */
+.account-card-menu-item-danger {
+  color: #d1454f;
+}
+
+.account-card-menu-item-danger:hover {
+  background: rgba(209, 69, 79, 0.08);
+  color: #d1454f;
+}
+
 /* Douglas 30/set (2): "o perfil publico abriu fora de centro deslocado
    pra cima" -- bug: .profile-backdrop (position:fixed, inset:0,
    flex-center) fica preso dentro de .lobby-topbar quando essa árvore
@@ -6631,25 +6662,6 @@ button.chat-picker-item:disabled {
   color: #14121f;
 }
 
-.lobby-signout-btn {
-  display: block;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: #8b879c;
-  font-size: 13px;
-  text-align: center;
-  padding: 14px 0 0;
-  cursor: pointer;
-}
-
-.lobby-signout-btn:hover {
-  text-decoration: underline;
-}
-
-/* botão de sair, só aparece pra quem entrou com conta (ver onSignOut
-   em GameRoom.tsx) -- cantinho discreto, não disputa espaço com a
-   av-bar/HUD do jogo. */
 /* pedido do Douglas, 30/set: "esse card, mantenha ele em toda tela
    que o usuario vai inclusive no jogo" -- .lobby-topbar-account-wrap
    (ver AccountCard.tsx) só é "position: relative" porque no Lobby
@@ -6669,8 +6681,8 @@ button.chat-picker-item:disabled {
    quase transparente + texto quase preto #14121f, ver comentário "tema
    claro" ali). Dentro da sala o fundo é ESCURO -- sem essa
    sobrescrita, ficava um "balão" quase invisível (texto escuro sobre
-   fundo escuro). Mesma "pegada" vidro escuro do .account-sign-out-btn
-   logo abaixo (fundo escuro translúcido + texto claro) -- só troca a
+   fundo escuro). Mesma "pegada" vidro escuro do resto do HUD da sala
+   (fundo escuro translúcido + texto claro) -- só troca a
    cor/fundo, mantém o resto (formato, tamanho) igual ao chip do
    Lobby. */
 .room-account-card-pin .lobby-topbar-account {
@@ -6681,27 +6693,6 @@ button.chat-picker-item:disabled {
 
 .room-account-card-pin .lobby-topbar-account:hover {
   background: rgba(13, 7, 21, 0.92);
-}
-
-.account-sign-out-btn {
-  position: fixed;
-  /* desce um pouco pra não ficar embaixo do card da conta novo (ver
-     .room-account-card-pin acima), que agora ocupa esse cantinho. */
-  top: 62px;
-  right: 12px;
-  z-index: 60;
-  background: rgba(13, 7, 21, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  color: #cfc4e6;
-  font-size: 11px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
-
-.account-sign-out-btn:hover {
-  background: rgba(13, 7, 21, 0.92);
-  color: #f5f0ff;
 }
 
 /* contador de membro/visitante online (ver presenceCounts em
