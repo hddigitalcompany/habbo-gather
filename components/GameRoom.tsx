@@ -877,6 +877,23 @@ export default function GameRoom({
   const [chatComposerText, setChatComposerText] = useState("");
   const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
   const [newConvName, setNewConvName] = useState("");
+  // 30/set, pedido do Douglas ("nova conversa aparece isso, nao minha
+  // lista nem o filtro", apontando pro picker de "quem tá na sala"
+  // vazio) -- MESMO filtro Amigos/Empresa que o Lobby ganhou
+  // (LobbyChatPanel/newConvFilter em components/Lobby.tsx), agora
+  // também dentro da sala: "Amigos" busca só amigo mútuo
+  // (GET /api/friends/list) e inicia conversa "private"; "Empresa"
+  // busca qualquer conta (GET /api/friends/search) só quando tem
+  // texto digitado -- sem texto, continua mostrando quem tá online na
+  // sala agora (pickable/onlinePlayers, atalho rápido de sempre).
+  const [newConvFilter, setNewConvFilter] = useState<"company" | "friends">("company");
+  const [newConvQuery, setNewConvQuery] = useState("");
+  const [newConvSearchResults, setNewConvSearchResults] = useState<
+    { userId: string; name: string; photoUrl: string }[] | null
+  >(null);
+  const [newConvFriends, setNewConvFriends] = useState<
+    { userId: string; name: string; photoUrl: string }[] | null
+  >(null);
   // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
   // chat, quero que eles vejam a possibilidade, sempre ali, abriu o
   // chat, ela ta junto" -- MESMA ideia do Lobby (ver myRoomLogoUrl lá
@@ -907,6 +924,64 @@ export default function GameRoom({
       cancelled = true;
     };
   }, [roomSlug]);
+
+  // "Empresa" -- só busca com texto (sem query, continua mostrando
+  // pickable/onlinePlayers, ver JSX do view "new" no ChatDrawer) --
+  // MESMO endpoint/debounce que o Lobby usa (newConvOpen em
+  // components/Lobby.tsx).
+  useEffect(() => {
+    if (chatView !== "new" || newConvFilter !== "company" || !accountAccessToken || !newConvQuery.trim()) {
+      setNewConvSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetch(`/api/friends/search?q=${encodeURIComponent(newConvQuery.trim())}`, {
+        headers: { Authorization: `Bearer ${accountAccessToken}` },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled) setNewConvSearchResults(Array.isArray(data?.users) ? data.users : []);
+        })
+        .catch(() => {
+          if (!cancelled) setNewConvSearchResults([]);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [chatView, newConvFilter, newConvQuery, accountAccessToken]);
+
+  // "Amigos" -- busca a lista inteira uma vez (mesma ideia do Lobby),
+  // filtro por texto é local (ver visibleNewConvFriends no ChatDrawer).
+  useEffect(() => {
+    if (chatView !== "new" || newConvFilter !== "friends" || !accountAccessToken) return;
+    let cancelled = false;
+    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setNewConvFriends(Array.isArray(data?.friends) ? data.friends : []);
+      })
+      .catch(() => {
+        if (!cancelled) setNewConvFriends([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatView, newConvFilter, accountAccessToken]);
+
+  // sai do view "new" -- limpa busca/filtro pra próxima vez que abrir
+  // começar do zero (mesmo comportamento do closeNewConv no Lobby).
+  useEffect(() => {
+    if (chatView !== "new") {
+      setNewConvQuery("");
+      setNewConvFilter("company");
+      setNewConvSearchResults(null);
+      setNewConvFriends(null);
+    }
+  }, [chatView]);
+
   const [renamingGroup, setRenamingGroup] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const [recordingAudio, setRecordingAudio] = useState(false);
@@ -3687,7 +3762,12 @@ export default function GameRoom({
   function submitNewConversation() {
     if (newConvSelection.length === 0) return;
     if (newConvSelection.length === 1 && !newConvName.trim()) {
-      startDirectWith(newConvSelection[0]);
+      // 30/set, pedido do Douglas: filtro Amigos/Empresa em "Nova
+      // conversa" (ver newConvFilter acima) -- "Amigos" sempre inicia
+      // "private" (servidor confere amigo mútuo de novo, ver case
+      // "chat:create_direct" em server/index.js), "Empresa" continua
+      // "company" (comportamento de sempre).
+      startDirectWith(newConvSelection[0], newConvFilter === "friends" ? "private" : "company");
       return;
     }
     autoOpenNextConversationRef.current = true;
@@ -4917,6 +4997,12 @@ export default function GameRoom({
     newConvName,
     onChangeNewConvName: setNewConvName,
     onSubmitNewConversation: submitNewConversation,
+    newConvFilter,
+    onChangeNewConvFilter: setNewConvFilter,
+    newConvQuery,
+    onChangeNewConvQuery: setNewConvQuery,
+    newConvSearchResults,
+    newConvFriends,
     renamingGroup,
     onStartRenameGroup: (currentName: string) => {
       setGroupNameDraft(currentName);
@@ -8374,6 +8460,12 @@ function ChatDrawer({
   newConvName,
   onChangeNewConvName,
   onSubmitNewConversation,
+  newConvFilter,
+  onChangeNewConvFilter,
+  newConvQuery,
+  onChangeNewConvQuery,
+  newConvSearchResults,
+  newConvFriends,
   renamingGroup,
   onStartRenameGroup,
   onCancelRenameGroup,
@@ -8429,6 +8521,12 @@ function ChatDrawer({
   newConvName: string;
   onChangeNewConvName: (v: string) => void;
   onSubmitNewConversation: () => void;
+  newConvFilter: "company" | "friends";
+  onChangeNewConvFilter: (f: "company" | "friends") => void;
+  newConvQuery: string;
+  onChangeNewConvQuery: (v: string) => void;
+  newConvSearchResults: { userId: string; name: string; photoUrl: string }[] | null;
+  newConvFriends: { userId: string; name: string; photoUrl: string }[] | null;
   renamingGroup: boolean;
   onStartRenameGroup: (currentName: string) => void;
   onCancelRenameGroup: () => void;
@@ -8757,25 +8855,89 @@ function ChatDrawer({
             </div>
           </div>
           <div className="chat-new-conv-body">
-            {pickable.length === 0 ? (
-              <p className="chat-empty-hint">Não tem mais ninguém na sala agora.</p>
-            ) : (
-              <div className="chat-picker-list">
-                {pickable.map((p) => (
-                  <label key={p.userId} className="chat-picker-item">
-                    <input
-                      type="checkbox"
-                      checked={newConvSelection.includes(p.userId)}
-                      onChange={() => onToggleNewConvSelection(p.userId)}
-                    />
-                    <span className="chat-conv-avatar" style={{ background: p.color }}>
-                      {(p.name || "?").slice(0, 1).toUpperCase()}
-                    </span>
-                    <span>{p.name || "Sem nome"}</span>
-                  </label>
-                ))}
-              </div>
-            )}
+            {/* 30/set, pedido do Douglas ("nova conversa aparece isso,
+                nao minha lista nem o filtro"): MESMO filtro Amigos/
+                Empresa do Lobby (ver newConvFilter/moveConversationLane
+                comentário grande lá em components/Lobby.tsx), agora
+                também aqui dentro da sala -- antes só listava quem tava
+                online na sala nesse instante (pickable), ficava vazio
+                com a sala vazia. */}
+            <div className="chat-lane-tabs">
+              <button
+                type="button"
+                className={`chat-lane-tab${newConvFilter === "friends" ? " chat-lane-tab-active" : ""}`}
+                onClick={() => onChangeNewConvFilter("friends")}
+              >
+                Amigos
+              </button>
+              <button
+                type="button"
+                className={`chat-lane-tab${newConvFilter === "company" ? " chat-lane-tab-active" : ""}`}
+                onClick={() => onChangeNewConvFilter("company")}
+              >
+                Empresa
+              </button>
+            </div>
+            <input
+              type="text"
+              className="contacts-panel-search"
+              placeholder="Buscar pelo nome..."
+              value={newConvQuery}
+              onChange={(e) => onChangeNewConvQuery(e.target.value)}
+            />
+            {(() => {
+              // candidatos normalizados numa forma só (userId/name/
+              // avatar), venham de onde vierem: gente na sala agora
+              // (pickable, cor de fundo própria), busca de amigo mútuo
+              // (newConvFriends, filtro local pelo texto) ou busca de
+              // qualquer conta (newConvSearchResults, servidor já
+              // filtra). "Empresa" sem texto nenhum cai pra pickable --
+              // atalho rápido de sempre pra quem tá do seu lado.
+              const q = newConvQuery.trim().toLowerCase();
+              type Candidate = { userId: string; name: string; color?: string; photoUrl?: string };
+              let candidates: Candidate[];
+              let emptyHint: string;
+              if (newConvFilter === "friends") {
+                const friends = newConvFriends ?? [];
+                candidates = q ? friends.filter((f) => f.name.toLowerCase().includes(q)) : friends;
+                emptyHint =
+                  newConvFriends === null
+                    ? "Buscando…"
+                    : q
+                    ? "Nenhum amigo com esse nome."
+                    : "Você ainda não tem amigo mútuo. Vire amigo de alguém no painel de Amigos primeiro.";
+              } else if (q) {
+                candidates = newConvSearchResults ?? [];
+                emptyHint = newConvSearchResults === null ? "Buscando…" : "Ninguém encontrado.";
+              } else {
+                candidates = pickable;
+                emptyHint = "Não tem mais ninguém na sala agora.";
+              }
+              return candidates.length === 0 ? (
+                <p className="chat-empty-hint">{emptyHint}</p>
+              ) : (
+                <div className="chat-picker-list">
+                  {candidates.map((p) => (
+                    <label key={p.userId} className="chat-picker-item">
+                      <input
+                        type="checkbox"
+                        checked={newConvSelection.includes(p.userId)}
+                        onChange={() => onToggleNewConvSelection(p.userId)}
+                      />
+                      <span className="chat-conv-avatar" style={{ background: p.color || "#5a4b7c" }}>
+                        {p.photoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.photoUrl} alt="" />
+                        ) : (
+                          (p.name || "?").slice(0, 1).toUpperCase()
+                        )}
+                      </span>
+                      <span>{p.name || "Sem nome"}</span>
+                    </label>
+                  ))}
+                </div>
+              );
+            })()}
             {newConvSelection.length > 1 && (
               <label className="chat-field">
                 <span>Nome do grupo</span>
