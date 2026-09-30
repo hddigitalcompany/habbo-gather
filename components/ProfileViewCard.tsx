@@ -53,6 +53,12 @@ export default function ProfileViewCard({
   const [profile, setProfile] = useState<ViewedProfile | null>(null);
   const [following, setFollowing] = useState(false);
   const [mutual, setMutual] = useState(false);
+  // pedido implícito ao reaproveitar esse card pra "Meu perfil público"
+  // (ver AccountCard.tsx, item 1 do card da conta) -- abrir o PRÓPRIO
+  // perfil não deveria oferecer "Seguir a si mesmo"/"Conversar
+  // consigo mesmo". A rota GET /api/profile/view já devolvia isSelf,
+  // só não tinha ninguém usando ainda.
+  const [isSelf, setIsSelf] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -68,6 +74,7 @@ export default function ProfileViewCard({
         setProfile(data.profile);
         setFollowing(!!data.following);
         setMutual(!!data.mutual);
+        setIsSelf(!!data.isSelf);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -156,21 +163,23 @@ export default function ProfileViewCard({
                 {profile.bio && <p className="profile-bio">{profile.bio}</p>}
               </div>
 
-              <div className="profile-actions">
-                <div className="profile-actions-row">
-                  <button className="profile-action-btn" disabled={busy} onClick={toggleFollow}>
-                    {following ? "Seguindo" : "Seguir"}
-                  </button>
-                  {mutual && (
-                    <button
-                      className="profile-action-btn primary"
-                      onClick={() => onStartConversation(profile.userId, displayName)}
-                    >
-                      Conversar
+              {!isSelf && (
+                <div className="profile-actions">
+                  <div className="profile-actions-row">
+                    <button className="profile-action-btn" disabled={busy} onClick={toggleFollow}>
+                      {following ? "Seguindo" : "Seguir"}
                     </button>
-                  )}
+                    {mutual && (
+                      <button
+                        className="profile-action-btn primary"
+                        onClick={() => onStartConversation(profile.userId, displayName)}
+                      >
+                        Conversar
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </>
         )}

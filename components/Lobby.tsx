@@ -51,6 +51,7 @@ import { resolveUserId } from "@/lib/identity";
 import SettingsPanel from "@/components/SettingsPanel";
 import FriendsPanel, { type ContactUser } from "@/components/FriendsPanel";
 import ProfileViewCard from "@/components/ProfileViewCard";
+import AccountCard from "@/components/AccountCard";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -447,15 +448,6 @@ function FileIcon() {
     </svg>
   );
 }
-
-// MESMO mapeamento de STATUS_OPTIONS/statusMeta em GameRoom.tsx
-// (copiado, não importado -- mesmo motivo dos ícones acima) -- usado
-// no "card" da conta (ver accountCardOpen mais abaixo).
-const ACCOUNT_STATUS_LABELS: Record<string, string> = {
-  online: "Online",
-  away: "Ausente",
-  focus: "Foco",
-};
 
 // "card" da Empresa selecionada -- pedido do Douglas: "nesse canto
 // quero o card da Empresa selecionada" (print de referência: card
@@ -2517,7 +2509,7 @@ export default function Lobby({
   // card da conta do cliente" + "faca o 'card' do perfil do usuario
   // aberto". Fica no canto direito da barra (3ª coluna do grid, que já
   // tava vazia/reservada, ver comentário grande em app/globals.css).
-  const [accountCardOpen, setAccountCardOpen] = useState(false);
+
 
   // card da Empresa selecionada -- pedido do Douglas (29/set (7)):
   // "quero cada card de empresa atrelado a um espaco". Busca o card
@@ -3304,14 +3296,6 @@ export default function Lobby({
   }
 
   const displayName = accountProfile?.name?.trim() || "visitante";
-  // "card" da conta (ver accountCardOpen) -- campos que a conta JÁ tem
-  // de verdade, sem inventar nada que o print de referência mostrava
-  // mas a gente não coleta (idade, skills, localização).
-  const accountBio = accountProfile?.bio?.trim() || "";
-  const accountInstagram = accountProfile?.instagram?.trim().replace(/^@/, "") || "";
-  const accountInitial = displayName.charAt(0).toUpperCase() || "?";
-  const accountStatusId = accountProfile?.status || "online";
-  const accountStatusLabel = ACCOUNT_STATUS_LABELS[accountStatusId] || ACCOUNT_STATUS_LABELS.online;
   const presenceText =
     presence === null
       ? "Verificando quem tá na sala…"
@@ -3596,50 +3580,18 @@ export default function Lobby({
               print de referência de um card "Hello! I'm Max"): "aqui
               nesse canto, faca o card da conta do cliente" + "faca o
               'card' do perfil do usuario aberto". */}
-          <div className="lobby-topbar-account-wrap">
-            <button
-              type="button"
-              className="lobby-topbar-account"
-              onClick={() => setAccountCardOpen((v) => !v)}
-              aria-expanded={accountCardOpen}
-            >
-              <span className="lobby-topbar-account-avatar">
-                {accountProfile?.photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={accountProfile.photoUrl} alt="" />
-                ) : (
-                  accountInitial
-                )}
-              </span>
-              <span className="lobby-topbar-account-name">{displayName}</span>
-            </button>
-            {accountCardOpen && (
-              <>
-                <div className="lobby-account-card-backdrop" onClick={() => setAccountCardOpen(false)} />
-                <div className="lobby-account-card">
-                  {/* pedido do Douglas: "tire o olha sou deixe apenas o nome". */}
-                  <p className="lobby-account-card-greeting">{displayName}</p>
-                  {accountBio && <p className="lobby-account-card-bio">{accountBio}</p>}
-                  <div className="lobby-account-card-tags">
-                    <span className="lobby-account-card-tag lobby-account-card-tag-status">
-                      <span className={`lobby-account-card-status-dot ${accountStatusId}`} />
-                      {accountStatusLabel}
-                    </span>
-                    {accountInstagram && (
-                      <a
-                        className="lobby-account-card-tag"
-                        href={`https://instagram.com/${accountInstagram}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        @{accountInstagram}
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          {/* card da conta -- virou componente à parte (ver
+              components/AccountCard.tsx), pedido do Douglas 30/set:
+              "esse card, mantenha ele em toda tela que o usuario vai
+              inclusive no jogo" (ver o mesmo <AccountCard /> dentro de
+              GameRoom.tsx agora). Os 3 itens novos (perfil público/
+              dados da conta/selo) moram dentro dele. */}
+          <AccountCard
+            accountUserId={accountUserId}
+            accountProfile={accountProfile}
+            accountAccessToken={accountAccessToken ?? null}
+            onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
+          />
         </div>
       </div>
 

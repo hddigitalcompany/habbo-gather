@@ -3132,6 +3132,70 @@ button.chat-picker-item:disabled {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* "Dados da conta" / "Selo de verificação" (ver AccountCard.tsx) --
+   reaproveitam .profile-backdrop/.profile-card/.profile-body de
+   propósito (mesmo vidro fosco escuro dos outros modais de perfil),
+   só com um pouco mais de altura livre pra caber mais campo. */
+.account-data-card {
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.account-panel-title {
+  margin: 4px 0 2px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.account-panel-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+
+.account-panel-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff8a8a;
+}
+
+.account-panel-divider {
+  margin: 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* bloco "Pessoal" / "Empresa" dentro do Selo de verificação. */
+.verification-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.verification-block-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.verification-badge-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(79, 217, 122, 0.18);
+  color: #4fd97a;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.verification-upload-btn {
+  cursor: pointer;
+}
+
 /* composer inline de "Deixar um recado" -- ver recadoOpen/onSendNote em
    GameRoom.tsx. Mesma receita visual dos campos de perfil (.profile-field
    textarea logo acima), só que vive fora daquele bloco (esse aqui
@@ -4610,6 +4674,41 @@ button.chat-picker-item:disabled {
 
 .lobby-account-card-status-dot.focus {
   background: #f5c542;
+}
+
+/* menu dentro do card da conta (ver AccountCard.tsx) -- "Meu perfil
+   público" / "Dados da conta" / "Selo de verificação", pedido do
+   Douglas 30/set. Mesmo tema CLARO do resto do .lobby-account-card
+   (fundo branco, texto escuro), separado do bloco de cima (nome/bio/
+   tags) por uma linha fina. */
+.account-card-menu {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(20, 20, 45, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-card-menu-item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #14121f;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 8px;
+  cursor: pointer;
+}
+
+.account-card-menu-item:hover {
+  background: rgba(20, 20, 45, 0.06);
+}
+
+.account-card-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* wrapper da 3ª coluna do grid -- só o card da conta agora (ver
@@ -6412,9 +6511,24 @@ button.chat-picker-item:disabled {
 /* botão de sair, só aparece pra quem entrou com conta (ver onSignOut
    em GameRoom.tsx) -- cantinho discreto, não disputa espaço com a
    av-bar/HUD do jogo. */
+/* pedido do Douglas, 30/set: "esse card, mantenha ele em toda tela
+   que o usuario vai inclusive no jogo" -- .lobby-topbar-account-wrap
+   (ver AccountCard.tsx) só é "position: relative" porque no Lobby
+   quem posiciona é o flex do .lobby-topbar; aqui dentro da sala não
+   tem topbar nenhum, então esse wrapper fixa ele no canto, espelhando
+   .room-logo-home-btn do lado esquerdo. */
+.room-account-card-pin {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
+}
+
 .account-sign-out-btn {
   position: fixed;
-  top: 10px;
+  /* desce um pouco pra não ficar embaixo do card da conta novo (ver
+     .room-account-card-pin acima), que agora ocupa esse cantinho. */
+  top: 62px;
   right: 12px;
   z-index: 60;
   background: rgba(13, 7, 21, 0.75);

@@ -47,6 +47,7 @@ import RoomMembersPanel from "@/components/RoomMembersPanel";
 import FriendsPanel from "@/components/FriendsPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
+import AccountCard from "@/components/AccountCard";
 import {
   catalogEntryGroupKey,
   catalogIndicesForGroup,
@@ -5155,6 +5156,20 @@ export default function GameRoom({
           <img src="/logo-x-badge.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
         </button>
       )}
+      {/* pedido do Douglas, 30/set: "esse card, mantenha ele em toda
+          tela que o usuario vai inclusive no jogo" -- MESMO
+          <AccountCard /> que já existia só no Lobby (ver
+          components/Lobby.tsx), agora fixo aqui no canto igual o
+          logo/botão de voltar do lado esquerdo (ver
+          .room-account-card-pin). */}
+      <div className="room-account-card-pin">
+        <AccountCard
+          accountUserId={accountUserId}
+          accountProfile={accountProfile}
+          accountAccessToken={accountAccessToken}
+          onStartConversation={(targetUserId) => startDirectWith(targetUserId)}
+        />
+      </div>
       {onSignOut && (
         <button type="button" className="account-sign-out-btn" onClick={onSignOut} title="Sair da conta">
           Sair da conta
