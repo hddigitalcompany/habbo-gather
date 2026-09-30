@@ -4397,7 +4397,7 @@ export default class MainScene extends Phaser.Scene {
         const img = this.add
           .image(midX, midY + vOffset, key)
           .setOrigin(0.5, 0)
-          .setFlipX(edge.side === "rowPlus")
+          .setFlipX(edge.side === "colPlus") // ACHADO -- ver comentário grande em addWallSprite acima
           .setDepth(DEPTH_FLOOR - 1);
         this.floorEdgeGlassImages.push(img);
       }
@@ -4761,10 +4761,20 @@ export default class MainScene extends Phaser.Scene {
     // precisa desenhar UMA arte por estilo, não duas. "centerRow" segue
     // a MESMA orientação de rowPlus (ver WallSide em game/wall.ts),
     // então espelha junto.
+    // ACHADO (Douglas testou ao vivo com a fachada de vidro nova: "nao o
+    // lado ta errada, espelha a imagem") -- pro estilo normal de
+    // sempre, rowPlus/centerRow é quem espelha (comentário acima); a
+    // fachada de vidro (facade-glass-tile.png/-single.png) precisa do
+    // espelhamento OPOSTO (colPlus/center em vez de rowPlus/centerRow) --
+    // ver MESMO ajuste em createFacadeGlassSprite/drawFloorEdgeGlass
+    // mais abaixo.
+    const flipX = isGlass
+      ? seg.side === "colPlus" || seg.side === "center"
+      : seg.side === "rowPlus" || seg.side === "centerRow";
     const image = this.add
       .image(pos.x, pos.y, key)
       .setOrigin(0.5, 1)
-      .setFlipX(seg.side === "rowPlus" || seg.side === "centerRow")
+      .setFlipX(flipX)
       .setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
     // recorte de boneco atrás: pulado de propósito pra fachada de vidro
     // (mesmo motivo de sempre, ver comentário grande no fim de
@@ -4824,7 +4834,7 @@ export default class MainScene extends Phaser.Scene {
     const image = this.add
       .image(anchor.x, anchor.y, finalKey)
       .setOrigin(0.5, 1)
-      .setFlipX(edge.side === "rowPlus" || edge.side === "centerRow")
+      .setFlipX(edge.side === "colPlus" || edge.side === "center") // ACHADO -- ver comentário grande em addWallSprite acima
       .setDepth(wallDepthForSegment(def, furnitureDepthForTile));
     // recorte de boneco atrás: pulado de propósito pra fachada de
     // vidro, mesmo motivo de sempre (ver addWallSprite acima).
