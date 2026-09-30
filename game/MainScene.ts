@@ -5161,7 +5161,24 @@ export default class MainScene extends Phaser.Scene {
       }
     }
     gfx.setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
-    this.applyWallAvatarCutoutMask(gfx); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
+    // recorte de boneco atrás (ver comentário grande de draftWallSprites)
+    // -- pulado de propósito pra fachada de vidro (ACHADO, Douglas
+    // testando com 2 pessoas na sala: "quando entrou outra pessoa na
+    // mesma sala, ficou bem lento pros dois"): updateWallAvatarCutoutMask
+    // roda TODO FRAME, e a fachada fica sempre na aresta MAIS externa da
+    // sala (a profundidade dela é sempre MAIOR que a de qualquer boneco
+    // de verdade lá dentro, ver wallDepthForSegment -- a média inclui o
+    // tile de FORA, que não existe boneco nenhum nele) -- ou seja, pra
+    // ESSE estilo específico, TODO boneco da sala sempre cai do lado
+    // "atrás" e o recorte SEMPRE roda pra TODOS eles, em TODOS os ~20-40
+    // segmentos da fachada, todo frame -- diferente de uma parede normal
+    // no meio da sala, onde na prática só uns poucos bonecos (se algum)
+    // ficam atrás dela num dado momento. Não faz sentido nenhum um
+    // "buraco" pro boneco aparecer atrás da fachada mesmo (não existe
+    // ninguém do lado de fora do prédio pra precisar aparecer), então
+    // pula a máscara de vez -- sem custo nenhum por frame pra esse
+    // estilo, sem perder nada visualmente.
+    if (!isGlass) this.applyWallAvatarCutoutMask(gfx); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
     return gfx;
   }
 
