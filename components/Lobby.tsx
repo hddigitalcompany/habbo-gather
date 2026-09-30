@@ -858,6 +858,7 @@ function formatAgendaEventTime(startTs: number, durationMinutes: number): string
 function LobbyChatPanel({
   myUserId,
   myName,
+  myRoomSlug,
   conversations,
   accountAccessToken,
   onClose,
@@ -869,6 +870,12 @@ function LobbyChatPanel({
 }: {
   myUserId: string;
   myName: string;
+  // 30/set, bug reportado pelo Douglas: "adicionei logo a empresa e no
+  // chat nao carregou" -- sala PRÓPRIA de quem tá com o painel aberto
+  // (myRealRoom.room_slug lá no Lobby, null se ainda não tem uma),
+  // usada só pra carimbar logo/nome ao mover conversa pra "Empresa"
+  // (ver moveConversationLane abaixo).
+  myRoomSlug: string | null;
   conversations: ConversationSummary[] | null;
   accountAccessToken?: string | null;
   onClose: () => void;
@@ -1057,15 +1064,17 @@ function LobbyChatPanel({
   // "3 pontinhos" -- MESMA ação do case "chat:set_lane" do WebSocket
   // (ver ChatDrawer/moveConversationLane em GameRoom.tsx), só que sem
   // socket (POST /chat/set-lane, ver comentário grande no topo do
-  // arquivo sobre esse painel ser REST-only). Sem companyInfo (o Lobby
-  // não tá "dentro" de sala nenhuma) -- mover pra "Empresa" por aqui
-  // nunca carimba logo/nome, só o ícone genérico (ver CompanyIcon).
+  // arquivo sobre esse painel ser REST-only). 30/set, bug reportado
+  // pelo Douglas ("adicionei logo a empresa e no chat nao carregou"):
+  // mandava sempre companyInfo null aqui (o Lobby não tem roomId de
+  // conexão) -- agora manda a sala PRÓPRIA de quem está movendo
+  // (myRoomSlug), o server só usa quando lane === "company".
   async function moveConversationLane(conversationId: string, lane: "company" | "private") {
     try {
       const res = await fetch(`${REALTIME_HTTP_BASE}/chat/set-lane`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, userId: myUserId, lane }),
+        body: JSON.stringify({ conversationId, userId: myUserId, lane, roomSlug: myRoomSlug }),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -2591,7 +2600,19 @@ export default function Lobby({
       const res = await fetch(`${REALTIME_HTTP_BASE}/chat/direct`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: myUserId, userName: myName, targetUserId, lane }),
+        // 30/set, bug reportado pelo Douglas: "adicionei logo a
+        // empresa e no chat nao carregou" -- o Lobby não tem roomId de
+        // conexão (sem WebSocket) igual o case "chat:create_direct"
+        // tem, então manda a sala PRÓPRIA de quem está criando
+        // (myRealRoom) explícito; o server só usa isso quando
+        // lane === "company" (ver POST /chat/direct em server/index.js).
+        body: JSON.stringify({
+          userId: myUserId,
+          userName: myName,
+          targetUserId,
+          lane,
+          roomSlug: myRealRoom?.room_slug ?? null,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -3683,6 +3704,7 @@ export default function Lobby({
         <LobbyChatPanel
           myUserId={myUserId}
           myName={myName}
+          myRoomSlug={myRealRoom?.room_slug ?? null}
           conversations={conversations}
           accountAccessToken={accountAccessToken}
           onClose={() => {

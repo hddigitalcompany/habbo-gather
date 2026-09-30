@@ -6854,19 +6854,19 @@ function instagramHref(handle: string) {
  * desmontar de vez -- nunca antes da transição de opacidade acabar,
  * senão sumiria seco.
  */
-// 3s só com o X parado no meio, depois desliza revelando "Tower" --
+// 2s só com o X parado no meio, depois desliza revelando "Tower" --
 // pedido do Douglas (29/set (18)): "coloque o X do tower mais tempo no
-// meio, ficou legal o efeito mas ele tem que ser mais estenso / deixe
-// como padrao 10segundo / 3 so com a logo, depois o texto sai".
-const ROOM_LOADING_LOGO_ALONE_MS = 3000;
+// meio... deixe como padrao 10segundo / 3 so com a logo, depois o
+// texto sai" -- e (29/set (19), achou longo demais depois de ver ao
+// vivo): "diminui o tempo de carregamento / 2s a logo, 5s o texto".
+const ROOM_LOADING_LOGO_ALONE_MS = 2000;
 // duração PADRÃO da tela inteira -- diferente do fallback de 10s lá no
 // useEffect do Phaser (esse é só rede de segurança contra a sala nunca
-// terminar de carregar, ver comentário grande dele): esse aqui é o
-// MÍNIMO de tempo que a tela fica visível mesmo quando a sala carrega
-// rápido (a intenção agora é ser uma vinheta de marca de verdade, não
-// só uma barreira contra pop-in -- por isso não soma com o fallback,
-// os dois só coincidem por terem o mesmo número).
-const ROOM_LOADING_MIN_DISPLAY_MS = 10000;
+// terminar de carregar, ver comentário grande dele, que continua 10s
+// de propósito -- só a vinheta ficou mais curta). MÍNIMO de tempo que
+// a tela fica visível mesmo quando a sala carrega rápido (vinheta de
+// marca, não só barreira contra pop-in).
+const ROOM_LOADING_MIN_DISPLAY_MS = 5000;
 
 function RoomLoadingScreen({ ready, onExited }: { ready: boolean; onExited: () => void }) {
   // anima em 2 passos -- ver comentário grande acima: nasce com

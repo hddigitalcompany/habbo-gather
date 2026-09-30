@@ -1081,7 +1081,16 @@ async function handlePostChatSetLane(req, res) {
     res.end('"lane" precisa ser "company" ou "private"');
     return;
   }
-  const result = chatStore.setConversationLane(conversationId, userId, lane, null);
+  // 30/set, bug reportado pelo Douglas: "adicionei logo a empresa e no
+  // chat nao carregou" -- mover uma conversa pra "Empresa" por aqui
+  // (Lobby, sem WebSocket/sem roomId de conexão) NUNCA carimbava
+  // logo/nome, sempre `null` (comentário antigo, agora corrigido) --
+  // "onde" vem do client explícito (a sala PRÓPRIA de quem está
+  // movendo, ver myRoomSlug/moveConversationLane em
+  // components/Lobby.tsx), mesma origem que POST /chat/direct abaixo.
+  const roomSlug = typeof body.roomSlug === "string" ? body.roomSlug.trim() : "";
+  const companyInfo = lane === "company" && roomSlug ? await getRoomCompanyInfo(roomSlug) : null;
+  const result = chatStore.setConversationLane(conversationId, userId, lane, companyInfo);
   if (!result) {
     res.writeHead(403, corsHeaders());
     res.end("Não dá pra mover essa conversa (não existe, é grupo, ou você não participa dela).");
@@ -1193,7 +1202,14 @@ function handlePostChatDirect(req, res) {
     }
     const senderName = typeof userName === "string" ? userName.slice(0, 80) : "";
     if (senderName) chatStore.upsertUser(userId, { name: senderName });
-    const conv = chatStore.getOrCreateDirectConversation(userId, targetUserId, lane);
+    // 30/set, mesmo bug/mesma correção do POST /chat/set-lane acima --
+    // "onde" vem do client explícito (a sala PRÓPRIA de quem está
+    // criando a conversa, ver myRealRoom/handleStartConversation em
+    // components/Lobby.tsx), já que o Lobby não tem roomId de conexão
+    // (sem WebSocket) igual o case "chat:create_direct" tem.
+    const roomSlug = typeof body.roomSlug === "string" ? body.roomSlug.trim() : "";
+    const companyInfo = lane === "company" && roomSlug ? await getRoomCompanyInfo(roomSlug) : null;
+    const conv = chatStore.getOrCreateDirectConversation(userId, targetUserId, lane, companyInfo);
     const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conv.id);
     // avisa o OUTRO participante em tempo real, se ele já tiver a sala
     // aberta em outra aba (mesmo "chat:conversation" que o WebSocket
