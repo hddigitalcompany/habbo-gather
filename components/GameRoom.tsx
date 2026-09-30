@@ -4799,16 +4799,22 @@ export default function GameRoom({
       {/* 29/set (8), pedido do Douglas: "Aumente o X 1/3 / deixe o
           tower na altura exatra do X / clicavel, o X se mantem quando
           entra na sala, e ele vira um link de retorno pro lobby" --
-          MESMO X do topbar do Lobby (components/Lobby.tsx), só que
-          aqui dentro só o mark (sem o texto "Tower", ele não pediu o
-          texto aqui) e na versão CLARA (public/logo-x-light.png --
-          o fundo da sala é escuro, a versão escura do topbar do
-          Lobby ficaria invisível aqui). onBackToLobby vem de
-          app/page.tsx (troca `entered` de volta pra false). */}
+          depois (29/set (14)): "cade o balao branco quadrado com
+          bordas arredondadas?? nao ta nem na mesma posicao nem no
+          mesmo tamanho" -- a primeira versão usava só o traço do X
+          (logo-x-light.png) dentro de um balão redondo translúcido
+          (bolha "vidro" tipo av-bar). Trocado pelo ÍCONE de verdade
+          do app (public/logo-x-badge.png -- MESMA imagem de
+          app/icon.png, o favicon/ícone que Douglas desenhou: já é o
+          quadrado branco de cantos arredondados com o X escuro
+          dentro, cantos de fora transparentes) -- sem precisar de
+          fundo/borda própria aqui, a imagem já É o selo inteiro.
+          onBackToLobby vem de app/page.tsx (troca `entered` de volta
+          pra false). */}
       {onBackToLobby && (
         <button type="button" className="room-logo-home-btn" onClick={onBackToLobby} title="Voltar pro Lobby">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-x-light.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
+          <img src="/logo-x-badge.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
         </button>
       )}
       {onSignOut && (

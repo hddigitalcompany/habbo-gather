@@ -810,6 +810,30 @@ body {
   flex-shrink: 0;
 }
 
+/* 29/set, pedido do Douglas: "nao ta igual ainda eu nao tenho opcao de
+   criar nova conversa na aba da empresa" -- a busca de "Nova conversa"
+   da aba Empresa (ver startNewCompanyConversation em components/
+   Lobby.tsx) usa <button> em vez do <label>+checkbox de sempre (aqui
+   não é multi-seleção, é clicar e já abre a conversa), então precisa
+   do mesmo reset de aparência de botão que .chat-conv-item já tem. */
+button.chat-picker-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  text-align: left;
+  color: inherit;
+}
+
+button.chat-picker-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+button.chat-picker-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .chat-field {
   display: flex;
   flex-direction: column;
@@ -6056,13 +6080,24 @@ body {
 /* 29/set (10): Douglas reportou "o X dentro da sala diminui, e nao
    fica com o balao em volta dele / Eu quero que o balao fique como
    um botao, no mesmo tamanho assim so que limitado a ele, respeitndo
-   o espacamento que tem fora" -- virou um "balão" de verdade, MESMO
-   círculo de vidro que os botões da .av-bar (42px, borderradius:50%,
-   fundo translúcido claro -- ver .av-btn), só que sozinho (não dentro
-   da pílula comprida da av-bar, "limitado a ele"). Posição alinhada
-   no mesmo respiro de 16px que .lobby-topbar/.av-bar já usam em toda
+   o espacamento que tem fora" -- virou um "balão" de verdade, círculo
+   de vidro tipo av-bar (42px, borderradius:50%). Posição alinhada no
+   mesmo respiro de 16px que .lobby-topbar/.av-bar já usam em toda
    parte ("o espaçamento que tem fora"), não mais um valor solto
    (10px/12px). */
+/* 29/set (14): Douglas reportou de novo -- "cade o balao branco
+   quadrado com bordas arredondadas?? nao ta nem na mesma posicao nem
+   no mesmo tamanho" -- o círculo de vidro acima não era o balão que
+   ele tinha em mente: ele queria o ÍCONE de verdade do app (mesmo
+   desenho de app/icon.png/public/logo-x-badge.png -- já É um
+   quadrado branco de cantos arredondados com o X escuro dentro,
+   cantos de fora transparentes), não uma bolha translúcida. Como a
+   imagem já é o selo inteiro (fundo+borda+X, ver JSX em
+   GameRoom.tsx), o botão vira só moldura de posição/interação --
+   sem fundo/borda/raio próprios (senão apareceria uma segunda forma
+   por trás da primeira). drop-shadow no lugar do glass de antes, pra
+   descolar do fundo escuro da sala do mesmo jeito que os outros
+   elementos flutuantes (.chat-drawer etc) fazem com blur+sombra. */
 .room-logo-home-btn {
   position: fixed;
   top: 16px;
@@ -6071,18 +6106,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
+  width: 44px;
+  height: 44px;
   border: none;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   cursor: pointer;
   padding: 0;
-  transition: background 0.15s ease, transform 0.1s ease;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.45));
+  transition: transform 0.1s ease;
 }
 
 .room-logo-home-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.05);
 }
 
 .room-logo-home-btn:active {
@@ -6090,9 +6125,10 @@ body {
 }
 
 .room-logo-home-mark {
-  height: 20px;
-  width: auto;
+  width: 100%;
+  height: 100%;
   display: block;
+  object-fit: contain;
 }
 
 /* --- painel "Membros da sala" (ver components/RoomMembersPanel.tsx)

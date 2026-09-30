@@ -660,6 +660,17 @@ function SendIcon() {
   );
 }
 
+// 29/set, pedido do Douglas: "nao ta igual ainda eu nao tenho opcao de
+// criar nova conversa na aba da empresa" -- MESMO PlusIcon de
+// components/GameRoom.tsx (botão "Nova conversa" no cabeçalho).
+function PlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // 29/set (13), pedido do Douglas: "quero a logo da empresa em que ele
 // abriu o chat" -- MESMO CompanyIcon de components/GameRoom.tsx
 // (fallback do .chat-conv-company-logo quando a empresa não tem
@@ -853,7 +864,7 @@ function LobbyChatPanel({
   accountAccessToken?: string | null;
   onClose: () => void;
   onSent: (conversationId: string, message: ChatMessage) => void;
-  onStartConversation: (targetUserId: string, targetName: string) => void;
+  onStartConversation: (targetUserId: string, targetName: string, lane?: "private" | "company") => void;
   initialActiveId?: string | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
@@ -862,6 +873,58 @@ function LobbyChatPanel({
   const [sending, setSending] = useState(false);
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
+  // "Nova conversa" na aba Empresa (pedido do Douglas, 29/set: "nao ta
+  // igual ainda eu nao tenho opcao de criar nova conversa na aba da
+  // empresa") -- reaproveita GET /api/friends/search (mesma fonte da
+  // aba "Buscar pessoas" do FriendsPanel), já que a lane "company" não
+  // tem trava de amizade nenhuma (qualquer conta com qualquer conta,
+  // ver getOrCreateDirectConversation em server/chatStore.js) --
+  // diferente de "Conversas privadas", que só nasce pelo painel de
+  // Amigos mesmo.
+  const [newConvOpen, setNewConvOpen] = useState(false);
+  const [newConvQuery, setNewConvQuery] = useState("");
+  const [newConvResults, setNewConvResults] = useState<
+    { userId: string; name: string; photoUrl: string }[] | null
+  >(null);
+  const [newConvBusy, setNewConvBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!newConvOpen || !accountAccessToken) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetch(`/api/friends/search?q=${encodeURIComponent(newConvQuery.trim())}`, {
+        headers: { Authorization: `Bearer ${accountAccessToken}` },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled) setNewConvResults(Array.isArray(data?.users) ? data.users : []);
+        })
+        .catch(() => {
+          if (!cancelled) setNewConvResults([]);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [newConvOpen, newConvQuery, accountAccessToken]);
+
+  function closeNewConv() {
+    setNewConvOpen(false);
+    setNewConvQuery("");
+    setNewConvResults(null);
+  }
+
+  async function startNewCompanyConversation(targetUserId: string, targetName: string) {
+    if (newConvBusy) return;
+    setNewConvBusy(targetUserId);
+    try {
+      onStartConversation(targetUserId, targetName, "company");
+      closeNewConv();
+    } finally {
+      setNewConvBusy(null);
+    }
+  }
 
   useEffect(() => {
     if (!activeId) {
@@ -924,12 +987,19 @@ function LobbyChatPanel({
   return (
     <div className="chat-drawer">
       <div className="chat-drawer-header">
-        {activeId && (
-          <button type="button" className="chat-icon-btn" title="Voltar" onClick={() => setActiveId(null)}>
+        {(activeId || newConvOpen) && (
+          <button
+            type="button"
+            className="chat-icon-btn"
+            title="Voltar"
+            onClick={() => (newConvOpen ? closeNewConv() : setActiveId(null))}
+          >
             <BackIcon />
           </button>
         )}
-        {activeId && activeConversation?.kind === "direct" && activeConversation.participants[0] ? (
+        {newConvOpen ? (
+          <h3>Nova conversa</h3>
+        ) : activeId && activeConversation?.kind === "direct" && activeConversation.participants[0] ? (
           <button
             type="button"
             className="chat-drawer-header-identity"
@@ -953,13 +1023,56 @@ function LobbyChatPanel({
           <h3>{activeId ? conversationTitle(activeConversation) : "Conversas"}</h3>
         )}
         <div className="chat-drawer-header-actions">
+          {!activeId && !newConvOpen && laneFilter === "company" && (
+            <button type="button" className="chat-icon-btn" title="Nova conversa" onClick={() => setNewConvOpen(true)}>
+              <PlusIcon />
+            </button>
+          )}
           <button type="button" className="chat-icon-btn" title="Fechar" onClick={onClose}>
             <CloseIcon />
           </button>
         </div>
       </div>
 
-      {!activeId ? (
+      {newConvOpen ? (
+        <div className="chat-new-conv-body">
+          <input
+            type="text"
+            className="contacts-panel-search"
+            placeholder="Buscar pelo nome..."
+            value={newConvQuery}
+            onChange={(e) => setNewConvQuery(e.target.value)}
+            autoFocus
+          />
+          {newConvResults === null ? (
+            <p className="chat-empty-hint">Buscando…</p>
+          ) : newConvResults.length === 0 ? (
+            <p className="chat-empty-hint">{newConvQuery ? "Ninguém encontrado." : "Ninguém cadastrado ainda."}</p>
+          ) : (
+            <div className="chat-picker-list">
+              {newConvResults.map((u) => (
+                <button
+                  key={u.userId}
+                  type="button"
+                  className={newConvBusy === u.userId ? "chat-picker-item busy" : "chat-picker-item"}
+                  disabled={!!newConvBusy}
+                  onClick={() => startNewCompanyConversation(u.userId, u.name)}
+                >
+                  <span className="chat-conv-avatar" style={{ background: "#5a4b7c" }}>
+                    {u.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={u.photoUrl} alt="" />
+                    ) : (
+                      (u.name || "?").trim().charAt(0).toUpperCase() || "?"
+                    )}
+                  </span>
+                  <span>{u.name || "(sem nome)"}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : !activeId ? (
         <>
           <div className="chat-lane-tabs">
             <button
@@ -2135,10 +2248,21 @@ export default function Lobby({
   // auto-gerado de antes ("Sala de {profile.name}"). Nada pra mudar
   // aqui, só documentando que o pedido já fica resolvido por
   // consequência dessa mudança.
-  const dropdownEntries =
-    myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo"
-      ? [...visibleRoomSlugs, { slug: myRoom.room_slug, label: myRoom.name, teamOnly: false }]
-      : visibleRoomSlugs;
+  // 29/set (14), pedido do Douglas ("cade a opcao de criar novo
+  // espaco?"): ele testa com a conta DONA da plataforma, cujo "mine"
+  // (GET /api/room/mine) cai pra Sala Principal mesmo (ver fallback
+  // `rooms[0]` em app/api/room/mine/route.ts, pra quem só tem sala
+  // reservada) -- "Criar espaço +"/showCreateRoomFlow abaixo usavam
+  // só "!myRoom" (sem esse filtro), então achavam que ele "já tinha
+  // sala própria" e escondiam a opção. myRealRoom é a MESMA regra que
+  // dropdownEntries logo abaixo já usava (sala reservada não conta
+  // como "sala própria de verdade") -- centralizado aqui pra não
+  // desalinhar nos dois lugares de novo.
+  const myRealRoom =
+    myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo" ? myRoom : null;
+  const dropdownEntries = myRealRoom
+    ? [...visibleRoomSlugs, { slug: myRealRoom.room_slug, label: myRealRoom.name, teamOnly: false }]
+    : visibleRoomSlugs;
   // itens do dropdown "Espaços visitados" (ver VisitedRoom acima) --
   // filtra fora qualquer coisa que já apareça em "Meus espaços" (ex:
   // visitou a própria sala em algum momento por engano, ou virou dono
@@ -2154,7 +2278,7 @@ export default function Lobby({
   // própria -- mostra "Criar minha sala" (ver JSX mais abaixo) no lugar
   // do preview/"Entrar na sala" normal, SEM escolha (ele não tem outro
   // espaço pra ver enquanto isso).
-  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRoom;
+  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRealRoom;
   // 29/set (10), pedido do Douglas: "adicione mais um opcao: Criar
   // espaço +" -- até aqui só quem NÃO era do time (needsToCreateRoom
   // acima) conseguia criar a própria sala; o time (Douglas/membros)
@@ -2169,7 +2293,7 @@ export default function Lobby({
   // (voltamos a confiar só em needsToCreateRoom, que nunca conta pra
   // quem já tem myRoom).
   const [creatingSpaceFromDropdown, setCreatingSpaceFromDropdown] = useState(false);
-  const showCreateRoomFlow = needsToCreateRoom || (creatingSpaceFromDropdown && !myRoom);
+  const showCreateRoomFlow = needsToCreateRoom || (creatingSpaceFromDropdown && !myRealRoom);
   function openCreateRoomFlow() {
     setCreatingSpaceFromDropdown(true);
     setSpacesMenuOpen(false);
@@ -2249,14 +2373,14 @@ export default function Lobby({
   // "private" -- esse painel só lista amigo mútuo (ver aba "Conversas
   // privadas" em LobbyChatPanel mais abaixo e a mesma trava do
   // servidor em POST /chat/direct).
-  async function handleStartConversation(targetUserId: string) {
+  async function handleStartConversation(targetUserId: string, lane: "private" | "company" = "private") {
     if (!myUserId || contactsBusy) return;
     setContactsBusy(true);
     try {
       const res = await fetch(`${REALTIME_HTTP_BASE}/chat/direct`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: myUserId, userName: myName, targetUserId, lane: "private" }),
+        body: JSON.stringify({ userId: myUserId, userName: myName, targetUserId, lane }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -2454,7 +2578,7 @@ export default function Lobby({
                       MESMO fluxo de nomear empresa + escolher modelo
                       (ver openCreateRoomFlow/showCreateRoomFlow mais
                       acima, JSX no .lobby-card mais abaixo). */}
-                  {accountAccessToken && !stillCheckingRoomAccess && !myRoom && (
+                  {accountAccessToken && !stillCheckingRoomAccess && !myRealRoom && (
                     <button
                       type="button"
                       className="lobby-topbar-dropdown-item lobby-topbar-dropdown-item-create"
@@ -3320,7 +3444,7 @@ export default function Lobby({
             setOpenChatConversationId(null);
           }}
           onSent={handleMessageSent}
-          onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
+          onStartConversation={(targetUserId, _targetName, lane) => handleStartConversation(targetUserId, lane)}
           initialActiveId={openChatConversationId}
         />
       )}
