@@ -6663,6 +6663,26 @@ button.chat-picker-item:disabled {
   z-index: 60;
 }
 
+/* bug reportado pelo Douglas: "o balao com nome no canto superior
+   direito dentro do jogo ta bugado" -- .lobby-topbar-account (ver
+   AccountCard.tsx) foi pensado só pro topbar CLARO do Lobby (fundo
+   quase transparente + texto quase preto #14121f, ver comentário "tema
+   claro" ali). Dentro da sala o fundo é ESCURO -- sem essa
+   sobrescrita, ficava um "balão" quase invisível (texto escuro sobre
+   fundo escuro). Mesma "pegada" vidro escuro do .account-sign-out-btn
+   logo abaixo (fundo escuro translúcido + texto claro) -- só troca a
+   cor/fundo, mantém o resto (formato, tamanho) igual ao chip do
+   Lobby. */
+.room-account-card-pin .lobby-topbar-account {
+  background: rgba(13, 7, 21, 0.75);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f5f0ff;
+}
+
+.room-account-card-pin .lobby-topbar-account:hover {
+  background: rgba(13, 7, 21, 0.92);
+}
+
 .account-sign-out-btn {
   position: fixed;
   /* desce um pouco pra não ficar embaixo do card da conta novo (ver
