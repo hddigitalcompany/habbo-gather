@@ -5571,13 +5571,18 @@ button.chat-picker-item:disabled {
 /* "Tagline" -- pedido do Douglas, 30/set (17): "a frase de impacto da
    empresa [...] com essa mesma caixa de texto/fonte" (print de
    referência: texto grande, caixa alta, negrito, branco, ocupando
-   bem a largura do card). Texto simples (sem foto de fundo nenhuma --
-   o print era só a inspiração da FONTE/peso, não um banner novo). */
+   bem a largura do card). Correção 30/set (18): "a fonte da tagline
+   nao foi a mesma que mandei na foto" -- o print usa uma fonte de
+   impacto/cartaz (Anton, ver --font-tagline em app/layout.tsx), bem
+   diferente da Raleway padrão do site -- font-weight 800 sozinho não
+   bastava, tinha que trocar a fonte mesmo. */
 .company-card-tagline {
   margin: 0 0 14px;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.25;
+  font-family: var(--font-tagline), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0.2px;
   text-transform: uppercase;
   color: #ffffff;
 }
@@ -5665,9 +5670,12 @@ button.chat-picker-item:disabled {
 
 .profile-company-tagline {
   margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
+  font-family: var(--font-tagline), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
   color: #f5f0ff;
 }
 

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Raleway } from "next/font/google";
+import { Raleway, Anton } from "next/font/google";
 import "./globals.css";
 
 // fonte da logo "X Tower" (pedido do Douglas, 29/set: "a fonte é:
@@ -15,6 +15,19 @@ const raleway = Raleway({
   variable: "--font-raleway",
 });
 
+// fonte da "Tagline" da empresa -- pedido do Douglas, 30/set (18):
+// "a fonte da tagline nao foi a mesma que mandei na foto" -- o print
+// de referência usa uma fonte de impacto (caixa alta, super
+// condensada/preta, tipo cartaz), bem diferente da Raleway do resto
+// do site. Anton (Google Fonts) é exatamente esse estilo -- só ela
+// muda, o resto do site continua igual (mesmo padrão da raleway
+// acima, variável CSS à parte).
+const anton = Anton({
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-tagline",
+});
+
 export const metadata: Metadata = {
   title: "Sala Virtual — Protótipo",
   description:
@@ -27,7 +40,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" className={raleway.variable}>
+    <html lang="pt-BR" className={`${raleway.variable} ${anton.variable}`}>
       <body>{children}</body>
     </html>
   );
