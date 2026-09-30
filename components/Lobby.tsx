@@ -3429,7 +3429,20 @@ export default function Lobby({
   // própria -- mostra "Criar minha sala" (ver JSX mais abaixo) no lugar
   // do preview/"Entrar na sala" normal, SEM escolha (ele não tem outro
   // espaço pra ver enquanto isso).
-  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRealRoom;
+  //
+  // 30/set (20): "o link de convite, eu envio e a pessoa quando entra,
+  // cai direto em criar espaco, nao no meu lobby" -- bug: essa conta
+  // não tinha `&& !visitSlug` aqui, então QUALQUER pessoa sem sala
+  // própria (o caso normal de quem recebeu um link de convite, ver
+  // handleCopyRoomLink/visitSlug lá em cima) caía direto nesse fluxo
+  // de "criar espaço", mesmo já tendo um ?visitar=<slug> válido na URL
+  // esperando pra ser resolvido -- a visita (POST /api/room/visit, ver
+  // efeito de visitSlug) rodava em paralelo e acabava não servindo pra
+  // nada, ninguém via o resultado dela. Com visitSlug presente, espera
+  // o preview/"Entrar na sala" normais de sempre (ver JSX mais abaixo)
+  // -- assim que o POST confirma, selectedRoomSlug vira a sala
+  // visitada e a pessoa entra nela, não na tela de criar espaço.
+  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRealRoom && !visitSlug;
   // 29/set (10), pedido do Douglas: "adicione mais um opcao: Criar
   // espaço +" -- até aqui só quem NÃO era do time (needsToCreateRoom
   // acima) conseguia criar a própria sala; o time (Douglas/membros)
