@@ -307,34 +307,29 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
 // estilo perfil do X/Twitter de uma marca real, "Obrazur"). Copiei o
 // LAYOUT/estilo exatamente (fundo claro em cima com frase de efeito,
 // ícones sociais + botão "Seguir", metade preta embaixo com logo,
-// nome + selo verificado, @arroba, bio, seguidores/seguindo, link) --
-// mas troquei o CONTEÚDO da Obrazur (nome, @arroba, bio e números de
-// verdade dela) por um exemplo/molde: reproduzir a identidade real de
-// outra empresa (nome, @arroba, contagem de seguidores, selo
-// verificado) aqui dentro passaria a impressão de que ela é
-// patrocinadora/parceira do habbo-gather, o que não é verdade. Quando
-// existir uma empresa de verdade cadastrada (ver "Empresas
-// Posicionadas" na barra, ainda sem backend), esses campos viram dado
-// real vindo dela, não mais esse molde fixo.
+// nome + selo verificado, @arroba, bio, seguidores/seguindo, link).
 //
 // 29/set: pedido do Douglas "quero uma setinha do lado do card da
 // empresa, abrindo a aba de edicao: Nome fantasia / cnpj / permissoes
 // de exibicao" + "e editar foto de perfil, e foto de banner do card
-// da empresa" (CNPJ removido depois, ver "Tira o cnpj da empresa" --
-// campo/formatCnpj/tipo saíram todos) -- virou estado editável
-// (companyProfile/setCompanyProfile) em vez de const fixa, pra edição
-// realmente refletir no card ao vivo. Continua tudo local (sem
-// backend de empresa ainda, mesmo motivo do comentário acima) --
-// quando existir, isso troca pra vir/salvar no banco de verdade.
+// da empresa" (CNPJ removido depois) -- virou estado editável
+// (companyProfile/setCompanyProfile).
 //
-// 29/set (2): Douglas reportou "quando eu salvo as edicoes, nao
-// mantem no card, atualizo e some" -- as edições já aplicavam ao vivo
-// no card, mas só existiam em memória (useState puro), então um F5
-// resetava tudo pro molde padrão. Adicionado localStorage (mesmo
-// padrão de getStoredMicOn/setStoredMicOn em lib/mediaPrefs.ts) só pra
-// sobreviver a refresh/fechar aba NESTE navegador -- ainda não é um
-// backend de verdade (não sincroniza entre dispositivos/pessoas), só
-// resolve o "some ao atualizar".
+// 29/set (7): pedido do Douglas "quero cada card de empresa atrelado
+// a um espaco" -- até aqui era um MOLDE fixo (localStorage, mesmo
+// navegador, sem ligação com qual sala era qual, ver
+// COMPANY_PROFILE_STORAGE_KEY antigo). Virou de VERDADE: cada ESPAÇO
+// (linha de rooms, colunas company_*, ver migration
+// 0040_room_company_profile.sql e app/api/room/company-profile) tem
+// o próprio card, buscado pelo `selectedRoomSlug` atual (mesma
+// seleção de "Meus espaços"/"Espaços visitados" -- troca de espaço
+// selecionado busca outro card). `name` (Nome fantasia) É a mesma
+// `rooms.name` de sempre (aparece em "Meus espaços"/aba "Empresa" do
+// chat) -- editar aqui reescreve ela direto no servidor, então nunca
+// mais diverge (substitui o sync manual de antes). Só o DONO do
+// espaço selecionado pode editar (companyProfileCanEdit, calculado
+// pelo servidor em cima do token -- ver rota); quem só tá olhando
+// (visitante, ou outro espaço) vê o card mas sem a setinha de editar.
 type CompanyProfile = {
   name: string;
   handle: string;
@@ -348,54 +343,30 @@ type CompanyProfile = {
   // logo abaixo.
   category: string[];
   // "Permitir exibicao do nome da empresa do perfil dos
-  // colaboradores?" -- também só fica guardado localmente por
-  // enquanto (mesmo motivo acima); o perfil dos colaboradores ainda
-  // não lê esse valor de lugar nenhum.
+  // colaboradores?" -- guardado no banco (company_show_name_on_employee_profiles),
+  // o perfil dos colaboradores ainda não lê esse valor de lugar
+  // nenhum (fica pronto pra quando isso existir).
   showNameOnEmployeeProfiles: boolean;
 };
 
-const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
-  name: "Empresa Exemplo",
-  handle: "empresaexemplo",
-  bio: "Espaço reservado para a empresa patrocinadora em destaque na plataforma.",
-  followers: 57,
-  link: "habbo-gather.com/empresas",
+// estado "em branco" -- usado enquanto o card de verdade ainda não
+// chegou do servidor (fetch em andamento/sem espaço selecionado
+// ainda) ou quando o espaço ainda não tem NENHUM campo preenchido
+// (sala nova, ninguém abriu "Editar Empresa" ainda). Sem molde/dado
+// inventado nenhum (era isso que "Empresa Exemplo" fazia antes) --
+// os campos vazios aparecem em branco no card mesmo (ver JSX,
+// placeholders nos inputs de edição cobrem esse caso).
+const BLANK_COMPANY_PROFILE: CompanyProfile = {
+  name: "",
+  handle: "",
+  bio: "",
+  followers: 0,
+  link: "",
   logoUrl: "",
   bannerUrl: "",
   category: [],
   showNameOnEmployeeProfiles: true,
 };
-
-const COMPANY_PROFILE_STORAGE_KEY = "habbo-gather-company-profile";
-
-// lê o que foi salvo no navegador; se não tiver nada, der erro (aba
-// anônima com storage bloqueado) ou vier de uma versão antiga sem
-// algum campo novo, cai pro molde padrão nesse(s) campo(s) em vez de
-// quebrar (spread do DEFAULT primeiro, sobrescrito pelo que veio salvo).
-function loadStoredCompanyProfile(): CompanyProfile {
-  if (typeof window === "undefined") return DEFAULT_COMPANY_PROFILE;
-  try {
-    const raw = window.localStorage.getItem(COMPANY_PROFILE_STORAGE_KEY);
-    if (!raw) return DEFAULT_COMPANY_PROFILE;
-    const parsed = JSON.parse(raw);
-    return {
-      ...DEFAULT_COMPANY_PROFILE,
-      ...parsed,
-      category: Array.isArray(parsed?.category) ? parsed.category : [],
-    };
-  } catch {
-    return DEFAULT_COMPANY_PROFILE;
-  }
-}
-
-function saveStoredCompanyProfile(profile: CompanyProfile) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, JSON.stringify(profile));
-  } catch {
-    // storage indisponível/cheio (aba anônima, quota) -- só não persiste
-  }
-}
 
 // pedido do Douglas: "uma caixa de selecao, escrita Posicione a sua
 // empresa:" + a lista de categorias exata que ele mandou.
@@ -1522,45 +1493,89 @@ export default function Lobby({
   // tava vazia/reservada, ver comentário grande em app/globals.css).
   const [accountCardOpen, setAccountCardOpen] = useState(false);
 
-  // card da Empresa selecionada é sempre visível (ver
-  // .lobby-company-card-pin lá embaixo, perto de .lobby-card) -- mas
-  // agora tem uma aba de EDIÇÃO (companyEditOpen), aberta pela
-  // setinha do lado do card (ver DEFAULT_COMPANY_PROFILE/CompanyProfile
-  // lá em cima pra entender por que os dados ficam em state em vez de
-  // const fixa).
-  // lazy init (função, não valor) -- só lê localStorage na primeira
-  // renderização, evita reler a cada render.
-  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(loadStoredCompanyProfile);
+  // card da Empresa selecionada -- pedido do Douglas (29/set (7)):
+  // "quero cada card de empresa atrelado a um espaco". Busca o card
+  // de VERDADE (GET /api/room/company-profile?slug=...) do espaço
+  // atualmente SELECIONADO (mesmo selectedRoomSlug de "Meus
+  // espaços"/"Espaços visitados" -- ver dropdown mais abaixo/mais
+  // acima) -- troca de espaço selecionado busca outro card, cada um
+  // com seus próprios dados (ver migration
+  // 0040_room_company_profile.sql/rota, comentário grande no topo do
+  // arquivo sobre CompanyProfile). companyProfileCanEdit vem do
+  // servidor (é dono de verdade daquele espaço ou não) -- controla se
+  // a setinha de editar aparece (ver JSX mais abaixo).
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(BLANK_COMPANY_PROFILE);
+  const [companyProfileCanEdit, setCompanyProfileCanEdit] = useState(false);
+  const [companyProfileLoading, setCompanyProfileLoading] = useState(false);
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  const [companySaving, setCompanySaving] = useState(false);
+  const [companySaveError, setCompanySaveError] = useState<string | null>(null);
 
-  // Douglas: "quando eu salvo as edicoes, nao mantem no card,
-  // atualizo e some" -- salva no localStorage toda vez que
-  // companyProfile mudar (inclusive fotos, já em base64 comprimido,
-  // ver compressSquarePhotoToDataUrl/compressBannerPhotoToDataUrl),
-  // não só quando clica em "Salvar alterações" (que só fecha o
-  // painel -- os campos já aplicavam ao vivo antes disso).
   useEffect(() => {
-    saveStoredCompanyProfile(companyProfile);
-  }, [companyProfile]);
+    if (!selectedRoomSlug) {
+      setCompanyProfile(BLANK_COMPANY_PROFILE);
+      setCompanyProfileCanEdit(false);
+      return;
+    }
+    let cancelled = false;
+    setCompanyProfileLoading(true);
+    setCompanyEditOpen(false); // troca de espaço fecha a edição do card anterior
+    const headers: Record<string, string> = {};
+    if (accountAccessToken) headers.Authorization = `Bearer ${accountAccessToken}`;
+    fetch(`/api/room/company-profile?slug=${encodeURIComponent(selectedRoomSlug)}`, { headers })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.profile) {
+          setCompanyProfile(data.profile);
+          setCompanyProfileCanEdit(!!data.canEdit);
+        } else {
+          setCompanyProfile(BLANK_COMPANY_PROFILE);
+          setCompanyProfileCanEdit(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCompanyProfile(BLANK_COMPANY_PROFILE);
+          setCompanyProfileCanEdit(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCompanyProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRoomSlug, accountAccessToken]);
 
-  // pergunta do Douglas 29/set (4): "no card da empresa no lobby
-  // certo?" -- confirmando se o nome da empresa que agora é
-  // obrigatório pra criar a sala (ver companyName em
-  // handleCreateRoomFromTemplate) também aparece no Card da Empresa
-  // (companyProfile acima). NÃO aparecia -- são dois sistemas
-  // diferentes até aqui (rooms.name é real, no banco; companyProfile
-  // continua só local, "sem backend de empresa ainda", ver comentário
-  // grande lá em cima). Isso aqui resolve só o NOME: assim que a sala
-  // de verdade existir (myRoom), se o card ainda tiver o nome-molde
-  // padrão (ninguém editou o card ainda), troca pro nome de verdade
-  // da empresa -- SEM sobrescrever se a pessoa já tiver customizado o
-  // card manualmente (ver DEFAULT_COMPANY_PROFILE.name mais acima).
-  // O resto do card (bio/categoria/banner/seguidores) continua local
-  // por enquanto, mesmo combinado de antes.
-  useEffect(() => {
-    if (!myRoom) return;
-    setCompanyProfile((prev) => (prev.name === DEFAULT_COMPANY_PROFILE.name ? { ...prev, name: myRoom.name } : prev));
-  }, [myRoom]);
+  // "Salvar alterações" agora salva DE VERDADE (POST, ver rota) --
+  // antes (quando isso era só localStorage) o botão só fechava o
+  // painel, porque os campos já aplicavam ao vivo em memória. Chamado
+  // pelo botão de salvar lá embaixo.
+  async function saveCompanyProfile() {
+    if (!selectedRoomSlug || !accountAccessToken || companySaving) return;
+    setCompanySaving(true);
+    setCompanySaveError(null);
+    try {
+      const res = await fetch("/api/room/company-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: selectedRoomSlug, ...companyProfile }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setCompanySaveError(data?.error || "não deu pra salvar, tenta de novo");
+        return;
+      }
+      if (data?.profile) setCompanyProfile(data.profile);
+      setCompanyEditOpen(false);
+    } catch {
+      setCompanySaveError("rede caiu no meio, tenta de novo");
+    } finally {
+      setCompanySaving(false);
+    }
+  }
+
   // dropdown de "Posicione a sua empresa:" -- Douglas pediu multi-seleção
   // ("deixei marcar varias opcoes"), então é um checklist dentro de um
   // dropdown, não um <select> nativo (que só permite uma opção por vez).
@@ -2449,12 +2464,11 @@ export default function Lobby({
           canto direito, do lado da conta). Fixo no canto ESQUERDO da
           tela, sempre visível (sem clique pra abrir) -- combina com o
           nome da aba "Empresas Posicionadas" no topbar: é uma vitrine
-          fixa, não um menu. Ver comentário do CompanyProfile lá em
-          cima sobre por que o conteúdo é um molde/exemplo, não os
-          dados reais da referência (Obrazur).
+          fixa, não um menu (ver comentário grande do CompanyProfile
+          lá em cima -- agora dado real por espaço, não mais molde).
 
-          29/set: + a setinha do lado que abre a aba de edição (ver
-          companyEditOpen/DEFAULT_COMPANY_PROFILE lá em cima). */}
+          29/set: + a setinha do lado que abre a aba de edição (só pro
+          dono, ver companyProfileCanEdit lá em cima). */}
       <div className="lobby-company-card-pin">
         <div className={companyEditOpen ? "company-card company-card-attached" : "company-card"}>
           {/* 29/set: pedido do Douglas "a frase no caso e a imagem do
@@ -2545,19 +2559,26 @@ export default function Lobby({
             quina com .company-edit-panel (que já nasce só arredondado
             do lado direito). Seta vira pra esquerda (fecha) quando já
             tá aberto. */}
-        <button
-          type="button"
-          className="company-card-edit-trigger"
-          onClick={() => setCompanyEditOpen((v) => !v)}
-          aria-expanded={companyEditOpen}
-          title={companyEditOpen ? "Fechar edição" : "Editar empresa"}
-          data-tooltip={companyEditOpen ? "Fechar edição" : "Editar empresa"}
-        >
-          {companyEditOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
-        </button>
+        {/* 29/set (7): só o DONO do espaço selecionado vê a setinha
+            de editar (companyProfileCanEdit vem do servidor, ver
+            fetch de /api/room/company-profile mais acima) -- antes
+            era sempre visível (o card era um molde só seu, sem
+            "espaço de outra pessoa" pra sequer existir). */}
+        {companyProfileCanEdit && (
+          <button
+            type="button"
+            className="company-card-edit-trigger"
+            onClick={() => setCompanyEditOpen((v) => !v)}
+            aria-expanded={companyEditOpen}
+            title={companyEditOpen ? "Fechar edição" : "Editar empresa"}
+            data-tooltip={companyEditOpen ? "Fechar edição" : "Editar empresa"}
+          >
+            {companyEditOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+          </button>
+        )}
       </div>
 
-      {companyEditOpen && (
+      {companyEditOpen && companyProfileCanEdit && (
         <>
           {/* clique fora fecha -- mas SEM escurecer o resto da tela
               (o pedido foi só o painel em si ficar "em blur
@@ -2716,7 +2737,7 @@ export default function Lobby({
                       escolhidas (ou um placeholder), clique abre um
                       checklist com todas as opções de
                       COMPANY_CATEGORIES (definida lá em cima, perto de
-                      DEFAULT_COMPANY_PROFILE). Mesmo padrão de
+                      BLANK_COMPANY_PROFILE). Mesmo padrão de
                       catcher/stopPropagation já usado pro próprio
                       painel de edição (company-edit-click-catcher). */}
                   <label className="company-edit-field">
@@ -2785,13 +2806,19 @@ export default function Lobby({
 
             <div className="company-edit-divider" />
 
+            {/* 29/set (7): agora salva DE VERDADE no espaço (POST
+                /api/room/company-profile, ver saveCompanyProfile
+                acima) -- antes só fechava o painel (era só
+                localStorage, já salvo a cada tecla). */}
+            {companySaveError && <p className="company-edit-save-error">{companySaveError}</p>}
             <div className="company-edit-save-row">
-              {/* sem backend de empresa ainda (ver comentário grande
-                  do CompanyProfile lá em cima) -- "Salvar" só fecha o
-                  painel, os dados já estão salvos ao vivo no state
-                  conforme a pessoa digita/troca foto. */}
-              <button type="button" className="company-edit-save-btn" onClick={() => setCompanyEditOpen(false)}>
-                Salvar alterações
+              <button
+                type="button"
+                className="company-edit-save-btn"
+                onClick={saveCompanyProfile}
+                disabled={companySaving}
+              >
+                {companySaving ? "Salvando…" : "Salvar alterações"}
               </button>
             </div>
           </div>
