@@ -1,0 +1,20 @@
+-- "Tornar os founders visíveis no perfil da empresa?" (pedido do
+-- Douglas, 30/set (13): "no editor do card da empresa coloque Tornar
+-- os founders visiveis no perfil da empresa? vai aparecer no card da
+-- empresa a foto de perfil dos founders com link clicavel pro perfil
+-- pessoal"). Um toggle a mais no card (mesmo padrão de
+-- company_show_name_on_employee_profiles, ver 0040_room_company_profile.sql),
+-- default FALSE (opt-in -- diferente do de nome, que já nasceu ligado
+-- -- esse aqui expõe foto+link pro perfil pessoal de gente de
+-- verdade, então só mostra quando o dono pedir).
+--
+-- "founders" NÃO é uma lista nova -- são as MESMAS contas de
+-- public.company_members (0044_company_members_and_profile_card.sql)
+-- + a dona (rooms.owner_user_id), sem coluna/tabela nova pra isso: o
+-- app/api/room/company-profile já monta essa lista na hora (owner
+-- primeiro, depois os membros), só quando esse toggle tá ligado.
+--
+-- RODAR NO SQL EDITOR DO SUPABASE ANTES DO DEPLOY (mesmo aviso de
+-- sempre -- sem essa coluna existir, o GET/POST de
+-- app/api/room/company-profile quebra).
+alter table public.rooms add column if not exists company_show_founders_on_card boolean not null default false;

@@ -5515,8 +5515,24 @@ button.chat-picker-item:disabled {
   color: #8b8798;
 }
 
-.company-card-bio {
+/* pedido do Douglas, 30/set (11): "No card da empresa, bio vira Quem
+   somos" -- rótulo fixo (não vem de campo nenhum, é só título) em
+   cima do texto de sempre (.company-card-bio, sem mudar nada nela). */
+.company-card-bio-block {
   margin: 0 0 14px;
+}
+
+.company-card-bio-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8b8798;
+}
+
+.company-card-bio {
+  margin: 0;
   font-size: 12.5px;
   line-height: 1.5;
   color: #d7d3e2;
@@ -5587,6 +5603,49 @@ button.chat-picker-item:disabled {
   line-height: 1.2;
   color: #ffffff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+
+/* fileira de fotos dos founders (dona + Membros) -- pedido do
+   Douglas, 30/set (13): "Tornar os founders visiveis no perfil da
+   empresa [...] com link clicavel pro perfil pessoal", ver
+   company-card-founders em Lobby.tsx. Botão sem casca (fundo/borda),
+   só a foto redonda -- clique abre o perfil (ProfileViewCard), mesma
+   ideia de company-edit-member-avatar no painel de edição, só
+   redonda em vez de quadrada (esse aqui é PÚBLICO, no card, não o
+   editor). */
+.company-card-founders {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.company-card-founder {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.company-card-founder-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #5a4b7c;
+  background-size: cover;
+  background-position: center;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.company-card-founder:hover .company-card-founder-avatar {
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .lobby-topbar-tab-wrap {

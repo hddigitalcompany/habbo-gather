@@ -503,6 +503,15 @@ type CompanyProfile = {
   // o perfil dos colaboradores ainda não lê esse valor de lugar
   // nenhum (fica pronto pra quando isso existir).
   showNameOnEmployeeProfiles: boolean;
+  // "Tornar os founders visíveis no perfil da empresa?" -- pedido do
+  // Douglas, 30/set (13): "vai aparecer no card da empresa a foto de
+  // perfil dos founders com link clicavel pro perfil pessoal". Sem
+  // lista/tabela nova pra "founder" -- é dona + Membros
+  // (company_members, ver comentário grande na migration 0045), o
+  // GET/POST de app/api/room/company-profile já manda pronta em
+  // `founders`, só quando esse toggle tá ligado (senão vem []).
+  showFoundersOnCard: boolean;
+  founders: { userId: string; name: string; photoUrl: string }[];
   // selo de verdade (pedido do Douglas, 30/set (2)) -- antes o ícone
   // verificado em .company-card-name era FIXO, sempre aparecia (ver
   // VerifiedBadge/uso mais abaixo). Vem de rooms.company_verified, só
@@ -529,6 +538,8 @@ const BLANK_COMPANY_PROFILE: CompanyProfile = {
   bannerUrl: "",
   category: [],
   showNameOnEmployeeProfiles: true,
+  showFoundersOnCard: false,
+  founders: [],
   verified: false,
 };
 
@@ -2545,6 +2556,13 @@ export default function Lobby({
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
   const [companySaving, setCompanySaving] = useState(false);
   const [companySaveError, setCompanySaveError] = useState<string | null>(null);
+  // clicar na foto de um founder no card (ver companyProfile.founders
+  // acima) abre o perfil pessoal dele -- pedido do Douglas, 30/set
+  // (13): "com link clicavel pro perfil pessoal". Estado próprio
+  // (diferente do viewingProfileUserId de LobbyChatPanel, que é outro
+  // componente/closure -- esse aqui é escopo do Lobby principal, onde
+  // o card da empresa vive).
+  const [viewingFounderUserId, setViewingFounderUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedRoomSlug) {
@@ -3759,7 +3777,20 @@ export default function Lobby({
               {companyProfile.verified && <VerifiedBadge />}
             </p>
             <p className="company-card-handle">@{companyProfile.handle.replace(/^@/, "")}</p>
-            <p className="company-card-bio">{companyProfile.bio}</p>
+            {/* pedido do Douglas, 30/set (11): "No card da empresa,
+                bio vira Quem somos / E a frse quem somos fica no card
+                tambem titulando a bio" -- rótulo fixo em cima do texto
+                da bio (campo continua sendo companyProfile.bio por
+                baixo, só o rótulo exibido no card + na edição vira
+                "Quem somos"). Só mostra o bloco quando tem bio pra
+                titular (senão ficava um "Quem somos" solto sem nada
+                embaixo). */}
+            {companyProfile.bio && (
+              <div className="company-card-bio-block">
+                <p className="company-card-bio-label">Quem somos</p>
+                <p className="company-card-bio">{companyProfile.bio}</p>
+              </div>
+            )}
             {/* pedido do Douglas: "so vai ter Seguidores (o perfil da
                 empresa nao segue ninguem)" -- perfil de empresa não
                 segue outras contas, então só faz sentido mostrar
@@ -3799,6 +3830,36 @@ export default function Lobby({
                   >
                     <span className="company-card-position-name">{cat}</span>
                   </div>
+                ))}
+              </div>
+            )}
+
+            {/* pedido do Douglas, 30/set (13): "vai aparecer no card
+                da empresa a foto de perfil dos founders com link
+                clicavel pro perfil pessoal" -- só aparece com o
+                toggle "Tornar os founders visíveis" ligado (ver painel
+                de edição acima); companyProfile.founders já vem
+                PRONTO do servidor nesse caso (dona primeiro, depois
+                Membros), então aqui é só desenhar. Clique abre
+                ProfileViewCard (ver viewingFounderUserId acima),
+                mesmo padrão de qualquer outra foto clicável no app. */}
+            {companyProfile.showFoundersOnCard && companyProfile.founders.length > 0 && (
+              <div className="company-card-founders">
+                {companyProfile.founders.map((f) => (
+                  <button
+                    key={f.userId}
+                    type="button"
+                    className="company-card-founder"
+                    title={f.name || "(sem nome)"}
+                    onClick={() => setViewingFounderUserId(f.userId)}
+                  >
+                    <span
+                      className="company-card-founder-avatar"
+                      style={{ backgroundImage: f.photoUrl ? `url(${f.photoUrl})` : undefined }}
+                    >
+                      {!f.photoUrl && (f.name || "?").trim().charAt(0).toUpperCase()}
+                    </span>
+                  </button>
                 ))}
               </div>
             )}
@@ -3995,7 +4056,7 @@ export default function Lobby({
                       do campo "Bio" do perfil pessoal em
                       GameRoom.tsx. */}
                   <label className="company-edit-field">
-                    <span>Bio</span>
+                    <span>Quem somos</span>
                     <textarea
                       className="company-edit-input company-edit-textarea"
                       value={companyProfile.bio}
@@ -4161,6 +4222,36 @@ export default function Lobby({
                 </div>
               )}
             </div>
+
+            <div className="company-edit-divider" />
+
+            {/* pedido do Douglas, 30/set (13): "no editor do card da
+                empresa coloque Tornar os founders visiveis no perfil
+                da empresa? vai aparecer no card da empresa a foto de
+                perfil dos founders com link clicavel pro perfil
+                pessoal" -- mesmo padrão do toggle de nome logo acima,
+                só que "founders" aqui é a mesma lista de Membros +
+                dona de cima (companyProfile.founders, montada pelo
+                servidor só quando esse toggle tá ligado, ver
+                comentário grande em app/api/room/company-profile). */}
+            <label className="company-edit-permission-row">
+              <div className="company-edit-permission-text">
+                <p className="company-edit-permission-question">Tornar os founders visíveis no perfil da empresa?</p>
+                <p className="company-edit-permission-hint">
+                  Quando ativado, a foto de quem é dona/membro aparece no card, com link pro perfil pessoal.
+                </p>
+              </div>
+              <span className="company-edit-toggle">
+                <input
+                  type="checkbox"
+                  checked={companyProfile.showFoundersOnCard}
+                  onChange={(e) => setCompanyProfile((prev) => ({ ...prev, showFoundersOnCard: e.target.checked }))}
+                />
+                <span className="company-edit-toggle-track">
+                  <span className="company-edit-toggle-thumb" />
+                </span>
+              </span>
+            </label>
 
             <div className="company-edit-divider" />
 
@@ -4539,6 +4630,20 @@ export default function Lobby({
           accountAccessToken={accountAccessToken}
           onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
           onClose={() => setContactsOpen(false)}
+        />
+      )}
+      {/* clique numa foto de founder no card da empresa (ver
+          viewingFounderUserId/company-card-founders acima) -- pedido
+          do Douglas, 30/set (13): "link clicavel pro perfil pessoal". */}
+      {viewingFounderUserId && accountAccessToken && (
+        <ProfileViewCard
+          userId={viewingFounderUserId}
+          accountAccessToken={accountAccessToken}
+          onClose={() => setViewingFounderUserId(null)}
+          onStartConversation={(targetUserId) => {
+            setViewingFounderUserId(null);
+            handleStartConversation(targetUserId);
+          }}
         />
       )}
       {agendaPanelOpen && (

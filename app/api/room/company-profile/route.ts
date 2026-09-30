@@ -42,6 +42,7 @@ type CompanyProfileRow = {
   company_banner_url: string | null;
   company_category: string[] | null;
   company_show_name_on_employee_profiles: boolean | null;
+  company_show_founders_on_card: boolean | null;
   company_followers: number | null;
   company_verified: boolean | null;
 };
@@ -56,12 +57,39 @@ function toProfile(row: CompanyProfileRow) {
     bannerUrl: row.company_banner_url ?? "",
     category: Array.isArray(row.company_category) ? row.company_category : [],
     showNameOnEmployeeProfiles: row.company_show_name_on_employee_profiles ?? true,
+    // "Tornar os founders visíveis no perfil da empresa?" -- pedido
+    // do Douglas, 30/set (13). Só o toggle vem daqui (coluna de
+    // verdade); a LISTA de founders (foto+link, ver `founders` no
+    // retorno do GET) é montada à parte, só quando esse booleano tá
+    // ligado -- ver comentário grande na migration 0045.
+    showFoundersOnCard: row.company_show_founders_on_card ?? false,
     followers: row.company_followers ?? 0,
     // selo de verdade agora (pedido do Douglas, 30/set (2)), ver
     // migration 0043_company_verification_per_room.sql -- antes o
     // ícone verificado no card era fixo/sempre aparecia.
     verified: row.company_verified ?? false,
   };
+}
+
+// "founders" pro card público (ver comentário grande na migration
+// 0045_company_founders_visibility.sql) -- dona primeiro, depois os
+// membros (public.company_members, 0044_company_members_and_profile_card.sql),
+// nome/foto de public.profiles. Só chamada quando
+// company_show_founders_on_card tá ligado (ver GET abaixo) -- sem
+// motivo pra montar essa lista (e expor foto+conta de gente) toda
+// visita a um espaço que nem ligou o toggle.
+async function getFounders(admin: NonNullable<ReturnType<typeof getSupabaseAdminClient>>, roomId: string, ownerUserId: string | null) {
+  const { data: memberRows } = await admin.from("company_members").select("user_id").eq("room_id", roomId);
+  const memberIds = (memberRows ?? []).map((r) => r.user_id as string);
+  const orderedIds = [...(ownerUserId ? [ownerUserId] : []), ...memberIds.filter((id) => id !== ownerUserId)];
+  if (orderedIds.length === 0) return [];
+
+  const { data: profiles } = await admin.from("profiles").select("id, name, photo_url").in("id", orderedIds);
+  const byId = new Map((profiles ?? []).map((p) => [p.id as string, p]));
+  return orderedIds
+    .map((id) => byId.get(id))
+    .filter((p): p is { id: string; name: string | null; photo_url: string | null } => !!p)
+    .map((p) => ({ userId: p.id, name: p.name ?? "", photoUrl: p.photo_url ?? "" }));
 }
 
 export async function GET(req: NextRequest) {
@@ -74,7 +102,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await admin
     .from("rooms")
     .select(
-      "name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_followers, company_verified"
+      "id, name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_show_founders_on_card, company_followers, company_verified"
     )
     .eq("room_slug", slug)
     .maybeSingle();
@@ -87,7 +115,9 @@ export async function GET(req: NextRequest) {
   const userId = await getVerifiedUserId(req);
   const canEdit = !!userId && !!data.owner_user_id && userId === data.owner_user_id;
 
-  return NextResponse.json({ profile: toProfile(data as CompanyProfileRow), canEdit });
+  const founders = data.company_show_founders_on_card ? await getFounders(admin, data.id as string, data.owner_user_id as string | null) : [];
+
+  return NextResponse.json({ profile: { ...toProfile(data as CompanyProfileRow), founders }, canEdit });
 }
 
 export async function POST(req: NextRequest) {
@@ -122,6 +152,11 @@ export async function POST(req: NextRequest) {
     company_banner_url: typeof body?.bannerUrl === "string" ? body.bannerUrl : "",
     company_category: Array.isArray(body?.category) ? body.category.filter((c: unknown) => typeof c === "string") : [],
     company_show_name_on_employee_profiles: body?.showNameOnEmployeeProfiles !== false,
+    // oposto do de cima de propósito (ver comentário na migration
+    // 0045) -- esse é opt-IN (só true se o dono mandar exatamente
+    // `true`), o de nome é opt-OUT (só false se mandar exatamente
+    // `false`).
+    company_show_founders_on_card: body?.showFoundersOnCard === true,
   };
 
   const updated = await admin
@@ -129,10 +164,13 @@ export async function POST(req: NextRequest) {
     .update(update)
     .eq("id", room.data.id)
     .select(
-      "name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_followers, company_verified"
+      "id, name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_show_founders_on_card, company_followers, company_verified"
     )
     .single();
   if (updated.error) return NextResponse.json({ error: updated.error.message }, { status: 500 });
 
-  return NextResponse.json({ profile: toProfile(updated.data as CompanyProfileRow) });
+  const row = updated.data as CompanyProfileRow & { id: string };
+  const founders = row.company_show_founders_on_card ? await getFounders(admin, row.id, row.owner_user_id) : [];
+
+  return NextResponse.json({ profile: { ...toProfile(row), founders } });
 }
