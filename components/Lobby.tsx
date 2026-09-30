@@ -2563,6 +2563,28 @@ export default function Lobby({
   const [visitedMenuOpen, setVisitedMenuOpen] = useState(false);
   const [visitSlug, setVisitSlug] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  // "Página principal" -- pedido do Douglas, 30/set (20): "o cara nao
+  // cai no lobby direto, ele vai cair na pagina principal / mesma
+  // coisa de navegacao ali, que ela e o inicio, vai ser clicando na
+  // logo cai nela, la vai ter a agenda dele tambem, mas por enquanto
+  // somente isso / mantenha todos os baloes de navegacao, tanto de
+  // baixo quanto de cima, e so mais uma pagina ali dentro mesmo" --
+  // NÃO é uma rota nova (o "ali dentro" é literal: mesmo <Lobby/>,
+  // mesmo topbar/av-bar de sempre, só troca o que aparece no meio).
+  // "home" = só a agenda (.lobby-agenda-preview, que morava junto do
+  // card da empresa antes, ver mais abaixo); "spaces" = o dashboard de
+  // sempre (card da empresa + Entrar na sala, ver .lobby-company-card-
+  // pin/.lobby-card). Logo = volta pra "home" (ver lobby-topbar-logo
+  // mais abaixo); clicar em "Meus espaços"/"Espaços visitados" (aba ou
+  // item do dropdown) leva pra "spaces". Chega em "home" por padrão --
+  // EXCETO quando tem um link de convite (?visitar=, ver visitSlug
+  // acima/efeito logo abaixo): aí vai direto pra "spaces" pra mostrar
+  // a sala do convite (senão a correção do bug de convite virando
+  // "criar espaço" de nada adiantaria).
+  const [lobbyView, setLobbyView] = useState<"home" | "spaces">("home");
+  useEffect(() => {
+    if (visitSlug) setLobbyView("spaces");
+  }, [visitSlug]);
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
   // mais abaixo/ROOM_SLUGS acima) -- vazio até confirmar algo válido
   // (nunca cai em "mapa-modelo"/"sala-principal" por padrão pra quem
@@ -3461,6 +3483,7 @@ export default function Lobby({
   function openCreateRoomFlow() {
     setCreatingSpaceFromDropdown(true);
     setSpacesMenuOpen(false);
+    setLobbyView("spaces");
   }
 
   // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
@@ -3724,11 +3747,14 @@ export default function Lobby({
               claro -- a original é branca, feita pro fundo escuro do
               resto do app) e "Tower" é texto de verdade (não imagem),
               na fonte Raleway (ver --font-raleway em app/layout.tsx). */}
-          <span className="lobby-topbar-logo">
+          {/* pedido do Douglas, 30/set (20): "vai ser clicando na
+              logo cai nela" (na página principal) -- logo era só
+              decorativo até aqui (span sem onClick nenhum). */}
+          <button type="button" className="lobby-topbar-logo" onClick={() => setLobbyView("home")}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo-x-dark.png" alt="" className="lobby-topbar-logo-mark" />
             <span className="lobby-topbar-logo-text">Tower</span>
-          </span>
+          </button>
         </div>
         <nav className="lobby-topbar-nav">
           <div className="lobby-topbar-tab-wrap">
@@ -3740,7 +3766,10 @@ export default function Lobby({
               // aberto/fechado é só a setinha girar, ver
               // lobby-topbar-chevron logo abaixo).
               className="lobby-topbar-tab active"
-              onClick={() => setSpacesMenuOpen((v) => !v)}
+              onClick={() => {
+                setLobbyView("spaces");
+                setSpacesMenuOpen((v) => !v);
+              }}
               aria-expanded={spacesMenuOpen}
             >
               <span className="lobby-topbar-tab-label">Meus espaços</span>
@@ -3783,6 +3812,7 @@ export default function Lobby({
                           userPickedRoomRef.current = true;
                           setSelectedRoomSlug(r.slug);
                           setSpacesMenuOpen(false);
+                          setLobbyView("spaces");
                         }}
                       >
                         {r.label}
@@ -3826,7 +3856,10 @@ export default function Lobby({
             <button
               type="button"
               className="lobby-topbar-tab"
-              onClick={() => setVisitedMenuOpen((v) => !v)}
+              onClick={() => {
+                setLobbyView("spaces");
+                setVisitedMenuOpen((v) => !v);
+              }}
               aria-expanded={visitedMenuOpen}
             >
               <span className="lobby-topbar-tab-label">Espaços visitados</span>
@@ -3858,6 +3891,7 @@ export default function Lobby({
                           userPickedRoomRef.current = true;
                           setSelectedRoomSlug(r.room_slug);
                           setVisitedMenuOpen(false);
+                          setLobbyView("spaces");
                         }}
                       >
                         {r.name}
@@ -3944,6 +3978,14 @@ export default function Lobby({
 
           29/set: + a setinha do lado que abre a aba de edição (só pro
           dono, ver companyProfileCanEdit lá em cima). */}
+      {/* pedido do Douglas, 30/set (20): card da empresa + painel de
+          edição (ver fechamento logo depois do company-edit-panel
+          abaixo) só aparecem na página "spaces" (Meus espaços) agora
+          -- ver lobbyView lá em cima. O card "Entrar na sala"
+          (.lobby-card, mais abaixo) tem o MESMO guard, só que
+          separado (a agenda entra no meio dos dois e foi pra "home"). */}
+      {lobbyView === "spaces" && (
+        <>
       <div className="lobby-company-card-pin">
         <div className={companyEditOpen ? "company-card company-card-attached" : "company-card"}>
           {/* 29/set: pedido do Douglas "a frase no caso e a imagem do
@@ -4622,6 +4664,8 @@ export default function Lobby({
           </div>
         </>
       )}
+        </>
+      )}
 
       {/* pedido do Douglas: "remova o botao abrir minha agenda,
           mantenha apenas os cards da agenda, alinhe os cards com o
@@ -4643,6 +4687,13 @@ export default function Lobby({
           .company-edit-panel (fundo escuro + blur mais forte), em vez
           do degradê roxo claro de antes. Dados reais, mesmo `calls`
           de sempre. */}
+      {/* pedido do Douglas, 30/set (20): "la vai ter a agenda dele
+          tambem mas por enquanto somente isso" -- essa é a página
+          "home" inteira, por enquanto (ver lobbyView lá em cima). Saiu
+          de perto do card da empresa (onde morava antes, mostrando
+          junto) -- agora só aparece em home, o card da empresa só
+          aparece em spaces. */}
+      {lobbyView === "home" && (
       <div className="lobby-agenda-preview">
         {agendaPreviewDays.map((day) => {
           const badge = formatAgendaDayBadge(day.ts);
@@ -4697,7 +4748,9 @@ export default function Lobby({
           );
         })}
       </div>
+      )}
 
+      {lobbyView === "spaces" && (
       <div className="lobby-card">
         {/* 29/set (2): Douglas mandou o print de novo, agora apontando
             pro card "Entrar na sala": "copie exatamente o que tem
@@ -4831,6 +4884,7 @@ export default function Lobby({
             agora é o último item do menu do <AccountCard /> acima (ver
             comentário grande lá). */}
       </div>
+      )}
 
       {/* pedido do Douglas (28/set, com print da av-bar de dentro da
           sala): "quero em balao assim, no canto esquerdo mesmo lugar
