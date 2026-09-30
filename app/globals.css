@@ -2157,9 +2157,12 @@ button.chat-picker-item:disabled {
      item flexível "de sobra" (min-width:auto por padrão) acaba sendo
      o canvas do jogo dentro de .room-wrapper, então é ESTE painel que
      é espremido até sumir (largura ~0) em vez do jogo encolher. Foi
-     isso que fazia "Editar espaço" parecer não abrir nada. */
+     isso que fazia "Editar espaço" parecer não abrir nada.
+     373px = 280px + 1/3 (pedido do Douglas: "Aumente a largura do
+     catalogo 1/3", pra caber miniatura maior no .palette-btn abaixo,
+     ver comentário lá). */
   flex-shrink: 0;
-  width: 280px;
+  width: 373px;
   max-width: 100%;
   max-height: 600px;
   overflow-y: auto;
@@ -2643,10 +2646,17 @@ button.chat-picker-item:disabled {
 
 /* Grade de móveis -- 1 miniatura (arte "de frente", ver furnitureArtFile
    em game/furniture.ts) por peça, sem nome escrito embaixo (nome vira
-   só o title/tooltip) -- mesma pegada do .floor-swatch da aba Piso. */
+   só o title/tooltip) -- mesma pegada do .floor-swatch da aba Piso.
+   104px (era 48px) -- pedido do Douglas: "aumente a visualizacao dos
+   objetos ate que caibam apenas 3 um do lado do outro". Largura útil
+   do .edit-panel (373px de fora - 14px*2 de padding = 345px) só cabe
+   3 miniaturas de 104px + os 2 gaps de 6px entre elas (324px); a 4ª
+   não cabe mais (precisaria de 434px), então quebra linha sozinha --
+   sem precisar de nenhum media query/cálculo em JS, só o
+   flex-wrap de sempre reagindo ao tamanho novo. */
 .palette-btn {
-  width: 48px;
-  height: 48px;
+  width: 104px;
+  height: 104px;
   border-radius: 8px;
   border: 2px solid #2f2245;
   background-color: #0d0715;
