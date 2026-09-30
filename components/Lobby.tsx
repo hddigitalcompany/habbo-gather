@@ -48,6 +48,15 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
+import {
+  SPACE_VOLUME_STORAGE_KEY,
+  CALL_VOLUME_STORAGE_KEY,
+  getStoredVolume,
+  setStoredVolume,
+  getStoredNotificationPrefs,
+  setStoredNotificationPrefs,
+  type NotificationPrefs,
+} from "@/lib/settingsPrefs";
 import SettingsPanel from "@/components/SettingsPanel";
 import FriendsPanel, { type ContactUser } from "@/components/FriendsPanel";
 import ProfileViewCard from "@/components/ProfileViewCard";
@@ -2655,6 +2664,30 @@ export default function Lobby({
   const [selectedMicId, setSelectedMicId] = useState(() => getStoredMicDeviceId());
   const [selectedCamId, setSelectedCamId] = useState(() => getStoredCamDeviceId());
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(() => getStoredSpeakerDeviceId());
+  // pedido do Douglas, 30/set (5): "Volume do espaco, deixe ele
+  // alterar mesmo fora de um [espaço], pra que quando entre ja esteja
+  // no volume certo" -- até aqui o slider daqui do Lobby era decoração
+  // pura (spaceVolume={1} fixo, onChangeSpaceVolume={() => {}} não
+  // fazia nada, ver git blame). Agora lê/escreve a MESMA preferência
+  // persistida que GameRoom.tsx usa (ver lib/settingsPrefs.ts) -- sem
+  // ninguém por perto pra ouvir de verdade aqui fora, mas o valor
+  // ajustado aqui já vale assim que entrar numa sala. callVolume/
+  // notificationPrefs mesma ideia.
+  const [spaceVolume, setSpaceVolumeState] = useState(() => getStoredVolume(SPACE_VOLUME_STORAGE_KEY));
+  const [callVolume, setCallVolumeState] = useState(() => getStoredVolume(CALL_VOLUME_STORAGE_KEY));
+  const [notificationPrefs, setNotificationPrefsState] = useState<NotificationPrefs>(() => getStoredNotificationPrefs());
+  function setSpaceVolume(volume: number) {
+    setSpaceVolumeState(volume);
+    setStoredVolume(SPACE_VOLUME_STORAGE_KEY, volume);
+  }
+  function setCallVolume(volume: number) {
+    setCallVolumeState(volume);
+    setStoredVolume(CALL_VOLUME_STORAGE_KEY, volume);
+  }
+  function setNotificationPrefs(prefs: NotificationPrefs) {
+    setNotificationPrefsState(prefs);
+    setStoredNotificationPrefs(prefs);
+  }
   const localStreamRef = useRef<MediaStream | null>(null);
 
   const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
@@ -4308,11 +4341,15 @@ export default function Lobby({
           onSelectMic={switchMicDevice}
           onSelectCam={switchCamDevice}
           onSelectSpeaker={switchSpeakerDevice}
-          spaceVolume={1}
-          onChangeSpaceVolume={() => {}}
+          spaceVolume={spaceVolume}
+          onChangeSpaceVolume={setSpaceVolume}
           remoteUsers={[]}
           remoteVolumes={{}}
           onChangeRemoteVolume={() => {}}
+          callVolume={callVolume}
+          onChangeCallVolume={setCallVolume}
+          notificationPrefs={notificationPrefs}
+          onChangeNotificationPrefs={setNotificationPrefs}
         />
       )}
 

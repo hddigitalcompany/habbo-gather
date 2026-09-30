@@ -32,6 +32,16 @@ import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { resolveUserId } from "@/lib/identity";
 import {
+  SPACE_VOLUME_STORAGE_KEY,
+  CALL_VOLUME_STORAGE_KEY,
+  getStoredVolume,
+  setStoredVolume,
+  getStoredNotificationPrefs,
+  setStoredNotificationPrefs,
+  fireNotification,
+  type NotificationPrefs,
+} from "@/lib/settingsPrefs";
+import {
   getStoredMicOn,
   getStoredCamOn,
   getStoredMicDeviceId,
@@ -797,15 +807,39 @@ export default function GameRoom({
   // de uma vez, pedido do Douglas), remoteVolumes é o ajuste fino POR
   // PESSOA (id de dentro de remoteStreams -> 0..1) -- os dois se
   // multiplicam na hora de aplicar (ver RemoteVideoTile mais abaixo).
-  // Volume nenhum dos dois persiste entre sessões (reseta ao
-  // recarregar a página) -- só mic/câmera/saída de áudio persistem
-  // (ver lib/mediaPrefs.ts), volume não faz sentido "lembrar" antes de
-  // ter alguém na sala pra ouvir.
+  //
+  // 30/set (5), pedido do Douglas: "Volume do espaco, deixe ele
+  // alterar mesmo fora de um [espaço], pra que quando entre ja esteja
+  // no volume certo" -- ao contrário do que o comentário acima dizia
+  // até aqui ("volume não faz sentido lembrar"), agora PERSISTE (ver
+  // lib/settingsPrefs.ts, mesmo esquema de lib/mediaPrefs.ts pro
+  // mic/câmera/saída) -- só remoteVolumes (ajuste POR PESSOA) continua
+  // sem persistir, esse sim não faz sentido guardar (é sempre gente
+  // diferente cada vez que entra). "Volume de chamadas" (callVolume) é
+  // um canal SEPARADO -- volume da chamada de voz/vídeo de uma
+  // conversa ("tipo Discord", ver ChatCallVideoTile mais abaixo), não
+  // tem nada a ver com o áudio de proximidade do mapa.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedMicId, setSelectedMicId] = useState(() => getStoredMicDeviceId());
   const [selectedCamId, setSelectedCamId] = useState(() => getStoredCamDeviceId());
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(() => getStoredSpeakerDeviceId());
-  const [spaceVolume, setSpaceVolume] = useState(1);
+  const [spaceVolume, setSpaceVolumeState] = useState(() => getStoredVolume(SPACE_VOLUME_STORAGE_KEY));
+  const [callVolume, setCallVolumeState] = useState(() => getStoredVolume(CALL_VOLUME_STORAGE_KEY));
+  const [notificationPrefs, setNotificationPrefsState] = useState<NotificationPrefs>(() => getStoredNotificationPrefs());
+  const notificationPrefsRef = useRef(notificationPrefs);
+  notificationPrefsRef.current = notificationPrefs;
+  function setSpaceVolume(volume: number) {
+    setSpaceVolumeState(volume);
+    setStoredVolume(SPACE_VOLUME_STORAGE_KEY, volume);
+  }
+  function setCallVolume(volume: number) {
+    setCallVolumeState(volume);
+    setStoredVolume(CALL_VOLUME_STORAGE_KEY, volume);
+  }
+  function setNotificationPrefs(prefs: NotificationPrefs) {
+    setNotificationPrefsState(prefs);
+    setStoredNotificationPrefs(prefs);
+  }
   const [remoteVolumes, setRemoteVolumes] = useState<Record<string, number>>({});
 
   const [status, setStatus] = useState("Conectando...");
@@ -852,6 +886,15 @@ export default function GameRoom({
   const [chatOpen, setChatOpen] = useState(false);
   const [chatView, setChatView] = useState<"list" | "thread" | "new">("list");
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // pedido do Douglas, 30/set (5): notificação (ver fireNotification em
+  // lib/settingsPrefs.ts, chamada no handler de "chat:message" mais
+  // abaixo) precisa saber a "lane" (private/company) da conversa que
+  // recebeu mensagem NOVA -- mesmo motivo de activeConversationIdRef/
+  // readingConversationIdRef logo abaixo: esse handler WS vive num
+  // efeito de vida longa, ler `conversations` direto seria closure
+  // velha (sempre o valor de quando o efeito rodou a primeira vez).
+  const conversationsRef = useRef<Conversation[]>([]);
+  conversationsRef.current = conversations;
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMsg[]>>({});
   // 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
@@ -2892,6 +2935,29 @@ export default function GameRoom({
           ...prev,
           [data.conversationId]: [...(prev[data.conversationId] ?? []), msg],
         }));
+        // pedido do Douglas, 30/set (5): "permitir notificacoes de
+        // conversas privadas? conversas de empresa?" -- só notifica
+        // mensagem de OUTRA pessoa (não a minha própria) e só se o
+        // toggle certo (privateChats/companyChats, conforme a lane da
+        // conversa, ver conversationsRef acima) tá ligado.
+        if (msg.senderId !== myUserId) {
+          const lane = conversationsRef.current.find((c) => c.id === data.conversationId)?.lane;
+          const prefs = notificationPrefsRef.current;
+          const allowed = lane === "private" ? prefs.privateChats : lane === "company" ? prefs.companyChats : false;
+          if (allowed) {
+            const preview =
+              msg.kind === "text"
+                ? msg.text
+                : msg.kind === "image"
+                  ? "📷 Foto"
+                  : msg.kind === "audio"
+                    ? "🎤 Áudio"
+                    : msg.kind === "room_card"
+                      ? "🔑 Convite de sala"
+                      : "📎 Arquivo";
+            fireNotification(msg.senderName || "Nova mensagem", preview);
+          }
+        }
         // 29/set (14), pedido do Douglas: "quando eu abro a conversa
         // nao mostra onde ta a mensagem nao vista, e quando eu vejo,
         // ela nao some a marcacao" -- se essa mensagem é de OUTRA
@@ -2977,11 +3043,20 @@ export default function GameRoom({
           { id: toastId, text: `${call.createdByName || "Alguém"} marcou "${call.title}" com você` },
         ]);
         setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
+        // pedido do Douglas, 30/set (5): "permitir notificacoes de ...
+        // agenda?" -- mesmo toast de sempre, só ganhou a notificação de
+        // verdade do navegador junto (se o toggle tá ligado).
+        if (notificationPrefsRef.current.agenda) {
+          fireNotification("Novo compromisso", `${call.createdByName || "Alguém"} marcou "${call.title}" com você`);
+        }
       } else if (data.type === "agenda:reminder") {
         const call = data.call as CallEvent;
         const toastId = `${Date.now()}-${Math.random()}`;
         setToasts((prev) => [...prev.slice(-3), { id: toastId, text: `"${call.title}" começa em breve` }]);
         setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 6000);
+        if (notificationPrefsRef.current.agenda) {
+          fireNotification("Compromisso começando", `"${call.title}" começa em breve`);
+        }
       } else if (data.type === "agenda:error") {
         agendaCreatingRef.current = false;
         if (data.reason === "conflict") {
@@ -5035,6 +5110,10 @@ export default function GameRoom({
     roomCompanyName,
     roomCompanyLogoUrl,
     accountAccessToken,
+    // pedido do Douglas, 30/set (5): "volume de chamadas" -- aplicado
+    // no vídeo/áudio da chamada de conversa (ver ChatCallVideoTile
+    // mais abaixo), ajustável em Configurações mesmo fora da sala.
+    callVolume,
     newConvSelection,
     onToggleNewConvSelection: toggleNewConvSelection,
     newConvName,
@@ -5589,6 +5668,10 @@ export default function GameRoom({
             }))}
             remoteVolumes={remoteVolumes}
             onChangeRemoteVolume={changeRemoteVolume}
+            callVolume={callVolume}
+            onChangeCallVolume={setCallVolume}
+            notificationPrefs={notificationPrefs}
+            onChangeNotificationPrefs={setNotificationPrefs}
           />
         )}
         <input
@@ -8470,12 +8553,21 @@ function RemoteVideoTile({
 // sentido numa chamada que não depende de posição no mapa). "muted" só
 // pro MEU PRÓPRIO preview (senão eu ouviria meu próprio áudio de volta),
 // o vídeo de quem eu tô chamando nunca é mudo.
-function ChatCallVideoTile({ stream, muted }: { stream: MediaStream; muted?: boolean }) {
+function ChatCallVideoTile({ stream, muted, volume }: { stream: MediaStream; muted?: boolean; volume?: number }) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
+
+  // pedido do Douglas, 30/set (5): "volume de chamadas" -- até aqui
+  // esse vídeo não tinha volume nenhum configurável, tocava sempre no
+  // padrão (1.0). "muted" (meu próprio preview) continua tendo
+  // prioridade -- não faz sentido aplicar volume no meu próprio áudio
+  // que já nem toca.
+  useEffect(() => {
+    if (ref.current && typeof volume === "number") ref.current.volume = Math.max(0, Math.min(1, volume));
+  }, [volume]);
 
   return <video ref={ref} autoPlay muted={muted} playsInline className="chat-call-video" />;
 }
@@ -8523,6 +8615,7 @@ function ChatDrawer({
   roomCompanyName,
   roomCompanyLogoUrl,
   accountAccessToken,
+  callVolume,
   newConvSelection,
   onToggleNewConvSelection,
   newConvName,
@@ -8585,6 +8678,7 @@ function ChatDrawer({
   roomCompanyName: string | null;
   roomCompanyLogoUrl: string | null;
   accountAccessToken?: string | null;
+  callVolume: number;
   newConvSelection: string[];
   onToggleNewConvSelection: (userId: string) => void;
   newConvName: string;
@@ -9213,7 +9307,7 @@ function ChatDrawer({
                   return (
                     <div key={p.connectionId} className="chat-call-video-tile">
                       {stream ? (
-                        <ChatCallVideoTile stream={stream} />
+                        <ChatCallVideoTile stream={stream} volume={callVolume} />
                       ) : (
                         <span className="chat-call-video-placeholder">{(p.name || "?").slice(0, 1).toUpperCase()}</span>
                       )}

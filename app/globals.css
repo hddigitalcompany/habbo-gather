@@ -8217,6 +8217,24 @@ button.chat-picker-item:disabled {
   cursor: pointer;
 }
 
+/* pedido do Douglas, 30/set (5): toggles de notificação (Conversas
+   privadas/de empresa/Agenda, ver NotificationsSection em
+   SettingsPanel.tsx) -- mesma ideia de .settings-hint-check, só com o
+   texto na cor normal (é uma opção de verdade, não uma dica). */
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e5defc;
+  margin-bottom: 8px;
+}
+
+.settings-checkbox-row:last-child {
+  margin-bottom: 0;
+}
+
 .settings-slider-row {
   display: grid;
   grid-template-columns: 1fr minmax(90px, 2fr) 40px;

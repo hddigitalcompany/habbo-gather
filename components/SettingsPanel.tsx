@@ -14,6 +14,7 @@
 // dispositivos (navigator.mediaDevices.enumerateDevices) e chama de
 // volta o que a pessoa escolheu.
 import { useEffect, useState } from "react";
+import type { NotificationPrefs } from "@/lib/settingsPrefs";
 
 type DeviceOption = { deviceId: string; label: string };
 
@@ -43,6 +44,10 @@ export default function SettingsPanel({
   remoteUsers,
   remoteVolumes,
   onChangeRemoteVolume,
+  callVolume,
+  onChangeCallVolume,
+  notificationPrefs,
+  onChangeNotificationPrefs,
 }: {
   onClose: () => void;
   micOn: boolean;
@@ -58,6 +63,17 @@ export default function SettingsPanel({
   remoteUsers: RemoteUser[];
   remoteVolumes: Record<string, number>;
   onChangeRemoteVolume: (id: string, volume: number) => void;
+  // pedido do Douglas, 30/set (5): "volume de chamadas" -- SEPARADO de
+  // "Som do espaço" (esse aqui é o volume da chamada de voz/vídeo de
+  // uma CONVERSA, "tipo Discord", ver ChatCallVideoTile em
+  // GameRoom.tsx; Som do espaço só afeta quem tá por perto no mapa).
+  // Os dois agora editam mesmo fora de uma sala (persistem em
+  // localStorage, ver lib/settingsPrefs.ts) -- "pra que quando entre
+  // ja esteja no volume certo".
+  callVolume: number;
+  onChangeCallVolume: (volume: number) => void;
+  notificationPrefs: NotificationPrefs;
+  onChangeNotificationPrefs: (prefs: NotificationPrefs) => void;
 }) {
   const [mics, setMics] = useState<DeviceOption[]>([]);
   const [cams, setCams] = useState<DeviceOption[]>([]);
@@ -188,6 +204,27 @@ export default function SettingsPanel({
             />
             <span className="settings-slider-value">{Math.round(spaceVolume * 100)}%</span>
           </div>
+          <p className="settings-hint">Volume de quem tá por perto no mapa -- vale já pra próxima vez que entrar numa sala.</p>
+
+          {/* pedido do Douglas, 30/set (5): "volume de chamadas" --
+              canal SEPARADO (chamada de voz/vídeo de uma conversa,
+              "tipo Discord", ver ChatCallVideoTile em GameRoom.tsx),
+              nada a ver com o volume de proximidade acima. Sempre
+              visível (não depende de ninguém por perto) -- dá pra
+              ajustar aqui fora da sala também, mesma ideia do "Som do
+              espaço". */}
+          <div className="settings-slider-row">
+            <span>Volume de chamadas</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(callVolume * 100)}
+              onChange={(e) => onChangeCallVolume(Number(e.target.value) / 100)}
+            />
+            <span className="settings-slider-value">{Math.round(callVolume * 100)}%</span>
+          </div>
+          <p className="settings-hint">Volume das chamadas de voz/vídeo de uma conversa (fora do mapa).</p>
 
           {remoteUsers.length === 0 ? (
             <p className="settings-hint">Ninguém por perto agora pra ajustar o volume de cada pessoa.</p>
@@ -210,6 +247,8 @@ export default function SettingsPanel({
             })
           )}
         </section>
+
+        <NotificationsSection notificationPrefs={notificationPrefs} onChangeNotificationPrefs={onChangeNotificationPrefs} />
 
         <section className="items-panel-section">
           <h3>Assinatura</h3>
@@ -247,5 +286,73 @@ export default function SettingsPanel({
         </section>
       </div>
     </div>
+  );
+}
+
+// "E notificacoes tambem, permitir notificacoes de conversas
+// privadas? conversas de empresa? agenda?" -- pedido do Douglas,
+// 30/set (5). Notificação de VERDADE do navegador (Notification API,
+// funciona com a aba em segundo plano) -- precisa de permissão do
+// navegador primeiro (botão abaixo, só aparece enquanto não foi
+// concedida/negada); os 3 toggles guardam a preferência (ver
+// lib/settingsPrefs.ts) mesmo antes de autorizar, pra já disparar
+// certo assim que a pessoa conceder.
+function NotificationsSection({
+  notificationPrefs,
+  onChangeNotificationPrefs,
+}: {
+  notificationPrefs: NotificationPrefs;
+  onChangeNotificationPrefs: (prefs: NotificationPrefs) => void;
+}) {
+  const supported = typeof window !== "undefined" && typeof Notification !== "undefined";
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
+    supported ? Notification.permission : "unsupported"
+  );
+
+  async function requestPermission() {
+    if (!supported) return;
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+    } catch {
+      // navegador recusou o prompt (bloqueado por política, etc.)
+    }
+  }
+
+  function toggle(key: keyof NotificationPrefs) {
+    onChangeNotificationPrefs({ ...notificationPrefs, [key]: !notificationPrefs[key] });
+  }
+
+  return (
+    <section className="items-panel-section">
+      <h3>Notificações</h3>
+
+      {!supported ? (
+        <p className="settings-hint">Seu navegador não suporta notificações.</p>
+      ) : permission === "granted" ? (
+        <p className="settings-hint">Notificações autorizadas nesse navegador.</p>
+      ) : permission === "denied" ? (
+        <p className="settings-hint">
+          Notificações bloqueadas pra esse site -- pra ligar, muda a permissão nas configurações do navegador.
+        </p>
+      ) : (
+        <button type="button" className="profile-action-btn" onClick={requestPermission}>
+          Permitir notificações no navegador
+        </button>
+      )}
+
+      <label className="settings-checkbox-row">
+        <input type="checkbox" checked={notificationPrefs.privateChats} onChange={() => toggle("privateChats")} />
+        <span>Conversas privadas</span>
+      </label>
+      <label className="settings-checkbox-row">
+        <input type="checkbox" checked={notificationPrefs.companyChats} onChange={() => toggle("companyChats")} />
+        <span>Conversas de empresa</span>
+      </label>
+      <label className="settings-checkbox-row">
+        <input type="checkbox" checked={notificationPrefs.agenda} onChange={() => toggle("agenda")} />
+        <span>Agenda</span>
+      </label>
+    </section>
   );
 }
