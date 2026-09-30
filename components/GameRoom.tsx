@@ -221,7 +221,12 @@ type Toast = { id: string; text: string };
 // verdade (não tem conversationId, ninguém precisa abrir histórico).
 type ChatAttachmentKind = "image" | "file" | "audio";
 type ChatAttachment = { url: string; name: string; size: number; mime: string };
-type ChatMsgKind = "text" | ChatAttachmentKind;
+// cardzinho de "convidar amigo pra sua sala" / "pedir pra visitar"
+// (pedido do Douglas, 30/set) -- action "invite" já vem com a sala de
+// quem convidou; action "visit" não carrega sala nenhuma, é só o
+// pedido (ver sendRoomCard/ChatMessageRow mais abaixo).
+type RoomCard = { action: "invite" | "visit"; roomSlug: string; roomName: string; roomLogoUrl: string };
+type ChatMsgKind = "text" | ChatAttachmentKind | "room_card";
 type ChatMsgBase = {
   id: string;
   senderId: string;
@@ -229,6 +234,7 @@ type ChatMsgBase = {
   kind: ChatMsgKind;
   text: string;
   attachment: ChatAttachment | null;
+  roomCard: RoomCard | null;
   ts: number;
   // true quando alguém apagou essa mensagem ("apaga pra todos") -- o
   // texto/anexo original já vem vazio do servidor nesse caso, o bubble
@@ -374,6 +380,7 @@ function previewText(last: { kind: ChatMsgKind; text: string }): string {
   if (last.kind === "text") return last.text;
   if (last.kind === "image") return "📷 Foto";
   if (last.kind === "audio") return "🎤 Áudio";
+  if (last.kind === "room_card") return "🔑 Convite de sala";
   return "📎 Arquivo";
 }
 
@@ -545,6 +552,18 @@ const REALTIME_HTTP_BASE =
 
 function attachmentUrl(path: string): string {
   return path.startsWith("http") ? path : `${REALTIME_HTTP_BASE}${path}`;
+}
+
+// mesmo link "?visitar=<slug>" que handleCopyRoomLink (Lobby.tsx) copia
+// pra área de transferência -- POST /api/room/visit só registra um
+// bookmark (nunca vira membro, ver comentário grande na rota), então
+// clicar em "Entrar" num cardzinho de convite nunca torna quem clicou
+// um membro da sala (pedido do Douglas: "visitante nao se tornam
+// membros"). Navegação de página cheia mesmo (não é troca de state
+// interna) -- o Lobby é quem resolve o parâmetro ao carregar.
+function visitRoomLink(roomSlug: string): string {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}/?visitar=${encodeURIComponent(roomSlug)}`;
 }
 
 /** Monta a URL de uma rota REST /room/* já com o slug da sala (ver
@@ -3830,6 +3849,29 @@ export default function GameRoom({
     sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
   }
 
+  // --- "Convidar amigo" / "Visitar amigo" (pedido do Douglas, 30/set):
+  // botão com seta do lado do nome, dentro de uma conversa direta --
+  // "Convidar amigo" manda um cardzinho com a sala ATUAL (ver
+  // roomSlug/roomCompanyName/roomCompanyLogoUrl lá em cima, mesma sala
+  // que a pessoa tá vendo agora); "Visitar amigo" manda só o pedido
+  // ("Fulano está querendo ir até você"), sem sala nenhuma -- quem
+  // recebe decide convidar de volta clicando no próprio cardzinho (ver
+  // onAcceptVisit em ChatMessageRow). Só faz sentido numa conversa
+  // direta de verdade (nunca no chat da Sala), mas aceita o mesmo
+  // "roteamento" de sempre (activeConversationId null cairia no chat
+  // da Sala, só não tem botão nenhum chamando isso nesse caso).
+  function sendRoomCard(action: "invite" | "visit") {
+    const roomCard =
+      action === "invite"
+        ? { action, roomSlug, roomName: roomCompanyName || "Minha sala", roomLogoUrl: roomCompanyLogoUrl || "" }
+        : { action, roomSlug: "", roomName: "", roomLogoUrl: "" };
+    if (activeConversationId === null) {
+      wsSend({ type: "chat", roomCard });
+    } else {
+      wsSend({ type: "chat:send", conversationId: activeConversationId, roomCard });
+    }
+  }
+
   // --- gravação de áudio, estilo WhatsApp: grava (mostra o tempo já
   // gravado ao vivo) -> PARA (sem mandar sozinho) -> mostra um preview
   // pra ouvir de novo -> só manda quando a pessoa confirma. Antes disso
@@ -5026,6 +5068,7 @@ export default function GameRoom({
     onDiscardRecordedAudio: discardRecordedAudio,
     onSendRecordedAudio: sendRecordedAudio,
     onDeleteMessage: deleteMessage,
+    onSendRoomCard: sendRoomCard,
     onMoveConversationLane: moveConversationLane,
     callParticipantsByConversation,
     myCallConversationId,
@@ -8435,6 +8478,16 @@ function PhoneIcon() {
   );
 }
 
+// seta do botão "Convidar amigo / Visitar amigo" (ver chat-invite-toggle-btn) --
+// só gira via CSS (.chat-invite-toggle-btn.open), o SVG é sempre o mesmo.
+function ChevronDownIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <path d="M5 9l7 7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // Gaveta de chat "de verdade" -- Sala (nearby, sem histórico, ver
 // comentário nos tipos lá em cima) + conversas diretas/grupo com
 // histórico persistido no servidor + foto/arquivo/áudio. Tamanho FIXO
@@ -8486,6 +8539,7 @@ function ChatDrawer({
   onDiscardRecordedAudio,
   onSendRecordedAudio,
   onDeleteMessage,
+  onSendRoomCard,
   onMoveConversationLane,
   callParticipantsByConversation,
   myCallConversationId,
@@ -8547,6 +8601,9 @@ function ChatDrawer({
   onDiscardRecordedAudio: () => void;
   onSendRecordedAudio: () => void;
   onDeleteMessage: (conversationId: string | null, messageId: string) => void;
+  // "Convidar amigo" / "Visitar amigo" -- ver comentário grande em
+  // sendRoomCard/GameRoom.tsx.
+  onSendRoomCard: (action: "invite" | "visit") => void;
   // "3 pontinhos" -- mover uma conversa 1x1 pra outra lane (Empresa <->
   // Privada, ver comentário grande em moveConversationLane/GameRoom.tsx
   // e setConversationLane em server/chatStore.js).
@@ -8649,6 +8706,11 @@ function ChatDrawer({
   // agora (null = nenhum), ver comentário grande em
   // onMoveConversationLane logo abaixo.
   const [convMenuOpenId, setConvMenuOpenId] = useState<string | null>(null);
+  // "Convidar amigo" / "Visitar amigo" -- menu que expande do lado do
+  // nome na conversa direta (pedido do Douglas, 30/set: "ao lado do
+  // nome, um botao com seta clicou expande"), ver JSX no header
+  // "thread" mais abaixo.
+  const [inviteMenuOpen, setInviteMenuOpen] = useState(false);
   const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
   // mantém sempre uma empresa válida selecionada (nunca null enquanto
   // existir pelo menos uma) -- cobre tanto o primeiro carregamento
@@ -8976,22 +9038,65 @@ function ChatDrawer({
                 Conversation no topo do arquivo). Grupo/Sala continuam
                 sem foto nenhuma (não tem UMA pessoa só pra mostrar). */}
             {!isRoom && !renamingGroup && activeConv?.kind === "direct" && activeConv.participants[0] ? (
-              <button
-                type="button"
-                className="chat-drawer-header-identity"
-                onClick={() => onOpenProfile(activeConv.participants[0].id)}
-                title="Ver perfil"
-              >
-                <span className="chat-drawer-header-avatar" style={{ background: activeConv.participants[0].color || "#5a4b7c" }}>
-                  {activeConv.participants[0].photoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={activeConv.participants[0].photoUrl} alt="" />
-                  ) : (
-                    (activeConv.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
-                  )}
-                </span>
-                <h3>{conversationDisplayName(activeConv)}</h3>
-              </button>
+              <span className="chat-drawer-header-identity-wrap">
+                <button
+                  type="button"
+                  className="chat-drawer-header-identity"
+                  onClick={() => onOpenProfile(activeConv.participants[0].id)}
+                  title="Ver perfil"
+                >
+                  <span className="chat-drawer-header-avatar" style={{ background: activeConv.participants[0].color || "#5a4b7c" }}>
+                    {activeConv.participants[0].photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={activeConv.participants[0].photoUrl} alt="" />
+                    ) : (
+                      (activeConv.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
+                    )}
+                  </span>
+                  <h3>{conversationDisplayName(activeConv)}</h3>
+                </button>
+                {/* "Convidar amigo" / "Visitar amigo" -- pedido do
+                    Douglas, 30/set: "ao lado do nome, um botao com
+                    seta clicou expande, Convidar amigo / Visitar
+                    amigo" -- manda um cardzinho na própria conversa
+                    (ver sendRoomCard/GameRoom.tsx e ChatMessageRow
+                    mais abaixo pra como ele renderiza). */}
+                <button
+                  type="button"
+                  className={inviteMenuOpen ? "chat-invite-toggle-btn open" : "chat-invite-toggle-btn"}
+                  title="Convidar ou visitar"
+                  onClick={() => setInviteMenuOpen((v) => !v)}
+                >
+                  <ChevronDownIcon />
+                </button>
+                {inviteMenuOpen && (
+                  <>
+                    <div className="chat-conv-menu-backdrop" onClick={() => setInviteMenuOpen(false)} />
+                    <div className="chat-invite-menu">
+                      <button
+                        type="button"
+                        className="chat-invite-menu-item"
+                        onClick={() => {
+                          onSendRoomCard("invite");
+                          setInviteMenuOpen(false);
+                        }}
+                      >
+                        Convidar amigo
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-invite-menu-item"
+                        onClick={() => {
+                          onSendRoomCard("visit");
+                          setInviteMenuOpen(false);
+                        }}
+                      >
+                        Visitar amigo
+                      </button>
+                    </div>
+                  </>
+                )}
+              </span>
             ) : isRoom ? (
               <h3>Sala</h3>
             ) : renamingGroup ? (
@@ -9143,6 +9248,7 @@ function ChatDrawer({
                             ? () => onDeleteMessage(activeConversationId, m.id)
                             : undefined
                         }
+                        onAcceptVisit={m.senderId !== myUserId ? () => onSendRoomCard("invite") : undefined}
                       />
                     </Fragment>
                   ));
@@ -9784,6 +9890,7 @@ function ChatMessageRow({
   own,
   showSenderName,
   onDelete,
+  onAcceptVisit,
 }: {
   msg: ChatMessage;
   own: boolean;
@@ -9792,6 +9899,11 @@ function ChatMessageRow({
   // chamadores em ChatDrawer (Sala usa chat:delete_room, conversa de
   // verdade usa chat:delete).
   onDelete?: () => void;
+  // "Visitar amigo" (ver comentário grande em sendRoomCard/GameRoom.tsx)
+  // -- só passado pra mensagens de conversa de verdade (nunca a Sala),
+  // chama de volta com action "invite" usando a MINHA sala quando eu
+  // (quem recebeu o pedido) clico "Convidar" no cardzinho.
+  onAcceptVisit?: () => void;
 }) {
   if (msg.deleted) {
     return (
@@ -9838,7 +9950,50 @@ function ChatMessageRow({
               </span>
             </a>
           )}
-          {msg.text && msg.kind !== "text" && <div className="chat-attachment-caption">{msg.text}</div>}
+          {msg.kind === "room_card" && msg.roomCard && msg.roomCard.action === "invite" && (
+            <div className="chat-room-card">
+              <span className="chat-room-card-icon">
+                {msg.roomCard.roomLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={msg.roomCard.roomLogoUrl} alt="" />
+                ) : (
+                  <CompanyIcon />
+                )}
+              </span>
+              <span className="chat-room-card-text">
+                {own ? (
+                  <>Você convidou pra sua sala <strong>{msg.roomCard.roomName || "sua sala"}</strong></>
+                ) : (
+                  <>
+                    {msg.senderName || "Alguém"} está te convidando pra sala <strong>{msg.roomCard.roomName || "dele(a)"}</strong>
+                  </>
+                )}
+              </span>
+              {!own && (
+                <a className="chat-room-card-btn" href={visitRoomLink(msg.roomCard.roomSlug)}>
+                  Entrar
+                </a>
+              )}
+            </div>
+          )}
+          {msg.kind === "room_card" && msg.roomCard && msg.roomCard.action === "visit" && (
+            <div className="chat-room-card">
+              <span className="chat-room-card-icon">
+                <CompanyIcon />
+              </span>
+              <span className="chat-room-card-text">
+                {own ? "Você pediu pra visitar a sala dele(a)" : `${msg.senderName || "Alguém"} está querendo ir até você`}
+              </span>
+              {!own && onAcceptVisit && (
+                <button type="button" className="chat-room-card-btn" onClick={onAcceptVisit}>
+                  Convidar
+                </button>
+              )}
+            </div>
+          )}
+          {msg.text && msg.kind !== "text" && msg.kind !== "room_card" && (
+            <div className="chat-attachment-caption">{msg.text}</div>
+          )}
         </div>
       </div>
       <span className="chat-message-time">{formatChatTime(msg.ts)}</span>

@@ -425,7 +425,7 @@ export function listConversationsForUser(userId) {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function addMessage(conversationId, { senderId, senderName, kind, text, attachment }) {
+export function addMessage(conversationId, { senderId, senderName, kind, text, attachment, roomCard }) {
   const conv = store.conversations[conversationId];
   if (!conv) return null;
   const msg = {
@@ -433,7 +433,7 @@ export function addMessage(conversationId, { senderId, senderName, kind, text, a
     conversationId,
     senderId,
     senderName: String(senderName || "").slice(0, 80),
-    kind, // "text" | "image" | "file" | "audio"
+    kind, // "text" | "image" | "file" | "audio" | "room_card"
     text: text ? String(text).slice(0, 2000) : "",
     attachment: attachment
       ? {
@@ -441,6 +441,27 @@ export function addMessage(conversationId, { senderId, senderName, kind, text, a
           name: String(attachment.name || "arquivo").slice(0, 200),
           size: Number(attachment.size) || 0,
           mime: String(attachment.mime || "").slice(0, 100),
+        }
+      : null,
+    // "convidar amigo pra sua sala" / "pedir pra visitar" (pedido do
+    // Douglas, 30/set: "os contatos, se convidarem direto com envio de
+    // convite que na conversa fica como um cardzinho ... visitante nao
+    // se tornam membros") -- cardzinho especial dentro da conversa, NÃO
+    // é um anexo de verdade (não passa por /upload). action "invite" já
+    // vem com a sala de quem convidou (roomSlug/roomName/roomLogoUrl);
+    // action "visit" é só o pedido ("Fulano está querendo ir até você"),
+    // sem sala nenhuma anexada -- quem recebe é que decide convidar de
+    // volta (ver onAcceptVisit em ChatMessageRow/GameRoom.tsx). "Entrar"
+    // num convite reaproveita o MESMO link ?visitar=<slug> de sempre
+    // (POST /api/room/visit só registra um bookmark, nunca vira membro,
+    // ver comentário grande na rota) -- então visitante continua nunca
+    // virando membro por essa via, do jeito que o Douglas pediu.
+    roomCard: roomCard
+      ? {
+          action: roomCard.action === "invite" ? "invite" : "visit",
+          roomSlug: String(roomCard.roomSlug || "").slice(0, 200),
+          roomName: String(roomCard.roomName || "").slice(0, 200),
+          roomLogoUrl: String(roomCard.roomLogoUrl || "").slice(0, 500),
         }
       : null,
     ts: Date.now(),

@@ -45,7 +45,7 @@
 // sala (dependem de WebRTC/WebSocket de verdade, ver ChatDrawer em
 // GameRoom.tsx).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 import SettingsPanel from "@/components/SettingsPanel";
@@ -68,6 +68,70 @@ const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
 const REALTIME_HTTP_BASE =
   (typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http") +
   `://${REALTIME_HOST}`;
+
+// 30/set, pedido do Douglas: "fora da sala nao deixa anexar e mandar
+// audio, adicione" -- o Lobby (REST, sem WebSocket) ganhou o mesmo
+// anexo/áudio que o chat de dentro da sala já tinha (ver comentário
+// grande no topo do arquivo sobre esse painel ser REST-only, e
+// uploadChatFile/attachmentUrl em GameRoom.tsx -- copiado, não
+// importado, mesmo motivo de sempre). MESMO endpoint POST /upload de
+// sempre (bytes crus, sem multipart), não depende de sala nenhuma.
+function attachmentUrl(path: string): string {
+  return path.startsWith("http") ? path : `${REALTIME_HTTP_BASE}${path}`;
+}
+
+async function uploadChatFile(file: Blob, filename: string): Promise<ChatAttachment> {
+  const res = await fetch(`${REALTIME_HTTP_BASE}/upload?filename=${encodeURIComponent(filename)}`, {
+    method: "POST",
+    headers: { "Content-Type": (file as File).type || "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`upload falhou (${res.status})`);
+  return (await res.json()) as ChatAttachment;
+}
+
+function formatFileSize(bytes: number): string {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatChatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// "0:07", "1:23" etc -- usado no contador de gravação de áudio.
+function formatRecordingTime(totalSec: number): string {
+  const m = Math.floor(totalSec / 60);
+  const s2 = totalSec % 60;
+  return `${m}:${s2 < 10 ? "0" : ""}${s2}`;
+}
+
+// tenta mimeTypes em ordem de preferência -- nem todo navegador aceita
+// "audio/webm;codecs=opus" (ex: Safari), então cai pro próximo que o
+// MediaRecorder confirmar que suporta.
+function pickSupportedAudioMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return undefined;
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+  return candidates.find((t) => {
+    try {
+      return MediaRecorder.isTypeSupported(t);
+    } catch {
+      return false;
+    }
+  });
+}
+
+// mesmo link "?visitar=<slug>" que handleCopyRoomLink copia pra área de
+// transferência mais abaixo -- POST /api/room/visit só registra um
+// bookmark (nunca vira membro), então "Entrar" num cardzinho de
+// convite nunca torna quem clicou um membro da sala (pedido do
+// Douglas: "visitante nao se tornam membros").
+function visitRoomLink(roomSlug: string): string {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}${window.location.pathname}?visitar=${encodeURIComponent(roomSlug)}`;
+}
 
 type PresenceInfo = { totalOnline: number } | null;
 
@@ -106,12 +170,23 @@ type ConversationSummary = {
   lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
 };
 
+// mesmo formato de anexo do WebSocket (ver ChatAttachment em
+// GameRoom.tsx) -- copiado, não importado (mesmo motivo de sempre
+// nesse arquivo, ver comentário grande no topo).
+type ChatAttachment = { url: string; name: string; size: number; mime: string };
+// cardzinho de "convidar amigo pra sua sala" / "pedir pra visitar"
+// (pedido do Douglas, 30/set) -- ver comentário grande em
+// chatStore.addMessage (server/chatStore.js) e sendRoomCard mais
+// abaixo.
+type RoomCard = { action: "invite" | "visit"; roomSlug: string; roomName: string; roomLogoUrl: string };
 type ChatMessage = {
   id: string;
   senderId: string;
   senderName: string;
   kind: string;
   text: string;
+  attachment?: ChatAttachment | null;
+  roomCard?: RoomCard | null;
   ts: number;
   deleted?: boolean;
 };
@@ -317,6 +392,58 @@ function ChevronIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
       <path d="M5 9l7 7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// mesmo pacote de ícones do chat de dentro da sala (copiado, não
+// importado, ver GameRoom.tsx) -- anexo/gravar/parar/apagar/arquivo.
+function AttachIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M16.5 6.5 8.9 14.1a3 3 0 0 0 4.24 4.24l7.6-7.6a5 5 0 0 0-7.07-7.07l-7.6 7.6a7 7 0 0 0 9.9 9.9"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M5 7h14M9.5 7V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v2M7 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3.5V8h4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -934,6 +1061,24 @@ function LobbyChatPanel({
   const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  // anexo/áudio no chat de fora da sala (pedido do Douglas, 30/set:
+  // "fora da sala nao deixa anexar e mandar audio, adicione") -- MESMO
+  // padrão de estado/refs do ChatDrawer em GameRoom.tsx (copiado, não
+  // importado, ver comentário grande no topo do arquivo).
+  const [sendingAttachment, setSendingAttachment] = useState(false);
+  const [recordingAudio, setRecordingAudio] = useState(false);
+  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const [recordedPreview, setRecordedPreview] = useState<{ url: string; durationSec: number } | null>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordedBlobRef = useRef<Blob | null>(null);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartRef = useRef(0);
+  const discardRecordingRef = useRef(false);
+  // "Convidar amigo" / "Visitar amigo" -- menu que expande do lado do
+  // nome (ver comentário grande em sendRoomCard mais abaixo).
+  const [inviteMenuOpen, setInviteMenuOpen] = useState(false);
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
   // 29/set (15), pedido do Douglas -- correção do que eu tinha
@@ -1179,29 +1324,148 @@ function LobbyChatPanel({
     }
   }
 
+  // POST /chat/send genérico -- text (chat de sempre), attachment+kind
+  // (foto/arquivo/áudio, pedido do Douglas 30/set: "fora da sala nao
+  // deixa anexar e mandar audio") ou roomCard (cardzinho de convite/
+  // visita, mesmo pedido: "os contatos, se convidarem direto com envio
+  // de convite"). MESMO endpoint que sendMessage já usava, só que
+  // extraído pra ser reaproveitado pelas três formas de mandar
+  // mensagem (texto/anexo/cardzinho) sem repetir o fetch três vezes.
+  async function sendChatPayload(payload: { text?: string; attachment?: ChatAttachment; kind?: string; roomCard?: RoomCard }) {
+    if (!activeId) return null;
+    const res = await fetch(`${REALTIME_HTTP_BASE}/chat/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: activeId, userId: myUserId, userName: myName, ...payload }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.message) {
+      setMessages((prev) => (prev ? [...prev, data.message] : [data.message]));
+      onSent(activeId, data.message);
+    }
+    return data?.message ?? null;
+  }
+
   async function sendMessage() {
     const text = draft.trim();
     if (!text || !activeId || sending) return;
     setSending(true);
     try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: activeId, userId: myUserId, userName: myName, text }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.message) {
-          setMessages((prev) => (prev ? [...prev, data.message] : [data.message]));
-          onSent(activeId, data.message);
-          setDraft("");
-        }
-      }
+      const msg = await sendChatPayload({ text });
+      if (msg) setDraft("");
     } catch {
       // rede caiu no meio -- deixa o texto no campo pra pessoa tentar de novo
     } finally {
       setSending(false);
     }
+  }
+
+  async function sendChatAttachment(file: Blob, filename: string, kind: "image" | "file" | "audio") {
+    if (!activeId) return;
+    setSendingAttachment(true);
+    try {
+      const attachment = await uploadChatFile(file, filename);
+      await sendChatPayload({ attachment, kind });
+    } catch (e) {
+      console.warn("Falha ao enviar anexo no chat (Lobby)", e);
+    } finally {
+      setSendingAttachment(false);
+    }
+  }
+
+  function handleChatFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
+  }
+
+  // --- gravação de áudio, mesmo fluxo "estilo WhatsApp" do chat de
+  // dentro da sala (grava -> PARA -> preview -> só manda quando
+  // confirma, ver ChatDrawer/GameRoom.tsx) -- aqui o Lobby não tem
+  // câmera/mic da sala já capturados (localStreamRef não existe fora
+  // da sala), então é sempre um getUserMedia novo mesmo.
+  async function startVoiceRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickSupportedAudioMimeType();
+      const mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      discardRecordingRef.current = false;
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordingIntervalRef.current) {
+          clearInterval(recordingIntervalRef.current);
+          recordingIntervalRef.current = null;
+        }
+        setRecordingAudio(false);
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          audioChunksRef.current = [];
+          return;
+        }
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
+        if (blob.size > 0) {
+          recordedBlobRef.current = blob;
+          const durationSec = Math.max(0, Math.round((Date.now() - recordingStartRef.current) / 1000));
+          setRecordedPreview({ url: URL.createObjectURL(blob), durationSec });
+        }
+      };
+      mediaRecorderRef.current = mr;
+      mr.start(250);
+      recordingStartRef.current = Date.now();
+      setRecordingElapsedSec(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingElapsedSec(Math.floor((Date.now() - recordingStartRef.current) / 1000));
+      }, 250);
+      setRecordedPreview(null);
+      setRecordingAudio(true);
+    } catch (e) {
+      console.warn("Sem acesso ao microfone pra gravar áudio (Lobby)", e);
+    }
+  }
+
+  function stopVoiceRecording() {
+    mediaRecorderRef.current?.stop();
+  }
+
+  function cancelVoiceRecording() {
+    discardRecordingRef.current = true;
+    mediaRecorderRef.current?.stop();
+  }
+
+  function discardRecordedAudio() {
+    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
+    recordedBlobRef.current = null;
+    setRecordedPreview(null);
+  }
+
+  async function sendRecordedAudio() {
+    const blob = recordedBlobRef.current;
+    if (!blob) return;
+    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
+    recordedBlobRef.current = null;
+    setRecordedPreview(null);
+    await sendChatAttachment(blob, `gravacao-${Date.now()}.webm`, "audio");
+  }
+
+  // "Convidar amigo" / "Visitar amigo" (pedido do Douglas, 30/set) --
+  // "Convidar amigo" manda um cardzinho com a MINHA sala (myRoomSlug/
+  // myRoomName/myRoomLogoUrl, únicas informações de "minha sala" que
+  // esse painel tem, ver props no topo do arquivo); "Visitar amigo"
+  // manda só o pedido, sem sala nenhuma -- MESMO mecanismo/mesmos
+  // nomes de campo que ChatDrawer usa dentro da sala (ver comentário
+  // grande em sendRoomCard/GameRoom.tsx).
+  async function sendRoomCard(action: "invite" | "visit") {
+    const roomCard: RoomCard =
+      action === "invite"
+        ? { action, roomSlug: myRoomSlug || "", roomName: myRoomName || "Minha sala", roomLogoUrl: myRoomLogoUrl || "" }
+        : { action, roomSlug: "", roomName: "", roomLogoUrl: "" };
+    await sendChatPayload({ roomCard });
   }
 
   const companyRail = showCompanyRail && (
@@ -1244,25 +1508,71 @@ function LobbyChatPanel({
         {newConvOpen ? (
           <h3>Nova conversa</h3>
         ) : activeId && activeConversation?.kind === "direct" && activeConversation.participants[0] ? (
-          <button
-            type="button"
-            className="chat-drawer-header-identity"
-            onClick={() => accountAccessToken && setViewingProfileUserId(activeConversation.participants[0].id)}
-            title="Ver perfil"
-          >
-            <span
-              className="chat-drawer-header-avatar"
-              style={{ background: activeConversation.participants[0].color || "#5c9bff" }}
+          <span className="chat-drawer-header-identity-wrap">
+            <button
+              type="button"
+              className="chat-drawer-header-identity"
+              onClick={() => accountAccessToken && setViewingProfileUserId(activeConversation.participants[0].id)}
+              title="Ver perfil"
             >
-              {activeConversation.participants[0].photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={activeConversation.participants[0].photoUrl} alt="" />
-              ) : (
-                (activeConversation.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
-              )}
-            </span>
-            <h3>{conversationTitle(activeConversation)}</h3>
-          </button>
+              <span
+                className="chat-drawer-header-avatar"
+                style={{ background: activeConversation.participants[0].color || "#5c9bff" }}
+              >
+                {activeConversation.participants[0].photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={activeConversation.participants[0].photoUrl} alt="" />
+                ) : (
+                  (activeConversation.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
+                )}
+              </span>
+              <h3>{conversationTitle(activeConversation)}</h3>
+            </button>
+            {/* "Convidar amigo" / "Visitar amigo" -- pedido do Douglas,
+                30/set: "ao lado do nome, um botao com seta clicou
+                expande, Convidar amigo / Visitar amigo" (mesmo padrão
+                do ChatDrawer dentro da sala, ver comentário grande lá em
+                components/GameRoom.tsx). "Convidar amigo" só aparece
+                habilitado quando a pessoa já tem sala própria
+                (myRoomSlug) -- sem sala não tem o que convidar. */}
+            <button
+              type="button"
+              className={inviteMenuOpen ? "chat-invite-toggle-btn open" : "chat-invite-toggle-btn"}
+              title="Convidar ou visitar"
+              onClick={() => setInviteMenuOpen((v) => !v)}
+            >
+              <ChevronIcon />
+            </button>
+            {inviteMenuOpen && (
+              <>
+                <div className="chat-conv-menu-backdrop" onClick={() => setInviteMenuOpen(false)} />
+                <div className="chat-invite-menu">
+                  <button
+                    type="button"
+                    className="chat-invite-menu-item"
+                    disabled={!myRoomSlug}
+                    title={myRoomSlug ? undefined : "Você ainda não tem uma sala"}
+                    onClick={() => {
+                      sendRoomCard("invite");
+                      setInviteMenuOpen(false);
+                    }}
+                  >
+                    Convidar amigo
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-invite-menu-item"
+                    onClick={() => {
+                      sendRoomCard("visit");
+                      setInviteMenuOpen(false);
+                    }}
+                  >
+                    Visitar amigo
+                  </button>
+                </div>
+              </>
+            )}
+          </span>
         ) : (
           <h3>{activeId ? conversationTitle(activeConversation) : "Conversas"}</h3>
         )}
@@ -1423,7 +1733,11 @@ function LobbyChatPanel({
                       {c.lastMessage && (
                         <span className="chat-conv-preview">
                           {c.lastMessage.senderId === myUserId ? "Você: " : ""}
-                          {c.lastMessage.kind === "text" ? c.lastMessage.text : "anexo enviado"}
+                          {c.lastMessage.kind === "text"
+                            ? c.lastMessage.text
+                            : c.lastMessage.kind === "room_card"
+                              ? "🔑 Convite de sala"
+                              : "anexo enviado"}
                         </span>
                       )}
                     </span>
@@ -1495,36 +1809,151 @@ function LobbyChatPanel({
                     <div className={m.senderId === myUserId ? "chat-message own" : "chat-message"}>
                       {m.senderId !== myUserId && <span className="chat-message-sender">{m.senderName}</span>}
                       <div className="chat-bubble">
-                        <span>{m.deleted ? "Mensagem apagada" : m.kind === "text" ? m.text : "anexo enviado"}</span>
+                        {m.deleted ? (
+                          <em>Mensagem apagada</em>
+                        ) : (
+                          <>
+                            {m.kind === "text" && <span>{m.text}</span>}
+                            {m.kind === "image" && m.attachment && (
+                              <a href={attachmentUrl(m.attachment.url)} target="_blank" rel="noreferrer">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img className="chat-attachment-image" src={attachmentUrl(m.attachment.url)} alt={m.attachment.name} />
+                              </a>
+                            )}
+                            {m.kind === "audio" && m.attachment && (
+                              // eslint-disable-next-line jsx-a11y/media-has-caption
+                              <audio className="chat-attachment-audio" controls src={attachmentUrl(m.attachment.url)} />
+                            )}
+                            {m.kind === "file" && m.attachment && (
+                              <a className="chat-attachment-file" href={attachmentUrl(m.attachment.url)} target="_blank" rel="noreferrer">
+                                <FileIcon />
+                                <span className="chat-attachment-file-info">
+                                  <span className="chat-attachment-file-name">{m.attachment.name}</span>
+                                  <span className="chat-attachment-file-size">{formatFileSize(m.attachment.size)}</span>
+                                </span>
+                              </a>
+                            )}
+                            {/* cardzinho de convite/visita (ver sendRoomCard mais acima e
+                                comentário grande em chatStore.addMessage) -- mesmo visual/
+                                mesmo texto do ChatDrawer dentro da sala. */}
+                            {m.kind === "room_card" && m.roomCard && m.roomCard.action === "invite" && (
+                              <div className="chat-room-card">
+                                <span className="chat-room-card-icon">
+                                  {m.roomCard.roomLogoUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={m.roomCard.roomLogoUrl} alt="" />
+                                  ) : (
+                                    <CompanyIcon />
+                                  )}
+                                </span>
+                                <span className="chat-room-card-text">
+                                  {m.senderId === myUserId ? (
+                                    <>Você convidou pra sua sala <strong>{m.roomCard.roomName || "sua sala"}</strong></>
+                                  ) : (
+                                    <>
+                                      {m.senderName || "Alguém"} está te convidando pra sala{" "}
+                                      <strong>{m.roomCard.roomName || "dele(a)"}</strong>
+                                    </>
+                                  )}
+                                </span>
+                                {m.senderId !== myUserId && (
+                                  <a className="chat-room-card-btn" href={visitRoomLink(m.roomCard.roomSlug)}>
+                                    Entrar
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                            {m.kind === "room_card" && m.roomCard && m.roomCard.action === "visit" && (
+                              <div className="chat-room-card">
+                                <span className="chat-room-card-icon">
+                                  <CompanyIcon />
+                                </span>
+                                <span className="chat-room-card-text">
+                                  {m.senderId === myUserId
+                                    ? "Você pediu pra visitar a sala dele(a)"
+                                    : `${m.senderName || "Alguém"} está querendo ir até você`}
+                                </span>
+                                {m.senderId !== myUserId && myRoomSlug && (
+                                  <button type="button" className="chat-room-card-btn" onClick={() => sendRoomCard("invite")}>
+                                    Convidar
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            {m.text && m.kind !== "text" && m.kind !== "room_card" && (
+                              <div className="chat-attachment-caption">{m.text}</div>
+                            )}
+                          </>
+                        )}
                       </div>
+                      <span className="chat-message-time">{formatChatTime(m.ts)}</span>
                     </div>
                   </div>
                 ));
               })()
             )}
           </div>
-          <div className="chat-composer">
-            <input
-              className="chat-composer-input"
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") sendMessage();
-              }}
-              placeholder="Escreva uma mensagem…"
-              maxLength={2000}
-            />
-            <button
-              type="button"
-              className="chat-composer-btn primary"
-              onClick={sendMessage}
-              disabled={!draft.trim() || sending}
-              title="Enviar"
-            >
-              <SendIcon />
-            </button>
-          </div>
+          {recordingAudio ? (
+            <div className="chat-composer chat-recording-bar">
+              <button className="chat-composer-btn" title="Cancelar gravação" onClick={cancelVoiceRecording}>
+                <TrashIcon />
+              </button>
+              <span className="chat-recording-indicator">
+                <span className="chat-recording-dot" />
+                Gravando... {formatRecordingTime(recordingElapsedSec)}
+              </span>
+              <button className="chat-composer-btn primary" title="Parar gravação" onClick={stopVoiceRecording}>
+                <StopIcon />
+              </button>
+            </div>
+          ) : recordedPreview ? (
+            <div className="chat-composer chat-audio-preview-bar">
+              <button className="chat-composer-btn" title="Descartar" onClick={discardRecordedAudio}>
+                <TrashIcon />
+              </button>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <audio className="chat-audio-preview-player" controls src={recordedPreview.url} />
+              <span className="chat-recording-time">{formatRecordingTime(recordedPreview.durationSec)}</span>
+              <button className="chat-composer-btn primary" title="Enviar áudio" onClick={sendRecordedAudio}>
+                <SendIcon />
+              </button>
+            </div>
+          ) : (
+            <div className="chat-composer">
+              <button
+                className="chat-composer-btn"
+                title="Anexar foto/arquivo"
+                onClick={() => chatFileInputRef.current?.click()}
+                disabled={sendingAttachment}
+              >
+                <AttachIcon />
+              </button>
+              <button className="chat-composer-btn" title="Gravar áudio" onClick={startVoiceRecording}>
+                <MicIcon off={false} />
+              </button>
+              <input
+                className="chat-composer-input"
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") sendMessage();
+                }}
+                placeholder="Escreva uma mensagem…"
+                maxLength={2000}
+              />
+              <button
+                type="button"
+                className="chat-composer-btn primary"
+                onClick={sendMessage}
+                disabled={!draft.trim() || sending}
+                title="Enviar"
+              >
+                <SendIcon />
+              </button>
+            </div>
+          )}
+          <input ref={chatFileInputRef} type="file" style={{ display: "none" }} onChange={handleChatFileChange} />
         </>
       )}
 

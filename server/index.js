@@ -1132,11 +1132,49 @@ async function handlePostChatSend(req, res) {
     return;
   }
   const text = typeof body.text === "string" ? body.text.slice(0, 2000) : "";
-  if (!text.trim()) {
+  // 30/set, pedido do Douglas: "fora da sala nao deixa anexar e mandar
+  // audio, adicione" -- Lobby (REST, sem WebSocket) agora aceita o
+  // MESMO formato de anexo/cardzinho que o "chat:send" do WebSocket
+  // (ver case em cima); o upload em si continua indo direto pro POST
+  // /upload (rota já pública/sem trava de sala nenhuma, ver
+  // uploadChatFile em components/Lobby.tsx) -- aqui só valida e
+  // guarda a mensagem, igual sempre.
+  const attachment =
+    body.attachment && typeof body.attachment === "object"
+      ? {
+          url: String(body.attachment.url || "").slice(0, 500),
+          name: String(body.attachment.name || "arquivo").slice(0, 200),
+          size: Number(body.attachment.size) || 0,
+          mime: String(body.attachment.mime || "").slice(0, 100),
+        }
+      : null;
+  // cardzinho de convite/visita (ver comentário grande em
+  // chatStore.addMessage) -- pedido do Douglas, 30/set: "os contatos,
+  // se convidarem direto com envio de convite que na conversa fica
+  // como um cardzinho".
+  const roomCard =
+    body.roomCard && typeof body.roomCard === "object"
+      ? {
+          action: body.roomCard.action === "invite" ? "invite" : "visit",
+          roomSlug: String(body.roomCard.roomSlug || "").slice(0, 200),
+          roomName: String(body.roomCard.roomName || "").slice(0, 200),
+          roomLogoUrl: String(body.roomCard.roomLogoUrl || "").slice(0, 500),
+        }
+      : null;
+  if (!text.trim() && !attachment && !roomCard) {
     res.writeHead(400, corsHeaders());
-    res.end('Falta "text"');
+    res.end('Falta "text"/anexo/cardzinho');
     return;
   }
+  const kind = roomCard
+    ? "room_card"
+    : !attachment
+      ? "text"
+      : body.kind === "audio"
+        ? "audio"
+        : body.kind === "image"
+          ? "image"
+          : "file";
   const senderName = typeof userName === "string" ? userName.slice(0, 80) : "";
   // registra/atualiza o nome no diretório (ver chatStore.upsertUser,
   // MESMA função que o WebSocket chama no "identify" -- syncChatUser
@@ -1146,8 +1184,10 @@ async function handlePostChatSend(req, res) {
   const msg = chatStore.addMessage(conversationId, {
     senderId: userId,
     senderName,
-    kind: "text",
+    kind,
     text,
+    attachment,
+    roomCard,
   });
   const conv = chatStore.getConversation(conversationId);
   for (const uid of conv.participantIds) {
@@ -2114,8 +2154,29 @@ wss.on("connection", async (ws, req) => {
                 mime: String(data.attachment.mime || "").slice(0, 100),
               }
             : null;
-        if (!text.trim() && !attachment) break;
-        const kind = !attachment ? "text" : data.kind === "audio" ? "audio" : data.kind === "image" ? "image" : "file";
+        // cardzinho de convite/visita (ver comentário grande em
+        // chatStore.addMessage) -- só faz sentido em conversa direta,
+        // mas o chat da SALA aceita o mesmo formato de mensagem por
+        // consistência (nunca é mandado daqui pelo client hoje).
+        const roomCard =
+          data.roomCard && typeof data.roomCard === "object"
+            ? {
+                action: data.roomCard.action === "invite" ? "invite" : "visit",
+                roomSlug: String(data.roomCard.roomSlug || "").slice(0, 200),
+                roomName: String(data.roomCard.roomName || "").slice(0, 200),
+                roomLogoUrl: String(data.roomCard.roomLogoUrl || "").slice(0, 500),
+              }
+            : null;
+        if (!text.trim() && !attachment && !roomCard) break;
+        const kind = roomCard
+          ? "room_card"
+          : !attachment
+            ? "text"
+            : data.kind === "audio"
+              ? "audio"
+              : data.kind === "image"
+                ? "image"
+                : "file";
         const message = {
           id: randomUUID(),
           senderId: player.userId,
@@ -2123,6 +2184,7 @@ wss.on("connection", async (ws, req) => {
           kind,
           text,
           attachment,
+          roomCard,
           ts: Date.now(),
         };
         broadcast(room, { type: "chat", id, message });
@@ -2311,14 +2373,32 @@ wss.on("connection", async (ws, req) => {
                 mime: data.attachment.mime,
               }
             : null;
-        if (!text.trim() && !attachment) break;
-        const kind = !attachment ? "text" : data.kind === "audio" ? "audio" : data.kind === "image" ? "image" : "file";
+        const roomCard =
+          data.roomCard && typeof data.roomCard === "object"
+            ? {
+                action: data.roomCard.action === "invite" ? "invite" : "visit",
+                roomSlug: String(data.roomCard.roomSlug || "").slice(0, 200),
+                roomName: String(data.roomCard.roomName || "").slice(0, 200),
+                roomLogoUrl: String(data.roomCard.roomLogoUrl || "").slice(0, 500),
+              }
+            : null;
+        if (!text.trim() && !attachment && !roomCard) break;
+        const kind = roomCard
+          ? "room_card"
+          : !attachment
+            ? "text"
+            : data.kind === "audio"
+              ? "audio"
+              : data.kind === "image"
+                ? "image"
+                : "file";
         const msg = chatStore.addMessage(data.conversationId, {
           senderId: player.userId,
           senderName: player.name,
           kind,
           text,
           attachment,
+          roomCard,
         });
         if (!msg) break;
         const conv = chatStore.getConversation(data.conversationId);
