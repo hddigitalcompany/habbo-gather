@@ -8607,25 +8607,13 @@ function ChatDrawer({
               const activeCall = callParticipantsByConversation[c.id] ?? [];
               return (
                 <button key={c.id} className="chat-conv-item" onClick={() => onOpenConversation(c.id)}>
-                  {/* 29/set (13), pedido do Douglas: "quero a logo da
-                      empresa em que ele abriu o chat, porque
-                      funcionarios podem participar de mais empresas" --
-                      só lane "company" tem empresa (ver comentário
-                      grande em companyName/companyLogoUrl no tipo
-                      Conversation acima); "private" nunca mostra nada
-                      aqui. Card ganhou largura extra (ver .chat-drawer,
-                      .lobby-panel em app/globals.css) só pra caber esse
-                      selo sem apertar o resto. */}
-                  {c.lane === "company" && (
-                    <span className="chat-conv-company-logo" title={c.companyName || "Empresa"}>
-                      {c.companyLogoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.companyLogoUrl} alt="" />
-                      ) : (
-                        <CompanyIcon />
-                      )}
-                    </span>
-                  )}
+                  {/* 30/set, pedido do Douglas: "quero a logo apenas na
+                      aba empresas, porque ter ela nas conversas?" --
+                      selo por linha removido (a coluna .chat-company-rail
+                      já mostra/filtra por logo, repetir aqui era
+                      redundante). companyName/companyLogoUrl continuam
+                      no tipo Conversation -- só pararam de aparecer
+                      nessa lista, a coluna de Empresas ainda usa. */}
                   <span
                     className="chat-conv-avatar"
                     style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
