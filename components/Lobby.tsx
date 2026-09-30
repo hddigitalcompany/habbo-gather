@@ -1983,6 +1983,16 @@ export default function Lobby({
   // Douglas, cuja "mine" já É a Sala principal (ver comentário em
   // app/api/room/mine/route.ts) -- sem esse "except" ela apareceria
   // duplicada no dropdown dele.
+  //
+  // 29/set (5), Douglas: "inclusive lá em meus espaços deve aparecer
+  // o nome da empresa" -- já é o caso aqui: label vem de myRoom.name,
+  // que é rooms.name direto do banco (ver GET /api/room/mine acima) --
+  // e rooms.name agora É o nome da empresa que a pessoa digitou antes
+  // de criar a sala (ver companyName em
+  // app/api/room/create-from-template/route.ts), não mais o nome
+  // auto-gerado de antes ("Sala de {profile.name}"). Nada pra mudar
+  // aqui, só documentando que o pedido já fica resolvido por
+  // consequência dessa mudança.
   const dropdownEntries =
     myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo"
       ? [...visibleRoomSlugs, { slug: myRoom.room_slug, label: myRoom.name, teamOnly: false }]
