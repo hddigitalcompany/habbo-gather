@@ -4163,17 +4163,19 @@ export default class MainScene extends Phaser.Scene {
    * sozinha sempre que o dono mexe na aba "Tamanho".
    *
    * Uma aresta é "fachada" quando o tile (c,r) é da sala MAS o vizinho
-   * de trás dela (c-1,r para o lado colPlus, c,r-1 para rowPlus) NÃO é
-   * -- ou seja, é uma borda VOLTADA pra fora pelo lado de baixo/frente
-   * (o oposto de roomBackNeighbors, que só deixa crescer pelo lado de
-   * cima/trás -- por isso essa borda nunca se move sozinha por causa
-   * de "Adicionar", só por causa de "Apagar" abrindo/fechando buraco). */
+   * da FRENTE dela (c+1,r para o lado colPlus, c,r+1 para rowPlus) NÃO
+   * é -- ou seja, é uma borda voltada pra fora pelo lado de baixo/
+   * frente (roomBackNeighbors só deixa "Adicionar" crescer ligando num
+   * vizinho com col+row MAIOR -- crescendo sempre pra col/row MENOR,
+   * ver comentário grande de roomBackNeighbors -- por isso essa borda
+   * de col/row MAIOR nunca se move sozinha por causa de "Adicionar",
+   * só por causa de "Apagar" abrindo/fechando buraco). */
   private computeFacadeEdges(): { col: number; row: number; side: WallSide }[] {
     const edges: { col: number; row: number; side: WallSide }[] = [];
     for (const key of this.roomShape) {
       const [c, r] = key.split(",").map(Number);
-      if (!this.isTileInRoom(c - 1, r)) edges.push({ col: c - 1, row: r, side: "colPlus" });
-      if (!this.isTileInRoom(c, r - 1)) edges.push({ col: c, row: r - 1, side: "rowPlus" });
+      if (!this.isTileInRoom(c + 1, r)) edges.push({ col: c, row: r, side: "colPlus" });
+      if (!this.isTileInRoom(c, r + 1)) edges.push({ col: c, row: r, side: "rowPlus" });
     }
     return edges;
   }
