@@ -47,8 +47,23 @@ export const dynamic = "force-dynamic";
 const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
 // nome padrão quando a pessoa cria a sala sem passar companyName (ver
 // comentário grande no topo do arquivo) -- ela troca isso no Card da
-// Empresa quando quiser, mesmo rooms.name de sempre.
-const DEFAULT_COMPANY_NAME = "Minha Empresa";
+// Empresa quando quiser, mesmo rooms.name de sempre. ACHADO do Douglas
+// (30/set): "minha empresa vai ser todos que criarem depois?? poha de
+// nome generico" -- sem sufixo, TODA conta nova sem nome próprio nascia
+// com o MESMO "Minha Empresa" (nenhum id, nenhuma distinção), o que já
+// causa confusão pra ele reconhecer sala/empresa (mesmo motivo do rolo
+// desta conversa toda) e também colide de verdade no agrupamento de
+// conversa "lane=company" (ver companyName/companyLogoUrl em
+// GameRoom.tsx/Lobby.tsx: a CHAVE do grupo é `${companyName}::${logo}` --
+// duas contas com o nome padrão IDÊNTICO e sem logo nenhum caem na MESMA
+// chave, misturando conversa de gente diferente). Fix: função em vez de
+// constante, recebe o id da sala nova (newRoomId, já gerado antes de
+// chamar) e gruda os 8 primeiros caracteres dele no nome -- único por
+// natureza (mesmo id que já é a PK da sala), sem precisar de contador
+// nem tabela nova só pra isso.
+function defaultCompanyName(newRoomId: string): string {
+  return `Minha Empresa ${newRoomId.slice(0, 8)}`;
+}
 
 export async function POST(req: NextRequest) {
   const userId = await getVerifiedUserId(req);
@@ -61,7 +76,11 @@ export async function POST(req: NextRequest) {
   const templateId = typeof body?.templateId === "string" ? body.templateId.trim() : "";
   if (!templateId) return NextResponse.json({ error: "templateId é obrigatório" }, { status: 400 });
   const bodyCompanyName = typeof body?.companyName === "string" ? body.companyName.trim().slice(0, 80) : "";
-  const companyName = bodyCompanyName || DEFAULT_COMPANY_NAME;
+  // gerado AQUI (não mais lá embaixo, ver comentário grande de
+  // defaultCompanyName acima) -- precisa existir antes pra poder entrar
+  // no nome padrão quando ninguém digitou companyName nenhum.
+  const newRoomId = randomUUID();
+  const companyName = bodyCompanyName || defaultCompanyName(newRoomId);
 
   // idempotente -- se a pessoa já tem sala própria (ex: clicou 2x,
   // ou deu refresh no meio do fluxo), devolve ela de novo em vez de
@@ -93,10 +112,9 @@ export async function POST(req: NextRequest) {
 
   // `name` da sala É o nome da empresa (ver comentário grande no topo
   // do arquivo) -- companyName aqui já é o que a pessoa digitou (se
-  // mandou) ou DEFAULT_COMPANY_NAME (se não mandou, fluxo atual: ela
-  // troca depois no Card da Empresa). Esse mesmo campo é o que aparece
-  // pros outros como rótulo da aba "Empresa" do chat.
-  const newRoomId = randomUUID();
+  // mandou) ou defaultCompanyName(newRoomId) (se não mandou, fluxo
+  // atual: ela troca depois no Card da Empresa). Esse mesmo campo é o
+  // que aparece pros outros como rótulo da aba "Empresa" do chat.
   const inserted = await admin
     .from("rooms")
     .insert({
