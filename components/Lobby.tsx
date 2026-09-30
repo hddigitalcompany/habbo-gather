@@ -3766,10 +3766,14 @@ export default function Lobby({
               // aberto/fechado é só a setinha girar, ver
               // lobby-topbar-chevron logo abaixo).
               className="lobby-topbar-tab active"
-              onClick={() => {
-                setLobbyView("spaces");
-                setSpacesMenuOpen((v) => !v);
-              }}
+              // pedido do Douglas, 30/set (20): "cliquei em meus
+              // espacos e ele ja pulou direto, nao e assim, ele tem
+              // que selecionar o espaco primeiro" -- clicar na ABA só
+              // abre o dropdown (como sempre foi); navegar pra
+              // "spaces" só acontece quando escolhe um item de
+              // verdade dentro dele (ver onClick dos itens mais
+              // abaixo, que já tinham ganhado setLobbyView).
+              onClick={() => setSpacesMenuOpen((v) => !v)}
               aria-expanded={spacesMenuOpen}
             >
               <span className="lobby-topbar-tab-label">Meus espaços</span>
@@ -3856,10 +3860,9 @@ export default function Lobby({
             <button
               type="button"
               className="lobby-topbar-tab"
-              onClick={() => {
-                setLobbyView("spaces");
-                setVisitedMenuOpen((v) => !v);
-              }}
+              // mesmo motivo do "Meus espaços" acima -- só abre o
+              // dropdown, não navega sozinho.
+              onClick={() => setVisitedMenuOpen((v) => !v)}
               aria-expanded={visitedMenuOpen}
             >
               <span className="lobby-topbar-tab-label">Espaços visitados</span>
