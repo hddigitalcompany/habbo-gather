@@ -5885,7 +5885,26 @@ export default class MainScene extends Phaser.Scene {
       // conta como "entrar" pra areaZoneAt, mas não é hora de perguntar
       // nada.
       if (previousAreaId && this.areaClaimPromptAreaId === previousAreaId) this.destroyAreaClaimPrompt();
-      if (areaId && !this.editMode) {
+      // previousAreaId === undefined (diferente de null) só acontece na
+      // PRIMEIRA vez que updateAreaDim roda pro boneco local, isto é,
+      // no exato frame em que ele nasce na sala (ver o comentário do
+      // campo areaDimAreaId lá em cima: começa undefined -- "nenhuma
+      // área calculada ainda", diferente de null que já é "calculado,
+      // tá em espaço aberto"). Bug reportado pelo Douglas (29/set):
+      // "minha acesso na pagina caindo em uma mesa aleatoria ta
+      // aparecendo o balao de assumir" -- a sala sempre nasce o boneco
+      // num tile FIXO (tileToWorld(6,4), ver spawn lá embaixo), sem
+      // ligação nenhuma com onde o dono da sala colocou as mesas;
+      // quando esse tile fixo cai em cima de uma área "mesa-privada"
+      // livre, esse bloco via isso como "entrou andando" (undefined
+      // !== areaId) e mostrava o balão sem o jogador ter dado nem um
+      // passo. NÃO é delay de carregamento (nunca foi corrida/race --
+      // é sempre o MESMO frame, com ou sem atraso de rede). Fix: só
+      // dispara o convite quando a transição é de verdade (saiu de um
+      // espaço já conhecido -- null ou outra área -- pra essa), nunca
+      // no cálculo inicial do spawn.
+      const isInitialSpawnFrame = previousAreaId === undefined;
+      if (areaId && !this.editMode && !isInitialSpawnFrame) {
         const def = this.areaDefs.get(areaId);
         if (def?.type === "mesa-privada" && !this.areaOwnerByAreaId.has(areaId) && !this.localOwnsAnyArea()) {
           this.showAreaClaimPrompt(areaId);
