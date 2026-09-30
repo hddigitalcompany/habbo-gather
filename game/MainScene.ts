@@ -627,6 +627,19 @@ const WALL_GLASS_SLAB_LINE_COLOR = 0x14161a;
 const WALL_GLASS_COLOR_TOP = 0xcdeaf2;
 const WALL_GLASS_COLOR_BOTTOM = 0x3c6e82;
 const WALL_GLASS_ALPHA = 0.82;
+/** vidro "com luz acesa" -- pedido do Douglas com print de referência
+ * (fachada de prédio à noite, janelas aleatórias acesas num amarelo
+ * quente entre as escuras/azuladas): "efeito de luz acesa, a cor da
+ * luz acesa". Mesmo gradiente TOP/BOTTOM do vidro normal (drawFacadeGlassFrontFace
+ * usa lerpColor entre os 2), só que quente (creme perto do teto, âmbar
+ * embaixo) em vez de frio -- ver glassPaneIsLit mais abaixo pra quem
+ * decide QUAL painel acende. */
+const WALL_GLASS_LIT_COLOR_TOP = 0xfff3c4;
+const WALL_GLASS_LIT_COLOR_BOTTOM = 0xd9822e;
+const WALL_GLASS_LIT_ALPHA = 0.92;
+/** fração dos painéis que nascem "acesos" -- mesma proporção aproximada
+ * do print de referência do Douglas (uns 1/3 das janelas). */
+const WALL_GLASS_LIT_RATIO = 0.34;
 /** perfil metálico vertical -- 1 faixa em CADA ponta do painel (pedido:
  * "com perfis metalicos na vertical... na largura exata do tile" -- o
  * painel já É 1 tile de largura, então o perfil da ponta B de um
@@ -2082,7 +2095,8 @@ export default class MainScene extends Phaser.Scene {
     gfx: Phaser.GameObjects.Graphics,
     mapPoint: (u: number, v: number) => { x: number; y: number },
     edgeLengthExt: number,
-    heightPx: number
+    heightPx: number,
+    lit = false
   ) {
     const slabH = WALL_GLASS_SLAB_HEIGHT_PX;
     const slabLineTop = slabH + WALL_GLASS_SLAB_LINE_PX;
@@ -2097,11 +2111,19 @@ export default class MainScene extends Phaser.Scene {
     const glassV1 = Math.max(glassV0 + 1, heightPx);
     const stripes = 10;
     const stripeH = (glassV1 - glassV0) / stripes;
+    // "luz acesa" (ver WALL_GLASS_LIT_* acima, pedido do Douglas com
+    // print de referência) -- troca só o PAR de cores do gradiente
+    // (quente em vez de frio); resto do desenho (laje, linha, perfil)
+    // continua idêntico, então a janela acesa ainda lê como o MESMO
+    // painel de vidro, só "com a luz do escritório ligada".
+    const colorBottom = lit ? WALL_GLASS_LIT_COLOR_BOTTOM : WALL_GLASS_COLOR_BOTTOM;
+    const colorTop = lit ? WALL_GLASS_LIT_COLOR_TOP : WALL_GLASS_COLOR_TOP;
+    const alpha = lit ? WALL_GLASS_LIT_ALPHA : WALL_GLASS_ALPHA;
     for (let i = 0; i < stripes; i++) {
       const v0 = glassV0 + i * stripeH;
       const v1 = i === stripes - 1 ? glassV1 : v0 + stripeH;
       const t = (i + 0.5) / stripes; // 0 perto da laje (fundo), 1 perto do topo (céu)
-      gfx.fillStyle(this.lerpColor(WALL_GLASS_COLOR_BOTTOM, WALL_GLASS_COLOR_TOP, t), WALL_GLASS_ALPHA);
+      gfx.fillStyle(this.lerpColor(colorBottom, colorTop, t), alpha);
       gfx.fillPoints([mapPoint(0, v0), mapPoint(edgeLengthExt, v0), mapPoint(edgeLengthExt, v1), mapPoint(0, v1)], true);
     }
     const mw = WALL_GLASS_MULLION_WIDTH_PX;
@@ -2135,6 +2157,25 @@ export default class MainScene extends Phaser.Scene {
    * precisar guardar em lugar nenhum qual cor cada tábua usa. Mistura de
    * bits comum (tipo hash de posição de grade em shader/procgen), não
    * precisa ser criptográfico, só bem distribuído. */
+  /** Decide, de forma DETERMINÍSTICA (mesmo seed sempre cai no mesmo
+   * resultado -- não sorteia de novo a cada redesenho/reconexão, senão
+   * as janelas "piscariam" toda vez que a cena redesenha), se UM painel
+   * de vidro nasce aceso (ver WALL_GLASS_LIT_* acima) -- mesma técnica
+   * de hash/mistura de bits de plankColorIndex logo abaixo, só que
+   * devolvendo um bool (< WALL_GLASS_LIT_RATIO) em vez de um índice de
+   * paleta. `seed` é montado por quem chama a partir da posição real do
+   * painel (col/row/side da parede, ou col/row/side/andar da vidraça
+   * abaixo do piso) -- painéis diferentes SEMPRE caem em seeds
+   * diferentes, então cada janela acende (ou não) de forma independente
+   * e estável. */
+  private glassPaneIsLit(seed: number): boolean {
+    let h = (seed * 2654435761) ^ (seed << 13);
+    h = Math.imul(h ^ (h >>> 15), 1274126177);
+    h = h ^ (h >>> 16);
+    const frac = (Math.abs(h) % 1000) / 1000;
+    return frac < WALL_GLASS_LIT_RATIO;
+  }
+
   private plankColorIndex(i: number, j: number, len: number): number {
     let h = (i * 374761393 + j * 668265263) ^ (i << 13);
     h = Math.imul(h ^ (h >>> 15), 1274126177);
@@ -4254,7 +4295,9 @@ export default class MainScene extends Phaser.Scene {
         // fosco, não uma lâmina.
         gfx.fillStyle(WALL_GLASS_SLAB_COLOR, 1);
         gfx.fillPoints([mapPoint(0, 0), mapPoint(edgeLength, 0), mapPoint(edgeLength, heightPx), mapPoint(0, heightPx)], true);
-        this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx);
+        const sideSeed = edge.side === "colPlus" ? 1 : 0;
+        const lit = this.glassPaneIsLit(edge.col * 928371 + edge.row * 17431 + i * 5197 + sideSeed);
+        this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx, lit);
       }
     }
     this.floorEdgeGlassGfx = gfx;
@@ -5112,7 +5155,9 @@ export default class MainScene extends Phaser.Scene {
     // saber que essa é diferente.
     const isGlass = pattern.material === "glass";
     if (isGlass) {
-      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLengthExt, pattern.heightPx);
+      const sideSeed = seg.side === "colPlus" || seg.side === "center" ? 1 : 0;
+      const lit = this.glassPaneIsLit(seg.col * 928371 + seg.row * 17431 + sideSeed);
+      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLengthExt, pattern.heightPx, lit);
     } else {
       // argamassa como fundo (o paralelogramo inteiro, já esticado),
       // tijolo desenhado por cima já com a folga -- mesma ideia visual de
