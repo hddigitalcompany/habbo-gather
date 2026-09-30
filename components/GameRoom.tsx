@@ -219,6 +219,17 @@ type RemotePlayer = {
   seatFurnitureId?: string | null;
   seatDCol?: number;
   seatDRow?: number;
+  // aparência do boneco (ver LOOK_FIELDS/protocolo "look" em
+  // server/index.js e setRemoteLook em MainScene.ts -- pedido do
+  // Douglas, 30/set: "o estilo roupa que ele escolher do avatar, deve
+  // seguir ele em qualquer ambiente que ele for"). Cada campo é
+  // OPCIONAL/pode vir null -- o boneco começa com a aparência PADRÃO
+  // (ver createAvatar) até o "look" de verdade chegar pela rede.
+  hairId?: string | null;
+  skinId?: string | null;
+  beardId?: string | null;
+  accessoryId?: string | null;
+  outfitId?: string | null;
 } & RemoteProfile;
 type Toast = { id: string; text: string };
 
@@ -407,6 +418,22 @@ function pickRemoteProfile(p: Partial<RemotePlayer> | undefined): RemoteProfile 
     bio: p?.bio ?? "",
     photoUrl: p?.photoUrl ?? "",
     role: p?.role ?? "",
+  };
+}
+
+// mesma ideia de pickRemoteProfile acima, só que pros 5 campos de
+// APARÊNCIA (ver comentário grande em RemotePlayer/setRemoteLook,
+// MainScene.ts) -- SEM fallback pro padrão de propósito (undefined, não
+// string vazia): setRemoteLook já ignora campo ausente/null sozinho
+// (mantém o que o boneco já tinha), aplicar um id "vazio" aqui quebraria
+// o find() no catálogo do lado da cena.
+function pickLook(p: Partial<RemotePlayer> | undefined) {
+  return {
+    hairId: p?.hairId ?? undefined,
+    skinId: p?.skinId ?? undefined,
+    beardId: p?.beardId ?? undefined,
+    accessoryId: p?.accessoryId ?? undefined,
+    outfitId: p?.outfitId ?? undefined,
   };
 }
 
@@ -2676,6 +2703,13 @@ export default function GameRoom({
           // dCol/dRow (ver comentário grande em RemotePlayer acima) pra
           // já sentar no assento CERTO de um item com mais de um lugar.
           if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name, p.seatDCol, p.seatDRow);
+          // aparência de verdade (cabelo/tom de pele/barba/acessório/
+          // traje) de quem já tava na sala ANTES de mim -- se ele já
+          // mandou o "look" dele antes de eu entrar (ver protocolo em
+          // server/index.js), já chega pronto aqui no "init", sem
+          // precisar esperar ele trocar de roupa de novo pra eu ver
+          // certo (ver comentário grande em RemotePlayer/setRemoteLook).
+          scene?.setRemoteLook(p.id, pickLook(p));
         }
         setRemoteProfiles((prev) => ({ ...prev, ...nextProfiles }));
 
@@ -2724,12 +2758,35 @@ export default function GameRoom({
           sendProfileUpdate(merged);
           return merged;
         });
+        // mesma ideia do profile logo acima, só que pra aparência (ver
+        // AVATAR_STORAGE_KEY/loadSavedAvatar lá no topo do arquivo) --
+        // o servidor sempre me dá o boneco PADRÃO nesse primeiro momento
+        // (ver player em server/index.js), então mando a MINHA aparência
+        // de verdade (já lida do localStorage no useState inicial de
+        // selectedHairId/etc.) assim que a conexão abre, pra sala
+        // inteira já me ver certo -- sem isso, só quem entrasse na sala
+        // DEPOIS de eu editar o traje no editor (ver saveEditingCharacter
+        // mais abaixo, mesmo esquema) me veria com a roupa certa.
+        sendLookUpdate({
+          hairId: selectedHairColorId ?? selectedHairId,
+          skinId: selectedSkinId,
+          beardId: selectedBeardId,
+          accessoryId: selectedAccessoryColorId ?? selectedAccessoryId,
+          outfitId: selectedOutfitColorId ?? selectedOutfitId,
+        });
       } else if (data.type === "join") {
         const p: RemotePlayer = data.player;
         remotePlayersRef.current.set(p.id, p);
         setRemoteProfiles((prev) => ({ ...prev, [p.id]: pickRemoteProfile(p) }));
         scene?.upsertRemotePlayer(p.id, p.x, p.y, p.color, p.name, statusColorFor(p.status));
         if (p.seatFurnitureId) scene?.setRemoteSeat(p.id, p.seatFurnitureId, p.name, p.seatDCol, p.seatDRow);
+        // quem tá chegando ainda não mandou o "look" dele (só manda
+        // DEPOIS do próprio "init", ver comentário grande acima) --
+        // normalmente esse pickLook(p) não faz nada ainda (undefined em
+        // tudo), mas cobre a corrida rara em que os dois já vieram
+        // juntos, e deixa o boneco no padrão certinho até a mensagem
+        // "look" de verdade chegar logo em seguida.
+        scene?.setRemoteLook(p.id, pickLook(p));
       } else if (data.type === "seat") {
         // ver protocolo "seat" em server/index.js -- outra pessoa sentou
         // ou levantou (furnitureId null); só pose-sync, não mexe em posse
@@ -2793,6 +2850,15 @@ export default function GameRoom({
         if (typeof data.status === "string") {
           scene?.setPlayerStatus(data.id === selfIdRef.current ? "local" : data.id, data.status);
         }
+      } else if (data.type === "look") {
+        // aparência de verdade de alguém (cabelo/tom de pele/barba/
+        // acessório/traje) trocou ou chegou pela primeira vez -- ver
+        // protocolo "look" em server/index.js e comentário grande em
+        // RemotePlayer/setRemoteLook (MainScene.ts). Mesmo esquema de
+        // "profile" logo acima.
+        const existingForLook = remotePlayersRef.current.get(data.id);
+        if (existingForLook) Object.assign(existingForLook, data);
+        scene?.setRemoteLook(data.id, pickLook(data));
       } else if (data.type === "poke") {
         const text =
           data.kind === "available"
@@ -4965,11 +5031,43 @@ export default function GameRoom({
       // localStorage indisponível (modo privado, etc.) -- segue só em memória
     }
 
+    // avisa a sala inteira da aparência nova (ver protocolo "look" em
+    // server/index.js) -- sem isso, só EU veria a roupa/cabelo/etc que
+    // acabei de trocar (ver comentário grande em RemotePlayer/
+    // setRemoteLook, MainScene.ts: pedido do Douglas, 30/set, "o estilo
+    // roupa que ele escolher do avatar, deve seguir ele em qualquer
+    // ambiente que ele for" -- isso cobre TODO mundo ver, em QUALQUER
+    // sala; a persistência local pro F5/pra sala seguinte já tava feita
+    // no localStorage.setItem logo acima).
+    sendLookUpdate({
+      hairId: selectedHairColorId ?? selectedHairId,
+      skinId: selectedSkinId,
+      beardId: selectedBeardId,
+      accessoryId: selectedAccessoryColorId ?? selectedAccessoryId,
+      outfitId: selectedOutfitColorId ?? selectedOutfitId,
+    });
+
     setEditingCharacter(false);
   }
 
   function sendProfileUpdate(fields: ProfileFields) {
     socketRef.current?.send(JSON.stringify({ type: "profile", ...fields }));
+  }
+
+  // aparência do boneco (ver comentário grande em RemotePlayer/
+  // setRemoteLook, MainScene.ts, e protocolo "look" em server/index.js)
+  // -- mesmo esquema de sendProfileUpdate acima, cada campo já chega
+  // RESOLVIDO pra cor escolhida quando houver (colorId ?? id, mesma
+  // convenção dos scene?.setLocal*Id de sempre), undefined pula o campo
+  // (o servidor mantém o que já tinha, ver case "look" nele).
+  function sendLookUpdate(fields: {
+    hairId?: string;
+    skinId?: string;
+    beardId?: string;
+    accessoryId?: string;
+    outfitId?: string;
+  }) {
+    socketRef.current?.send(JSON.stringify({ type: "look", ...fields }));
   }
 
   // edição do MEU card (nome/status/insta/bio/foto): atualiza local +

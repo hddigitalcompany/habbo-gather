@@ -2477,8 +2477,11 @@ export default class MainScene extends Phaser.Scene {
         // avatar local: usa o traje já guardado em localOutfitId (ver
         // comentário no campo -- normalmente o sorteado no spawn, já
         // setado ANTES de create() rodar via setLocalOutfitId). Avatar
-        // remoto: sempre começa em DEFAULT_OUTFIT_ID mesmo (o traje de
-        // verdade dele ainda não é sincronizado pela rede).
+        // remoto: sempre começa em DEFAULT_OUTFIT_ID aqui (o traje de
+        // verdade dele só chega DEPOIS, pela rede -- ver "look" no
+        // protocolo em server/index.js e setRemoteLook mais abaixo,
+        // chamado por upsertRemotePlayer/GameRoom.tsx assim que souber;
+        // corrige na hora, sem esperar o próximo "traje" trocado).
         const initialOutfitId = isLocal ? this.localOutfitId : DEFAULT_OUTFIT_ID;
         const defaultOutfit = OUTFIT_CATALOG.find((o) => o.id === initialOutfitId) ?? OUTFIT_CATALOG[0];
         const resolvedSkinId = resolveOutfitSkinId(defaultOutfit, DEFAULT_SKIN_ID) ?? DEFAULT_SKIN_ID;
@@ -2793,9 +2796,18 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /** Troca o penteado do jogador LOCAL ao vivo (ver HAIR_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
-  setLocalHairId(hairId: string) {
-    if (!this.localContainer) return;
-    const sprite = this.localContainer.getData("hairSprite") as Phaser.GameObjects.Sprite | null;
+  /** `container` opcional -- default é o boneco LOCAL (comportamento de
+   * sempre); passar um container de `remoteContainers` aplica no boneco
+   * REMOTO certo em vez do meu (ver setRemoteLook mais abaixo, pedido do
+   * Douglas 30/set: "o estilo roupa que ele escolher do avatar, deve
+   * seguir ele em qualquer ambiente que ele for" -- a aparência escolhida
+   * nunca saía do navegador de quem escolheu, todo jogador remoto sempre
+   * aparecia com o boneco padrão pra todo mundo, em QUALQUER sala, ver
+   * comentário que existia em createAvatar/"traje"). Mesma lógica de
+   * sempre, só trocando qual container ela mexe. */
+  setLocalHairId(hairId: string, container: Phaser.GameObjects.Container | null = this.localContainer) {
+    if (!container) return;
+    const sprite = container.getData("hairSprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
     // mesma checagem que setLocalSkinId já tinha (textures.exists) --
     // achado investigando avisos "Texture __MISSING has no frame N" no
@@ -2819,7 +2831,7 @@ export default class MainScene extends Phaser.Scene {
       sprite.setTexture(key, currentFrame);
     }
     sprite.setVisible(exists);
-    this.localContainer.setData("hairId", hairId);
+    container.setData("hairId", hairId);
   }
 
   /** Troca o tom de pele do jogador LOCAL ao vivo (ver SKIN_CATALOG) --
@@ -2829,9 +2841,9 @@ export default class MainScene extends Phaser.Scene {
    * resolveBeardSkinId. Isso garante que trocar o tom mantém a mão e a
    * barba combinando, independente da ordem em que skin/traje/barba
    * forem trocados. */
-  setLocalSkinId(skinId: string) {
-    if (!this.localContainer) return;
-    const sprite = this.localContainer.getData("skinSprite") as Phaser.GameObjects.Sprite | null;
+  setLocalSkinId(skinId: string, container: Phaser.GameObjects.Container | null = this.localContainer) {
+    if (!container) return;
+    const sprite = container.getData("skinSprite") as Phaser.GameObjects.Sprite | null;
     if (sprite) {
       // mesma checagem de createAvatar/"base" acima -- SKIN_CATALOG pode
       // não ter (ainda) nenhum tom custom carregado pro id escolhido
@@ -2846,10 +2858,10 @@ export default class MainScene extends Phaser.Scene {
       }
       sprite.setVisible(exists);
     }
-    this.localContainer.setData("skinId", skinId);
+    container.setData("skinId", skinId);
 
-    const outfitSprite = this.localContainer.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
-    const outfitId = this.localContainer.getData("outfitId") as string | undefined;
+    const outfitSprite = container.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
+    const outfitId = container.getData("outfitId") as string | undefined;
     if (outfitSprite && outfitId) {
       const outfit = OUTFIT_CATALOG.find((o) => o.id === outfitId);
       if (outfit) {
@@ -2875,8 +2887,8 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
-    const beardSprite = this.localContainer.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
-    const beardId = this.localContainer.getData("beardId") as string | undefined;
+    const beardSprite = container.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
+    const beardId = container.getData("beardId") as string | undefined;
     if (beardSprite && beardId) {
       const beard = BEARD_CATALOG.find((b) => b.id === beardId);
       if (beard) {
@@ -2900,19 +2912,19 @@ export default class MainScene extends Phaser.Scene {
    * pelo editor de personagem (GameRoom.tsx). Usa o tom de pele ATUAL do
    * jogador pra escolher a arte certa (ver resolveBeardSkinId) -- não
    * precisa escolha manual de cor/tom, igual o traje. */
-  setLocalBeardId(beardId: string) {
-    if (!this.localContainer) return;
-    const sprite = this.localContainer.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
+  setLocalBeardId(beardId: string, container: Phaser.GameObjects.Container | null = this.localContainer) {
+    if (!container) return;
+    const sprite = container.getData("beardSprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
     const beard = BEARD_CATALOG.find((b) => b.id === beardId);
     if (!beard) return;
-    const skinId = (this.localContainer.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
+    const skinId = (container.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
     const resolvedSkinId = resolveBeardSkinId(beard, skinId);
     if (!resolvedSkinId) {
       // sem barba pro sexo do tom atual (ver resolveBeardSkinId) --
       // esconde em vez de deixar a textura de OUTRO sexo grudada.
       sprite.setVisible(false);
-      this.localContainer.setData("beardId", beardId);
+      container.setData("beardId", beardId);
       return;
     }
     // mesma checagem de textures.exists -- ver comentário grande em
@@ -2924,13 +2936,13 @@ export default class MainScene extends Phaser.Scene {
       sprite.setTexture(key, currentFrame);
     }
     sprite.setVisible(exists);
-    this.localContainer.setData("beardId", beardId);
+    container.setData("beardId", beardId);
   }
 
   /** Troca o acessório do jogador LOCAL ao vivo (ver ACCESSORY_CATALOG) -- chamado pelo editor de personagem (GameRoom.tsx). */
-  setLocalAccessoryId(accessoryId: string) {
-    if (!this.localContainer) return;
-    const sprite = this.localContainer.getData("accessorySprite") as Phaser.GameObjects.Sprite | null;
+  setLocalAccessoryId(accessoryId: string, container: Phaser.GameObjects.Container | null = this.localContainer) {
+    if (!container) return;
+    const sprite = container.getData("accessorySprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
     // mesma checagem de textures.exists -- ver comentário grande em
     // setLocalHairId (avisos "Texture __MISSING has no frame N").
@@ -2941,7 +2953,7 @@ export default class MainScene extends Phaser.Scene {
       sprite.setTexture(key, currentFrame);
     }
     sprite.setVisible(exists);
-    this.localContainer.setData("accessoryId", accessoryId);
+    container.setData("accessoryId", accessoryId);
   }
 
   /** Troca o traje do jogador LOCAL ao vivo (ver OUTFIT_CATALOG) --
@@ -2949,24 +2961,36 @@ export default class MainScene extends Phaser.Scene {
    * a cena fica pronta pra aplicar o traje sorteado no spawn (ver
    * pickRandomOutfitId em GameRoom.tsx). Guarda em localOutfitId SEMPRE
    * (mesmo se o boneco ainda não existir -- ver comentário no campo),
-   * então funciona tanto ANTES quanto DEPOIS de create() ter rodado. Usa
-   * o tom de pele ATUAL do jogador pra escolher a arte certa (mão
-   * exposta, ver resolveOutfitSkinId) -- não precisa escolha manual de
-   * cor/tom. */
+   * então funciona tanto ANTES quanto DEPOIS de create() ter rodado. A
+   * arte em si (skin-dependente) é aplicada por applyOutfitToContainer
+   * logo abaixo -- essa aqui só cuida do rastro extra do campo
+   * localOutfitId, que só faz sentido pro boneco LOCAL mesmo (ver
+   * comentário no campo). */
   setLocalOutfitId(outfitId: string) {
     this.localOutfitId = outfitId;
-    if (!this.localContainer) return;
-    const sprite = this.localContainer.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
+    this.applyOutfitToContainer(this.localContainer, outfitId);
+  }
+
+  /** Aplica o traje num container QUALQUER (local OU remoto, ver
+   * setLocalOutfitId acima e setRemoteLook mais abaixo -- pedido do
+   * Douglas 30/set: "o estilo roupa que ele escolher do avatar, deve
+   * seguir ele em qualquer ambiente que ele for", ver comentário grande
+   * em setRemoteLook pro que faltava). Usa o tom de pele ATUAL do
+   * container (não precisa escolha manual de cor/tom, mão exposta, ver
+   * resolveOutfitSkinId). */
+  private applyOutfitToContainer(container: Phaser.GameObjects.Container | null, outfitId: string) {
+    if (!container) return;
+    const sprite = container.getData("outfitSprite") as Phaser.GameObjects.Sprite | null;
     if (!sprite) return;
     const outfit = OUTFIT_CATALOG.find((o) => o.id === outfitId);
     if (!outfit) return;
-    const skinId = (this.localContainer.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
+    const skinId = (container.getData("skinId") as string | undefined) ?? DEFAULT_SKIN_ID;
     const resolvedSkinId = resolveOutfitSkinId(outfit, skinId);
     if (!resolvedSkinId) {
       // sem traje pro sexo do tom atual (ver resolveOutfitSkinId) --
       // esconde em vez de deixar a textura de OUTRO sexo grudada.
       sprite.setVisible(false);
-      this.localContainer.setData("outfitId", outfitId);
+      container.setData("outfitId", outfitId);
       return;
     }
     // mesma checagem de textures.exists -- ver comentário grande em
@@ -2980,7 +3004,44 @@ export default class MainScene extends Phaser.Scene {
       sprite.setTexture(key, currentFrame);
     }
     sprite.setVisible(exists);
-    this.localContainer.setData("outfitId", outfitId);
+    container.setData("outfitId", outfitId);
+  }
+
+  /** Aplica a aparência de VERDADE (cabelo/tom de pele/barba/acessório/
+   * traje) num jogador REMOTO -- chamado ao receber "look" (ver
+   * protocolo em server/index.js) ou já no "init"/"join" quando o
+   * player recém-chegado já vem com o campo preenchido. ANTES disso
+   * (pedido do Douglas 30/set: "o estilo roupa que ele escolher do
+   * avatar, deve seguir ele em qualquer ambiente que ele for"), o boneco
+   * de QUALQUER jogador remoto sempre aparecia com a aparência PADRÃO
+   * pra todo mundo (ver comentário que existia em createAvatar/"traje":
+   * "o traje de verdade dele ainda não é sincronizado pela rede") -- não
+   * era só entre uma sala e outra, era em QUALQUER sala, porque a
+   * escolha nunca saía do navegador de quem escolheu (ver
+   * AVATAR_STORAGE_KEY em GameRoom.tsx, só local até então). Cada campo
+   * é opcional -- só aplica o que veio preenchido, mantém o resto como
+   * já estava (mesmo esquema tolerante de "profile"). Ordem importa:
+   * cabelo/pele primeiro (pele recalcula barba/traje já equipados pro
+   * tom novo, ver setLocalSkinId), barba/acessório/traje por último com
+   * o id de verdade -- mesma ordem que saveEditingCharacter já usa pro
+   * boneco local. */
+  setRemoteLook(
+    id: string,
+    look: {
+      hairId?: string | null;
+      skinId?: string | null;
+      beardId?: string | null;
+      accessoryId?: string | null;
+      outfitId?: string | null;
+    }
+  ) {
+    const container = this.remoteContainers.get(id);
+    if (!container) return;
+    if (look.hairId) this.setLocalHairId(look.hairId, container);
+    if (look.skinId) this.setLocalSkinId(look.skinId, container);
+    if (look.beardId) this.setLocalBeardId(look.beardId, container);
+    if (look.accessoryId) this.setLocalAccessoryId(look.accessoryId, container);
+    if (look.outfitId) this.applyOutfitToContainer(container, look.outfitId);
   }
 
   /**

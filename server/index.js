@@ -37,6 +37,23 @@
 //   profile -> { type: "profile", id, name, status, instagram, bio, photoUrl }
 //              (card de perfil -- ver ProfileCard em GameRoom.tsx; "role"
 //              NÃO entra aqui, é só o servidor que atribui, ver PROFILE_FIELDS)
+//   look    -> cliente->servidor: { type: "look", hairId?, skinId?, beardId?,
+//              accessoryId?, outfitId? } (aparência do boneco -- cabelo/
+//              tom de pele/barba/acessório/traje, já resolvidos pra cor
+//              escolhida quando houver, ver SavedAvatar/AVATAR_STORAGE_KEY
+//              em GameRoom.tsx; cada campo é OPCIONAL, só troca o que veio)
+//              servidor->sala: { type: "look", id, hairId, skinId, beardId,
+//              accessoryId, outfitId } (ver LOOK_FIELDS/pickLookFields --
+//              pedido do Douglas, 30/set: "o estilo roupa que ele escolher
+//              do avatar, deve seguir ele em qualquer ambiente que ele
+//              for" -- ANTES disso o traje/cabelo/etc escolhido nunca
+//              saía do navegador de quem escolheu, ver comentário que
+//              existia em setLocalOutfitId/createAvatar, MainScene.ts:
+//              cada jogador remoto sempre aparecia com o boneco padrão
+//              pra todo mundo, em QUALQUER sala, não só de uma sala pra
+//              outra. Mesmo esquema de "profile" acima, só que sem
+//              limite de tamanho por campo maior que o catálogo (ids
+//              curtos, nunca foto).
 //   poke    -> cliente->servidor: { type: "poke", to, kind, text? }
 //              servidor->alvo:    { type: "poke", from, fromName, kind, text? }
 //              (botões de interação do card de OUTRO jogador -- "Disponível?"
@@ -535,6 +552,15 @@ function scheduleReminder(call) {
 // (PROFILE_ROLE_PLACEHOLDER) que o cliente mostra como somente-leitura.
 const PROFILE_FIELDS = ["name", "status", "instagram", "bio", "photoUrl"];
 const PROFILE_ROLE_PLACEHOLDER = "";
+// aparência do boneco (ver protocolo "look" acima) -- mesmo esquema de
+// PROFILE_FIELDS, só que quem decide o valor certo de cada campo é
+// SEMPRE o cliente (catálogo/cor já resolvidos, ver SavedAvatar em
+// GameRoom.tsx) -- o servidor só guarda e repassa pra sala, nunca
+// valida contra um catálogo (não existe um aqui, de propósito -- mesma
+// razão de "role" nunca vir do cliente em PROFILE_FIELDS, só que aqui é
+// o oposto: não tem NADA que só o servidor saiba, então não tem campo
+// de fora igual "role").
+const LOOK_FIELDS = ["hairId", "skinId", "beardId", "accessoryId", "outfitId"];
 // tamanho máx de uma mensagem (principalmente a foto de PERFIL, que vai
 // como data-URL) -- generoso o bastante pra uma foto pequena comprimida
 // no cliente (ver compressPhotoToDataUrl em GameRoom.tsx), mas evita que
@@ -546,6 +572,16 @@ const MAX_MESSAGE_BYTES = 900_000;
 function pickProfileFields(player) {
   const out = {};
   for (const field of PROFILE_FIELDS) out[field] = player[field] ?? "";
+  return out;
+}
+
+// ver LOOK_FIELDS acima -- diferente de pickProfileFields, usa null (não
+// "") como vazio: "" seria um id de catálogo inválido que quebraria o
+// find() do cliente (ver setRemoteLook, MainScene.ts, que já ignora
+// campo nenhum/null de propósito -- ver comentário lá).
+function pickLookFields(player) {
+  const out = {};
+  for (const field of LOOK_FIELDS) out[field] = player[field] ?? null;
   return out;
 }
 
@@ -1872,6 +1908,17 @@ wss.on("connection", async (ws, req) => {
     bio: "",
     photoUrl: "",
     role: PROFILE_ROLE_PLACEHOLDER,
+    // aparência do boneco (ver LOOK_FIELDS/protocolo "look" acima) --
+    // começa tudo null (cliente ainda não mandou o "look" de verdade
+    // dele, chega logo depois do "init" -- ver comentário grande no
+    // protocolo); o cliente já sabe renderizar um remoto sem isso ainda
+    // (usa o boneco padrão até o "look" chegar, ver createAvatar em
+    // MainScene.ts).
+    hairId: null,
+    skinId: null,
+    beardId: null,
+    accessoryId: null,
+    outfitId: null,
   };
 
   room.set(id, { ws, player });
@@ -2204,6 +2251,29 @@ wss.on("connection", async (ws, req) => {
         // mundo pra refletir no picker de participantes/busca da Agenda
         // (ver comentário em "identify" acima).
         broadcast(room, { type: "users:list", users: chatStore.listAllUsers() });
+        break;
+      }
+      case "look": {
+        // aparência do boneco (ver LOOK_FIELDS/protocolo "look" acima) --
+        // pedido do Douglas, 30/set: "o estilo roupa que ele escolher do
+        // avatar, deve seguir ele em qualquer ambiente que ele for".
+        // Mesmo esquema de "profile" acima (string ou ignora o campo,
+        // mantém o que já tinha), só que aceita null explícito também
+        // (GameRoom.tsx nunca manda null hoje -- cada campo só existe
+        // depois de escolhido -- mas aceitar deixa o protocolo pronto
+        // pra "voltar ao padrão" no futuro sem precisar mexer aqui de
+        // novo). ids de catálogo são curtos -- limite generoso (80,
+        // igual "instagram"/"status" em PROFILE_FIELDS), só pra nunca
+        // deixar alguém mandar um payload gigante nesse campo.
+        for (const field of LOOK_FIELDS) {
+          if (data[field] === null) {
+            player[field] = null;
+            continue;
+          }
+          if (typeof data[field] !== "string") continue;
+          player[field] = data[field].slice(0, 80);
+        }
+        broadcast(room, { type: "look", id, ...pickLookFields(player) });
         break;
       }
       case "poke": {
