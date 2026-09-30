@@ -907,6 +907,21 @@ function LobbyChatPanel({
   initialActiveId?: string | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
+  // 30/set, bug reportado pelo Douglas: "quando eu vou em nova
+  // conversa clico no contato, nada acontece, nao inicia uma
+  // conversa" -- initialActiveId só é lido no useState acima, que só
+  // roda no PRIMEIRO mount; como o painel já tava aberto (a pessoa
+  // clicou "+" com o chat já na tela), ele nunca desmonta, então
+  // startNewCompanyConversation/startNewPrivateConversation criavam a
+  // conversa (handleStartConversation no Lobby chama
+  // setOpenChatConversationId, que vira initialActiveId de novo) mas
+  // nada reagia à mudança -- fechava a busca (closeNewConv) e voltava
+  // pra lista, sem abrir a conversa nova. Esse efeito sincroniza
+  // activeId toda vez que initialActiveId muda, não só na primeira
+  // vez.
+  useEffect(() => {
+    if (initialActiveId) setActiveId(initialActiveId);
+  }, [initialActiveId]);
   // "3 pontinhos" -- id da conversa com o menu de mover-de-aba aberto
   // agora (null = nenhum), mesmo padrão do ChatDrawer em GameRoom.tsx.
   const [convMenuOpenId, setConvMenuOpenId] = useState<string | null>(null);
