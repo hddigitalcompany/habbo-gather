@@ -146,7 +146,10 @@ type RoomShape = {
 // canEditRoom em GameRoom.tsx já usa pra esconder o editor de espaço.
 const ROOM_SLUGS: { slug: string; label: string; teamOnly: boolean }[] = [
   { slug: "sala-principal", label: "Sala principal", teamOnly: true },
-  { slug: "mapa-modelo", label: "Mapa modelo", teamOnly: true },
+  // 29/set (6), pedido do Douglas: "ok renomeie Sala Modelo" -- só o
+  // RÓTULO mudou (label), o slug continua "mapa-modelo" (usado em
+  // vários lugares no servidor/banco, ver comentário grande acima).
+  { slug: "mapa-modelo", label: "Sala Modelo", teamOnly: true },
 ];
 
 // um modelo publicado (ver GET /api/room/templates) -- é o que aparece

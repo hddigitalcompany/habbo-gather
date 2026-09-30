@@ -5388,8 +5388,19 @@ body {
   background: rgba(10, 8, 16, 0.55);
 }
 
+/* 29/set (6), pedido do Douglas: "quero o chat de fora, no mesmo
+   padrao de tamanho e tal, do de dentro" -- largura/fundo/borda já
+   eram compartilhados (ver .chat-drawer, .lobby-panel lá em cima),
+   mas a ALTURA não: o de dentro é uma caixa de tamanho fixo (480px,
+   ver .chat-drawer), enquanto esse aqui só tinha um teto (max-height)
+   e encolhia/crescia conforme o conteúdo -- por isso parecia "menor"
+   quando tinha pouca coisa dentro (ex: 1 conversa só). Mesma altura
+   fixa agora, com o mesmo limite pra caber em telas baixas.
+   .lobby-panel-wide (formulário de criar/editar, mais largo) segue
+   sem entrar aqui -- só mexe em largura, não em altura. */
 .lobby-panel {
-  max-height: min(520px, calc(100vh - 64px));
+  height: 480px;
+  max-height: calc(100vh - 64px);
 }
 
 .lobby-panel-header {
@@ -5469,6 +5480,11 @@ body {
   margin: 0;
   padding: 6px;
   overflow-y: auto;
+  /* 29/set (6): sem isso, com a altura da caixa agora fixa (ver
+     .lobby-panel lá em cima), uma lista curta deixava espaço vazio
+     sobrando embaixo em vez de esticar -- mesmo "flex: 1" que
+     .chat-conv-list (o de dentro) já tinha. */
+  flex: 1;
 }
 
 .lobby-conv-item {
