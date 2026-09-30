@@ -648,20 +648,21 @@ const WALL_GLASS_LIT_RATIO = 0.34;
  * altura TODA do painel (laje + vidro), não só o vidro -- perfil de
  * fachada de verdade corre inteiriço, sem quebrar na viga. */
 const WALL_GLASS_MULLION_WIDTH_PX = 8;
-/** o perfil agora é empurrado pra FORA (rumo à câmera) essa distância,
- * formando um topo + uma face de verdade (geometria 2D, não truque de
- * cor) -- ver drawMullionBar em drawFacadeGlassFrontFace. Pedido do
- * Douglas: "a parede voce criou espessura, crie ela no perfil tambem,
- * com linhas, formando uma geometria 2d mesmo, topo, face". */
-const WALL_GLASS_MULLION_DEPTH_PX = 5;
 const WALL_GLASS_MULLION_COLOR = 0x9aa3ad;
-const WALL_GLASS_MULLION_LINE_COLOR = 0x6b727a;
-/** borda de FORA de cada perfil (o canto, mais exposto) pega brilho --
- * ver drawMullionBar dentro de drawFacadeGlassFrontFace. Pedido do
- * Douglas com print de referência: "replique a espessura dos perfis,
- * o volume" -- mesma dupla sombra+brilho do WALL_BASEBOARD_GROOVE_*,
- * só que numa barra (2 bordas) em vez de um sulco. */
-const WALL_GLASS_MULLION_HIGHLIGHT_COLOR = 0xeef1f4;
+/** ACHADO (Douglas vendo a foto de novo: "olha esse, o vidro é
+ * recuado") -- a espessura de verdade NÃO é o perfil saindo pra fora
+ * (tentativa anterior, revertida): é o VIDRO que fica pra DENTRO/atrás
+ * da esquadria (laje + perfil, que ficam coladas num plano só, à
+ * frente). Por isso o volume agora mora no vidro (ver `back()` em
+ * drawFacadeGlassFrontFace), não no perfil -- o perfil voltou a ser
+ * uma barra chata no plano da frente, igual antes de qualquer "volume".
+ * `WALL_GLASS_RECESS_DEPTH_PX` é o quanto o vidro recua; as 2 cores
+ * abaixo são a sombra do recuo (mais larga/suave) + a linha bem na
+ * quina de dentro dela (pedido: "coloque linha nas quinas pra ficar
+ * mais evidente" -- reforça o degrau, não deixa só o gradiente suave). */
+const WALL_GLASS_RECESS_DEPTH_PX = 6;
+const WALL_GLASS_RECESS_SHADOW_COLOR = 0x1b2128;
+const WALL_GLASS_RECESS_LINE_COLOR = 0x0d1013;
 
 // fonte usada em todo texto desenhado DENTRO do canvas do jogo
 // (plaquinha de nome, label de área/assento) -- mesma pilha do resto
@@ -2122,13 +2123,53 @@ export default class MainScene extends Phaser.Scene {
     );
     const glassV0 = slabLineTop;
     const glassV1 = Math.max(glassV0 + 1, heightPx);
+    const mw = WALL_GLASS_MULLION_WIDTH_PX;
+    const glassU0 = mw;
+    const glassU1 = Math.max(glassU0 + 1, edgeLengthExt - mw);
+
+    // RECUO DE VERDADE (Douglas vendo a foto de novo: "olha esse, o
+    // vidro é recuado") -- back(p) empurra um ponto do plano da
+    // esquadria (laje+perfil, que ficam na frente) pra TRÁS (oposto de
+    // outPerp), pela profundidade do recuo. O vidro inteiro passa a
+    // viver nesse plano recuado; laje e perfil continuam no plano da
+    // frente, sem nenhum offset.
+    const rdx = -outPerp.x * WALL_GLASS_RECESS_DEPTH_PX;
+    const rdy = -outPerp.y * WALL_GLASS_RECESS_DEPTH_PX;
+    const back = (p: { x: number; y: number }) => ({ x: p.x + rdx, y: p.y + rdy });
+
+    // "caixa" do recuo -- liga o plano da frente (laje/perfil) ao vidro
+    // recuado nas 4 bordas (embaixo, em cima, e nas 2 pontas, coladas
+    // em cada perfil): sombra larga/suave + uma linha fina e escura bem
+    // na quina de DENTRO (onde encosta no vidro) -- pedido: "coloque
+    // linha nas quinas pra ficar mais evidente", pra não ficar só o
+    // gradiente suave, ter um traço definindo o degrau de verdade.
+    const lerpPt = (p: { x: number; y: number }, q: { x: number; y: number }, t: number) => ({
+      x: p.x + (q.x - p.x) * t,
+      y: p.y + (q.y - p.y) * t,
+    });
+    const reveal = (
+      pA0: { x: number; y: number },
+      pB0: { x: number; y: number },
+      pA1: { x: number; y: number },
+      pB1: { x: number; y: number }
+    ) => {
+      gfx.fillStyle(WALL_GLASS_RECESS_SHADOW_COLOR, 1);
+      gfx.fillPoints([pA0, pB0, pB1, pA1], true);
+      gfx.fillStyle(WALL_GLASS_RECESS_LINE_COLOR, 1);
+      gfx.fillPoints([lerpPt(pA0, pA1, 0.7), lerpPt(pB0, pB1, 0.7), pB1, pA1], true);
+    };
+    reveal(mapPoint(glassU0, glassV0), mapPoint(glassU1, glassV0), back(mapPoint(glassU0, glassV0)), back(mapPoint(glassU1, glassV0))); // embaixo (sob a laje)
+    reveal(mapPoint(glassU0, glassV1), mapPoint(glassU1, glassV1), back(mapPoint(glassU0, glassV1)), back(mapPoint(glassU1, glassV1))); // em cima
+    reveal(mapPoint(glassU0, glassV0), mapPoint(glassU0, glassV1), back(mapPoint(glassU0, glassV0)), back(mapPoint(glassU0, glassV1))); // ponta esquerda (colada no perfil)
+    reveal(mapPoint(glassU1, glassV0), mapPoint(glassU1, glassV1), back(mapPoint(glassU1, glassV0)), back(mapPoint(glassU1, glassV1))); // ponta direita (colada no perfil)
+
     const stripes = 10;
     const stripeH = (glassV1 - glassV0) / stripes;
     // "luz acesa" (ver WALL_GLASS_LIT_* acima, pedido do Douglas com
     // print de referência) -- troca só o PAR de cores do gradiente
-    // (quente em vez de frio); resto do desenho (laje, linha, perfil)
-    // continua idêntico, então a janela acesa ainda lê como o MESMO
-    // painel de vidro, só "com a luz do escritório ligada".
+    // (quente em vez de frio); resto do desenho (laje, linha, recuo,
+    // perfil) continua idêntico, então a janela acesa ainda lê como o
+    // MESMO painel de vidro, só "com a luz do escritório ligada".
     const colorBottom = lit ? WALL_GLASS_LIT_COLOR_BOTTOM : WALL_GLASS_COLOR_BOTTOM;
     const colorTop = lit ? WALL_GLASS_LIT_COLOR_TOP : WALL_GLASS_COLOR_TOP;
     const alpha = lit ? WALL_GLASS_LIT_ALPHA : WALL_GLASS_ALPHA;
@@ -2137,46 +2178,18 @@ export default class MainScene extends Phaser.Scene {
       const v1 = i === stripes - 1 ? glassV1 : v0 + stripeH;
       const t = (i + 0.5) / stripes; // 0 perto da laje (fundo), 1 perto do topo (céu)
       gfx.fillStyle(this.lerpColor(colorBottom, colorTop, t), alpha);
-      gfx.fillPoints([mapPoint(0, v0), mapPoint(edgeLengthExt, v0), mapPoint(edgeLengthExt, v1), mapPoint(0, v1)], true);
+      gfx.fillPoints(
+        [back(mapPoint(glassU0, v0)), back(mapPoint(glassU1, v0)), back(mapPoint(glassU1, v1)), back(mapPoint(glassU0, v1))],
+        true
+      );
     }
-    const mw = WALL_GLASS_MULLION_WIDTH_PX;
-    // volume do perfil de VERDADE (pedido do Douglas: "a parede voce
-    // criou espessura, crie ela no perfil tambem, com linhas, formando
-    // uma geometria 2d mesmo, topo, face") -- mesma técnica da face de
-    // cima da parede (ver pattern.topColor/raise() lá em
-    // createWallPatternGraphics): 2 faces de verdade, não gradiente.
-    // `front(p)` empurra um ponto do plano do vidro pra FORA (rumo à
-    // câmera) pela espessura do perfil, usando `outPerp` (a MESMA
-    // direção perpendicular da espessura da parede de verdade --
-    // calculada pelos 2 lugares que chamam essa função, ver
-    // createWallPatternGraphics e drawFloorEdgeGlass).
-    const dx = outPerp.x * WALL_GLASS_MULLION_DEPTH_PX;
-    const dy = outPerp.y * WALL_GLASS_MULLION_DEPTH_PX;
-    const front = (p: { x: number; y: number }) => ({ x: p.x + dx, y: p.y + dy });
+
+    // perfil -- barra chata no plano da FRENTE (colada na laje, sem
+    // nenhum offset): o volume agora vem inteiro do recuo do vidro ao
+    // lado dela, não de um relevo no próprio perfil.
     const drawMullionBar = (uOuter: number, uInner: number) => {
-      // TOPO -- liga a borda de cima no plano do vidro até a borda de
-      // cima empurrada pra fora: um topo de verdade pegando luz, exatamente
-      // como o topo (topColor) de uma parede normal.
-      gfx.fillStyle(WALL_GLASS_MULLION_HIGHLIGHT_COLOR, 1);
-      gfx.fillPoints(
-        [mapPoint(uOuter, heightPx), mapPoint(uInner, heightPx), front(mapPoint(uInner, heightPx)), front(mapPoint(uOuter, heightPx))],
-        true
-      );
-      // FACE -- o retângulo vertical do perfil, empurrado pra fora
-      // (antes ficava colado no mesmo plano do vidro, por isso não dava
-      // pra ver a espessura de jeito nenhum).
       gfx.fillStyle(WALL_GLASS_MULLION_COLOR, 1);
-      gfx.fillPoints(
-        [front(mapPoint(uOuter, 0)), front(mapPoint(uInner, 0)), front(mapPoint(uInner, heightPx)), front(mapPoint(uOuter, heightPx))],
-        true
-      );
-      // linha escura fina onde a face encosta no vidro -- ancora o
-      // perfil visualmente (mesma ideia da linha de baixo da laje).
-      gfx.fillStyle(WALL_GLASS_MULLION_LINE_COLOR, 1);
-      gfx.fillPoints(
-        [mapPoint(uOuter, 0), mapPoint(uInner, 0), front(mapPoint(uInner, 0)), front(mapPoint(uOuter, 0))],
-        true
-      );
+      gfx.fillPoints([mapPoint(uOuter, 0), mapPoint(uInner, 0), mapPoint(uInner, heightPx), mapPoint(uOuter, heightPx)], true);
     };
     drawMullionBar(0, mw);
     drawMullionBar(edgeLengthExt, edgeLengthExt - mw);
