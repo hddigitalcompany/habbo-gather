@@ -1966,6 +1966,7 @@ export default function Lobby({
       }
       const created: MyRoom = { id: data.room.id, name: String(data.room.name ?? "Minha sala"), room_slug: data.room.room_slug };
       setMyRoom(created);
+      setCreatingSpaceFromDropdown(false);
       userPickedRoomRef.current = true;
       setSelectedRoomSlug(created.room_slug);
     } catch {
@@ -2033,8 +2034,28 @@ export default function Lobby({
   const stillCheckingRoomAccess = roomRoleLoading || myRoomLoading;
   // cliente de verdade: não é do time do Douglas E ainda não tem sala
   // própria -- mostra "Criar minha sala" (ver JSX mais abaixo) no lugar
-  // do preview/"Entrar na sala" normal.
+  // do preview/"Entrar na sala" normal, SEM escolha (ele não tem outro
+  // espaço pra ver enquanto isso).
   const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRoom;
+  // 29/set (10), pedido do Douglas: "adicione mais um opcao: Criar
+  // espaço +" -- até aqui só quem NÃO era do time (needsToCreateRoom
+  // acima) conseguia criar a própria sala; o time (Douglas/membros)
+  // ficava travado só com "Sala principal"/"Mapa modelo" pra sempre,
+  // sem jeito de ter uma sala própria também. Esse state, ligado pelo
+  // item novo "Criar espaço +" no dropdown "Meus espaços" (mais
+  // abaixo), força o MESMO fluxo de needsToCreateRoom a aparecer
+  // mesmo sendo do time -- ver openCreateRoomFlow no lugar do
+  // dropdown. Só faz sentido enquanto ainda não tem myRoom (o mesmo
+  // limite de "uma sala por conta" que sempre existiu); assim que a
+  // sala nasce, myRoom passa a existir e esse flag fica sem efeito
+  // (voltamos a confiar só em needsToCreateRoom, que nunca conta pra
+  // quem já tem myRoom).
+  const [creatingSpaceFromDropdown, setCreatingSpaceFromDropdown] = useState(false);
+  const showCreateRoomFlow = needsToCreateRoom || (creatingSpaceFromDropdown && !myRoom);
+  function openCreateRoomFlow() {
+    setCreatingSpaceFromDropdown(true);
+    setSpacesMenuOpen(false);
+  }
 
   // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
   // causa raiz: o Lobby não abre WebSocket de propósito (ver
@@ -2305,6 +2326,24 @@ export default function Lobby({
                         {r.label}
                       </button>
                     ))
+                  )}
+                  {/* 29/set (10), pedido do Douglas: "adicione mais um
+                      opcao: Criar espaço +" -- até aqui só quem não
+                      era do time ganhava esse fluxo (forçado, tela
+                      inteira, ver needsToCreateRoom). Item extra no
+                      fim da lista, sempre que a conta ainda não tem
+                      sala própria (mesmo sendo do time) -- abre o
+                      MESMO fluxo de nomear empresa + escolher modelo
+                      (ver openCreateRoomFlow/showCreateRoomFlow mais
+                      acima, JSX no .lobby-card mais abaixo). */}
+                  {accountAccessToken && !stillCheckingRoomAccess && !myRoom && (
+                    <button
+                      type="button"
+                      className="lobby-topbar-dropdown-item lobby-topbar-dropdown-item-create"
+                      onClick={openCreateRoomFlow}
+                    >
+                      Criar espaço +
+                    </button>
                   )}
                 </div>
               </>
@@ -2930,8 +2969,26 @@ export default function Lobby({
             myRoom passa a existir e esse bloco some sozinho (needsToCreateRoom
             vira false), voltando pro fluxo normal de sempre com a sala
             nova já selecionada. */}
-        {needsToCreateRoom ? (
+        {showCreateRoomFlow ? (
           <div className="lobby-create-room">
+            {/* só quem chegou aqui pelo "Criar espaço +" do dropdown
+                (ver openCreateRoomFlow) E já tem pra onde voltar (é do
+                time, ver canSeeSalaPrincipal) ganha esse "Cancelar" --
+                um cliente de verdade em needsToCreateRoom não tem
+                outro lugar pra ir (é obrigado a criar a sala). */}
+            {creatingSpaceFromDropdown && !needsToCreateRoom && (
+              <button
+                type="button"
+                className="lobby-create-room-cancel-btn"
+                onClick={() => {
+                  setCreatingSpaceFromDropdown(false);
+                  setCompanyName("");
+                  setCompanyNameDraft("");
+                }}
+              >
+                ✕ Cancelar
+              </button>
+            )}
             <p className="lobby-create-room-title">Você ainda não tem uma sala</p>
             {!accountAccessToken ? (
               <p className="lobby-create-room-hint">Crie uma conta pra ganhar a sua.</p>

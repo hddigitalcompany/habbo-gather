@@ -4968,6 +4968,22 @@ body {
   background: rgba(124, 92, 255, 0.14);
 }
 
+/* 29/set (10): "Criar espaço +" (ver openCreateRoomFlow em
+   Lobby.tsx) -- é uma AÇÃO, não um espaço pra selecionar, então
+   ganha uma linha separando ele do resto da lista + cor de destaque
+   (mesma roxa de marca do resto do app) em vez do cinza padrão. */
+.lobby-topbar-dropdown-item-create {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(20, 20, 45, 0.08);
+  color: #7c5cff;
+  font-weight: 700;
+}
+
+.lobby-topbar-dropdown-item-create:hover {
+  background: rgba(124, 92, 255, 0.1);
+}
+
 /* 29/set: dropdown vazio (cliente sem time/sala própria ainda, ver
    dropdownEntries em Lobby.tsx) -- mesma tipografia/cor discreta de um
    estado vazio, só texto, sem virar botão. */
@@ -5994,6 +6010,25 @@ body {
 }
 
 .lobby-create-room-back-btn:hover {
+  color: #14121f;
+}
+
+/* 29/set (10): "Cancelar" só aparece pra quem abriu esse fluxo pelo
+   "Criar espaço +" do dropdown E já tem pra onde voltar (é do time --
+   ver creatingSpaceFromDropdown/showCreateRoomFlow em Lobby.tsx).
+   Mesmo estilo discreto do botão de voltar, só que no canto oposto
+   (align-self: flex-end -- .lobby-create-room já é flex-column). */
+.lobby-create-room-cancel-btn {
+  align-self: flex-end;
+  background: transparent;
+  border: none;
+  color: #8b879c;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.lobby-create-room-cancel-btn:hover {
   color: #14121f;
 }
 

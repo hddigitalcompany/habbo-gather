@@ -36,6 +36,14 @@ import { getVerifiedUserId } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
+// 29/set (10): mesma lista de app/api/room/visit/route.ts e
+// app/api/room/mine/route.ts -- Sala Principal/Mapa Modelo são fixas
+// do time, não contam como "já tem sala própria" pro check de
+// idempotência logo abaixo (senão o time nunca conseguiria criar uma
+// sala de verdade: essa rota devolveria Sala Principal de novo pra
+// sempre, achando que já era "a sala" da pessoa).
+const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+
 export async function POST(req: NextRequest) {
   const userId = await getVerifiedUserId(req);
   if (!userId) return NextResponse.json({ error: "não autenticado" }, { status: 401 });
@@ -53,14 +61,17 @@ export async function POST(req: NextRequest) {
   // ou deu refresh no meio do fluxo), devolve ela de novo em vez de
   // criar uma segunda (pedido implícito do Douglas: "ele ainda nao
   // tem" -- só faz sentido escolher template ENQUANTO não tem sala).
+  // Sala Principal/Mapa Modelo (RESERVED_SLUGS) não contam aqui --
+  // ver comentário grande no topo do arquivo.
   const existing = await admin
     .from("rooms")
     .select("id, name, room_slug")
     .eq("owner_user_id", userId)
     .eq("is_template", false)
-    .not("room_slug", "is", null)
-    .maybeSingle();
-  if (existing.data) return NextResponse.json({ room: existing.data });
+    .not("room_slug", "is", null);
+  if (existing.error) return NextResponse.json({ error: existing.error.message }, { status: 500 });
+  const existingReal = (existing.data ?? []).find((r) => !RESERVED_SLUGS.has(r.room_slug));
+  if (existingReal) return NextResponse.json({ room: existingReal });
 
   const template = await admin
     .from("rooms")
