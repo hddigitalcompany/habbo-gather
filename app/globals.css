@@ -5772,11 +5772,7 @@ button.chat-picker-item:disabled {
 }
 
 .company-card-founder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 56px;
+  position: relative;
   background: none;
   border: none;
   padding: 0;
@@ -5801,18 +5797,40 @@ button.chat-picker-item:disabled {
   font-weight: 700;
 }
 
-/* pedido do Douglas, 30/set (20): "cade o nome? poe o nome da
-   empresa nos dois" -- nome da pessoa embaixo do avatar (antes só
-   tinha o title/tooltip, que não aparece em toque/mobile). */
-.company-card-founder-name {
-  max-width: 56px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #cfc9de;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* pedido do Douglas, 30/set (20): "igual o balao, vai criar um card
+   aqui igual cria no perfil publico, de lado" -- balãozinho ancorado
+   do lado direito do avatar (mesmo visual do .area-confirm-balloon:
+   fundo escuro + blur), só visível no hover/foco (opacity/visibility,
+   não display, pra poder animar); pointer-events: none pra não
+   atrapalhar o clique no botão por baixo. */
+.company-card-founder-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%) scale(0.95);
+  z-index: 5;
+  padding: 6px 12px;
+  border-radius: 999px;
   white-space: nowrap;
+  background: rgba(20, 26, 44, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+}
+
+.company-card-founder:hover .company-card-founder-tooltip,
+.company-card-founder:focus-visible .company-card-founder-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) scale(1);
 }
 
 .company-card-founder:hover .company-card-founder-avatar {

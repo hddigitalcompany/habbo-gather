@@ -4058,12 +4058,17 @@ export default function Lobby({
                       {!f.photoUrl && (f.name || "?").trim().charAt(0).toUpperCase()}
                     </span>
                     {/* pedido do Douglas, 30/set (20): "cade o nome? poe
-                        o nome da empresa nos dois" -- na fileira de
-                        founders o avatar não tinha nenhum texto visível
-                        (só o title/tooltip, que não aparece em touch),
-                        então aqui é o nome da PESSOA (cada founder já
-                        tem o seu próprio f.name vindo do servidor). */}
-                    <span className="company-card-founder-name">{f.name || "(sem nome)"}</span>
+                        o nome da empresa nos dois", depois "igual o
+                        balao, vai criar um card aqui igual cria no
+                        perfil publico, de lado" -- a primeira versão
+                        (nome fixo embaixo do avatar) truncava feio
+                        ("Hualison ..."); virou um balãozinho que só
+                        aparece no hover/foco, encostado do LADO do
+                        avatar (mesma ideia visual do balão de
+                        confirmação de mesa: fundo escuro com blur),
+                        sem precisar clicar (o clique continua abrindo
+                        o perfil público completo, como já era). */}
+                    <span className="company-card-founder-tooltip">{f.name || "(sem nome)"}</span>
                   </button>
                 ))}
                 </div>
