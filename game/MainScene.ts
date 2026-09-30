@@ -3907,6 +3907,28 @@ export default class MainScene extends Phaser.Scene {
     ].filter((t) => this.isTileInRoom(t.col, t.row));
   }
 
+  /** Vizinhos da sala que ficam "atrás" (rumo ao fundo/topo da tela --
+   * ver comentário grande de roomShape lá em cima e a fórmula de
+   * col+row -> profundidade em game/grid.ts) do tile (col,row) --
+   * usado só por "Adicionar" (ver paintRoomShapeAt/hover abaixo), que
+   * agora só deixa crescer a sala pela borda de CIMA (pedido do
+   * Douglas: ideia do Tower ser um prédio de verdade, com fachada fixa
+   * na borda de BAIXO -- "deixar tiles adicionaveis apenas nas borda
+   * de cima", ver drawFacadeGlass mais abaixo pra vidraça que ocupa
+   * essa borda de baixo). Só (col+1,row) e (col,row+1) contam -- são
+   * os 2 únicos vizinhos com col+row MAIOR que o tile novo, ou seja o
+   * tile novo sempre nasce ATRÁS deles, nunca na frente/borda de baixo
+   * empurrando a fachada. Diferente de roomNeighbors (usado por
+   * eraseRoomShapeAt/wouldDisconnectRoom, onde qualquer direção conta
+   * -- a restrição de direção é só pra CRESCER; apagar continua livre
+   * em qualquer lado). */
+  private roomBackNeighbors(col: number, row: number): { col: number; row: number }[] {
+    return [
+      { col: col + 1, row },
+      { col, row: row + 1 },
+    ].filter((t) => this.isTileInRoom(t.col, t.row));
+  }
+
   /** Carrega o formato salvo da sala (ver GET /room/shape em
    * server/index.js) -- chamado pelo React assim que a cena fica pronta
    * (mesmo timing de loadSavedFloor/loadSavedFurniture). SUBSTITUI o
@@ -4012,14 +4034,17 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /** Pinta (adiciona) um tile novo na sala -- só aceita se ele AINDA
-   * não for da sala e encostar (4 direções) em pelo menos um tile que
-   * já é (mantém a sala sempre conectada, crescendo pela borda, nunca
-   * uma ilha solta). Silencioso quando inválido (mesmo padrão de
+   * não for da sala e encostar num tile que já é, SÓ pelo lado de
+   * trás/cima (ver roomBackNeighbors acima -- antes eram as 4 direções
+   * livres; a borda de baixo agora é fachada fixa, ver
+   * drawFacadeGlass). Mantém a sala sempre conectada, crescendo só
+   * pela borda de cima, nunca uma ilha solta nem empurrando a fachada
+   * de baixo pra frente. Silencioso quando inválido (mesmo padrão de
    * clicar num tile já ocupado com outra ferramenta -- não faz nada). */
   private paintRoomShapeAt(col: number, row: number) {
     const key = this.roomTileKey(col, row);
     if (this.roomShape.has(key)) return;
-    if (this.roomNeighbors(col, row).length === 0) return;
+    if (this.roomBackNeighbors(col, row).length === 0) return;
     this.roomShape.add(key);
     this.drawEditGrid();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
@@ -6946,7 +6971,7 @@ export default class MainScene extends Phaser.Scene {
       this.wallHoverGraphics?.setVisible(false);
       this.catalogGhostSprite?.setVisible(false);
       const already = this.isTileInRoom(col, row);
-      const valid = this.selectedRoomShapeTool === "add" ? !already && this.roomNeighbors(col, row).length > 0 : already;
+      const valid = this.selectedRoomShapeTool === "add" ? !already && this.roomBackNeighbors(col, row).length > 0 : already;
       const { x, y } = tileToWorld(col, row);
       this.hoverGraphics
         .clear()
