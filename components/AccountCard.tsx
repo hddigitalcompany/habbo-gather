@@ -388,11 +388,19 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
 // sistema de plano de verdade (usa "é dono de sala" como substituto
 // até existir).
 // ---------------------------------------------------------------
+type OwnedRoom = { id: string; slug: string; name: string; companyVerified: boolean };
 type VerificationData = {
   eligible: boolean;
   verifiedPersonal: boolean;
   verifiedCompany: boolean;
-  requests: { id: string; type: "personal" | "company"; status: "pending" | "approved" | "rejected"; createdAt: string }[];
+  ownedRooms: OwnedRoom[];
+  requests: {
+    id: string;
+    type: "personal" | "company";
+    status: "pending" | "approved" | "rejected";
+    createdAt: string;
+    roomId: string | null;
+  }[];
 };
 
 function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken: string; onClose: () => void }) {
@@ -400,13 +408,30 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
   const [loading, setLoading] = useState(true);
   const [busyType, setBusyType] = useState<"personal" | "company" | null>(null);
   const [errByType, setErrByType] = useState<Record<string, string>>({});
+  // pedido do Douglas, 30/set (2): "quando a pessoa for verificar a
+  // empresa, aparece a selecao do espaco que essa empresa esta" --
+  // qual dos ownedRooms tá escolhido no seletor do bloco "Empresa"
+  // agora (nasce no primeiro espaço ainda sem selo, ver useEffect
+  // abaixo).
+  const [selectedRoomId, setSelectedRoomId] = useState<string>("");
 
   function load() {
     setLoading(true);
     fetch("/api/account/verification", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) setData(d);
+      .then((d: VerificationData | null) => {
+        if (!d) return;
+        setData(d);
+        // seleciona automaticamente o primeiro espaço que ainda não
+        // tem o selo (o mais provável de ser o que a pessoa quer
+        // verificar agora) -- só na primeira carga, pra não pular a
+        // escolha de quem já tinha mudado o seletor e só tá recarregando
+        // depois de enviar um documento (ver load() chamado de novo em
+        // submitDoc).
+        setSelectedRoomId((prev) => {
+          if (prev && d.ownedRooms.some((r) => r.id === prev)) return prev;
+          return d.ownedRooms.find((r) => !r.companyVerified)?.id ?? d.ownedRooms[0]?.id ?? "";
+        });
       })
       .finally(() => setLoading(false));
   }
@@ -416,8 +441,12 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountAccessToken]);
 
+  // "personal" -- status da CONTA (sem espaço). "company" -- status do
+  // ESPAÇO escolhido no seletor (cada espaço tem seu próprio pedido/
+  // selo, ver migration 0043_company_verification_per_room.sql).
   function statusFor(type: "personal" | "company") {
-    return data?.requests.find((r) => r.type === type)?.status ?? null;
+    if (type === "personal") return data?.requests.find((r) => r.type === "personal")?.status ?? null;
+    return data?.requests.find((r) => r.type === "company" && r.roomId === selectedRoomId)?.status ?? null;
   }
 
   async function submitDoc(type: "personal" | "company", file: File) {
@@ -426,6 +455,7 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
     try {
       const form = new FormData();
       form.set("type", type);
+      if (type === "company") form.set("roomId", selectedRoomId);
       form.set("file", file);
       const res = await fetch("/api/account/verification", {
         method: "POST",
@@ -475,11 +505,30 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
               <VerificationTypeBlock
                 title="Empresa"
                 description="Envie o contrato social da empresa, constando você como sócio."
-                verified={data.verifiedCompany}
+                verified={data.ownedRooms.find((r) => r.id === selectedRoomId)?.companyVerified ?? false}
                 status={statusFor("company")}
                 busy={busyType === "company"}
                 error={errByType.company}
                 onPick={(file) => submitDoc("company", file)}
+                extra={
+                  // pedido do Douglas, 30/set (2): "quando a pessoa for
+                  // verificar a empresa, aparece a selecao do espaco que
+                  // essa empresa esta" -- sem esse seletor não dá pra
+                  // saber QUAL dos espaços da pessoa é essa "empresa"
+                  // (sem CNPJ, ver comentário grande em
+                  // app/api/account/verification/route.ts).
+                  <label className="profile-field">
+                    Espaço
+                    <select value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)}>
+                      {data.ownedRooms.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                          {r.companyVerified ? " (verificado)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                }
               />
             </>
           )}
@@ -498,6 +547,8 @@ function VerificationTypeBlock({
   busy,
   error,
   onPick,
+  extra,
+  disabled,
 }: {
   title: string;
   description: string;
@@ -506,6 +557,12 @@ function VerificationTypeBlock({
   busy: boolean;
   error?: string;
   onPick: (file: File) => void;
+  // pedido do Douglas, 30/set (2): seletor de espaço do bloco "Empresa"
+  // (ver VerificationPanel) -- Pessoal não usa, fica null.
+  extra?: React.ReactNode;
+  // sem espaço nenhum selecionado (conta sem espaço próprio ainda) --
+  // não faz sentido deixar enviar documento sem saber pra qual espaço é.
+  disabled?: boolean;
 }) {
   return (
     <div className="verification-block">
@@ -514,17 +571,18 @@ function VerificationTypeBlock({
         {verified && <span className="verification-badge-pill">Verificado</span>}
       </p>
       <p className="account-panel-hint">{description}</p>
+      {extra}
       {error && <p className="account-panel-error">{error}</p>}
       {verified ? null : status === "pending" ? (
         <p className="account-panel-hint">Em análise...</p>
       ) : (
-        <label className="profile-action-btn verification-upload-btn">
+        <label className={`profile-action-btn verification-upload-btn${disabled ? " disabled" : ""}`}>
           {busy ? "Enviando..." : status === "rejected" ? "Enviar de novo" : "Enviar documento"}
           <input
             type="file"
             accept="image/*,application/pdf"
             style={{ display: "none" }}
-            disabled={busy}
+            disabled={busy || disabled}
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";

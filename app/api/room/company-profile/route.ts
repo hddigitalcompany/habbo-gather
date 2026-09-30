@@ -43,6 +43,7 @@ type CompanyProfileRow = {
   company_category: string[] | null;
   company_show_name_on_employee_profiles: boolean | null;
   company_followers: number | null;
+  company_verified: boolean | null;
 };
 
 function toProfile(row: CompanyProfileRow) {
@@ -56,6 +57,10 @@ function toProfile(row: CompanyProfileRow) {
     category: Array.isArray(row.company_category) ? row.company_category : [],
     showNameOnEmployeeProfiles: row.company_show_name_on_employee_profiles ?? true,
     followers: row.company_followers ?? 0,
+    // selo de verdade agora (pedido do Douglas, 30/set (2)), ver
+    // migration 0043_company_verification_per_room.sql -- antes o
+    // ícone verificado no card era fixo/sempre aparecia.
+    verified: row.company_verified ?? false,
   };
 }
 
@@ -69,7 +74,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await admin
     .from("rooms")
     .select(
-      "name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_followers"
+      "name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_followers, company_verified"
     )
     .eq("room_slug", slug)
     .maybeSingle();
@@ -124,7 +129,7 @@ export async function POST(req: NextRequest) {
     .update(update)
     .eq("id", room.data.id)
     .select(
-      "name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_followers"
+      "name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_followers, company_verified"
     )
     .single();
   if (updated.error) return NextResponse.json({ error: updated.error.message }, { status: 500 });

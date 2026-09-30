@@ -494,6 +494,13 @@ type CompanyProfile = {
   // o perfil dos colaboradores ainda não lê esse valor de lugar
   // nenhum (fica pronto pra quando isso existir).
   showNameOnEmployeeProfiles: boolean;
+  // selo de verdade (pedido do Douglas, 30/set (2)) -- antes o ícone
+  // verificado em .company-card-name era FIXO, sempre aparecia (ver
+  // VerifiedBadge/uso mais abaixo). Vem de rooms.company_verified, só
+  // liga com um pedido de "Selo de verificação > Empresa" aprovado pra
+  // ESSE espaço (ver migration 0043_company_verification_per_room.sql
+  // e app/api/account/verification/route.ts).
+  verified: boolean;
 };
 
 // estado "em branco" -- usado enquanto o card de verdade ainda não
@@ -513,6 +520,7 @@ const BLANK_COMPANY_PROFILE: CompanyProfile = {
   bannerUrl: "",
   category: [],
   showNameOnEmployeeProfiles: true,
+  verified: false,
 };
 
 // pedido do Douglas: "uma caixa de selecao, escrita Posicione a sua
@@ -3634,7 +3642,7 @@ export default function Lobby({
           <div className="company-card-bottom">
             <p className="company-card-name">
               {companyProfile.name}
-              <VerifiedBadge />
+              {companyProfile.verified && <VerifiedBadge />}
             </p>
             <p className="company-card-handle">@{companyProfile.handle.replace(/^@/, "")}</p>
             <p className="company-card-bio">{companyProfile.bio}</p>

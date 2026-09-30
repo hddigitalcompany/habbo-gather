@@ -3196,6 +3196,15 @@ button.chat-picker-item:disabled {
   cursor: pointer;
 }
 
+/* sem espaço selecionado (VerificationTypeBlock disabled=true, ver
+   AccountCard.tsx) -- mesma ideia visual de :disabled nos outros
+   botões desse card (opacity 0.4 + cursor default). */
+.verification-upload-btn.disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
 /* composer inline de "Deixar um recado" -- ver recadoOpen/onSendNote em
    GameRoom.tsx. Mesma receita visual dos campos de perfil (.profile-field
    textarea logo acima), só que vive fora daquele bloco (esse aqui
