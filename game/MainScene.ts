@@ -648,6 +648,13 @@ const WALL_GLASS_LIT_RATIO = 0.34;
  * altura TODA do painel (laje + vidro), não só o vidro -- perfil de
  * fachada de verdade corre inteiriço, sem quebrar na viga. */
 const WALL_GLASS_MULLION_WIDTH_PX = 8;
+/** o perfil agora é empurrado pra FORA (rumo à câmera) essa distância,
+ * formando um topo + uma face de verdade (geometria 2D, não truque de
+ * cor) -- ver drawMullionBar em drawFacadeGlassFrontFace. Pedido do
+ * Douglas: "a parede voce criou espessura, crie ela no perfil tambem,
+ * com linhas, formando uma geometria 2d mesmo, topo, face". */
+const WALL_GLASS_MULLION_DEPTH_PX = 5;
+const WALL_GLASS_MULLION_COLOR = 0x9aa3ad;
 const WALL_GLASS_MULLION_LINE_COLOR = 0x6b727a;
 /** borda de FORA de cada perfil (o canto, mais exposto) pega brilho --
  * ver drawMullionBar dentro de drawFacadeGlassFrontFace. Pedido do
@@ -2101,7 +2108,8 @@ export default class MainScene extends Phaser.Scene {
     mapPoint: (u: number, v: number) => { x: number; y: number },
     edgeLengthExt: number,
     heightPx: number,
-    lit = false
+    lit = false,
+    outPerp: { x: number; y: number } = { x: 0, y: -1 }
   ) {
     const slabH = WALL_GLASS_SLAB_HEIGHT_PX;
     const slabLineTop = slabH + WALL_GLASS_SLAB_LINE_PX;
@@ -2132,26 +2140,43 @@ export default class MainScene extends Phaser.Scene {
       gfx.fillPoints([mapPoint(0, v0), mapPoint(edgeLengthExt, v0), mapPoint(edgeLengthExt, v1), mapPoint(0, v1)], true);
     }
     const mw = WALL_GLASS_MULLION_WIDTH_PX;
-    // volume do perfil: em vez de 1px de brilho + 1px de sombra nas
-    // bordas (some de tão fino no zoom isométrico do jogo -- por isso
-    // "não tava ficando o efeito"), agora é um DEGRADÊ de verdade
-    // cobrindo a barra inteira, brilho na borda de FORA (canto, mais
-    // exposto à luz) até sombra na borda de DENTRO (colada no vidro) --
-    // mesma técnica de lerpColor em faixas já usada nas listras do
-    // vidro acima, só que na horizontal. Largura proporcional (mw),
-    // então continua visível em qualquer zoom, não só em telas grandes.
-    // Pedido do Douglas com print de referência: "replique a espessura
-    // dos perfis, o volume".
-    const mullionBands = 6;
+    // volume do perfil de VERDADE (pedido do Douglas: "a parede voce
+    // criou espessura, crie ela no perfil tambem, com linhas, formando
+    // uma geometria 2d mesmo, topo, face") -- mesma técnica da face de
+    // cima da parede (ver pattern.topColor/raise() lá em
+    // createWallPatternGraphics): 2 faces de verdade, não gradiente.
+    // `front(p)` empurra um ponto do plano do vidro pra FORA (rumo à
+    // câmera) pela espessura do perfil, usando `outPerp` (a MESMA
+    // direção perpendicular da espessura da parede de verdade --
+    // calculada pelos 2 lugares que chamam essa função, ver
+    // createWallPatternGraphics e drawFloorEdgeGlass).
+    const dx = outPerp.x * WALL_GLASS_MULLION_DEPTH_PX;
+    const dy = outPerp.y * WALL_GLASS_MULLION_DEPTH_PX;
+    const front = (p: { x: number; y: number }) => ({ x: p.x + dx, y: p.y + dy });
     const drawMullionBar = (uOuter: number, uInner: number) => {
-      const bandW = (uInner - uOuter) / mullionBands;
-      for (let i = 0; i < mullionBands; i++) {
-        const u0 = uOuter + i * bandW;
-        const u1 = i === mullionBands - 1 ? uInner : u0 + bandW;
-        const t = (i + 0.5) / mullionBands; // 0 na borda de fora (brilho), 1 na borda de dentro (sombra/vidro)
-        gfx.fillStyle(this.lerpColor(WALL_GLASS_MULLION_HIGHLIGHT_COLOR, WALL_GLASS_MULLION_LINE_COLOR, t), 1);
-        gfx.fillPoints([mapPoint(u0, 0), mapPoint(u1, 0), mapPoint(u1, heightPx), mapPoint(u0, heightPx)], true);
-      }
+      // TOPO -- liga a borda de cima no plano do vidro até a borda de
+      // cima empurrada pra fora: um topo de verdade pegando luz, exatamente
+      // como o topo (topColor) de uma parede normal.
+      gfx.fillStyle(WALL_GLASS_MULLION_HIGHLIGHT_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(uOuter, heightPx), mapPoint(uInner, heightPx), front(mapPoint(uInner, heightPx)), front(mapPoint(uOuter, heightPx))],
+        true
+      );
+      // FACE -- o retângulo vertical do perfil, empurrado pra fora
+      // (antes ficava colado no mesmo plano do vidro, por isso não dava
+      // pra ver a espessura de jeito nenhum).
+      gfx.fillStyle(WALL_GLASS_MULLION_COLOR, 1);
+      gfx.fillPoints(
+        [front(mapPoint(uOuter, 0)), front(mapPoint(uInner, 0)), front(mapPoint(uInner, heightPx)), front(mapPoint(uOuter, heightPx))],
+        true
+      );
+      // linha escura fina onde a face encosta no vidro -- ancora o
+      // perfil visualmente (mesma ideia da linha de baixo da laje).
+      gfx.fillStyle(WALL_GLASS_MULLION_LINE_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(uOuter, 0), mapPoint(uInner, 0), front(mapPoint(uInner, 0)), front(mapPoint(uOuter, 0))],
+        true
+      );
     };
     drawMullionBar(0, mw);
     drawMullionBar(edgeLengthExt, edgeLengthExt - mw);
@@ -4287,6 +4312,15 @@ export default class MainScene extends Phaser.Scene {
       if (edgeLength === 0) continue;
       const alongX = dx / edgeLength;
       const alongY = dy / edgeLength;
+      // mesma conta de perpX/perpY de createWallPatternGraphics/
+      // wallRailLine (tile vs vizinho "pra dentro da sala") -- só pra
+      // saber pra que lado é "rumo à câmera", usado no volume do
+      // perfil (ver outPerp em drawFacadeGlassFrontFace).
+      const neighborTile = edge.side === "rowPlus" ? { col: edge.col, row: edge.row + 1 } : { col: edge.col + 1, row: edge.row };
+      const centerNear = tileToWorld(edge.col, edge.row);
+      const centerFar = tileToWorld(neighborTile.col, neighborTile.row);
+      const perpDist = Math.hypot(centerFar.x - centerNear.x, centerFar.y - centerNear.y) || 1;
+      const outPerp = { x: (centerFar.x - centerNear.x) / perpDist, y: (centerFar.y - centerNear.y) / perpDist };
       for (let i = 0; i < FLOOR_GLASS_REPEATS; i++) {
         const vOffset = i * heightPx;
         const mapPoint = (u: number, v: number) => ({ x: a.x + alongX * u, y: a.y + alongY * u + vOffset + v });
@@ -4306,7 +4340,7 @@ export default class MainScene extends Phaser.Scene {
         gfx.fillPoints([mapPoint(0, 0), mapPoint(edgeLength, 0), mapPoint(edgeLength, heightPx), mapPoint(0, heightPx)], true);
         const sideSeed = edge.side === "colPlus" ? 1 : 0;
         const lit = this.glassPaneIsLit(edge.col * 928371 + edge.row * 17431 + i * 5197 + sideSeed);
-        this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx, lit);
+        this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx, lit, outPerp);
       }
     }
     this.floorEdgeGlassGfx = gfx;
@@ -5166,7 +5200,10 @@ export default class MainScene extends Phaser.Scene {
     if (isGlass) {
       const sideSeed = seg.side === "colPlus" || seg.side === "center" ? 1 : 0;
       const lit = this.glassPaneIsLit(seg.col * 928371 + seg.row * 17431 + sideSeed);
-      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLengthExt, pattern.heightPx, lit);
+      // perfil empurra pra fora na MESMA direção perpendicular que já
+      // separa nearA/farA acima (perpX/perpY) -- o perfil protrude rumo
+      // à câmera, igual a espessura de verdade da parede.
+      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLengthExt, pattern.heightPx, lit, { x: perpX, y: perpY });
     } else {
       // argamassa como fundo (o paralelogramo inteiro, já esticado),
       // tijolo desenhado por cima já com a folga -- mesma ideia visual de
