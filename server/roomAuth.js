@@ -137,3 +137,28 @@ export async function isRoomOwner(userId, roomSlug) {
     return false;
   }
 }
+
+/** Nome + logo da empresa (public.rooms.name/company_logo_url) DAQUELA
+ * sala -- pedido do Douglas (29/set (13)): "quero a logo da empresa em
+ * que ele abriu o chat, porque funcionarios podem participar de mais
+ * empresas" -- usado só na hora de CRIAR uma conversa direta/grupo na
+ * lane "company" (ver chat:create_direct/chat:create_group em
+ * index.js), pra "carimbar" ela com a empresa de onde nasceu (ver
+ * companyName/companyLogoUrl em chatStore.js). Mesmas colunas que
+ * app/api/room/company-profile/route.ts lê (0040_room_company_profile.sql).
+ */
+export async function getRoomCompanyInfo(roomSlug) {
+  if (!admin || !roomSlug) return null;
+  try {
+    const { data } = await admin
+      .from("rooms")
+      .select("name, company_logo_url")
+      .eq("room_slug", roomSlug)
+      .eq("is_template", false)
+      .maybeSingle();
+    if (!data) return null;
+    return { name: data.name || "", logoUrl: data.company_logo_url || "" };
+  } catch {
+    return null;
+  }
+}

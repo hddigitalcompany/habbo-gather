@@ -89,6 +89,13 @@ type ConversationSummary = {
   // isso a lista/cabeçalho de conversa direta ficavam sem avatar
   // nenhum enquanto o de dentro da sala (ChatDrawer) já mostrava.
   participants: { id: string; name?: string; color?: string; photoUrl?: string }[];
+  // 29/set (13), pedido do Douglas: "quero a logo da empresa em que
+  // ele abriu o chat, porque funcionarios podem participar de mais
+  // empresas" -- nome/logo da empresa (sala) onde essa conversa
+  // nasceu, congelados na criação (mesmo comentário grande em
+  // server/chatStore.js). Só lane "company" tem valor aqui.
+  companyName: string | null;
+  companyLogoUrl: string | null;
   lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
 };
 
@@ -653,6 +660,24 @@ function SendIcon() {
   );
 }
 
+// 29/set (13), pedido do Douglas: "quero a logo da empresa em que ele
+// abriu o chat" -- MESMO CompanyIcon de components/GameRoom.tsx
+// (fallback do .chat-conv-company-logo quando a empresa não tem
+// company_logo_url ainda).
+function CompanyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M5 20.5V4.5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v16M14 20.5h5a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-5M8 8h2M8 11.5h2M8 15h2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function ChatIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
@@ -815,7 +840,6 @@ function formatAgendaEventTime(startTs: number, durationMinutes: number): string
 function LobbyChatPanel({
   myUserId,
   myName,
-  companyName,
   conversations,
   accountAccessToken,
   onClose,
@@ -825,7 +849,6 @@ function LobbyChatPanel({
 }: {
   myUserId: string;
   myName: string;
-  companyName: string | null;
   conversations: ConversationSummary[] | null;
   accountAccessToken?: string | null;
   onClose: () => void;
@@ -944,7 +967,7 @@ function LobbyChatPanel({
               className={`chat-lane-tab${laneFilter === "company" ? " chat-lane-tab-active" : ""}`}
               onClick={() => setLaneFilter("company")}
             >
-              {companyName || "Empresa"}
+              Empresa
             </button>
             <button
               type="button"
@@ -969,6 +992,16 @@ function LobbyChatPanel({
               <div className="chat-conv-list">
                 {laneConversations.map((c) => (
                   <button key={c.id} type="button" className="chat-conv-item" onClick={() => setActiveId(c.id)}>
+                    {c.lane === "company" && (
+                      <span className="chat-conv-company-logo" title={c.companyName || "Empresa"}>
+                        {c.companyLogoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={c.companyLogoUrl} alt="" />
+                        ) : (
+                          <CompanyIcon />
+                        )}
+                      </span>
+                    )}
                     <span
                       className="chat-conv-avatar"
                       style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
@@ -3280,7 +3313,6 @@ export default function Lobby({
         <LobbyChatPanel
           myUserId={myUserId}
           myName={myName}
-          companyName={myRoom?.name ?? null}
           conversations={conversations}
           accountAccessToken={accountAccessToken}
           onClose={() => {

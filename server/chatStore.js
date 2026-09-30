@@ -169,7 +169,7 @@ function directKeyFor(userIdA, userIdB, lane) {
  * sempre a MESMA conversa pro mesmo par+lane, não importa quem abriu
  * primeiro. `lane` default "company" mantém o comportamento de
  * sempre pra quem já chama isso sem saber da lane nova. */
-export function getOrCreateDirectConversation(userIdA, userIdB, lane = "company") {
+export function getOrCreateDirectConversation(userIdA, userIdB, lane = "company", companyInfo = null) {
   const key = directKeyFor(userIdA, userIdB, lane);
   const existing = Object.values(store.conversations).find(
     (c) => c.kind === "direct" && c.directKey === key
@@ -182,6 +182,16 @@ export function getOrCreateDirectConversation(userIdA, userIdB, lane = "company"
     directKey: key,
     lane,
     name: null,
+    // 29/set (13), pedido do Douglas: "quero a logo da empresa em que
+    // ele abriu o chat, porque funcionarios podem participar de mais
+    // empresas" -- só faz sentido lane "company" (direta com QUALQUER
+    // um por perto, ver comentário grande de "lane" mais abaixo);
+    // "private" nunca tem sala envolvida (pode nascer de fora, ver
+    // painel de Amigos/FriendsPanel.tsx), fica sempre null. Congelado
+    // no momento da criação -- mesmo espírito "última conhecida" que
+    // getUser já usa (ver createGroupConversation acima).
+    companyName: lane === "company" && companyInfo ? companyInfo.name : null,
+    companyLogoUrl: lane === "company" && companyInfo ? companyInfo.logoUrl : null,
     participantIds: [userIdA, userIdB],
     createdBy: userIdA,
     createdAt: Date.now(),
@@ -212,13 +222,29 @@ export async function areMutualFriends(userIdA, userIdB) {
   }
 }
 
-export function createGroupConversation({ name, participantIds, createdBy }) {
+export function createGroupConversation({ name, participantIds, createdBy, companyInfo = null }) {
   const ids = Array.from(new Set([...participantIds, createdBy]));
   const conv = {
     id: randomUUID(),
     kind: "group",
     directKey: null,
+    // grupo é sempre lane "company" (servidor nunca manda "private"
+    // num grupo, ver chat:create_group em server/index.js) -- antes
+    // ficava implícito (listConversationsForUser caía no fallback
+    // `c.lane || "company"`), agora vem explícito porque companyName/
+    // companyLogoUrl abaixo só fazem sentido nessa lane.
+    lane: "company",
     name: String(name || "Grupo sem nome").slice(0, 60),
+    // 29/set (13), pedido do Douglas: "quero a logo da empresa em que
+    // ele abriu o chat, porque funcionarios podem participar de mais
+    // empresas" -- congela o nome/logo da empresa (sala) de onde o
+    // grupo nasceu (ver getRoomCompanyInfo em server/roomAuth.js,
+    // chamado pelo case "chat:create_group" em index.js), mesmo
+    // espírito de "última conhecida" que getUser já usa pra nome/cor/
+    // foto de pessoa -- não persegue a sala se a empresa mudar de
+    // nome/logo depois.
+    companyName: companyInfo ? companyInfo.name : null,
+    companyLogoUrl: companyInfo ? companyInfo.logoUrl : null,
     participantIds: ids,
     createdBy,
     createdAt: Date.now(),
@@ -265,6 +291,12 @@ export function listConversationsForUser(userId) {
         // getOrCreateDirectConversation acima).
         lane: c.lane || "company",
         name: c.name,
+        // 29/set (13): ver comentário grande em getOrCreateDirectConversation/
+        // createGroupConversation acima -- conversa criada ANTES dessa
+        // mudança não tem esses campos, cai pra null (mesmo trato que
+        // "lane" já recebia com c.lane || "company").
+        companyName: c.companyName ?? null,
+        companyLogoUrl: c.companyLogoUrl ?? null,
         participantIds: c.participantIds,
         participants: c.participantIds
           .filter((id) => id !== userId)

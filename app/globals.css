@@ -494,7 +494,13 @@ body {
    chat de dentro, não tinha motivo pra virar igual. */
 .chat-drawer,
 .lobby-panel {
-  width: 340px;
+  /* 29/set (13), pedido do Douglas: "quero a logo da empresa em que
+     ele abriu o chat [...] ou seja, o card vai aumentar na largura
+     porque a logo sempre fica aberta ali" -- cada linha da lista de
+     conversa "company" ganhou um selo extra (.chat-conv-company-logo,
+     ver ChatDrawer/LobbyChatPanel) -- 340px ficava apertado com mais
+     um elemento na fila (logo + avatar + nome/prévia). */
+  width: 380px;
   max-width: calc(100vw - 32px);
   display: flex;
   flex-direction: column;
@@ -719,6 +725,32 @@ body {
 
 .chat-conv-avatar-room {
   background: #2a1d40;
+}
+
+/* 29/set (13), pedido do Douglas: "quero a logo da empresa em que ele
+   abriu o chat, porque funcionarios podem participar de mais
+   empresas" -- selo quadrado (não redondo, pra não confundir com o
+   avatar de pessoa em .chat-conv-avatar) só nas linhas lane
+   "company" (ver ChatDrawer/LobbyChatPanel) -- foto/logo de VERDADE
+   se a empresa já tiver uma (company_logo_url, ver Card da Empresa em
+   Lobby.tsx), senão o CompanyIcon genérico. */
+.chat-conv-company-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: #a89cc4;
+  overflow: hidden;
+}
+
+.chat-conv-company-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .chat-conv-info {

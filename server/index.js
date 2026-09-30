@@ -246,7 +246,7 @@ import { fileURLToPath } from "url";
 import * as chatStore from "./chatStore.js";
 import * as agendaStore from "./agendaStore.js";
 import * as roomStore from "./roomStore.js";
-import { verifyAccessToken, getActiveMemberIds, isBanned, getRole, isRoomOwner } from "./roomAuth.js";
+import { verifyAccessToken, getActiveMemberIds, isBanned, getRole, isRoomOwner, getRoomCompanyInfo } from "./roomAuth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
@@ -2076,7 +2076,14 @@ wss.on("connection", async (ws, req) => {
             ws.send(JSON.stringify({ type: "error", message: "Só dá pra abrir conversa privada com quem é amigo mútuo." }));
             return;
           }
-          const conv = chatStore.getOrCreateDirectConversation(player.userId, targetUserId, lane);
+          // 29/set (13), pedido do Douglas: "quero a logo da empresa em
+          // que ele abriu o chat" -- "onde" é a sala dessa CONEXÃO
+          // (roomId, ver "aceita qualquer caminho ... nome da sala"
+          // logo no começo do onConnect) -- só busca pra lane
+          // "company" (a única que carimba empresa, ver comentário
+          // grande em chatStore.js).
+          const companyInfo = lane === "company" ? await getRoomCompanyInfo(roomId) : null;
+          const conv = chatStore.getOrCreateDirectConversation(player.userId, targetUserId, lane, companyInfo);
           sendConversationTo(player.userId, conv.id);
           sendConversationTo(targetUserId, conv.id);
         })();
@@ -2086,12 +2093,16 @@ wss.on("connection", async (ws, req) => {
         if (!Array.isArray(data.participantIds)) break;
         const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
         if (participantIds.length === 0) break;
-        const conv = chatStore.createGroupConversation({
-          name: data.name,
-          participantIds,
-          createdBy: player.userId,
-        });
-        for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+        (async () => {
+          const companyInfo = await getRoomCompanyInfo(roomId);
+          const conv = chatStore.createGroupConversation({
+            name: data.name,
+            participantIds,
+            createdBy: player.userId,
+            companyInfo,
+          });
+          for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+        })();
         break;
       }
       case "chat:rename_group": {

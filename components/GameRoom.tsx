@@ -248,6 +248,15 @@ type Conversation = {
   // "private" num grupo, ver chat:create_group em server/index.js).
   lane: "company" | "private";
   name: string | null;
+  // 29/set (13), pedido do Douglas: "quero a logo da empresa em que
+  // ele abriu o chat, porque funcionarios podem participar de mais
+  // empresas" -- nome/logo da empresa (sala) onde essa conversa
+  // nasceu, congelados na criação (ver companyName/companyLogoUrl em
+  // server/chatStore.js/getOrCreateDirectConversation). Só lane
+  // "company" tem valor aqui -- "private" e conversa criada ANTES
+  // dessa mudança ficam null.
+  companyName: string | null;
+  companyLogoUrl: string | null;
   participantIds: string[];
   participants: ConversationParticipant[]; // só os OUTROS, sem mim
   updatedAt: number;
@@ -1022,33 +1031,14 @@ export default function GameRoom({
   // dono de OUTRA sala nunca, em lugar nenhum.
   const canEditRoom = IS_ROOM_EDITOR_ENABLED || isCurrentRoomOwner;
 
-  // nome de verdade da aba "Empresa" do chat (29/set (2), pedido do
-  // Douglas: "'empresa' tem que virar o Nome da empresa") -- SEMPRE a
-  // MINHA própria empresa (GET /api/room/mine, mesma rota que o Lobby
-  // usa pra myRoom), não a da sala que eu tô visitando agora --
-  // diferente de isCurrentRoomOwner acima (que é sobre ESSA sala
-  // específica): entrando na sala de outra empresa, meu "Empresa" no
-  // chat continua sendo a MINHA, porque é ali que meu próprio time me
-  // alcança, não importa onde eu esteja andando.
-  const [myCompanyName, setMyCompanyName] = useState<string | null>(null);
-  useEffect(() => {
-    if (!accountAccessToken) {
-      setMyCompanyName(null);
-      return;
-    }
-    let cancelled = false;
-    fetch("/api/room/mine", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled) setMyCompanyName(typeof data?.room?.name === "string" ? data.room.name : null);
-      })
-      .catch(() => {
-        if (!cancelled) setMyCompanyName(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [accountAccessToken]);
+  // 29/set (13): a aba "Empresa" do chat deixou de precisar de um
+  // nome fixo (ver comentário grande em companyName/companyLogoUrl no
+  // tipo Conversation e chat-conv-company-logo mais abaixo) -- cada
+  // conversa agora carrega sua PRÓPRIA empresa (funcionário pode
+  // participar de mais de uma), então mostrar aqui só a MINHA empresa
+  // (GET /api/room/mine) ficaria errado/incompleto pras conversas de
+  // outras empresas que ele também participa. Removido o
+  // myCompanyName/fetch que só alimentava esse rótulo.
 
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
   const [presenceCounts, setPresenceCounts] = useState<{ memberCount: number; visitorCount: number } | null>(null);
@@ -4710,7 +4700,6 @@ export default function GameRoom({
   const chatDrawerProps = {
     view: chatView,
     onChangeView: setChatView,
-    companyName: myCompanyName,
     conversations,
     activeConversationId,
     onOpenConversation: openConversation,
@@ -8051,7 +8040,6 @@ function PhoneIcon() {
 function ChatDrawer({
   view,
   onChangeView,
-  companyName,
   conversations,
   activeConversationId,
   onOpenConversation,
@@ -8098,10 +8086,6 @@ function ChatDrawer({
 }: {
   view: "list" | "thread" | "new";
   onChangeView: (v: "list" | "thread" | "new") => void;
-  // nome de verdade da aba "Empresa" (29/set (2), ver comentário
-  // grande em myCompanyName mais acima) -- null enquanto carrega ou
-  // sem sala própria ainda, cai pro rótulo genérico "Empresa".
-  companyName: string | null;
   conversations: Conversation[];
   activeConversationId: string | null;
   onOpenConversation: (id: string | null) => void;
@@ -8216,7 +8200,7 @@ function ChatDrawer({
               className={`chat-lane-tab${laneFilter === "company" ? " chat-lane-tab-active" : ""}`}
               onClick={() => setLaneFilter("company")}
             >
-              {companyName || "Empresa"}
+              Empresa
             </button>
             <button
               type="button"
@@ -8250,6 +8234,25 @@ function ChatDrawer({
               const activeCall = callParticipantsByConversation[c.id] ?? [];
               return (
                 <button key={c.id} className="chat-conv-item" onClick={() => onOpenConversation(c.id)}>
+                  {/* 29/set (13), pedido do Douglas: "quero a logo da
+                      empresa em que ele abriu o chat, porque
+                      funcionarios podem participar de mais empresas" --
+                      só lane "company" tem empresa (ver comentário
+                      grande em companyName/companyLogoUrl no tipo
+                      Conversation acima); "private" nunca mostra nada
+                      aqui. Card ganhou largura extra (ver .chat-drawer,
+                      .lobby-panel em app/globals.css) só pra caber esse
+                      selo sem apertar o resto. */}
+                  {c.lane === "company" && (
+                    <span className="chat-conv-company-logo" title={c.companyName || "Empresa"}>
+                      {c.companyLogoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={c.companyLogoUrl} alt="" />
+                      ) : (
+                        <CompanyIcon />
+                      )}
+                    </span>
+                  )}
                   <span
                     className="chat-conv-avatar"
                     style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
@@ -9379,6 +9382,26 @@ function RoomIcon() {
         d="m4 11 8-6.5L20 11M6 9.5V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5"
         stroke="currentColor"
         strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// 29/set (13), pedido do Douglas: "quero a logo da empresa em que ele
+// abriu o chat" -- fallback pro .chat-conv-company-logo (ver lista de
+// conversas em ChatDrawer/LobbyChatPanel) quando a empresa (ainda) não
+// tem company_logo_url definido (ver Card da Empresa/companyLogoUrl em
+// components/Lobby.tsx) -- prédio simples, mesmo estilo linha-fina do
+// resto dos ícones do chat.
+function CompanyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M5 20.5V4.5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v16M14 20.5h5a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-5M8 8h2M8 11.5h2M8 15h2"
+        stroke="currentColor"
+        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
