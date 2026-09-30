@@ -4223,7 +4223,6 @@ export default class MainScene extends Phaser.Scene {
     const gfx = this.add.graphics().setDepth(DEPTH_FLOOR - 1);
     const entry = wallEntryById(FACADE_GLASS_STYLE_ID);
     const heightPx = entry?.pattern?.heightPx ?? 165; // mesmo heightPx de FACADE_GLASS_ENTRY.pattern (game/wall.ts) -- consistência visual com a parede, nunca hardcoded 2x
-    const thicknessPx = entry?.pattern?.thicknessPx ?? 10; // idem, mesmo thicknessPx da parede
     // pedido do Douglas: "repita o piso abaixo, a cada frame de altura
     // de parede" -- em vez de 1 painel só, repete o MESMO desenho
     // (laje+vidro+perfil) empilhado FLOOR_GLASS_REPEATS vezes, cada um
@@ -4238,28 +4237,23 @@ export default class MainScene extends Phaser.Scene {
       if (edgeLength === 0) continue;
       const alongX = dx / edgeLength;
       const alongY = dy / edgeLength;
-      // espessura (pedido do Douglas: "coloque espessura no vidro") --
-      // mesma técnica da parede normal (ver wallRailLine): empurra a
-      // tira INTEIRA por thicknessPx na direção perpendicular à aresta,
-      // pro lado de FORA da sala (centerFar - centerNear, mesmo sentido
-      // que a parede "padrão" usa pra sua face da frente), e fecha o
-      // degrau resultante com uma tampa na cor da laje (mesma
-      // WALL_GLASS_SLAB_COLOR) bem no chão (v=0) -- dá volume de
-      // verdade (a "aba" da laje aparecendo) em vez de uma folha lisa
-      // grudada exatamente na linha da divisa.
-      const neighbor = edge.side === "rowPlus" ? { col: edge.col, row: edge.row + 1 } : { col: edge.col + 1, row: edge.row };
-      const centerNear = tileToWorld(edge.col, edge.row);
-      const centerFar = tileToWorld(neighbor.col, neighbor.row);
-      const perpDist = Math.hypot(centerFar.x - centerNear.x, centerFar.y - centerNear.y) || 1;
-      const perpX = (centerFar.x - centerNear.x) / perpDist;
-      const perpY = (centerFar.y - centerNear.y) / perpDist;
-      const aOut = { x: a.x + perpX * thicknessPx, y: a.y + perpY * thicknessPx };
-      const bOut = { x: b.x + perpX * thicknessPx, y: b.y + perpY * thicknessPx };
-      gfx.fillStyle(WALL_GLASS_SLAB_COLOR, 1);
-      gfx.fillPoints([a, b, bOut, aOut], true);
       for (let i = 0; i < FLOOR_GLASS_REPEATS; i++) {
         const vOffset = i * heightPx;
-        const mapPoint = (u: number, v: number) => ({ x: aOut.x + alongX * u, y: aOut.y + alongY * u + vOffset + v });
+        const mapPoint = (u: number, v: number) => ({ x: a.x + alongX * u, y: a.y + alongY * u + vOffset + v });
+        // espessura (pedido do Douglas: "quero o vidro com espessura, a
+        // laje de antes atrás dos vidros") -- NÃO é um deslocamento
+        // geométrico pra fora (tentativa anterior, revertida): é uma
+        // chapa SÓLIDA na cor da laje (WALL_GLASS_SLAB_COLOR), do MESMO
+        // tamanho do painel inteiro (0 a heightPx), desenhada ATRÁS
+        // (antes, na mesma Graphics -- ordem de desenho = ordem de
+        // empilhamento) de cada repetição do vidro semi-transparente.
+        // Sem essa chapa por trás, o vidro (alpha < 1) só tinha o vazio
+        // escuro do fundo atrás dele e parecia uma folha fina flutuando;
+        // com a laje sólida atrás, o vidro ganha uma "massa" de verdade
+        // por trás pra filtrar, lendo como um painel espesso de vidro
+        // fosco, não uma lâmina.
+        gfx.fillStyle(WALL_GLASS_SLAB_COLOR, 1);
+        gfx.fillPoints([mapPoint(0, 0), mapPoint(edgeLength, 0), mapPoint(edgeLength, heightPx), mapPoint(0, heightPx)], true);
         this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx);
       }
     }
