@@ -560,9 +560,18 @@ export default function ProfileViewCard({
                             </span>
                           </div>
                         </div>
-                        {profile.company.tagline && (
-                          <p className="profile-company-tagline">{profile.company.tagline}</p>
-                        )}
+                        {/* pedido do Douglas, 30/set (20): "cade o
+                            nome? poe o nome da empresa nos dois" -- até
+                            aqui esse badge nunca mostrava o NOME da
+                            empresa (só a logo + Dona/cargo + tagline);
+                            entra como uma colunazinha ao lado da logo,
+                            nome em negrito em cima da tagline. */}
+                        <div className="profile-company-text">
+                          <p className="profile-company-name">{profile.company.name}</p>
+                          {profile.company.tagline && (
+                            <p className="profile-company-tagline">{profile.company.tagline}</p>
+                          )}
+                        </div>
                         </div>
                       </>
                     )}

@@ -4057,6 +4057,13 @@ export default function Lobby({
                     >
                       {!f.photoUrl && (f.name || "?").trim().charAt(0).toUpperCase()}
                     </span>
+                    {/* pedido do Douglas, 30/set (20): "cade o nome? poe
+                        o nome da empresa nos dois" -- na fileira de
+                        founders o avatar não tinha nenhum texto visível
+                        (só o title/tooltip, que não aparece em touch),
+                        então aqui é o nome da PESSOA (cada founder já
+                        tem o seu próprio f.name vindo do servidor). */}
+                    <span className="company-card-founder-name">{f.name || "(sem nome)"}</span>
                   </button>
                 ))}
                 </div>

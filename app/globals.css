@@ -5682,6 +5682,28 @@ button.chat-picker-item:disabled {
   margin-top: 0;
 }
 
+/* pedido do Douglas, 30/set (20): "cade o nome? poe o nome da
+   empresa nos dois" -- coluna de texto ao lado da logo (antes só
+   tinha a tagline sozinha aqui); min-width: 0 + o truncamento abaixo
+   evitam que um nome/tagline longo estoure a largura do card. */
+.profile-company-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.profile-company-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .profile-company-tagline {
   margin: 0;
   font-family: var(--font-tagline), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -5691,6 +5713,9 @@ button.chat-picker-item:disabled {
   letter-spacing: 0.2px;
   text-transform: uppercase;
   color: #f5f0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* fundo placeholder (gradiente) até o Douglas subir as artes de
@@ -5747,12 +5772,17 @@ button.chat-picker-item:disabled {
 }
 
 .company-card-founder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 56px;
   background: none;
   border: none;
   padding: 0;
   margin: 0;
   cursor: pointer;
-  border-radius: 50%;
+  border-radius: 8px;
 }
 
 .company-card-founder-avatar {
@@ -5769,6 +5799,20 @@ button.chat-picker-item:disabled {
   color: #ffffff;
   font-size: 13px;
   font-weight: 700;
+}
+
+/* pedido do Douglas, 30/set (20): "cade o nome? poe o nome da
+   empresa nos dois" -- nome da pessoa embaixo do avatar (antes só
+   tinha o title/tooltip, que não aparece em toque/mobile). */
+.company-card-founder-name {
+  max-width: 56px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #cfc9de;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .company-card-founder:hover .company-card-founder-avatar {
