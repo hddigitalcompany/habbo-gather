@@ -145,7 +145,12 @@ type RoomShape = {
 // forçando a URL/room manualmente -- é o mesmo nível de confiança que
 // canEditRoom em GameRoom.tsx já usa pra esconder o editor de espaço.
 const ROOM_SLUGS: { slug: string; label: string; teamOnly: boolean }[] = [
-  { slug: "sala-principal", label: "Sala principal", teamOnly: true },
+  // 29/set (9), pedido do Douglas: "mude la encima no meu / SAla
+  // principal, Mapa Publicado" -- só o RÓTULO em "Meus espaços"
+  // mudou, o slug continua "sala-principal" (fixo no servidor
+  // WebSocket, ver DEFAULT_ROOM_SLUG em server/roomStore.js e
+  // STORE_SLUG em chatStore.js/agendaStore.js).
+  { slug: "sala-principal", label: "Mapa Publicado", teamOnly: true },
   // 29/set (6), pedido do Douglas: "ok renomeie Sala Modelo" -- só o
   // RÓTULO mudou (label), o slug continua "mapa-modelo" (usado em
   // vários lugares no servidor/banco, ver comentário grande acima).
