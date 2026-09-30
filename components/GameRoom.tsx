@@ -8269,7 +8269,56 @@ function ChatDrawer({
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
   const laneConversations = conversations.filter((c) => c.lane === laneFilter);
 
-  return (
+  // 29/set (15), pedido do Douglas -- correção do que eu tinha
+  // entendido errado antes (selo pequeno em cada linha da lista, ver
+  // .chat-conv-company-logo): "eu quero uma aba aberta ao lado do
+  // chat" -- uma COLUNA de verdade com a logo de cada empresa que a
+  // pessoa tem conversa (lane "company", ver companyName/companyLogoUrl
+  // em Conversation lá em cima), do lado do painel, pra trocar entre
+  // elas clicando. Só empresas DIFERENTES entre si (dedupe por nome+
+  // logo) -- com 1 empresa só não tem o que escolher, a coluna nem
+  // aparece.
+  const companyOptions = useMemo(() => {
+    const seen = new Map<string, { key: string; name: string; logoUrl: string }>();
+    for (const c of conversations) {
+      if (c.lane !== "company" || !c.companyName) continue;
+      const key = `${c.companyName}::${c.companyLogoUrl || ""}`;
+      if (!seen.has(key)) seen.set(key, { key, name: c.companyName, logoUrl: c.companyLogoUrl || "" });
+    }
+    return Array.from(seen.values());
+  }, [conversations]);
+  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
+  const showCompanyRail = view === "list" && laneFilter === "company" && companyOptions.length > 1;
+  const visibleLaneConversations =
+    laneFilter === "company" && selectedCompanyKey
+      ? laneConversations.filter((c) => `${c.companyName}::${c.companyLogoUrl || ""}` === selectedCompanyKey)
+      : laneConversations;
+
+  const companyRail = showCompanyRail && (
+    <div className="chat-company-rail">
+      <span className="chat-company-rail-title">Empresas</span>
+      <div className="chat-company-rail-list">
+        {companyOptions.map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            className={selectedCompanyKey === opt.key ? "chat-company-rail-item active" : "chat-company-rail-item"}
+            title={opt.name || "Empresa"}
+            onClick={() => setSelectedCompanyKey((prev) => (prev === opt.key ? null : opt.key))}
+          >
+            {opt.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={opt.logoUrl} alt="" />
+            ) : (
+              <CompanyIcon />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const drawerBody = (
     <div
       className={pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}
     >
@@ -8319,7 +8368,7 @@ function ChatDrawer({
                 </span>
               </button>
             )}
-            {laneConversations.map((c) => {
+            {visibleLaneConversations.map((c) => {
               // botão verde "tipo discord": acende quando tem gente NA
               // CHAMADA dessa conversa agora, mesmo que eu ainda não
               // tenha entrado -- clicar nele já abre a conversa E entra
@@ -8377,7 +8426,7 @@ function ChatDrawer({
                 </button>
               );
             })}
-            {laneConversations.length === 0 &&
+            {visibleLaneConversations.length === 0 &&
               (laneFilter === "private" ? (
                 <p className="chat-empty-hint">
                   Nenhuma conversa privada ainda. Vire amigo de alguém no painel de Amigos pra conversar aqui.
@@ -8695,6 +8744,15 @@ function ChatDrawer({
           )}
         </>
       )}
+    </div>
+  );
+
+  if (!companyRail) return drawerBody;
+
+  return (
+    <div className={pinMode === "side" ? "chat-drawer-shell chat-drawer-shell-sidebar" : "chat-drawer-shell"}>
+      {companyRail}
+      {drawerBody}
     </div>
   );
 }

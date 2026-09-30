@@ -893,6 +893,24 @@ function LobbyChatPanel({
   const [sending, setSending] = useState(false);
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
+  // 29/set (15), pedido do Douglas -- correção do que eu tinha
+  // entendido errado antes (selo pequeno em cada linha da lista, ver
+  // .chat-conv-company-logo): "eu quero uma aba aberta ao lado do
+  // chat" -- MESMA coluna de empresas que o ChatDrawer de dentro da
+  // sala ganhou (ver comentário grande lá em components/GameRoom.tsx),
+  // aqui reaproveitando literalmente a classe .chat-company-rail (a
+  // mesma filosofia de sempre desse painel, ver comentário grande no
+  // topo do arquivo).
+  const companyOptions = useMemo(() => {
+    const seen = new Map<string, { key: string; name: string; logoUrl: string }>();
+    for (const c of conversations ?? []) {
+      if (c.lane !== "company" || !c.companyName) continue;
+      const key = `${c.companyName}::${c.companyLogoUrl || ""}`;
+      if (!seen.has(key)) seen.set(key, { key, name: c.companyName, logoUrl: c.companyLogoUrl || "" });
+    }
+    return Array.from(seen.values());
+  }, [conversations]);
+  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
   // "Nova conversa" na aba Empresa (pedido do Douglas, 29/set: "nao ta
   // igual ainda eu nao tenho opcao de criar nova conversa na aba da
   // empresa") -- reaproveita GET /api/friends/search (mesma fonte da
@@ -907,6 +925,7 @@ function LobbyChatPanel({
     { userId: string; name: string; photoUrl: string }[] | null
   >(null);
   const [newConvBusy, setNewConvBusy] = useState<string | null>(null);
+  const showCompanyRail = !activeId && !newConvOpen && laneFilter === "company" && companyOptions.length > 1;
 
   useEffect(() => {
     if (!newConvOpen || !accountAccessToken) return;
@@ -1033,7 +1052,31 @@ function LobbyChatPanel({
     }
   }
 
-  return (
+  const companyRail = showCompanyRail && (
+    <div className="chat-company-rail">
+      <span className="chat-company-rail-title">Empresas</span>
+      <div className="chat-company-rail-list">
+        {companyOptions.map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            className={selectedCompanyKey === opt.key ? "chat-company-rail-item active" : "chat-company-rail-item"}
+            title={opt.name || "Empresa"}
+            onClick={() => setSelectedCompanyKey((prev) => (prev === opt.key ? null : opt.key))}
+          >
+            {opt.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={opt.logoUrl} alt="" />
+            ) : (
+              <CompanyIcon />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const drawerBody = (
     <div className="chat-drawer">
       <div className="chat-drawer-header">
         {(activeId || newConvOpen) && (
@@ -1141,7 +1184,11 @@ function LobbyChatPanel({
           </div>
           {(() => {
             const laneConversations = (conversations ?? []).filter((c) => c.lane === laneFilter);
-            if (laneConversations.length === 0) {
+            const visibleLaneConversations =
+              laneFilter === "company" && selectedCompanyKey
+                ? laneConversations.filter((c) => `${c.companyName}::${c.companyLogoUrl || ""}` === selectedCompanyKey)
+                : laneConversations;
+            if (visibleLaneConversations.length === 0) {
               return (
                 <p className="chat-empty-hint">
                   {laneFilter === "private"
@@ -1152,7 +1199,7 @@ function LobbyChatPanel({
             }
             return (
               <div className="chat-conv-list">
-                {laneConversations.map((c) => (
+                {visibleLaneConversations.map((c) => (
                   <button key={c.id} type="button" className="chat-conv-item" onClick={() => setActiveId(c.id)}>
                     {c.lane === "company" && (
                       <span className="chat-conv-company-logo" title={c.companyName || "Empresa"}>
@@ -1258,6 +1305,15 @@ function LobbyChatPanel({
           }}
         />
       )}
+    </div>
+  );
+
+  if (!companyRail) return drawerBody;
+
+  return (
+    <div className="chat-drawer-shell">
+      {companyRail}
+      {drawerBody}
     </div>
   );
 }
