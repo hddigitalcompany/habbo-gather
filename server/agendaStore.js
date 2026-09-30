@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
 const STORE_PATH = path.join(DATA_DIR, "agenda.json");
 
-const STORE_SLUG = "sala-principal";
+const STORE_SLUG = "mapa-publicado";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const admin =

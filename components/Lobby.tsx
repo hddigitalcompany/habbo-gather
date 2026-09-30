@@ -255,10 +255,10 @@ type RoomShape = {
 const ROOM_SLUGS: { slug: string; label: string; teamOnly: boolean }[] = [
   // 29/set (9), pedido do Douglas: "mude la encima no meu / SAla
   // principal, Mapa Publicado" -- só o RÓTULO em "Meus espaços"
-  // mudou, o slug continua "sala-principal" (fixo no servidor
+  // mudou, o slug continua "mapa-publicado" (fixo no servidor
   // WebSocket, ver DEFAULT_ROOM_SLUG em server/roomStore.js e
   // STORE_SLUG em chatStore.js/agendaStore.js).
-  { slug: "sala-principal", label: "Mapa Publicado", teamOnly: true },
+  { slug: "mapa-publicado", label: "Mapa Publicado", teamOnly: true },
   // 29/set (6), pedido do Douglas: "ok renomeie Sala Modelo" -- só o
   // RÓTULO mudou (label), o slug continua "mapa-modelo" (usado em
   // vários lugares no servidor/banco, ver comentário grande acima).
@@ -2608,9 +2608,9 @@ export default function Lobby({
   }, [accountUserId]);
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
   // mais abaixo/ROOM_SLUGS acima) -- vazio até confirmar algo válido
-  // (nunca cai em "mapa-modelo"/"sala-principal" por padrão pra quem
+  // (nunca cai em "mapa-modelo"/"mapa-publicado" por padrão pra quem
   // pode não ter acesso a nenhum dos dois, ver efeitos logo abaixo).
-  // Vira "sala-principal" sozinho pro time do Douglas, ou o slug da
+  // Vira "mapa-publicado" sozinho pro time do Douglas, ou o slug da
   // MyRoom sozinho pra quem já tem sala própria -- mas só DEPOIS de
   // confirmar (nunca busca/mostra o preview de uma sala que a pessoa
   // não devia ver, nem por um instante).
@@ -2640,7 +2640,7 @@ export default function Lobby({
   // do site da Pepsi -- só a DIAGRAMAÇÃO, canto superior esquerdo:
   // logo à esquerda, abas na mesma linha) -- "Meus espaços" é a
   // primeira aba, com setinha seletora: hoje só existe UMA sala no
-  // ambiente todo (STORE_SLUG "sala-principal", ver server/chatStore.js
+  // ambiente todo (STORE_SLUG "mapa-publicado", ver server/chatStore.js
   // -- ainda não existe conceito de múltiplas salas/organizações no
   // backend), então o menu lista só ela; o dropdown já fica pronto pra
   // quando existir mais de uma (aí lista o nome de cada organização,
@@ -3201,7 +3201,7 @@ export default function Lobby({
         // comentário grande "teamOnly" acima) cai direto na Sala
         // principal por padrão (comportamento de sempre), a menos que já
         // tenha escolhido algo no dropdown à mão.
-        if (role !== "visitor" && !userPickedRoomRef.current) setSelectedRoomSlug("sala-principal");
+        if (role !== "visitor" && !userPickedRoomRef.current) setSelectedRoomSlug("mapa-publicado");
       })
       .catch(() => {
         if (!cancelled) setRoomRole("visitor");
@@ -3273,7 +3273,7 @@ export default function Lobby({
 
   // resolve o ?visitar=<slug> lido acima (ver efeito de visitSlug) --
   // POST /api/room/visit confere se é uma sala de CLIENTE de verdade
-  // (recusa sala-principal/mapa-modelo e slugs inventados, ver
+  // (recusa mapa-publicado/mapa-modelo e slugs inventados, ver
   // comentário grande na rota) e só DEPOIS de confirmado é que
   // selectedRoomSlug muda -- nunca confia direto no que veio da URL.
   // Precisa de conta (sem token não tem como registrar a visita nem
@@ -3425,7 +3425,7 @@ export default function Lobby({
   // como "sala própria de verdade") -- centralizado aqui pra não
   // desalinhar nos dois lugares de novo.
   const myRealRoom =
-    myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo" ? myRoom : null;
+    myRoom && myRoom.room_slug !== "mapa-publicado" && myRoom.room_slug !== "mapa-modelo" ? myRoom : null;
   // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
   // chat, quero que eles vejam a possibilidade, sempre ali" -- logo da
   // empresa PRÓPRIA (myRealRoom.name já tem o nome, mas não a logo --

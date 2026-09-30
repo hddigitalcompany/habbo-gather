@@ -152,7 +152,7 @@ type GameRoomProps = {
   // slug da sala a entrar (ver comentário grande "MULTI-SALA" em
   // server/roomStore.js) -- pedido do Douglas: "Mapa modelo (ja pode
   // criar um, mesmo que sem decoracao, so pra gente estruturar como vai
-  // ser pros clientes)". Default "sala-principal" (= Mapa Publicada,
+  // ser pros clientes)". Default "mapa-publicado" (= Mapa Publicada,
   // mesmo valor hardcoded de sempre) pra quem já chamava <GameRoom />
   // sem essa prop continuar entrando EXATAMENTE na mesma sala de antes
   // -- ver roomSlug escolhido em app/page.tsx (state novo, setado pelo
@@ -609,7 +609,7 @@ function visitRoomLink(roomSlug: string): string {
  * roomSlugFromUrl em server/index.js) -- toda chamada de
  * GET/POST /room/shape|floor|walls|doors|areas|furniture precisa
  * passar por aqui agora, em vez de montar `${REALTIME_HTTP_BASE}/room/...`
- * direto (senão sempre bateria na sala padrão, "sala-principal",
+ * direto (senão sempre bateria na sala padrão, "mapa-publicado",
  * mesmo dentro do Mapa Modelo). */
 function roomApiPath(roomSlug: string, path: string): string {
   return `${REALTIME_HTTP_BASE}${path}?room=${encodeURIComponent(roomSlug)}`;
@@ -678,7 +678,7 @@ export default function GameRoom({
   accountProfile = null,
   accountAccessToken = null,
   onSignOut = null,
-  roomSlug = "sala-principal",
+  roomSlug = "mapa-publicado",
   onBackToLobby = null,
 }: GameRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -5480,7 +5480,7 @@ export default function GameRoom({
         )}
 
         <div className="controls">
-          {roomSlug === "sala-principal" && isCurrentRoomOwner && (
+          {roomSlug === "mapa-publicado" && isCurrentRoomOwner && (
             <button
               className="av-btn"
               onClick={() => setMembersPanelOpen(true)}

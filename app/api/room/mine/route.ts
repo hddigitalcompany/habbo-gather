@@ -26,7 +26,7 @@ import { getVerifiedUserId } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
-const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+const RESERVED_SLUGS = new Set(["mapa-publicado", "mapa-modelo"]);
 
 export async function GET(req: NextRequest) {
   const userId = await getVerifiedUserId(req);

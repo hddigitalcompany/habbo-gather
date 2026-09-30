@@ -17,10 +17,10 @@
 // app/api/account/verification/route.ts.
 //
 // Só "mapa-modelo" fica de fora aqui -- DIFERENTE do RESERVED_SLUGS
-// de verification.ts (que também exclui "sala-principal"). Lá faz
-// sentido: "sala-principal" não pode ser usada pra pedir o selo de
+// de verification.ts (que também exclui "mapa-publicado"). Lá faz
+// sentido: "mapa-publicado" não pode ser usada pra pedir o selo de
 // empresa verificada (exige contrato social/sócio de verdade). Mas
-// "sala-principal" É a sala oficial única do time do Douglas (Mapa
+// "mapa-publicado" É a sala oficial única do time do Douglas (Mapa
 // Publicado/"X Tower", ver ROOM_SLUGS em Lobby.tsx) -- já vem com
 // nome/logo/categoria de empresa preenchidos de verdade (bug
 // encontrado 30/set: Hualison configurou tudo isso nela e o card

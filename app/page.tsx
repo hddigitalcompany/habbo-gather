@@ -22,10 +22,10 @@ export default function Home() {
   // qual sala foi escolhida em "Meus espaços" antes de clicar "Entrar
   // na sala" (ver ROOM_SLUGS/selectedRoomSlug em Lobby.tsx) -- pedido
   // do Douglas (29/set): "Mapa publicada (essa) / Mapa modelo (ja pode
-  // criar um...)". Default "sala-principal" (Mapa Publicada, mesmo
+  // criar um...)". Default "mapa-publicado" (Mapa Publicada, mesmo
   // valor de sempre) -- só muda de verdade quando o Lobby manda um
   // slug diferente pra onEnter.
-  const [roomSlug, setRoomSlug] = useState("sala-principal");
+  const [roomSlug, setRoomSlug] = useState("mapa-publicado");
 
   return (
     <main className="page">

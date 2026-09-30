@@ -40,7 +40,7 @@ import { getVerifiedUserId } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
-const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+const RESERVED_SLUGS = new Set(["mapa-publicado", "mapa-modelo"]);
 const MAX_DOC_BYTES = 15 * 1024 * 1024; // 15MB -- foto/PDF de documento, folga em cima do que um celular tira
 
 type OwnedRoom = { id: string; slug: string; name: string; companyVerified: boolean };

@@ -720,8 +720,8 @@ function handleServeUpload(req, res, pathname) {
  * GET /room/shape?room=mapa-modelo. Sem "?room=" (todo request de hoje,
  * antes do Lobby ganhar um 2º espaço clicável -- ver Lobby.tsx), cai
  * pro slug padrão (roomStore trata undefined como DEFAULT_ROOM_SLUG
- * sozinho) -- é assim que "sala-principal" continua funcionando
- * IDÊNTICO a antes, sem precisar mandar "?room=sala-principal" toda
+ * sozinho) -- é assim que "mapa-publicado" continua funcionando
+ * IDÊNTICO a antes, sem precisar mandar "?room=mapa-publicado" toda
  * vez. */
 function roomSlugFromUrl(url) {
   const raw = url.searchParams.get("room");

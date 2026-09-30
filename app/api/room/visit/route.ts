@@ -9,10 +9,10 @@
 // gerar código nenhum (diferente do convite de time em
 // app/api/room/invite/route.ts, que continua só pro Douglas).
 //
-// Recusa de propósito: sala-principal/mapa-modelo (ver ROOM_SLUGS em
+// Recusa de propósito: mapa-publicado/mapa-modelo (ver ROOM_SLUGS em
 // components/Lobby.tsx) e qualquer coisa que não seja uma sala de
 // CLIENTE de verdade (is_template=false) -- sem essa trava, um link
-// ?visitar=sala-principal furaria a visibilidade que o Douglas acabou
+// ?visitar=mapa-publicado furaria a visibilidade que o Douglas acabou
 // de pedir (só ele + time vê a Sala Principal). A sala só entra em
 // "Espaços visitados" se REALMENTE existir e não for a do próprio
 // visitante (ver ownRoom abaixo).
@@ -22,7 +22,7 @@ import { getVerifiedUserId } from "@/lib/supabase/roomAuth";
 
 export const dynamic = "force-dynamic";
 
-const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+const RESERVED_SLUGS = new Set(["mapa-publicado", "mapa-modelo"]);
 
 export async function POST(req: NextRequest) {
   const userId = await getVerifiedUserId(req);

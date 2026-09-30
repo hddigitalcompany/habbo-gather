@@ -18,14 +18,14 @@
 // publicada (essa) / Mapa modelo (ja pode criar um, mesmo que sem
 // decoracao, so pra gente estruturar como vai ser pros clientes)") --
 // esse arquivo ERA um singleton de verdade: uma `store` só, um
-// `ROOM_SLUG` fixo ("sala-principal"), carregada uma vez com top-level
+// `ROOM_SLUG` fixo ("mapa-publicado"), carregada uma vez com top-level
 // await no boot do processo. Virou um Map<roomSlug, store> (ver
-// `ensureStore` abaixo) -- cada sala (hoje: "sala-principal" = Mapa
+// `ensureStore` abaixo) -- cada sala (hoje: "mapa-publicado" = Mapa
 // Publicada, "mapa-modelo" = Mapa Modelo) tem seu PRÓPRIO blob,
 // carregado sob demanda (na primeira vez que alguém pede aquele slug) e
 // cacheado em memória depois disso, mesma ideia de bootStore de sempre,
 // só que agora parametrizada por slug em vez de uma constante. A sala
-// padrão ("sala-principal") continua pré-aquecida no boot do módulo
+// padrão ("mapa-publicado") continua pré-aquecida no boot do módulo
 // (ver `await ensureStore(DEFAULT_ROOM_SLUG)` lá embaixo) pra não mudar
 // a latência de hoje em nada -- só uma sala NOVA (tipo "mapa-modelo")
 // paga o custo de um boot (1 leitura no Supabase) na primeira vez que
@@ -41,11 +41,11 @@
 // comentários lá.
 //
 // Ainda NÃO é multi-tenant de verdade (Task #63 maior, ainda pendente):
-// continua chaveado por um SLUG texto (hoje só "sala-principal" e
+// continua chaveado por um SLUG texto (hoje só "mapa-publicado" e
 // "mapa-modelo" existem, mesmo valor que o cliente manda no PartySocket
 // e nas chamadas REST /room/*), não por public.rooms.id/dono/permissão
 // nenhuma -- qualquer slug que alguém mandar cria uma sala nova vazia
-// na hora (comportamento igual a "sala-principal" antes dessa mudança:
+// na hora (comportamento igual a "mapa-publicado" antes dessa mudança:
 // sempre existiu, nunca pediu permissão pra existir). Isso é de
 // propósito nessa passada: o pedido do Douglas foi "so pra gente
 // estruturar como vai ser pros clientes", não ownership/RLS/catálogo de
@@ -54,7 +54,7 @@
 //
 // Se SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não estiverem configurados
 // nesse processo (mesmo esquema de fallback de server/roomAuth.js),
-// cai pro arquivo local de sempre (data/room.json pra "sala-principal",
+// cai pro arquivo local de sempre (data/room.json pra "mapa-publicado",
 // data/room.<slug>.json pra qualquer outro slug) em vez de travar --
 // só afeta ambiente sem Supabase configurado (não devia acontecer em
 // produção/staging, os dois já têm essas variáveis, ver README).
@@ -94,14 +94,14 @@ import { createClient } from "@supabase/supabase-js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
 
-export const DEFAULT_ROOM_SLUG = "sala-principal";
+export const DEFAULT_ROOM_SLUG = "mapa-publicado";
 // slug só pode ter letras/números/hífen (mesma ideia de um "handle" --
 // vem de query string em requests REST, ver roomSlugFromUrl em
 // server/index.js, então precisa ser seguro pra virar nome de arquivo
 // em disco -- ver storePathFor abaixo -- e pra ir numa cláusula
 // .eq(...) do Supabase). Qualquer slug fora desse formato (ou vazio)
 // cai pro padrão -- nunca trava a chamada, só ignora um slug malformado
-// e usa "sala-principal" no lugar dele.
+// e usa "mapa-publicado" no lugar dele.
 const SLUG_PATTERN = /^[a-z0-9-]{1,80}$/;
 
 function normalizeSlug(roomSlug) {
@@ -392,7 +392,7 @@ function ensureStore(roomSlug) {
   return booting;
 }
 
-// pré-aquece a sala padrão ("sala-principal" = Mapa Publicada) no boot
+// pré-aquece a sala padrão ("mapa-publicado" = Mapa Publicada) no boot
 // do módulo -- preserva EXATAMENTE a latência de hoje pra ela (já
 // carregada em memória antes do primeiro request chegar, mesmo
 // comportamento do antigo `const store = await bootStore()`). Só uma

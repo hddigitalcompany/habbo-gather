@@ -44,7 +44,7 @@ export const dynamic = "force-dynamic";
 // idempotência logo abaixo (senão o time nunca conseguiria criar uma
 // sala de verdade: essa rota devolveria Sala Principal de novo pra
 // sempre, achando que já era "a sala" da pessoa).
-const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+const RESERVED_SLUGS = new Set(["mapa-publicado", "mapa-modelo"]);
 // nome padrão quando a pessoa cria a sala sem passar companyName (ver
 // comentário grande no topo do arquivo) -- ela troca isso no Card da
 // Empresa quando quiser, mesmo rooms.name de sempre. ACHADO do Douglas
