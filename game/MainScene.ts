@@ -878,6 +878,15 @@ export default class MainScene extends Phaser.Scene {
   private draftFurniture: Map<string, FurnitureDef> = new Map();
   private draftSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private gridGraphics?: Phaser.GameObjects.Graphics;
+  /** Vidraça de sistema ABAIXO do piso (ver drawFloorEdgeGlass mais
+   * abaixo) -- pedido do Douglas (30/set): "janelas abaixo do piso...
+   * como se fosse a vidraça de um prédio", pra dar a sensação de olhar
+   * pra fora/baixo do andar através da fachada, não só pra cima como
+   * a parede de vidro normal. 1 Graphics só (mesmo padrão de
+   * gridGraphics), redesenhado inteiro toda vez que o formato da
+   * sala muda -- nunca salvo em lugar nenhum (nem parede nem
+   * móvel), é decoração pura calculada de roomShape. */
+  private floorEdgeGlassGfx?: Phaser.GameObjects.Graphics;
   private hoverGraphics?: Phaser.GameObjects.Graphics;
   // "fantasma" (ver refreshCatalogGhost) do item selecionado na paleta,
   // seguindo o cursor -- null quando nenhum item de móvel está selecionado.
@@ -1549,6 +1558,7 @@ export default class MainScene extends Phaser.Scene {
         this.roomShape.add(this.roomTileKey(col, row));
       }
     }
+    this.drawFloorEdgeGlass(); // loadSavedRoomShape redesenha de novo assim que o formato de verdade chegar -- isso aqui e so o valor inicial, mesma ideia do roomShape default acima
 
     // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
     // escolhidos -- por isso desenha antes até dos móveis fixos (ver
@@ -4065,6 +4075,7 @@ export default class MainScene extends Phaser.Scene {
     if (list.length === 0) return;
     this.roomShape = new Set(list.map((t) => this.roomTileKey(t.col, t.row)));
     this.drawEditGrid();
+    this.drawFloorEdgeGlass();
   }
 
   getDraftRoomShapeList(): { col: number; row: number }[] {
@@ -4180,6 +4191,45 @@ export default class MainScene extends Phaser.Scene {
     return edges;
   }
 
+  /** Desenha a vidraça de sistema ABAIXO do piso, alinhada 1:1 com cada
+   * tile da borda de baixo/direita (mesma lista de computeFacadeEdges
+   * acima) -- pedido do Douglas: "janelas abaixo do piso, desenhadas em
+   * linha como fizemos na parede... como se fosse a vidraça de um
+   * prédio". Reaproveita drawFacadeGlassFrontFace (laje+tiras de vidro+
+   * perfil metálico, o mesmo desenho da parede de vidro) só que com um
+   * mapPoint que soma `v` em vez de subtrair -- na parede normal v
+   * crescente SOBE na tela (ver comentário grande de mapPoint em
+   * createWallPatternGraphics), aqui v crescente DESCE, pendurando o
+   * painel pra baixo do chão em vez de erguer uma parede.
+   *
+   * Sem toda a complexidade de junção/quina de createWallPatternGraphics
+   * (wallJunctionAt, miter etc.) -- essa vidraça não é uma parede de
+   * verdade (não bloqueia passagem, não entra no Editor de Itens, não
+   * precisa encostar perfeitamente em painel vizinho numa quina), só
+   * decoração; cada tile da borda desenha seu próprio painel de 1 tile
+   * de largura, mesma largura exata de FACADE_GLASS_ENTRY.
+   *
+   * Depth bem abaixo de DEPTH_FLOOR -- é pra parecer que continua por
+   * BAIXO/por TRÁS do chão (olhando pra fora/baixo do prédio através da
+   * borda), nunca por cima de nada que já existe na sala. */
+  private drawFloorEdgeGlass() {
+    this.floorEdgeGlassGfx?.destroy();
+    const gfx = this.add.graphics().setDepth(DEPTH_FLOOR - 1);
+    const heightPx = 120; // mesmo heightPx de FACADE_GLASS_ENTRY.pattern (game/wall.ts) -- consistência visual com a parede
+    for (const edge of this.computeFacadeEdges()) {
+      const { a, b } = wallEdgeFloorPoints(edge.col, edge.row, edge.side);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const edgeLength = Math.hypot(dx, dy);
+      if (edgeLength === 0) continue;
+      const alongX = dx / edgeLength;
+      const alongY = dy / edgeLength;
+      const mapPoint = (u: number, v: number) => ({ x: a.x + alongX * u, y: a.y + alongY * u + v });
+      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx);
+    }
+    this.floorEdgeGlassGfx = gfx;
+  }
+
   /** Aplica o resultado de computeFacadeEdges de verdade: cria sprite
    * de vidro em toda aresta nova da borda de baixo, remove o que tiver
    * ficado pra trás (a sala encolheu ali), e deixa QUALQUER aresta que
@@ -4248,6 +4298,7 @@ export default class MainScene extends Phaser.Scene {
     if (this.roomBackNeighbors(col, row).length === 0) return;
     this.roomShape.add(key);
     this.syncFacadeGlassWalls();
+    this.drawFloorEdgeGlass();
     this.drawEditGrid();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
   }
@@ -4273,6 +4324,7 @@ export default class MainScene extends Phaser.Scene {
     }
     this.roomShape.delete(key);
     this.syncFacadeGlassWalls();
+    this.drawFloorEdgeGlass();
     this.drawEditGrid();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
     return null;
