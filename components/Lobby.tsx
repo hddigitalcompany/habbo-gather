@@ -911,6 +911,22 @@ function LobbyChatPanel({
     return Array.from(seen.values());
   }, [conversations]);
   const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
+  // 29/set (17), correção do Douglas (depois de eu explicar errado que
+  // "com 1 empresa só a coluna nem aparece"): "tem que aparecer mesmo
+  // so com uma / e nao pode tirar o filtro, somente separado por
+  // empresa, nada junto" -- MESMA regra do ChatDrawer (ver comentário
+  // grande lá em components/GameRoom.tsx): sempre uma empresa válida
+  // selecionada (nunca null/"todas juntas") assim que existir pelo
+  // menos uma, escolhendo a primeira por padrão.
+  useEffect(() => {
+    if (companyOptions.length === 0) {
+      if (selectedCompanyKey !== null) setSelectedCompanyKey(null);
+      return;
+    }
+    if (!selectedCompanyKey || !companyOptions.some((opt) => opt.key === selectedCompanyKey)) {
+      setSelectedCompanyKey(companyOptions[0].key);
+    }
+  }, [companyOptions, selectedCompanyKey]);
   // "Nova conversa" na aba Empresa (pedido do Douglas, 29/set: "nao ta
   // igual ainda eu nao tenho opcao de criar nova conversa na aba da
   // empresa") -- reaproveita GET /api/friends/search (mesma fonte da
@@ -925,7 +941,7 @@ function LobbyChatPanel({
     { userId: string; name: string; photoUrl: string }[] | null
   >(null);
   const [newConvBusy, setNewConvBusy] = useState<string | null>(null);
-  const showCompanyRail = !activeId && !newConvOpen && laneFilter === "company" && companyOptions.length > 1;
+  const showCompanyRail = !activeId && !newConvOpen && laneFilter === "company" && companyOptions.length > 0;
 
   useEffect(() => {
     if (!newConvOpen || !accountAccessToken) return;
@@ -1062,7 +1078,7 @@ function LobbyChatPanel({
             type="button"
             className={selectedCompanyKey === opt.key ? "chat-company-rail-item active" : "chat-company-rail-item"}
             title={opt.name || "Empresa"}
-            onClick={() => setSelectedCompanyKey((prev) => (prev === opt.key ? null : opt.key))}
+            onClick={() => setSelectedCompanyKey(opt.key)}
           >
             {opt.logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element

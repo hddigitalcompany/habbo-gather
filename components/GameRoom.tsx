@@ -630,6 +630,29 @@ export default function GameRoom({
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<MainScene | null>(null);
 
+  // "página de carregamento" antes de cair na sala -- pedido do Douglas
+  // (29/set): "minha acesso na pagina caindo em uma mesa aleatoria ta
+  // aparecendo o balao de assumir, isos seria por um delay de
+  // carregamento? / se a gente criar uma pagina de carregamento antes
+  // de cair direto na sala, resolveria... inclusive assim a pessoa faz
+  // o download da sala toda antes de entrar pra nao ir vendo carregando
+  // as coisas aos poucos". Fica true só depois que as 6 buscas de
+  // estado salvo da sala (piso/mobília/parede/porta/área/formato, ver
+  // *LoadedRef mais abaixo e markRoomAssetsReadyIfDone dentro de
+  // runWhenSceneReady) já tiverem TODAS terminado -- sucesso ou falha,
+  // mesma regra de cada *LoadedRef individual (o autosave de cada aba
+  // já confiava nelas antes disso, só nunca tinha um "e quando TODAS
+  // terminam" combinado até agora). Não cobre o balão de "Assumir essa
+  // mesa?" aparecer sozinho no spawn -- isso é bug à parte, de POSIÇÃO
+  // (ver o fix em updateAreaDim, MainScene.ts), não de tempo: essa tela
+  // aqui só evita ver piso/móvel/parede aparecendo aos poucos.
+  const [roomAssetsReady, setRoomAssetsReady] = useState(false);
+  // continua MONTADA até o próprio fade-out da RoomLoadingScreen
+  // terminar (ver onExited/onTransitionEnd nela) -- só desmonta de
+  // vez depois disso, senão sumiria seco (sem a transição de
+  // opacidade) assim que roomAssetsReady virasse true.
+  const [roomLoadingScreenMounted, setRoomLoadingScreenMounted] = useState(true);
+
   // balão "destituir mesa de fulano?" (ver
   // scene.onAreaDestituirPromptChange logo abaixo) -- pedido do Douglas
   // depois do resultado ficar "pixelado, meio estilo do jogo" mesmo
@@ -3085,6 +3108,23 @@ export default function GameRoom({
         // antes de mandar qualquer POST, senão o primeiro render
         // (draftRoomShapeItems ainda vazio) salvaria um formato vazio
         // por cima do que já tava salvo antes mesmo da busca responder.
+        // ver comentário grande de roomAssetsReady lá em cima -- só
+        // esconde a RoomLoadingScreen quando as 6 buscas abaixo (shape/
+        // furniture/floor/wall/door/area) já tiverem TODAS terminado,
+        // chamada no finally() de cada uma (a ORDEM não importa, cada
+        // uma seta seu próprio *LoadedRef antes de checar as outras).
+        const markRoomAssetsReadyIfDone = () => {
+          if (
+            roomShapeLoadedRef.current &&
+            furnitureLoadedRef.current &&
+            floorLoadedRef.current &&
+            wallLoadedRef.current &&
+            doorLoadedRef.current &&
+            areaLoadedRef.current
+          ) {
+            setRoomAssetsReady(true);
+          }
+        };
         fetch(roomApiPath(roomSlug, "/room/shape"))
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
@@ -3101,6 +3141,7 @@ export default function GameRoom({
           })
           .finally(() => {
             roomShapeLoadedRef.current = true;
+            markRoomAssetsReadyIfDone();
           });
         fetchAndRegisterCustomSkins();
         fetchAndRegisterCustomAvatarItems();
@@ -3127,6 +3168,7 @@ export default function GameRoom({
             .catch(() => {})
             .finally(() => {
               furnitureLoadedRef.current = true;
+              markRoomAssetsReadyIfDone();
             });
         });
         // piso já salvo (ver GET /room/floor em server/index.js) -- busca
@@ -3185,6 +3227,7 @@ export default function GameRoom({
             .catch(() => {})
             .finally(() => {
               floorLoadedRef.current = true;
+              markRoomAssetsReadyIfDone();
             });
         });
         // parede já salva (ver GET /room/walls em server/index.js) --
@@ -3208,6 +3251,7 @@ export default function GameRoom({
             .catch(() => {})
             .finally(() => {
               wallLoadedRef.current = true;
+              markRoomAssetsReadyIfDone();
             });
         });
         // porta já salva (ver GET /room/doors em server/index.js) -- mesmo
@@ -3226,6 +3270,7 @@ export default function GameRoom({
             .catch(() => {})
             .finally(() => {
               doorLoadedRef.current = true;
+              markRoomAssetsReadyIfDone();
             });
         });
         // área já salva (ver GET /room/areas em server/index.js) -- mesmo
@@ -3280,6 +3325,7 @@ export default function GameRoom({
           .catch(() => {})
           .finally(() => {
             areaLoadedRef.current = true;
+            markRoomAssetsReadyIfDone();
           });
         scene.onAvatarClick = (info) => {
           setProfileCard({ playerId: info.playerId, isLocal: info.isLocal });
@@ -3354,8 +3400,22 @@ export default function GameRoom({
 
     init();
 
+    // Rede de segurança pra RoomLoadingScreen NUNCA travar pra sempre --
+    // o pedido do Douglas era só "nao ir vendo carregando aos poucos",
+    // não trocar esse problema por um pior (tela de carregamento presa
+    // se UMA das 6 buscas nunca responder, ex: servidor caiu bem no
+    // meio -- hoje nenhuma delas tem timeout próprio, só .catch(erro de
+    // rede de verdade)+.finally, ver markRoomAssetsReadyIfDone lá em
+    // cima). 10s é bem mais que o normal (mesmo servidor Render do
+    // WebSocket, que já responde na casa dos ms) -- só existe pra
+    // cobrir o servidor de verdade travado/sem resposta nenhuma.
+    const roomAssetsReadyFallback = setTimeout(() => {
+      if (!destroyed) setRoomAssetsReady(true);
+    }, 10000);
+
     return () => {
       destroyed = true;
+      clearTimeout(roomAssetsReadyFallback);
       gameRef.current?.destroy(true);
       socketRef.current?.close();
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -4865,6 +4925,9 @@ export default function GameRoom({
 
   return (
     <div className="room-and-editor">
+      {roomLoadingScreenMounted && (
+        <RoomLoadingScreen ready={roomAssetsReady} onExited={() => setRoomLoadingScreenMounted(false)} />
+      )}
       {/* 29/set (8), pedido do Douglas: "Aumente o X 1/3 / deixe o
           tower na altura exatra do X / clicavel, o X se mantem quando
           entra na sala, e ele vira um link de retorno pro lobby" --
@@ -6714,6 +6777,73 @@ function instagramHref(handle: string) {
 // escrito via JS nesse MESMO elemento) -- juntar os dois no mesmo DIV
 // faria o pulso apagar a posição a cada frame, o balão pularia pra
 // (0,0).
+/**
+ * Tela de carregamento antes de cair na sala -- pedido do Douglas
+ * (29/set): "meu acesso na pagina caindo em uma mesa aleatoria ta
+ * aparecendo o balao de assumir, isos seria por um delay de
+ * carregamento? / se a gente criar uma pagina de carregamento antes de
+ * cair direto na sala, resolveria... inclusive assim a pessoa faz o
+ * download da sala toda antes de entrar pra nao ir vendo carregando as
+ * coisas aos poucos / coloque a nossa logo nessa aba de carregamento /
+ * Logo X, sem o tower / ai ela desliza pra esquerda mostrando o tower,
+ * como se ela tivesse escondendo ele, mesma ideia de balao branco em
+ * volta igual la encima" ("la encima" = .room-logo-home-btn, ver
+ * comentário grande dele em app/globals.css).
+ *
+ * NÃO conserta sozinho o balão "Assumir essa mesa?" aparecendo no
+ * spawn (esse é bug de POSIÇÃO -- o spawn cair em cima de uma mesa
+ * livre -- corrigido à parte em updateAreaDim, MainScene.ts) -- essa
+ * tela só evita ver o piso/mobília/parede/porta aparecendo aos poucos
+ * (ver roomAssetsReady em GameRoom.tsx, que só vira true depois que as
+ * 6 buscas de estado salvo da sala já tiverem TODAS terminado).
+ *
+ * `visible` controla as DUAS fases da animação: false na primeira
+ * renderização (só o X, ver .room-loading-mark) e depois de um pulo de
+ * frame (ver useEffect abaixo -- precisa ser depois do PRIMEIRO paint
+ * pra a transição de verdade acontecer, não só "nascer" já no estado
+ * final) vira true (X desliza, "Tower" aparece). `ready=false` (prop)
+ * mantém isso tudo montado; quando `ready` vira true de vez (as 6
+ * buscas terminaram) o componente pai troca pra `exiting` mais um
+ * tick depois, e essa tela mesma cuida do fade-out (onTransitionEnd)
+ * antes de desmontar de vez -- fica pelo `unmount` que o pai só chama
+ * depois da transição de opacidade acabar, senão sumiria seco.
+ */
+function RoomLoadingScreen({ ready, onExited }: { ready: boolean; onExited: () => void }) {
+  // anima em 2 passos -- ver comentário grande acima: nasce com
+  // slid=false (só o X, parado) e um efeito troca pra true no PRÓXIMO
+  // frame, senão o CSS não tem "de onde" fazer a transição (montar já
+  // com a classe final não anima nada, é só o estado final direto).
+  const [slid, setSlid] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setSlid(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  useEffect(() => {
+    if (ready) setExiting(true);
+  }, [ready]);
+  return (
+    <div
+      className={exiting ? "room-loading-screen exiting" : "room-loading-screen"}
+      onTransitionEnd={(e) => {
+        // só o fade do PRÓPRIO overlay (opacity) marca "sumiu de vez" --
+        // esse mesmo elemento recebe onTransitionEnd de QUALQUER
+        // transição filha que borbulhe (ex: o slide do X, se ainda
+        // estiver rolando), então confere e.target === e.currentTarget.
+        if (exiting && e.target === e.currentTarget && e.propertyName === "opacity") onExited();
+      }}
+    >
+      <div className={slid ? "room-loading-lockup slid" : "room-loading-lockup"}>
+        <div className="room-loading-badge">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-x-badge.png" alt="" className="room-loading-mark" />
+        </div>
+        <span className="room-loading-tower">Tower</span>
+      </div>
+    </div>
+  );
+}
+
 function AreaConfirmBalloon({
   innerRef,
   message,
@@ -8276,8 +8406,18 @@ function ChatDrawer({
   // pessoa tem conversa (lane "company", ver companyName/companyLogoUrl
   // em Conversation lá em cima), do lado do painel, pra trocar entre
   // elas clicando. Só empresas DIFERENTES entre si (dedupe por nome+
-  // logo) -- com 1 empresa só não tem o que escolher, a coluna nem
-  // aparece.
+  // logo).
+  //
+  // 29/set (17), correção de novo (Douglas, depois de eu explicar
+  // errado que "com 1 empresa só a coluna nem aparece"): "tem que
+  // aparecer mesmo so com uma / e nao pode tirar o filtro, somente
+  // separado por empresa, nada junto" -- a coluna aparece com 1 empresa
+  // só também (não precisa ter O QUE escolher pra fazer sentido existir
+  // -- ela também É o rótulo de qual empresa é essa conversa), e a
+  // lista NUNCA mostra mais de uma empresa junta: sempre tem uma
+  // selecionada (nunca null/"todas"), começando pela primeira que
+  // aparecer, e clicar numa logo troca a seleção pra ela (nunca
+  // desliga, ver o useEffect logo abaixo e o onClick sem toggle).
   const companyOptions = useMemo(() => {
     const seen = new Map<string, { key: string; name: string; logoUrl: string }>();
     for (const c of conversations) {
@@ -8288,7 +8428,21 @@ function ChatDrawer({
     return Array.from(seen.values());
   }, [conversations]);
   const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
-  const showCompanyRail = view === "list" && laneFilter === "company" && companyOptions.length > 1;
+  // mantém sempre uma empresa válida selecionada (nunca null enquanto
+  // existir pelo menos uma) -- cobre tanto o primeiro carregamento
+  // (companyOptions ainda vazio na 1ª renderização, chega depois que
+  // "chat:list" responde) quanto a seleção atual "sumir" (ex: a única
+  // conversa daquela empresa foi apagada em outra aba).
+  useEffect(() => {
+    if (companyOptions.length === 0) {
+      if (selectedCompanyKey !== null) setSelectedCompanyKey(null);
+      return;
+    }
+    if (!selectedCompanyKey || !companyOptions.some((opt) => opt.key === selectedCompanyKey)) {
+      setSelectedCompanyKey(companyOptions[0].key);
+    }
+  }, [companyOptions, selectedCompanyKey]);
+  const showCompanyRail = view === "list" && laneFilter === "company" && companyOptions.length > 0;
   const visibleLaneConversations =
     laneFilter === "company" && selectedCompanyKey
       ? laneConversations.filter((c) => `${c.companyName}::${c.companyLogoUrl || ""}` === selectedCompanyKey)
@@ -8304,7 +8458,7 @@ function ChatDrawer({
             type="button"
             className={selectedCompanyKey === opt.key ? "chat-company-rail-item active" : "chat-company-rail-item"}
             title={opt.name || "Empresa"}
-            onClick={() => setSelectedCompanyKey((prev) => (prev === opt.key ? null : opt.key))}
+            onClick={() => setSelectedCompanyKey(opt.key)}
           >
             {opt.logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
