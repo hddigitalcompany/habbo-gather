@@ -27,12 +27,15 @@ create table if not exists public.account_private (
 
 alter table public.account_private enable row level security;
 
+drop policy if exists "account_private: só o dono lê" on public.account_private;
 create policy "account_private: só o dono lê" on public.account_private
   for select to authenticated using (auth.uid() = id);
 
+drop policy if exists "account_private: só o dono grava" on public.account_private;
 create policy "account_private: só o dono grava" on public.account_private
   for insert to authenticated with check (auth.uid() = id);
 
+drop policy if exists "account_private: só o dono atualiza" on public.account_private;
 create policy "account_private: só o dono atualiza" on public.account_private
   for update to authenticated using (auth.uid() = id);
 
@@ -62,6 +65,7 @@ alter table public.verification_requests enable row level security;
 
 -- só o dono vê os PRÓPRIOS pedidos (status do selo dele) -- sem select
 -- público nenhum (mesmo motivo de account_private acima).
+drop policy if exists "verification_requests: só o dono lê os próprios" on public.verification_requests;
 create policy "verification_requests: só o dono lê os próprios" on public.verification_requests
   for select to authenticated using (auth.uid() = user_id);
 
@@ -86,6 +90,11 @@ alter table public.profiles add column if not exists verified_company boolean no
 -- de insert pra "authenticated" aqui, só a service role (que ignora
 -- RLS) consegue gravar.
 -- ---------------------------------------------------------------
+-- Rodando de novo NÃO quebra nada (create table/alter table já eram
+-- idempotentes com IF NOT EXISTS -- só as policies não eram, "policy ... already exists"
+-- se essa migration já tivesse rodado antes, mesmo que parcial; por isso o
+-- "drop policy if exists" antes de cada "create policy" acima).
+
 insert into storage.buckets (id, name, public)
 values ('verification-docs', 'verification-docs', false)
 on conflict (id) do nothing;
