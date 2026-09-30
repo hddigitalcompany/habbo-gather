@@ -50,6 +50,7 @@ import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 import SettingsPanel from "@/components/SettingsPanel";
 import FriendsPanel, { type ContactUser } from "@/components/FriendsPanel";
+import ProfileViewCard from "@/components/ProfileViewCard";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -79,7 +80,15 @@ type ConversationSummary = {
   // getOrCreateDirectConversation e a aba "Conversas privadas" em
   // LobbyChatPanel mais abaixo.
   lane: "company" | "private";
-  participants: { id: string; name?: string }[];
+  // 29/set (12), pedido do Douglas: "QUERO O CHAT DE FORA IGUAL AO
+  // CHAT DE DENTRO, ATE NA POSICAO, IGUAL" -- color/photoUrl JÁ
+  // vinham nessa resposta (GET /chat/summary reaproveita
+  // chatStore.listConversationsForUser, que já soma ...getUser(id) em
+  // cada participante, ver server/chatStore.js), só o tipo aqui não
+  // declarava os campos e o painel não desenhava nada com eles -- por
+  // isso a lista/cabeçalho de conversa direta ficavam sem avatar
+  // nenhum enquanto o de dentro da sala (ChatDrawer) já mostrava.
+  participants: { id: string; name?: string; color?: string; photoUrl?: string }[];
   lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
 };
 
@@ -597,6 +606,53 @@ function LinkIcon() {
   );
 }
 
+// 29/set (12), pedido do Douglas: "QUERO O CHAT DE FORA IGUAL AO CHAT
+// DE DENTRO, ATE NA POSICAO, IGUAL" -- copiados de ChatDrawer/
+// ChatMessageRow em components/GameRoom.tsx (mesmo motivo do resto
+// dos ícones dessa barra, ver comentário grande no topo do arquivo:
+// esse componente não importa nada de GameRoom.tsx, que é gigante e
+// só deveria carregar depois que a pessoa entra na sala).
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M15 5 8 12l7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M5 5l14 14M19 5 5 19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GroupIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <circle cx="9" cy="9" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="17" cy="9" r="2.6" stroke="currentColor" strokeWidth="1.5" opacity="0.75" />
+      <path d="M15.2 12.3A4.6 4.6 0 0 1 20.5 16.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.75" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 12 20 4l-6.5 16-3-6.5L4 12Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function ChatIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
@@ -761,45 +817,29 @@ function LobbyChatPanel({
   myName,
   companyName,
   conversations,
+  accountAccessToken,
   onClose,
   onSent,
+  onStartConversation,
   initialActiveId,
 }: {
   myUserId: string;
   myName: string;
-  // nome de verdade da aba "Empresa" (29/set (2), pedido do Douglas:
-  // "'empresa' tem que virar o Nome da empresa") -- vem de myRoom?.name
-  // lá no componente Lobby (a sala PRÓPRIA de quem tá logado, ver GET
-  // /api/room/mine). Sem sala própria ainda (ou carregando), cai pra
-  // "Empresa" mesmo, só como rótulo genérico de fallback.
   companyName: string | null;
   conversations: ConversationSummary[] | null;
+  accountAccessToken?: string | null;
   onClose: () => void;
   onSent: (conversationId: string, message: ChatMessage) => void;
-  // pré-seleciona uma conversa ao abrir -- pedido do Douglas: "quero
-  // agora, mais um icone de contatos" (28/set), clicar em "Conversar"
-  // no painel de Contatos já abre DIRETO a conversa com a pessoa, sem
-  // passar pela lista. Só lido no useState inicial (ver abaixo) porque
-  // esse painel inteiro só existe montado enquanto chatPanelOpen é
-  // true (desmonta ao fechar, ver componente Lobby mais abaixo) --
-  // cada abertura é um mount novo, então dá pra usar como valor
-  // inicial sem precisar sincronizar com um efeito.
+  onStartConversation: (targetUserId: string, targetName: string) => void;
   initialActiveId?: string | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  // duas abas (pedido do Douglas, 29/set: "vao ter duas abas nas
-  // conversas / EmpresaTal / Conversas Privadas") -- mesma ideia do
-  // ChatDrawer de dentro da sala (ver components/GameRoom.tsx),
-  // filtra a lista já pronta que o Lobby busca via GET /chat/summary.
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
+  const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
 
-  // mesma ideia do polling de conversas lá no componente Lobby (ver
-  // comentário grande perto do useEffect que busca /chat/summary):
-  // sem isso, uma mensagem nova mandada pela outra pessoa só aparecia
-  // se você fechasse e abrisse o painel de novo.
   useEffect(() => {
     if (!activeId) {
       setMessages(null);
@@ -807,8 +847,6 @@ function LobbyChatPanel({
     }
     let cancelled = false;
     setMessages(null);
-    // guarda o id numa const local pra TS enxergar que continua
-    // string (não string|null) dentro da closure de fetchMessages.
     const conversationId = activeId;
 
     function fetchMessages() {
@@ -861,104 +899,151 @@ function LobbyChatPanel({
   }
 
   return (
-    <div className="lobby-panel-backdrop" onClick={onClose}>
-      <div className="lobby-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="lobby-panel-header">
-          {activeId && (
-            <button type="button" className="lobby-panel-back" onClick={() => setActiveId(null)} title="Voltar">
-              ←
-            </button>
-          )}
+    <div className="chat-drawer">
+      <div className="chat-drawer-header">
+        {activeId && (
+          <button type="button" className="chat-icon-btn" title="Voltar" onClick={() => setActiveId(null)}>
+            <BackIcon />
+          </button>
+        )}
+        {activeId && activeConversation?.kind === "direct" && activeConversation.participants[0] ? (
+          <button
+            type="button"
+            className="chat-drawer-header-identity"
+            onClick={() => accountAccessToken && setViewingProfileUserId(activeConversation.participants[0].id)}
+            title="Ver perfil"
+          >
+            <span
+              className="chat-drawer-header-avatar"
+              style={{ background: activeConversation.participants[0].color || "#5c9bff" }}
+            >
+              {activeConversation.participants[0].photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={activeConversation.participants[0].photoUrl} alt="" />
+              ) : (
+                (activeConversation.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
+              )}
+            </span>
+            <h3>{conversationTitle(activeConversation)}</h3>
+          </button>
+        ) : (
           <h3>{activeId ? conversationTitle(activeConversation) : "Conversas"}</h3>
-          <button type="button" className="lobby-panel-close" onClick={onClose} title="Fechar">
-            ✕
+        )}
+        <div className="chat-drawer-header-actions">
+          <button type="button" className="chat-icon-btn" title="Fechar" onClick={onClose}>
+            <CloseIcon />
           </button>
         </div>
-
-        {!activeId ? (
-          <>
-            <div className="lobby-lane-tabs">
-              <button
-                type="button"
-                className={`lobby-lane-tab${laneFilter === "company" ? " lobby-lane-tab-active" : ""}`}
-                onClick={() => setLaneFilter("company")}
-              >
-                {companyName || "Empresa"}
-              </button>
-              <button
-                type="button"
-                className={`lobby-lane-tab${laneFilter === "private" ? " lobby-lane-tab-active" : ""}`}
-                onClick={() => setLaneFilter("private")}
-              >
-                Conversas privadas
-              </button>
-            </div>
-            {(() => {
-              const laneConversations = (conversations ?? []).filter((c) => c.lane === laneFilter);
-              if (laneConversations.length === 0) {
-                return (
-                  <p className="lobby-panel-empty">
-                    {laneFilter === "private"
-                      ? "Nenhuma conversa privada ainda. Vire amigo de alguém no painel de Amigos pra conversar aqui."
-                      : "Nenhuma conversa ainda. Entre na sala pra começar uma."}
-                  </p>
-                );
-              }
-              return (
-                <ul className="lobby-conv-list">
-                  {laneConversations.map((c) => (
-                    <li key={c.id}>
-                      <button type="button" className="lobby-conv-item" onClick={() => setActiveId(c.id)}>
-                        <span className="lobby-conv-name">{conversationTitle(c)}</span>
-                        {c.lastMessage && (
-                          <span className="lobby-conv-preview">
-                            {c.lastMessage.senderId === myUserId ? "Você: " : ""}
-                            {c.lastMessage.kind === "text" ? c.lastMessage.text : "anexo enviado"}
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              );
-            })()}
-          </>
-        ) : (
-          <>
-            <div className="lobby-message-list">
-              {messages === null ? (
-                <p className="lobby-panel-empty">Carregando…</p>
-              ) : messages.length === 0 ? (
-                <p className="lobby-panel-empty">Nenhuma mensagem ainda.</p>
-              ) : (
-                messages.map((m) => (
-                  <div key={m.id} className={`lobby-message${m.senderId === myUserId ? " lobby-message-own" : ""}`}>
-                    {m.senderId !== myUserId && <span className="lobby-message-sender">{m.senderName}</span>}
-                    <span className="lobby-message-text">
-                      {m.deleted ? "Mensagem apagada" : m.kind === "text" ? m.text : "anexo enviado"}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="lobby-compose">
-              <input
-                type="text"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") sendMessage();
-                }}
-                placeholder="Escreva uma mensagem…"
-                maxLength={2000}
-              />
-              <button type="button" onClick={sendMessage} disabled={!draft.trim() || sending}>
-                Enviar
-              </button>
-            </div>
-          </>
-        )}
       </div>
+
+      {!activeId ? (
+        <>
+          <div className="chat-lane-tabs">
+            <button
+              type="button"
+              className={`chat-lane-tab${laneFilter === "company" ? " chat-lane-tab-active" : ""}`}
+              onClick={() => setLaneFilter("company")}
+            >
+              {companyName || "Empresa"}
+            </button>
+            <button
+              type="button"
+              className={`chat-lane-tab${laneFilter === "private" ? " chat-lane-tab-active" : ""}`}
+              onClick={() => setLaneFilter("private")}
+            >
+              Conversas privadas
+            </button>
+          </div>
+          {(() => {
+            const laneConversations = (conversations ?? []).filter((c) => c.lane === laneFilter);
+            if (laneConversations.length === 0) {
+              return (
+                <p className="chat-empty-hint">
+                  {laneFilter === "private"
+                    ? "Nenhuma conversa privada ainda. Vire amigo de alguém no painel de Amigos pra conversar aqui."
+                    : "Nenhuma conversa ainda. Entre na sala pra começar uma."}
+                </p>
+              );
+            }
+            return (
+              <div className="chat-conv-list">
+                {laneConversations.map((c) => (
+                  <button key={c.id} type="button" className="chat-conv-item" onClick={() => setActiveId(c.id)}>
+                    <span
+                      className="chat-conv-avatar"
+                      style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
+                    >
+                      {c.kind === "group" ? <GroupIcon /> : conversationTitle(c).slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="chat-conv-info">
+                      <span className="chat-conv-name">{conversationTitle(c)}</span>
+                      {c.lastMessage && (
+                        <span className="chat-conv-preview">
+                          {c.lastMessage.senderId === myUserId ? "Você: " : ""}
+                          {c.lastMessage.kind === "text" ? c.lastMessage.text : "anexo enviado"}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+        </>
+      ) : (
+        <>
+          <div className="chat-messages">
+            {messages === null ? (
+              <p className="chat-empty-hint">Carregando…</p>
+            ) : messages.length === 0 ? (
+              <p className="chat-empty-hint">Nenhuma mensagem ainda.</p>
+            ) : (
+              messages.map((m) => (
+                <div key={m.id} className={m.senderId === myUserId ? "chat-message own" : "chat-message"}>
+                  {m.senderId !== myUserId && <span className="chat-message-sender">{m.senderName}</span>}
+                  <div className="chat-bubble">
+                    <span>{m.deleted ? "Mensagem apagada" : m.kind === "text" ? m.text : "anexo enviado"}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="chat-composer">
+            <input
+              className="chat-composer-input"
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") sendMessage();
+              }}
+              placeholder="Escreva uma mensagem…"
+              maxLength={2000}
+            />
+            <button
+              type="button"
+              className="chat-composer-btn primary"
+              onClick={sendMessage}
+              disabled={!draft.trim() || sending}
+              title="Enviar"
+            >
+              <SendIcon />
+            </button>
+          </div>
+        </>
+      )}
+
+      {viewingProfileUserId && accountAccessToken && (
+        <ProfileViewCard
+          userId={viewingProfileUserId}
+          accountAccessToken={accountAccessToken}
+          onClose={() => setViewingProfileUserId(null)}
+          onStartConversation={(targetUserId, targetName) => {
+            setViewingProfileUserId(null);
+            onStartConversation(targetUserId, targetName);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -3197,11 +3282,13 @@ export default function Lobby({
           myName={myName}
           companyName={myRoom?.name ?? null}
           conversations={conversations}
+          accountAccessToken={accountAccessToken}
           onClose={() => {
             setChatPanelOpen(false);
             setOpenChatConversationId(null);
           }}
           onSent={handleMessageSent}
+          onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
           initialActiveId={openChatConversationId}
         />
       )}

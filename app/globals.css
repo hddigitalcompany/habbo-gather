@@ -474,25 +474,24 @@ body {
    Tamanho FIXO (não muda entre lista/nova conversa/conversa aberta,
    mesma lógica do .profile-card.editing) -- só o conteúdo de dentro
    rola. */
-/* MESMO card/vidro do painel de fora da sala (.lobby-panel, ver
-   comentário lá) -- pedido do Douglas 29/set: "a cor do card, nao ta
-   igual de fora, quero igual ao de fora [...] MESMO PADRAO". Antes
-   era uma cor chapada (rgba(28,22,42,0.92)) diferente do gradiente
-   acinzentado que o Lobby usa -- agora os dois usam o mesmo fundo/
-   borda/sombra, só a POSIÇÃO continua diferente de propósito (aqui é
-   um painel flutuante por cima do jogo, sem backdrop, pra não travar
-   o movimento; lá é um modal centralizado com backdrop, ver
-   .lobby-panel-backdrop -- isso é comportamento, não "cor", então não
-   mexi). */
-/* card/vidro de VERDADE compartilhado entre o chat de dentro
-   (.chat-drawer) e o de fora da sala (.lobby-panel) -- fundo/borda/
-   raio/sombra/blur moram só AQUI agora, pra nunca mais um mudar sem
-   o outro (era esse o motivo do "nao e o mesmo do de fora?" do
-   Douglas: cada um tinha a PRÓPRIA cópia dos mesmos valores, e foram
-   desalinhando aos poucos). Cada um continua com seu próprio
-   posicionamento/tamanho (flutuante fixo aqui, modal centralizado lá)
-   -- isso é comportamento, não visual, então continua em cada
-   seletor específico. */
+/* HISTÓRICO (deixo pra quem for mexer aqui de novo): primeiro só a cor
+   virou igual (29/set, "a cor do card, nao ta igual de fora [...]
+   MESMO PADRAO"), com a posição de propósito diferente (chat de
+   dentro flutuante, painel de fora um modal centralizado). Só que
+   isso significava duas cópias das mesmas classes-irmãs (.chat-* vs
+   .lobby-*) em tudo -- header, abas, lista de conversa, mensagem,
+   composer -- e foi isso que foi desalinhando aos poucos de novo (o
+   "nao e o mesmo do de fora?" do Douglas se repetiu com a POSIÇÃO:
+   "QUERO O CHAT DE FORA IGUAL AO CHAT DE DENTRO, ATE NA POSICAO,
+   IGUAL", 29/set (12)). Resolvido de vez: o painel de Conversas do
+   Lobby (LobbyChatPanel) parou de ter classe própria e passou a
+   renderizar literalmente com className="chat-drawer" -- MESMA classe,
+   não só "mesmo visual" -- então não tem mais como desalinhar de
+   novo (é a mesma regra CSS pros dois). .lobby-panel
+   continua existindo só pro painel de Agenda (AgendaPanel, mais
+   abaixo), que continua sendo de propósito um modal centralizado com
+   backdrop (.lobby-panel-backdrop) -- Agenda nunca foi comparada ao
+   chat de dentro, não tinha motivo pra virar igual. */
 .chat-drawer,
 .lobby-panel {
   width: 340px;
@@ -661,8 +660,7 @@ body {
   padding: 6px 6px 0;
 }
 
-.chat-lane-tab,
-.lobby-lane-tab {
+.chat-lane-tab {
   flex: 1;
   border: none;
   background: rgba(255, 255, 255, 0.08);
@@ -674,8 +672,7 @@ body {
   color: #f5f0ff;
 }
 
-.chat-lane-tab-active,
-.lobby-lane-tab-active {
+.chat-lane-tab-active {
   background: #fff;
   color: #1c162a;
 }
@@ -5548,140 +5545,25 @@ body {
   color: #f5f0ff;
 }
 
-/* abas "Empresa" / "Conversas privadas" no painel de Conversas do
-   Lobby -- mesma ideia/mesmas classes-irmãs do ChatDrawer de dentro
-   da sala (.chat-lane-tab*, ver comentário grande lá). */
-.lobby-lane-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 10px 10px 0;
-}
-
-
-
-.lobby-conv-list,
+/* 29/set (12), pedido do Douglas: "QUERO O CHAT DE FORA IGUAL AO CHAT
+   DE DENTRO, ATE NA POSICAO, IGUAL" -- o painel de Conversas do Lobby
+   passou a usar as MESMAS classes .chat-lane-tabs/.chat-conv-*/
+   .chat-messages/.chat-message*/.chat-composer* do ChatDrawer de
+   dentro da sala (ver LobbyChatPanel em components/Lobby.tsx) em vez
+   de ter sua própria cópia -- por isso as antigas .lobby-lane-tabs/
+   .lobby-conv-item/.lobby-message*/.lobby-compose* saíram daqui:
+   eram justamente a causa da gaveta de fora ir desalinhando da de
+   dentro aos poucos (cada uma com seus próprios valores, ver
+   comentário grande em .chat-drawer, .lobby-panel mais acima). O
+   Agenda (mais abaixo, AgendaPanel) continua com seu próprio
+   .lobby-call-list -- não mexi nele, só nas classes que eram
+   exclusivas do chat. */
 .lobby-call-list {
   list-style: none;
   margin: 0;
   padding: 6px;
   overflow-y: auto;
-  /* 29/set (6): sem isso, com a altura da caixa agora fixa (ver
-     .lobby-panel lá em cima), uma lista curta deixava espaço vazio
-     sobrando embaixo em vez de esticar -- mesmo "flex: 1" que
-     .chat-conv-list (o de dentro) já tinha. */
   flex: 1;
-}
-
-.lobby-conv-item {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  background: transparent;
-  border: none;
-  border-radius: 10px;
-  padding: 9px 10px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.lobby-conv-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.lobby-conv-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: #f5f0ff;
-}
-
-.lobby-conv-preview {
-  font-size: 12px;
-  color: #f5f0ff;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.lobby-message-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lobby-message {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  max-width: 86%;
-}
-
-.lobby-message-own {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.lobby-message-sender {
-  font-size: 10.5px;
-  color: #f5f0ff;
-}
-
-.lobby-message-text {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f5f0ff;
-  padding: 7px 10px;
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.lobby-message-own .lobby-message-text {
-  background: #7c5cff;
-}
-
-.lobby-compose {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.lobby-compose input {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  padding: 8px 12px;
-  color: #f5f0ff;
-  font-size: 13px;
-}
-
-.lobby-compose input:focus {
-  outline: none;
-  border-color: #7c5cff;
-}
-
-.lobby-compose button {
-  background: #7c5cff;
-  border: none;
-  border-radius: 999px;
-  color: #fff;
-  padding: 0 14px;
-  font-size: 12.5px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.lobby-compose button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .lobby-call-item {
