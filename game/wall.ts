@@ -292,16 +292,38 @@ const FACADE_GLASS_ENTRY: WallCatalogEntry = {
   file: "facade-glass-tile.png",
 };
 
-/** Tamanho de verdade (px) da arte de facade-glass-tile.png -- MESMA
- * arte usada em 2 lugares (addWallSprite pra parede de verdade, e
- * drawFloorEdgeGlass em MainScene.ts pra vidraça repetida abaixo do
- * piso), então mora aqui, não hardcoded 2x. Largura = comprimento de 1
- * aresta de tile (128x64, ver ISO_TILE_WIDTH/HEIGHT em grid.ts:
- * Math.hypot(64,32) = 71.55, arredondado); altura segue proporcional
- * (não é mais um valor "escolhido" tipo o heightPx antigo do vetor --
- * é só o tamanho de verdade do arquivo .png). */
-export const FACADE_GLASS_TILE_WIDTH_PX = 72;
-export const FACADE_GLASS_TILE_HEIGHT_PX = 152;
+/** Tamanho de verdade (px) da arte LARGA de facade-glass-tile.png --
+ * MESMA arte usada em 2 lugares (createFacadeGlassSprite em
+ * MainScene.ts pra parede de verdade, e drawFloorEdgeGlass pra vidraça
+ * repetida abaixo do piso), então mora aqui, não hardcoded 2x.
+ *
+ * ACHADO (Douglas: "eu te mandei a imagem pronta ja so pra vc subir" --
+ * a arte de verdade que ele manda tem 2 vidraças desenhadas numa peça
+ * só, bem mais bonita que espremer 1 vidraça em 71px de largura só pra
+ * bater com 1 aresta de tile; mostrei as 2 opções (A: encaixar como 1
+ * peça de parede, espremida; B: manter o tamanho/proporção natural,
+ * cobrindo 2 peças) e ele escolheu B) -- por isso essa arte NÃO é mais
+ * 1:1 com wallEdgeLengthPx, é ~2x isso, e precisa PAREAR 2 arestas
+ * vizinhas pra plantar 1 imagem só cobrindo as duas (ver
+ * pairFacadeGlassEdges/FacadeGlassPairing abaixo, e
+ * createFacadeGlassSprite em MainScene.ts que consome o pareamento).
+ * Sobra ímpar (fileira de tamanho ímpar, ou quina) cai no fallback de 1
+ * vidraça só -- facade-glass-tile-single.png, metade exata da arte
+ * larga (recorte, não redimensionado, então sem distorcer o ângulo). */
+export const FACADE_GLASS_TILE_WIDTH_PX = 144;
+export const FACADE_GLASS_TILE_HEIGHT_PX = 199;
+/** Largura/altura do fallback de 1 vidraça só (facade-glass-tile-single.png)
+ * -- ver comentário grande acima. Também usado pelo caminho genérico
+ * addWallSprite (MainScene.ts, chamado por refreshWallNeighbors/
+ * refreshWallModel quando uma parede QUALQUER vizinha muda) -- sem
+ * contexto de pareamento ali (reconsultar computeFacadeEdges inteiro só
+ * pra redesenhar 1 vizinho seria caro à toa), então esse caminho sempre
+ * cai no fallback de 1 aresta só -- a única largura seguramente correta
+ * sem saber quem é o par. Self-heals: a próxima mudança de roomShape
+ * (syncFacadeGlassWalls) reconstrói a fachada inteira do zero,
+ * reparando o pareamento certo de novo. */
+export const FACADE_GLASS_SINGLE_TILE_WIDTH_PX = 72;
+export const FACADE_GLASS_SINGLE_TILE_HEIGHT_PX = 199;
 
 export const WALL_CATALOG: WallCatalogEntry[] = [...GENERATED_WALL_CATALOG, FACADE_GLASS_ENTRY];
 
@@ -558,4 +580,68 @@ export function nearestWallEdge(x: number, y: number, gridOriginX: number, gridO
     return fracCol >= 0 ? { col, row, side: "colPlus" } : { col: col - 1, row, side: "colPlus" };
   }
   return fracRow >= 0 ? { col, row, side: "rowPlus" } : { col, row: row - 1, side: "rowPlus" };
+}
+/** Resultado do pareamento de UMA aresta de fachada de vidro (ver
+ * FACADE_GLASS_TILE_WIDTH_PX acima) -- "primary" planta a imagem LARGA
+ * (cobre essa aresta + `partner`), "secondary" REAPROVEITA a MESMA
+ * imagem do `partner` primary (não cria outra -- a arte larga já cobre
+ * o espaço dela), "single" é sobra ímpar (sem par), cai no fallback de
+ * 1 vidraça só. */
+export interface FacadeGlassPairing {
+  edge: { col: number; row: number; side: WallSide };
+  role: "primary" | "secondary" | "single";
+  /** só presente pras roles "primary"/"secondary" -- a OUTRA aresta do par. */
+  partner?: { col: number; row: number; side: WallSide };
+}
+
+/**
+ * Pareia as arestas de fachada (computeFacadeEdges em MainScene.ts) 2 a
+ * 2, pra plantar a arte larga de facade-glass-tile.png (ver
+ * FACADE_GLASS_TILE_WIDTH_PX acima) cobrindo um par de cada vez, em vez
+ * de repetir ela (espremida) 1x por aresta.
+ *
+ * Agrupa por FILEIRA RETA (mesmo side, e pra colPlus mesmo `col`
+ * variando `row` / pra rowPlus mesmo `row` variando `col` -- mesmo
+ * conceito de "vizinho reto" de wallJunctionAt em MainScene.ts), ordena
+ * essa fileira e empareia sequencialmente (0-1, 2-3, ...) SÓ quando os
+ * 2 realmente se encostam (diferença de 1 no eixo que varia) -- uma
+ * sala em "L"/côncava pode ter 2 arestas com mesmo col/row mas
+ * DISTANTES uma da outra (buraco no meio, sem fileira reta nenhuma
+ * ali), então checa adjacência de verdade em vez de só parear por
+ * índice cru. Determinístico (sempre ordena antes de parear) -- não
+ * depende da ordem de iteração de `edges`, senão a mesma fileira
+ * pareava diferente dependendo de quem chamou primeiro (ex.: depois de
+ * apagar 1 tile no meio, reconstruída do zero por syncFacadeGlassWalls
+ * -- ver comentário lá).
+ */
+export function pairFacadeGlassEdges(
+  edges: { col: number; row: number; side: WallSide }[]
+): FacadeGlassPairing[] {
+  const byRun = new Map<string, { col: number; row: number; side: WallSide }[]>();
+  for (const e of edges) {
+    const runKey = e.side === "colPlus" ? `colPlus_${e.col}` : `rowPlus_${e.row}`;
+    const list = byRun.get(runKey);
+    if (list) list.push(e);
+    else byRun.set(runKey, [e]);
+  }
+
+  const result: FacadeGlassPairing[] = [];
+  for (const run of byRun.values()) {
+    const sorted = [...run].sort((a, b) => (a.side === "colPlus" ? a.row - b.row : a.col - b.col));
+    let i = 0;
+    while (i < sorted.length) {
+      const a = sorted[i];
+      const b = sorted[i + 1];
+      const adjacent = !!b && (a.side === "colPlus" ? b.row === a.row + 1 : b.col === a.col + 1);
+      if (b && adjacent) {
+        result.push({ edge: a, role: "primary", partner: b });
+        result.push({ edge: b, role: "secondary", partner: a });
+        i += 2;
+      } else {
+        result.push({ edge: a, role: "single" });
+        i += 1;
+      }
+    }
+  }
+  return result;
 }

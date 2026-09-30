@@ -98,6 +98,8 @@ import {
   nearestWallEdge,
   FACADE_GLASS_STYLE_ID,
   FACADE_GLASS_TILE_HEIGHT_PX,
+  pairFacadeGlassEdges,
+  FacadeGlassPairing,
 } from "./wall";
 import {
   DoorSide,
@@ -639,8 +641,15 @@ const WALL_GLASS_LIT_COLOR_TOP = 0xfff3c4;
 const WALL_GLASS_LIT_COLOR_BOTTOM = 0xd9822e;
 const WALL_GLASS_LIT_ALPHA = 0.92;
 /** fração dos painéis que nascem "acesos" -- mesma proporção aproximada
- * do print de referência do Douglas (uns 1/3 das janelas). */
-const WALL_GLASS_LIT_RATIO = 0.34;
+ * do print de referência do Douglas (uns 1/3 das janelas). PAUSADO por
+ * pedido dele (30/set, trocando a arte pra facade-glass-tile.png de
+ * verdade): "mas quero tudo pagado [apagado] agora depois posiciono as
+ * acesa" -- ele vai escolher/posicionar os painéis acesos NA MÃO mais
+ * pra frente (feature ainda não existe), então por enquanto ninguém
+ * nasce aceso (0 em vez de 0.34) até essa escolha manual existir. Não
+ * apaguei glassPaneIsLit nem os pontos que chamam ela -- só zerei a
+ * fração, pra ligar de volta é só voltar esse número. */
+const WALL_GLASS_LIT_RATIO = 0;
 /** textura "acesa" (facade-glass-tile-lit.png) da vidraça-imagem -- a
  * "apagada" (facade-glass-tile.png) já entra pelo catálogo normal de
  * parede (ver FACADE_GLASS_ENTRY em game/wall.ts, addWallSprite carrega
@@ -650,6 +659,14 @@ const WALL_GLASS_LIT_RATIO = 0.34;
  * glassPaneIsLit), então carrega à mão aqui em vez de entrar no loop
  * genérico do catálogo. */
 const FACADE_GLASS_LIT_TEXTURE_KEY = "facade-glass-tile-lit";
+/** textura do fallback de 1 vidraça só (ver FACADE_GLASS_SINGLE_TILE_WIDTH_PX
+ * em game/wall.ts) -- metade exata da arte larga, usada pra sobra ímpar
+ * de pareamento (pairFacadeGlassEdges) e pelo caminho genérico
+ * addWallSprite mais abaixo (sem contexto de par ali). Mesma ideia de
+ * FACADE_GLASS_LIT_TEXTURE_KEY: não é estilo de parede à parte, carrega
+ * à mão em vez de entrar no loop genérico do catálogo. */
+const FACADE_GLASS_SINGLE_TEXTURE_KEY = "facade-glass-tile-single";
+const FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY = "facade-glass-tile-single-lit";
 /** perfil metálico vertical -- 1 faixa em CADA ponta do painel (pedido:
  * "com perfis metalicos na vertical... na largura exata do tile" -- o
  * painel já É 1 tile de largura, então o perfil da ponta B de um
@@ -1577,6 +1594,9 @@ export default class MainScene extends Phaser.Scene {
     // estilo de parede à parte, então não entra no loop acima (ver
     // FACADE_GLASS_LIT_TEXTURE_KEY acima).
     this.load.image(FACADE_GLASS_LIT_TEXTURE_KEY, "/assets/facade-glass-tile-lit.png");
+    // fallback de 1 vidraça só (ver FACADE_GLASS_SINGLE_TEXTURE_KEY acima).
+    this.load.image(FACADE_GLASS_SINGLE_TEXTURE_KEY, "/assets/facade-glass-tile-single.png");
+    this.load.image(FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY, "/assets/facade-glass-tile-single-lit.png");
   }
 
   create() {
@@ -4331,27 +4351,48 @@ export default class MainScene extends Phaser.Scene {
     // (FACADE_GLASS_TILE_HEIGHT_PX), não mais um heightPx "escolhido"
     // de pattern -- mora em game/wall.ts pra nunca dessincronizar da
     // parede de verdade (MESMA arte nos 2 lugares).
+    //
+    // ACHADO 2 (Douglas escolheu a opção B: manter a arte no tamanho
+    // natural, 2 vidraças por peça, em vez de espremer 1 por aresta) --
+    // mesmo pareamento de createFacadeGlassSprite (ver
+    // pairFacadeGlassEdges em game/wall.ts): "primary" planta a imagem
+    // larga ancorada no meio do PAR, "secondary" não desenha nada (já
+    // coberta pela larga do parceiro), "single" (sobra ímpar) cai no
+    // fallback de 1 vidraça só.
     const heightPx = FACADE_GLASS_TILE_HEIGHT_PX;
+    const pairings = pairFacadeGlassEdges(this.computeFacadeEdges());
     // pedido do Douglas: "repita o piso abaixo, a cada frame de altura
     // de parede" -- em vez de 1 painel só, repete a MESMA imagem
     // empilhada FLOOR_GLASS_REPEATS vezes, cada uma exatamente heightPx
     // mais abaixo que a anterior -- dá a sensação de vários andares do
     // prédio se repetindo lá embaixo, não só 1 tira.
-    for (const edge of this.computeFacadeEdges()) {
+    for (const p of pairings) {
+      if (p.role === "secondary") continue; // já coberta pela imagem larga do "primary" parceiro
+      const edge = p.edge;
       const { a, b } = wallEdgeFloorPoints(edge.col, edge.row, edge.side);
-      const edgeLength = Math.hypot(b.x - a.x, b.y - a.y);
-      if (edgeLength === 0) continue;
       // ponto médio da aresta -- MESMA ideia de wallWorldAnchor
       // (game/wall.ts), só que a parede usa ele como base (origem 0.5,1,
       // cresce pra CIMA) e aqui ele é o TOPO de cada repetição (origem
       // 0.5,0, pendura pra BAIXO, ver vOffset abaixo).
-      const midX = (a.x + b.x) / 2;
-      const midY = (a.y + b.y) / 2;
+      let midX = (a.x + b.x) / 2;
+      let midY = (a.y + b.y) / 2;
+      const wide = p.role === "primary" && !!p.partner;
+      if (wide && p.partner) {
+        // "primary": ancora no meio do PAR -- média dos 2 pontos médios
+        // (mesma conta de createFacadeGlassSprite acima).
+        const { a: pa, b: pb } = wallEdgeFloorPoints(p.partner.col, p.partner.row, p.partner.side);
+        const partnerMidX = (pa.x + pb.x) / 2;
+        const partnerMidY = (pa.y + pb.y) / 2;
+        midX = (midX + partnerMidX) / 2;
+        midY = (midY + partnerMidY) / 2;
+      }
       const sideSeed = edge.side === "colPlus" ? 1 : 0;
+      const normalKey = wide ? wallTextureKey(FACADE_GLASS_STYLE_ID) : FACADE_GLASS_SINGLE_TEXTURE_KEY;
+      const litKey = wide ? FACADE_GLASS_LIT_TEXTURE_KEY : FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY;
       for (let i = 0; i < FLOOR_GLASS_REPEATS; i++) {
         const vOffset = i * heightPx;
         const lit = this.glassPaneIsLit(edge.col * 928371 + edge.row * 17431 + i * 5197 + sideSeed);
-        const key = lit ? FACADE_GLASS_LIT_TEXTURE_KEY : wallTextureKey(FACADE_GLASS_STYLE_ID);
+        const key = lit ? litKey : normalKey;
         if (!this.textures.exists(key)) continue; // mesma cautela de addWallSprite -- textura ainda não carregada
         const img = this.add
           .image(midX, midY + vOffset, key)
@@ -4363,57 +4404,76 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  /** Aplica o resultado de computeFacadeEdges de verdade: cria sprite
-   * de vidro em toda aresta nova da borda de baixo, remove o que tiver
-   * ficado pra trás (a sala encolheu ali), e deixa QUALQUER aresta que
-   * já tenha outra coisa (parede comum do dono, ou porta) em paz --
-   * nunca troca o que já tava lá por cima, só warn no console (mesma
-   * cautela de addWallSprite acima quando falta textura). Chamada
-   * DEPOIS de toda mudança em roomShape (ver paintRoomShapeAt/
-   * eraseRoomShapeAt) -- nunca do carregamento inicial
+  /** Aplica o resultado de computeFacadeEdges de verdade -- reconstrói a
+   * fachada INTEIRA do zero (destrói tudo que já era vidro, recria com
+   * o pareamento atual), em vez de só tocar as arestas que
+   * entraram/saíram. ACHADO (opção B, Douglas: "mesmo tamanho/proporção
+   * natural" -- ver pairFacadeGlassEdges em game/wall.ts): como a arte
+   * agora cobre 2 arestas de uma vez, adicionar/apagar 1 tile no MEIO
+   * de uma fileira pode reclassificar o pareamento de segmentos que nem
+   * mudaram (um "secondary" pode virar "primary" e vice-versa) -- um
+   * diff incremental (só tocar quem entrou/saiu, como antes) deixaria
+   * pares velhos rasgados pra trás. Reconstruir tudo sempre que
+   * roomShape muda evita esse tipo de bug de qualquer jeito, sem
+   * precisar rastrear pareamento antigo -- só roda numa edição de
+   * verdade do dono (nunca por frame), custo irrelevante.
+   *
+   * Deixa QUALQUER aresta que já tenha outra coisa (parede comum do
+   * dono, ou porta) em paz -- nunca troca o que já tava lá por cima, só
+   * warn no console (mesma cautela de addWallSprite acima quando falta
+   * textura). Chamada DEPOIS de toda mudança em roomShape (ver
+   * paintRoomShapeAt/eraseRoomShapeAt) -- nunca do carregamento inicial
    * (loadSavedRoomShape), que roda em QUALQUER cliente (dono ou
    * visitante): salvar daqui só pode acontecer numa edição de verdade
    * do dono, senão visitante nenhum devia estar disparando POST
    * /room/walls sozinho. */
   private syncFacadeGlassWalls() {
-    const expected = this.computeFacadeEdges();
-    const expectedKeys = new Set(expected.map((e) => wallSegmentId(e.col, e.row, e.side)));
-    let changed = false;
-
-    // remove fachada que não é mais borda (a sala encolheu/mudou ali)
+    // destrói TODA fachada de vidro atual -- reconstruída do zero logo
+    // abaixo (ver comentário grande acima pro motivo). "secondary"
+    // compartilha a MESMA instância de Image do "primary" do par, então
+    // um segmento pode chamar .destroy() numa imagem já destruída pelo
+    // seu parceiro -- inofensivo (Phaser ignora destroy duplicado).
     for (const [key, seg] of Array.from(this.draftWall.entries())) {
       if (seg.styleId !== FACADE_GLASS_STYLE_ID) continue;
-      if (expectedKeys.has(key)) continue;
       this.draftWallSprites.get(key)?.destroy();
       this.draftWallSprites.delete(key);
       this.draftWall.delete(key);
       this.refreshWallNeighbors(seg.col, seg.row, seg.side);
-      changed = true;
     }
 
-    // cria fachada em toda aresta nova da borda de baixo
-    for (const edge of expected) {
-      const key = wallSegmentId(edge.col, edge.row, edge.side);
+    // recria a fachada inteira, já pareada (ver createFacadeGlassSprite
+    // acima e pairFacadeGlassEdges em game/wall.ts) -- "secondary"
+    // reaproveita a MESMA Image que o "primary" do par acabou de criar,
+    // nunca cria a dele própria.
+    const pairings = pairFacadeGlassEdges(this.computeFacadeEdges());
+    const sharedByPrimaryKey = new Map<string, Phaser.GameObjects.Image>();
+    for (const p of pairings) {
+      const key = wallSegmentId(p.edge.col, p.edge.row, p.edge.side);
       const existing = this.draftWall.get(key);
-      if (existing?.styleId === FACADE_GLASS_STYLE_ID) continue; // já é fachada, nada a fazer
       if (existing) {
         console.warn(`[fachada] aresta ${key} já tem parede "${existing.styleId}" -- não troquei por vidro.`);
         continue;
       }
       if (this.draftDoor.has(key)) continue; // não pode parede E porta na mesma aresta
-      const def: WallSegmentDef = { col: edge.col, row: edge.row, side: edge.side, styleId: FACADE_GLASS_STYLE_ID };
-      const sprite = this.addWallSprite(def);
+
+      let sprite: Phaser.GameObjects.Image | null;
+      if (p.role === "secondary" && p.partner) {
+        const partnerKey = wallSegmentId(p.partner.col, p.partner.row, p.partner.side);
+        sprite = sharedByPrimaryKey.get(partnerKey) ?? null;
+      } else {
+        sprite = this.createFacadeGlassSprite(p);
+        if (sprite && p.role === "primary") sharedByPrimaryKey.set(key, sprite);
+      }
       if (!sprite) continue;
+
+      const def: WallSegmentDef = { col: p.edge.col, row: p.edge.row, side: p.edge.side, styleId: FACADE_GLASS_STYLE_ID };
       this.draftWall.set(key, def);
       this.draftWallSprites.set(key, sprite);
-      this.refreshWallNeighbors(edge.col, edge.row, edge.side);
-      changed = true;
+      this.refreshWallNeighbors(p.edge.col, p.edge.row, p.edge.side);
     }
 
-    if (changed) {
-      this.onDraftWallChange?.(this.getDraftWallList());
-      this.updateAreaDim(true);
-    }
+    this.onDraftWallChange?.(this.getDraftWallList());
+    this.updateAreaDim(true);
   }
 
   /** Pinta (adiciona) um tile novo na sala -- só aceita se ele AINDA
@@ -4674,15 +4734,18 @@ export default class MainScene extends Phaser.Scene {
     if (!entry) return null;
     if (entry.pattern) return this.createWallPatternGraphics(seg, entry.pattern);
     const isGlass = seg.styleId === FACADE_GLASS_STYLE_ID;
-    // fachada de vidro: escolhe entre a textura apagada (catálogo
-    // normal) e a acesa (FACADE_GLASS_LIT_TEXTURE_KEY) -- MESMO seed
-    // determinístico de sempre (glassPaneIsLit/createWallPatternGraphics
-    // antigo), então continua estável entre redesenhos, sem piscar.
-    const sideSeed = seg.side === "colPlus" || seg.side === "center" ? 1 : 0;
-    const key =
-      isGlass && this.glassPaneIsLit(seg.col * 928371 + seg.row * 17431 + sideSeed)
-        ? FACADE_GLASS_LIT_TEXTURE_KEY
-        : wallTextureKey(seg.styleId);
+    // fachada de vidro: a arte de verdade (facade-glass-tile.png) é
+    // LARGA (cobre 2 arestas, ver FACADE_GLASS_TILE_WIDTH_PX em
+    // game/wall.ts) e precisa de contexto de PAR pra se posicionar
+    // certo -- esse contexto só existe em createFacadeGlassSprite
+    // (chamada por syncFacadeGlassWalls, que conhece a fachada
+    // INTEIRA). Este caminho aqui é genérico (chamado por
+    // refreshWallNeighbors/refreshWallModel pra QUALQUER parede vizinha
+    // que mudou, sem saber quem é o par de ninguém), então sempre cai
+    // no fallback de 1 vidraça só (facade-glass-tile-single.png) --
+    // self-heals na próxima mudança de roomShape, que reconstrói a
+    // fachada inteira com o pareamento certo de novo.
+    const key = isGlass ? FACADE_GLASS_SINGLE_TEXTURE_KEY : wallTextureKey(seg.styleId);
     if (!this.textures.exists(key)) {
       console.warn(`[parede] textura "${key}" (estilo "${seg.styleId}") não estava carregada ainda -- segmento ${seg.col},${seg.row},${seg.side} não desenhado.`);
       return null;
@@ -4711,6 +4774,60 @@ export default class MainScene extends Phaser.Scene {
     // eles, todo frame, em toda a fachada -- caro à toa, já que não
     // existe ninguém "do lado de fora do prédio" pra precisar aparecer).
     if (!isGlass) this.applyWallAvatarCutoutMask(image); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
+    return image;
+  }
+
+  /** Cria o sprite de UMA aresta de fachada de vidro já considerando o
+   * PAREAMENTO (ver pairFacadeGlassEdges em game/wall.ts) -- SÓ usada
+   * por syncFacadeGlassWalls, que conhece a fachada inteira de uma vez
+   * (addWallSprite, o caminho genérico, não tem esse contexto e sempre
+   * cai no fallback de 1 vidraça só, ver comentário lá).
+   *
+   * "primary": planta a imagem LARGA (facade-glass-tile.png) ANCORADA
+   * no meio do PAR -- média dos 2 pontos médios de cada aresta
+   * (wallWorldAnchor), que já dá exatamente o meio de verdade do par
+   * (as 2 arestas são iguais/coladas em linha reta, então o ponto que
+   * elas compartilham é a média dos 2 extremos -- a média dos 2 meios
+   * cai matematicamente no mesmo lugar, sem precisar calcular o ponto
+   * de encontro à parte).
+   * "secondary" NÃO cria imagem nenhuma (devolve null) -- quem chama
+   * (syncFacadeGlassWalls) reaproveita a MESMA instância que o
+   * "primary" do par criou, a arte larga já cobre as 2 arestas.
+   * "single" (sobra ímpar de pareamento, ex.: fileira de tamanho ímpar
+   * ou quina) cai no fallback de 1 vidraça só, MESMA arte/textura que o
+   * caminho genérico de addWallSprite usa.
+   */
+  private createFacadeGlassSprite(p: FacadeGlassPairing): Phaser.GameObjects.Image | null {
+    const edge = p.edge;
+    const def: WallSegmentDef = { col: edge.col, row: edge.row, side: edge.side, styleId: FACADE_GLASS_STYLE_ID };
+    const wide = p.role === "primary" && !!p.partner;
+    const key = wide ? wallTextureKey(FACADE_GLASS_STYLE_ID) : FACADE_GLASS_SINGLE_TEXTURE_KEY;
+    // acesa: PAUSADA por pedido do Douglas (ver WALL_GLASS_LIT_RATIO
+    // acima -- 0 por enquanto, ele vai escolher/posicionar na mão),
+    // mas o código de seleção já fica pronto pro dia que voltar --
+    // MESMO seed determinístico de sempre.
+    const sideSeed = edge.side === "colPlus" || edge.side === "center" ? 1 : 0;
+    const lit = this.glassPaneIsLit(edge.col * 928371 + edge.row * 17431 + sideSeed);
+    const litKey = wide ? FACADE_GLASS_LIT_TEXTURE_KEY : FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY;
+    const finalKey = lit ? litKey : key;
+    if (!this.textures.exists(finalKey)) {
+      console.warn(`[fachada] textura "${finalKey}" não estava carregada ainda -- vidro ${edge.col},${edge.row},${edge.side} não desenhado.`);
+      return null;
+    }
+    const anchor = wallWorldAnchor(def);
+    if (wide && p.partner) {
+      const partnerDef: WallSegmentDef = { ...p.partner, styleId: FACADE_GLASS_STYLE_ID };
+      const partnerAnchor = wallWorldAnchor(partnerDef);
+      anchor.x = (anchor.x + partnerAnchor.x) / 2;
+      anchor.y = (anchor.y + partnerAnchor.y) / 2;
+    }
+    const image = this.add
+      .image(anchor.x, anchor.y, finalKey)
+      .setOrigin(0.5, 1)
+      .setFlipX(edge.side === "rowPlus" || edge.side === "centerRow")
+      .setDepth(wallDepthForSegment(def, furnitureDepthForTile));
+    // recorte de boneco atrás: pulado de propósito pra fachada de
+    // vidro, mesmo motivo de sempre (ver addWallSprite acima).
     return image;
   }
 
