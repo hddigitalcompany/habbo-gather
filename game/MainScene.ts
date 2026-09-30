@@ -648,7 +648,6 @@ const WALL_GLASS_LIT_RATIO = 0.34;
  * altura TODA do painel (laje + vidro), não só o vidro -- perfil de
  * fachada de verdade corre inteiriço, sem quebrar na viga. */
 const WALL_GLASS_MULLION_WIDTH_PX = 8;
-const WALL_GLASS_MULLION_COLOR = 0x9aa3ad;
 const WALL_GLASS_MULLION_LINE_COLOR = 0x6b727a;
 /** borda de FORA de cada perfil (o canto, mais exposto) pega brilho --
  * ver drawMullionBar dentro de drawFacadeGlassFrontFace. Pedido do
@@ -2133,29 +2132,26 @@ export default class MainScene extends Phaser.Scene {
       gfx.fillPoints([mapPoint(0, v0), mapPoint(edgeLengthExt, v0), mapPoint(edgeLengthExt, v1), mapPoint(0, v1)], true);
     }
     const mw = WALL_GLASS_MULLION_WIDTH_PX;
-    // volume do perfil: virou uma barra com 3 tons (brilho / base /
-    // sombra) em vez de só a linha escura de antes -- como um metal
-    // extrudado na frente do vidro: a borda de FORA de cada perfil (o
-    // canto, mais exposto à luz) pega brilho, a borda de DENTRO (colada
-    // no vidro) fica na sombra. Pedido do Douglas com print de
-    // referência: "replique a espessura dos perfis, o volume" (mesma
-    // técnica de sombra+brilho colados do rodapé, ver
-    // WALL_BASEBOARD_GROOVE_* acima, só que nas 2 bordas de uma barra
-    // em vez de um sulco só).
+    // volume do perfil: em vez de 1px de brilho + 1px de sombra nas
+    // bordas (some de tão fino no zoom isométrico do jogo -- por isso
+    // "não tava ficando o efeito"), agora é um DEGRADÊ de verdade
+    // cobrindo a barra inteira, brilho na borda de FORA (canto, mais
+    // exposto à luz) até sombra na borda de DENTRO (colada no vidro) --
+    // mesma técnica de lerpColor em faixas já usada nas listras do
+    // vidro acima, só que na horizontal. Largura proporcional (mw),
+    // então continua visível em qualquer zoom, não só em telas grandes.
+    // Pedido do Douglas com print de referência: "replique a espessura
+    // dos perfis, o volume".
+    const mullionBands = 6;
     const drawMullionBar = (uOuter: number, uInner: number) => {
-      const dir = uInner > uOuter ? 1 : -1; // sentido de "fora" pra "dentro"
-      gfx.fillStyle(WALL_GLASS_MULLION_COLOR, 1);
-      gfx.fillPoints([mapPoint(uOuter, 0), mapPoint(uInner, 0), mapPoint(uInner, heightPx), mapPoint(uOuter, heightPx)], true);
-      gfx.fillStyle(WALL_GLASS_MULLION_HIGHLIGHT_COLOR, 1);
-      gfx.fillPoints(
-        [mapPoint(uOuter, 0), mapPoint(uOuter + dir, 0), mapPoint(uOuter + dir, heightPx), mapPoint(uOuter, heightPx)],
-        true
-      );
-      gfx.fillStyle(WALL_GLASS_MULLION_LINE_COLOR, 1);
-      gfx.fillPoints(
-        [mapPoint(uInner - dir, 0), mapPoint(uInner, 0), mapPoint(uInner, heightPx), mapPoint(uInner - dir, heightPx)],
-        true
-      );
+      const bandW = (uInner - uOuter) / mullionBands;
+      for (let i = 0; i < mullionBands; i++) {
+        const u0 = uOuter + i * bandW;
+        const u1 = i === mullionBands - 1 ? uInner : u0 + bandW;
+        const t = (i + 0.5) / mullionBands; // 0 na borda de fora (brilho), 1 na borda de dentro (sombra/vidro)
+        gfx.fillStyle(this.lerpColor(WALL_GLASS_MULLION_HIGHLIGHT_COLOR, WALL_GLASS_MULLION_LINE_COLOR, t), 1);
+        gfx.fillPoints([mapPoint(u0, 0), mapPoint(u1, 0), mapPoint(u1, heightPx), mapPoint(u0, heightPx)], true);
+      }
     };
     drawMullionBar(0, mw);
     drawMullionBar(edgeLengthExt, edgeLengthExt - mw);
