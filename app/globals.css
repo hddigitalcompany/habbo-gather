@@ -480,15 +480,19 @@ body {
    o movimento; lá é um modal centralizado com backdrop, ver
    .lobby-panel-backdrop -- isso é comportamento, não "cor", então não
    mexi). */
-.chat-drawer {
-  position: absolute;
-  bottom: 82px;
-  left: 16px;
-  z-index: 7;
+/* card/vidro de VERDADE compartilhado entre o chat de dentro
+   (.chat-drawer) e o de fora da sala (.lobby-panel) -- fundo/borda/
+   raio/sombra/blur moram só AQUI agora, pra nunca mais um mudar sem
+   o outro (era esse o motivo do "nao e o mesmo do de fora?" do
+   Douglas: cada um tinha a PRÓPRIA cópia dos mesmos valores, e foram
+   desalinhando aos poucos). Cada um continua com seu próprio
+   posicionamento/tamanho (flutuante fixo aqui, modal centralizado lá)
+   -- isso é comportamento, não visual, então continua em cada
+   seletor específico. */
+.chat-drawer,
+.lobby-panel {
   width: 340px;
   max-width: calc(100vw - 32px);
-  height: 480px;
-  max-height: calc(100vh - 150px);
   display: flex;
   flex-direction: column;
   background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
@@ -498,6 +502,15 @@ body {
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   backdrop-filter: blur(22px) saturate(180%);
+}
+
+.chat-drawer {
+  position: absolute;
+  bottom: 82px;
+  left: 16px;
+  z-index: 7;
+  height: 480px;
+  max-height: calc(100vh - 150px);
 }
 
 /* "Fixar": em vez de flutuar por cima do jogo, a gaveta vira uma barra
@@ -599,7 +612,8 @@ body {
   padding: 6px 6px 0;
 }
 
-.chat-lane-tab {
+.chat-lane-tab,
+.lobby-lane-tab {
   flex: 1;
   border: none;
   background: rgba(255, 255, 255, 0.08);
@@ -608,10 +622,11 @@ body {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  color: #a99fc2;
+  color: #f5f0ff;
 }
 
-.chat-lane-tab-active {
+.chat-lane-tab-active,
+.lobby-lane-tab-active {
   background: #fff;
   color: #1c162a;
 }
@@ -676,7 +691,7 @@ body {
 
 .chat-conv-preview {
   font-size: 12px;
-  color: #a99fc2;
+  color: #f5f0ff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -686,7 +701,7 @@ body {
   padding: 24px 16px;
   text-align: center;
   font-size: 12px;
-  color: #a99fc2;
+  color: #f5f0ff;
 }
 
 .chat-new-conv-body {
@@ -943,13 +958,13 @@ body {
 .chat-message-sender {
   font-size: 11px;
   font-weight: 600;
-  color: #a68bff;
+  color: #f5f0ff;
   padding: 0 4px;
 }
 
 .chat-message-time {
   font-size: 10px;
-  color: #7c7290;
+  color: #f5f0ff;
   padding: 0 4px;
 }
 
@@ -5374,18 +5389,7 @@ body {
 }
 
 .lobby-panel {
-  width: 340px;
-  max-width: calc(100vw - 32px);
   max-height: min(520px, calc(100vh - 64px));
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 20px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  overflow: hidden;
 }
 
 .lobby-panel-header {
@@ -5412,7 +5416,7 @@ body {
 .lobby-panel-add {
   background: transparent;
   border: none;
-  color: #cfc4e6;
+  color: #f5f0ff;
   font-size: 15px;
   cursor: pointer;
   padding: 2px 4px;
@@ -5445,7 +5449,7 @@ body {
   padding: 24px 16px;
   text-align: center;
   font-size: 13px;
-  color: #a89cc4;
+  color: #f5f0ff;
 }
 
 /* abas "Empresa" / "Conversas privadas" no painel de Conversas do
@@ -5457,22 +5461,7 @@ body {
   padding: 10px 10px 0;
 }
 
-.lobby-lane-tab {
-  flex: 1;
-  border: none;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  padding: 7px 8px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  color: #a89cc4;
-}
 
-.lobby-lane-tab-active {
-  background: #fff;
-  color: #17111f;
-}
 
 .lobby-conv-list,
 .lobby-call-list {
@@ -5508,7 +5497,7 @@ body {
 
 .lobby-conv-preview {
   font-size: 12px;
-  color: #a89cc4;
+  color: #f5f0ff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5539,7 +5528,7 @@ body {
 
 .lobby-message-sender {
   font-size: 10.5px;
-  color: #a89cc4;
+  color: #f5f0ff;
 }
 
 .lobby-message-text {

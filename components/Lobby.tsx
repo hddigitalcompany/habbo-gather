@@ -1539,6 +1539,25 @@ export default function Lobby({
   useEffect(() => {
     saveStoredCompanyProfile(companyProfile);
   }, [companyProfile]);
+
+  // pergunta do Douglas 29/set (4): "no card da empresa no lobby
+  // certo?" -- confirmando se o nome da empresa que agora é
+  // obrigatório pra criar a sala (ver companyName em
+  // handleCreateRoomFromTemplate) também aparece no Card da Empresa
+  // (companyProfile acima). NÃO aparecia -- são dois sistemas
+  // diferentes até aqui (rooms.name é real, no banco; companyProfile
+  // continua só local, "sem backend de empresa ainda", ver comentário
+  // grande lá em cima). Isso aqui resolve só o NOME: assim que a sala
+  // de verdade existir (myRoom), se o card ainda tiver o nome-molde
+  // padrão (ninguém editou o card ainda), troca pro nome de verdade
+  // da empresa -- SEM sobrescrever se a pessoa já tiver customizado o
+  // card manualmente (ver DEFAULT_COMPANY_PROFILE.name mais acima).
+  // O resto do card (bio/categoria/banner/seguidores) continua local
+  // por enquanto, mesmo combinado de antes.
+  useEffect(() => {
+    if (!myRoom) return;
+    setCompanyProfile((prev) => (prev.name === DEFAULT_COMPANY_PROFILE.name ? { ...prev, name: myRoom.name } : prev));
+  }, [myRoom]);
   // dropdown de "Posicione a sua empresa:" -- Douglas pediu multi-seleção
   // ("deixei marcar varias opcoes"), então é um checklist dentro de um
   // dropdown, não um <select> nativo (que só permite uma opção por vez).
