@@ -11,6 +11,7 @@
 // vivo (remoteProfile). Sem editor de avatar/traje -- é só leitura +
 // Seguir/Conversar.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type ViewedProfile = {
@@ -615,8 +616,40 @@ export default function ProfileViewCard({
   // (modo `anchored`) ia espremer essa lista no mesmo cantinho pequeno
   // do card de perfil, em vez de abrir como modal centralizado de
   // verdade.
+  //
+  // 30/set (20): "cade aonde aparece o seguindo" -- bug: mesmo FORA de
+  // `card`, esse modal (.members-panel-backdrop, position:fixed)
+  // continuava nascendo espremido no topo da tela quando aberto pelo
+  // PRÓPRIO card da conta (AccountCard "Meu perfil público", que abre
+  // com anchored=true) -- porque o <AccountCard/> que monta esse
+  // <ProfileViewCard/> vive DENTRO de .lobby-topbar/.room-topbar (ver
+  // Lobby.tsx/GameRoom.tsx), que tem backdrop-filter: blur(); um
+  // ancestral com backdrop-filter vira o "containing block" de
+  // qualquer descendente `position:fixed` (regra de CSS, não bug do
+  // React) -- então o "viewport inteiro" desse fixed virava só a
+  // faixinha de 84px de altura da topbar, mesmo bug já documentado em
+  // .account-card-anchor-backdrop acima, só que esse aqui ninguém
+  // tinha consertado ainda. `position: fixed` sozinho (mesmo em
+  // .lobby-backdrop) NÃO causa isso -- só transform/filter/
+  // backdrop-filter/perspective/will-change num ancestral. Fix: portal
+  // pra fora da árvore inteira, direto pra <body> (ver render() do
+  // portal mais abaixo) -- garante viewport de verdade sempre, não
+  // importa de onde o ProfileViewCard foi aberto.
   const followListModal = followPanel && (
-    <div className="members-panel-backdrop" onClick={() => setFollowPanel(null)}>
+    <div
+      className="members-panel-backdrop"
+      // z-index inline (só aqui, não na classe .members-panel-backdrop
+      // compartilhada com FriendsPanel.tsx/RoomMembersPanel.tsx, pra
+      // não bagunçar a camada deles) -- agora que isso é um portal
+      // direto pro <body> (ver followListPortal mais abaixo), o
+      // z-index:400 da classe passa a competir com .lobby-backdrop/
+      // .auth-gate-backdrop/.room-loading-screen (que são 500) no
+      // MESMO nível (filhos diretos do body), em vez de já nascer por
+      // cima deles como descendente. 550 garante que fica acima de
+      // tudo isso, de qualquer tela (Lobby ou dentro da sala).
+      style={{ zIndex: 550 }}
+      onClick={() => setFollowPanel(null)}
+    >
       <div className="members-panel" onClick={(e) => e.stopPropagation()}>
         <div className="members-panel-header">
           <h2>{followPanel === "followers" ? "Seguidores" : "Seguindo"}</h2>
@@ -669,13 +702,21 @@ export default function ProfileViewCard({
     </div>
   );
 
+  // portal pro <body> -- ver comentário grande em followListModal
+  // acima (o "porquê" do bug). typeof document !== "undefined" só é
+  // guarda de SSR (esse componente é "use client", mas o Next ainda
+  // faz um primeiro render no servidor); followPanel só liga depois
+  // de um clique do usuário, ou seja, sempre em cima de um DOM real.
+  const followListPortal =
+    followListModal && typeof document !== "undefined" ? createPortal(followListModal, document.body) : null;
+
   if (anchored) {
     return (
       <>
         <div className="account-card-anchor-backdrop" onClick={onClose}>
           <div className="account-card-anchor">{card}</div>
         </div>
-        {followListModal}
+        {followListPortal}
       </>
     );
   }
@@ -684,7 +725,7 @@ export default function ProfileViewCard({
       <div className="profile-backdrop" onClick={onClose}>
         {card}
       </div>
-      {followListModal}
+      {followListPortal}
     </>
   );
 }
