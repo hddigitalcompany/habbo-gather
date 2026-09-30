@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await admin!
     .from("company_members")
-    .select("user_id, created_at, profiles(name, photo_url)")
+    .select("user_id, cargo, created_at, profiles(name, photo_url)")
     .eq("room_id", gate.roomId)
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -46,6 +46,10 @@ export async function GET(req: NextRequest) {
     userId: row.user_id as string,
     name: (row.profiles?.name as string) || "",
     photoUrl: (row.profiles?.photo_url as string) || "",
+    // "Cargo" (pedido do Douglas, 30/set (16), ver migration
+    // 0047_company_member_cargo.sql) -- "" quando o dono ainda não
+    // escolheu nenhum (ver CARGO_OPTIONS em components/Lobby.tsx).
+    cargo: (row.cargo as string) || "",
   }));
   return NextResponse.json({ members });
 }
@@ -69,9 +73,24 @@ export async function POST(req: NextRequest) {
   const targetProfile = await admin!.from("profiles").select("id").eq("id", targetUserId).maybeSingle();
   if (!targetProfile.data) return NextResponse.json({ error: "conta não encontrada" }, { status: 404 });
 
-  const { error } = await admin!
-    .from("company_members")
-    .upsert({ room_id: gate.roomId, user_id: targetUserId, added_by: userId }, { onConflict: "room_id,user_id" });
+  // "Cargo" (pedido do Douglas, 30/set (16)) -- MESMA rota serve pra
+  // "adicionar membro" (sem `cargo` no corpo -- upsert só grava
+  // room_id/user_id/added_by, o cargo nasce "" pelo default do banco
+  // numa linha nova, ou fica INTOCADO numa já existente, já que só as
+  // colunas presentes no payload entram no ON CONFLICT DO UPDATE) e
+  // "trocar o cargo de um membro já adicionado" (com `cargo` no
+  // corpo, ver updateMemberCargo em components/Lobby.tsx). Sem
+  // validação contra a lista fixa (mesmo padrão de company_category
+  // logo abaixo em company-profile/route.ts) -- só tipo/tamanho.
+  const cargo = typeof body?.cargo === "string" ? body.cargo.trim().slice(0, 60) : undefined;
+  const payload: { room_id: string; user_id: string; added_by: string; cargo?: string } = {
+    room_id: gate.roomId,
+    user_id: targetUserId,
+    added_by: userId,
+  };
+  if (cargo !== undefined) payload.cargo = cargo;
+
+  const { error } = await admin!.from("company_members").upsert(payload, { onConflict: "room_id,user_id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ ok: true });

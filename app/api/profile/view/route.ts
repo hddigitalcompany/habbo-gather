@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
   // desse espaço -- se deixou de ser (saiu, foi removida, a empresa foi
   // apagada), simplesmente não mostra mais, sem precisar de trigger
   // nenhum limpando o campo salvo.
-  let company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member" } | null = null;
+  let company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member"; cargo: string } | null = null;
   const featuredRoomId = profile.featured_company_room_id as string | null;
   if (featuredRoomId) {
     const relation = await getUserRelationToRoom(admin, targetUserId, featuredRoomId);
@@ -80,12 +80,29 @@ export async function GET(req: NextRequest) {
         .eq("id", featuredRoomId)
         .maybeSingle();
       if (room.data) {
+        // "Cargo" (pedido do Douglas, 30/set (16), ver migration
+        // 0047_company_member_cargo.sql) -- completa o pedido mais
+        // antigo ("a funcao dela na empresa", 30/set (8)) que até
+        // aqui só mostrava "Dona"/"Membro" fixo. Só existe pra
+        // MEMBRO (company_members.cargo) -- dona não tem cargo aqui,
+        // continua "Dona" (ver ProfileViewCard.tsx).
+        let cargo = "";
+        if (relation === "member") {
+          const memberRow = await admin
+            .from("company_members")
+            .select("cargo")
+            .eq("room_id", featuredRoomId)
+            .eq("user_id", targetUserId)
+            .maybeSingle();
+          cargo = (memberRow.data?.cargo as string) || "";
+        }
         company = {
           roomId: room.data.id as string,
           slug: (room.data.room_slug as string) || "",
           name: (room.data.name as string) || "",
           logoUrl: (room.data.company_logo_url as string) || "",
           relation,
+          cargo,
         };
       }
     }

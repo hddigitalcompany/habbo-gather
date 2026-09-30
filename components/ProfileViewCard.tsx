@@ -27,7 +27,7 @@ type ViewedProfile = {
   // empresa". null quando não escolheu nenhuma (ou deixou de ser
   // dona/membro da que tinha escolhido -- ver GET /api/profile/view,
   // que já confere de novo antes de mandar isso).
-  company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member" } | null;
+  company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member"; cargo: string } | null;
   // pedido do Douglas, 30/set (12): "perfil de usuario publico, quero
   // seguidores e seguindo" -- só a CONTAGEM vem junto do perfil; a
   // lista em si (pra abrir clicando) é buscada à parte (ver
@@ -267,7 +267,16 @@ export default function ProfileViewCard({
               instagram: editInstagram.trim(),
               bio: editBio.trim(),
               photoUrl: editPhotoUrl,
-              company: chosen ? { roomId: chosen.roomId, slug: chosen.slug, name: chosen.name, logoUrl: chosen.logoUrl, relation: chosen.relation } : null,
+              // cargo "" aqui de propósito (não vem de myCompanies,
+              // que não carrega isso) -- é só o patch OTIMISTA local
+              // logo depois de escolher a empresa destacada; o valor
+              // de verdade (definido pelo dono da empresa em
+              // Lobby.tsx) chega na próxima vez que esse perfil for
+              // buscado do zero (GET /api/profile/view, que já lê
+              // certo -- ver comentário grande lá).
+              company: chosen
+                ? { roomId: chosen.roomId, slug: chosen.slug, name: chosen.name, logoUrl: chosen.logoUrl, relation: chosen.relation, cargo: "" }
+                : null,
             }
           : prev
       );
@@ -503,7 +512,17 @@ export default function ProfileViewCard({
                           }}
                         >
                           <span className="company-card-position-name">
-                            {profile.company.relation === "owner" ? "Dona" : "Membro"}
+                            {/* "Cargo" (pedido do Douglas, 30/set (16)) --
+                                completa "a funcao dela na empresa" (30/set
+                                (8)), que até aqui só mostrava "Membro" fixo.
+                                Dona continua "Dona" (não tem cargo, ver
+                                comentário grande em GET /api/profile/view);
+                                Membro mostra o cargo escolhido pelo dono
+                                quando tiver um, senão cai no genérico
+                                "Membro" de sempre. */}
+                            {profile.company.relation === "owner"
+                              ? "Dona"
+                              : profile.company.cargo || "Membro"}
                           </span>
                         </div>
                       </div>

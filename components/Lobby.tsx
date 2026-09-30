@@ -614,6 +614,68 @@ const COMPANY_CATEGORIES = [
   "Outros",
 ];
 
+// "Cargo" de cada Membro -- pedido do Douglas, 30/set (16): "adicione
+// essas opcoes de cargos dentro da sala pro founder rotular", lista
+// exata que ele mandou. Sem validação contra essa lista no servidor
+// (mesmo padrão de COMPANY_CATEGORIES acima -- lista fixa só do lado
+// do cliente, ver comentário em app/api/room/company-members).
+const CARGO_OPTIONS = [
+  "Gestor de Tráfego Júnior",
+  "Gestor de Tráfego Pleno",
+  "Gestor de Tráfego Sênior",
+  "Media Buyer Júnior",
+  "Media Buyer Pleno",
+  "Media Buyer Sênior",
+  "Copywriter Júnior",
+  "Copywriter Pleno",
+  "Copywriter Sênior",
+  "Editor de Vídeo Júnior",
+  "Editor de Vídeo Pleno",
+  "Editor de Vídeo Sênior",
+  "Designer Júnior",
+  "Designer Pleno",
+  "Designer Sênior",
+  "Creative Strategist Júnior",
+  "Creative Strategist Pleno",
+  "Creative Strategist Sênior",
+  "Social Media Júnior",
+  "Social Media Pleno",
+  "Social Media Sênior",
+  "Web Designer Júnior",
+  "Web Designer Pleno",
+  "Web Designer Sênior",
+  "Desenvolvedor Front-end",
+  "Desenvolvedor Back-end",
+  "Desenvolvedor Full Stack",
+  "Especialista em CRO",
+  "Analista de CRO",
+  "Analista de Dados",
+  "Analista de Performance",
+  "Especialista em Tracking",
+  "Especialista em Automação",
+  "Especialista em CRM",
+  "E-mail Marketing Specialist",
+  "Funil Builder",
+  "Landing Page Builder",
+  "VSL Producer",
+  "Roteirista de VSL",
+  "Head de Copy",
+  "Head de Criação",
+  "Head de Performance",
+  "Head de Marketing",
+  "Diretor de Marketing / CMO",
+  "Diretor de Operações / COO",
+  "Project Manager",
+  "Product Manager",
+  "Account Manager",
+  "Customer Success",
+  "Assistente Administrativo",
+  "Financeiro",
+  "RH / People",
+  "Recrutador",
+  "Founder",
+];
+
 // pedido do Douglas: 4 artes (gradientes) que ele subiu pra por de
 // fundo dos "quadradinhos" de posicionamento -- e "faca sorteio
 // aleatório" pra decidir qual arte vai em cada quadradinho. Sorteio
@@ -2676,7 +2738,9 @@ export default function Lobby({
   // adiciona/remove (mesma trava de app/api/room/company-members, ver
   // rota). Lista carregada só quando o painel de edição abre (não em
   // toda visita à sala) -- ver useEffect logo abaixo.
-  const [companyMembers, setCompanyMembers] = useState<{ userId: string; name: string; photoUrl: string }[] | null>(null);
+  const [companyMembers, setCompanyMembers] = useState<
+    { userId: string; name: string; photoUrl: string; cargo: string }[] | null
+  >(null);
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
   const [memberBusyUserId, setMemberBusyUserId] = useState<string | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
@@ -2715,12 +2779,42 @@ export default function Lobby({
         return;
       }
       const added = directory?.find((u) => u.userId === targetUserId);
-      setCompanyMembers((prev) => [...(prev ?? []), { userId: targetUserId, name: added?.name || "", photoUrl: "" }]);
+      setCompanyMembers((prev) => [
+        ...(prev ?? []),
+        { userId: targetUserId, name: added?.name || "", photoUrl: "", cargo: "" },
+      ]);
       setMemberPickerOpen(false);
     } catch {
       setMemberError("rede caiu no meio, tenta de novo");
     } finally {
       setMemberBusyUserId(null);
+    }
+  }
+
+  // "Cargo" (pedido do Douglas, 30/set (16)) -- MESMA rota de
+  // adicionar/remover (POST /api/room/company-members), só que com
+  // `cargo` no corpo (ver comentário grande na rota sobre upsert só
+  // tocar as colunas presentes no payload). Atualiza local igual às
+  // outras funções aqui -- sem recarregar a lista inteira.
+  async function updateMemberCargo(targetUserId: string, cargo: string) {
+    if (!selectedRoomSlug || !accountAccessToken) return;
+    setMemberError(null);
+    // otimista: o <select> já reflete a escolha na hora, sem esperar
+    // o servidor confirmar (mesmo padrão de outros campos de
+    // formulário no app) -- só desfaz se a chamada falhar de verdade.
+    setCompanyMembers((prev) => (prev ?? []).map((m) => (m.userId === targetUserId ? { ...m, cargo } : m)));
+    try {
+      const res = await fetch("/api/room/company-members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: selectedRoomSlug, targetUserId, cargo }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setMemberError(data?.error || "não deu pra salvar o cargo, tenta de novo");
+      }
+    } catch {
+      setMemberError("rede caiu no meio, tenta de novo");
     }
   }
 
@@ -4284,22 +4378,41 @@ export default function Lobby({
               ) : (
                 <div className="company-edit-members-list">
                   {companyMembers.map((m) => (
-                    <div key={m.userId} className="company-edit-member-row">
-                      <span
-                        className="company-edit-member-avatar"
-                        style={{ backgroundImage: m.photoUrl ? `url(${m.photoUrl})` : undefined }}
+                    // "Cargo" (pedido do Douglas, 30/set (16)) -- wrapper
+                    // à parte SÓ aqui (Founders logo abaixo continua
+                    // usando .company-edit-member-row direto, sem esse
+                    // wrapper) pra não mexer no layout de quem não tem
+                    // cargo nenhum.
+                    <div key={m.userId} className="company-edit-member-item">
+                      <div className="company-edit-member-row">
+                        <span
+                          className="company-edit-member-avatar"
+                          style={{ backgroundImage: m.photoUrl ? `url(${m.photoUrl})` : undefined }}
+                        >
+                          {!m.photoUrl && (m.name || "?").trim().charAt(0).toUpperCase()}
+                        </span>
+                        <span className="company-edit-member-name">{m.name || "(sem nome)"}</span>
+                        <button
+                          type="button"
+                          className="company-edit-member-remove"
+                          disabled={memberBusyUserId === m.userId}
+                          onClick={() => removeCompanyMember(m.userId)}
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      <select
+                        className="company-edit-input company-edit-member-cargo"
+                        value={m.cargo}
+                        onChange={(e) => updateMemberCargo(m.userId, e.target.value)}
                       >
-                        {!m.photoUrl && (m.name || "?").trim().charAt(0).toUpperCase()}
-                      </span>
-                      <span className="company-edit-member-name">{m.name || "(sem nome)"}</span>
-                      <button
-                        type="button"
-                        className="company-edit-member-remove"
-                        disabled={memberBusyUserId === m.userId}
-                        onClick={() => removeCompanyMember(m.userId)}
-                      >
-                        Remover
-                      </button>
+                        <option value="">Sem cargo definido</option>
+                        {CARGO_OPTIONS.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   ))}
                 </div>

@@ -1,0 +1,20 @@
+-- "Cargo" (função/título) de cada Membro -- pedido do Douglas, 30/set
+-- (16): lista de ~54 cargos (Gestor de Tráfego Júnior/Pleno/Sênior,
+-- Media Buyer, Copywriter, Editor de Vídeo, Designer, etc.) "pro
+-- founder rotular" -- ou seja, o DONO do espaço escolhe o cargo de
+-- cada Membro (public.company_members, 0044_company_members_and_profile_card.sql).
+--
+-- Completa um pedido mais antigo que eu tinha simplificado demais: "as
+-- empresas que a pessoa é dona/membro vao aparecer no perfil dela [...]
+-- a funcao dela na empresa" (30/set (8)) -- até aqui só mostrava
+-- "Dona"/"Membro" fixo (ver profile.company.relation em
+-- app/api/profile/view/route.ts); com esse campo dá pra mostrar o
+-- cargo de verdade no lugar de "Membro" quando tiver um definido.
+--
+-- Texto livre (não enum/check no banco) -- mesmo padrão de
+-- rooms.company_category (lista fixa do lado do CLIENTE, ver
+-- CARGO_OPTIONS em components/Lobby.tsx), sem trava rígida no banco.
+--
+-- RODAR NO SQL EDITOR DO SUPABASE ANTES DO DEPLOY (mesmo aviso de
+-- sempre).
+alter table public.company_members add column if not exists cargo text not null default '';
