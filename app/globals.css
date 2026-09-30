@@ -615,10 +615,19 @@ body {
   padding: 14px 14px 14px 12px;
   background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
   border: 1px solid rgba(255, 255, 255, 0.2);
+  border-right: none;
+  /* 30/set, pedido do Douglas: "tire a borda arredondada da direita
+     nessa abinha de empresas, somente a da direita" + "encima e
+     embaixo" -- só os dois cantos da ESQUERDA (lado de fora) ficam
+     arredondados, os da DIREITA (lado colado no painel de chat) ficam
+     retos. Precisa ser raio por canto em vez do shorthand
+     `border-radius`, porque o shorthand sobrescrevia os
+     border-*-right-radius: 0 que vinham antes dele (bug -- cantos da
+     direita continuavam arredondados apesar do 0 em cima). */
+  border-top-left-radius: 20px;
+  border-bottom-left-radius: 20px;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
-  border-right: none;
-  border-radius: 20px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   backdrop-filter: blur(22px) saturate(180%);
