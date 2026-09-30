@@ -11,7 +11,12 @@
 //
 // Também devolve following/mutual (mesmo cálculo de /api/friends/*)
 // pra já desenhar os botões Seguir/Conversar sem precisar de uma
-// segunda chamada.
+// segunda chamada, e followerCount/followingCount (pedido do Douglas,
+// 30/set: "perfil de usuario publico, quero seguidores e seguindo") --
+// as LISTAS de quem segue/é seguido vêm de uma rota à parte (GET
+// /api/profile/followers), só quando a pessoa clica pra abrir (ver
+// components/ProfileViewCard.tsx), pra não puxar todo mundo numa
+// visita comum ao perfil.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getVerifiedUserId } from "@/lib/supabase/roomAuth";
@@ -39,6 +44,10 @@ export async function GET(req: NextRequest) {
 
   let following = false;
   let mutual = false;
+  const followCountsPromise = Promise.all([
+    admin.from("followers").select("follower_id", { count: "exact", head: true }).eq("followed_id", targetUserId),
+    admin.from("followers").select("followed_id", { count: "exact", head: true }).eq("follower_id", targetUserId),
+  ]);
   if (targetUserId !== userId) {
     const [a, b] = await Promise.all([
       admin.from("followers").select("follower_id").eq("follower_id", userId).eq("followed_id", targetUserId).maybeSingle(),
@@ -47,6 +56,9 @@ export async function GET(req: NextRequest) {
     following = !!a.data;
     mutual = !!a.data && !!b.data;
   }
+  const [followerCountRes, followingCountRes] = await followCountsPromise;
+  const followerCount = followerCountRes.count ?? 0;
+  const followingCount = followingCountRes.count ?? 0;
 
   // empresa destacada (ver profiles.featured_company_room_id, migration
   // 0044_company_members_and_profile_card.sql) -- pedido do Douglas,
@@ -88,6 +100,8 @@ export async function GET(req: NextRequest) {
       bio: (profile.bio as string) || "",
       photoUrl: (profile.photo_url as string) || "",
       company,
+      followerCount,
+      followingCount,
     },
     following,
     mutual,

@@ -28,7 +28,16 @@ type ViewedProfile = {
   // dona/membro da que tinha escolhido -- ver GET /api/profile/view,
   // que já confere de novo antes de mandar isso).
   company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member" } | null;
+  // pedido do Douglas, 30/set (12): "perfil de usuario publico, quero
+  // seguidores e seguindo" -- só a CONTAGEM vem junto do perfil; a
+  // lista em si (pra abrir clicando) é buscada à parte (ver
+  // followPanel/GET /api/profile/followers mais abaixo), só quando a
+  // pessoa realmente clica.
+  followerCount: number;
+  followingCount: number;
 };
+
+type FollowUser = { userId: string; name: string; photoUrl: string };
 
 // mesma empresa acima, mas na forma que o seletor de edição usa (ver
 // GET /api/account/companies) -- TODAS as que a pessoa é dona/membro,
@@ -142,6 +151,40 @@ export default function ProfileViewCard({
   // vazio ("") = "Nenhuma" no <select> (equivale a null ao salvar).
   const [myCompanies, setMyCompanies] = useState<MyCompany[] | null>(null);
   const [editFeaturedCompanyRoomId, setEditFeaturedCompanyRoomId] = useState("");
+
+  // "Seguidores"/"Seguindo" clicáveis (ver profile-follow-counts mais
+  // abaixo) -- followPanel controla qual lista tá aberta (ou nenhuma);
+  // followUsers só busca quando abre uma (GET /api/profile/followers),
+  // não em toda visita ao perfil. followPanelViewingUserId é o MESMO
+  // padrão de viewingUserId em FriendsPanel.tsx: clicar numa linha da
+  // lista abre outro <ProfileViewCard> por cima (empilhado), inclusive
+  // o do próprio ProfileViewCard de novo -- funciona liso porque é só
+  // um componente React se referenciando, sem import circular nenhum.
+  const [followPanel, setFollowPanel] = useState<"followers" | "following" | null>(null);
+  const [followUsers, setFollowUsers] = useState<FollowUser[] | null>(null);
+  const [followPanelViewingUserId, setFollowPanelViewingUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!followPanel) {
+      setFollowUsers(null);
+      return;
+    }
+    let cancelled = false;
+    setFollowUsers(null);
+    fetch(`/api/profile/followers?userId=${encodeURIComponent(userId)}&type=${followPanel}`, {
+      headers: { Authorization: `Bearer ${accountAccessToken}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setFollowUsers(Array.isArray(data?.users) ? data.users : []);
+      })
+      .catch(() => {
+        if (!cancelled) setFollowUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [followPanel, userId, accountAccessToken]);
 
   function startEditing(p: ViewedProfile) {
     setEditName(p.name);
@@ -410,6 +453,23 @@ export default function ProfileViewCard({
                         {status.label}
                       </span>
                     )}
+                    {/* pedido do Douglas, 30/set (12): "perfil de
+                        usuario publico, quero seguidores e seguindo" --
+                        contagem sempre visível, clica pra abrir a
+                        lista (ver followPanel acima). Sem "Seguindo"
+                        quando é o card da própria conta não muda nada
+                        aqui -- diferente do card de empresa (que só
+                        tem Seguidores porque não segue ninguém), CONTA
+                        de pessoa segue outras contas de verdade, os
+                        dois números sempre fazem sentido. */}
+                    <div className="profile-follow-counts">
+                      <button type="button" className="profile-follow-count-btn" onClick={() => setFollowPanel("followers")}>
+                        <strong>{profile.followerCount}</strong> Seguidores
+                      </button>
+                      <button type="button" className="profile-follow-count-btn" onClick={() => setFollowPanel("following")}>
+                        <strong>{profile.followingCount}</strong> Seguindo
+                      </button>
+                    </div>
                     {profile.instagram && (
                       <a
                         className="profile-instagram-link"
@@ -481,16 +541,83 @@ export default function ProfileViewCard({
       </div>
   );
 
+  // painel "Seguidores"/"Seguindo" (ver followPanel acima) -- mesmas
+  // classes .members-panel-*/.contacts-panel-* do painel de Amigos
+  // (components/FriendsPanel.tsx), pra ter a cara idêntica. Fica FORA
+  // de `card` de propósito -- se entrasse dentro, o .account-card-anchor
+  // (modo `anchored`) ia espremer essa lista no mesmo cantinho pequeno
+  // do card de perfil, em vez de abrir como modal centralizado de
+  // verdade.
+  const followListModal = followPanel && (
+    <div className="members-panel-backdrop" onClick={() => setFollowPanel(null)}>
+      <div className="members-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="members-panel-header">
+          <h2>{followPanel === "followers" ? "Seguidores" : "Seguindo"}</h2>
+          <button type="button" className="members-panel-close" onClick={() => setFollowPanel(null)} title="Fechar">
+            ✕
+          </button>
+        </div>
+        {followUsers === null ? (
+          <p className="members-panel-loading">Carregando...</p>
+        ) : followUsers.length === 0 ? (
+          <p className="members-panel-loading">
+            {followPanel === "followers" ? "Ninguém segue essa conta ainda." : "Não segue ninguém ainda."}
+          </p>
+        ) : (
+          <ul className="members-panel-list">
+            {followUsers.map((u) => (
+              <li
+                key={u.userId}
+                className="members-panel-row members-panel-row-clickable"
+                onClick={() => setFollowPanelViewingUserId(u.userId)}
+              >
+                <span className="contacts-panel-identity">
+                  <span className="contacts-panel-avatar" style={{ background: "#5a4b7c" }}>
+                    {u.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={u.photoUrl} alt="" />
+                    ) : (
+                      (u.name || "?").trim().charAt(0).toUpperCase() || "?"
+                    )}
+                  </span>
+                  <span className="members-panel-name">{u.name || "(sem nome)"}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {followPanelViewingUserId && (
+        <ProfileViewCard
+          userId={followPanelViewingUserId}
+          accountAccessToken={accountAccessToken}
+          onClose={() => setFollowPanelViewingUserId(null)}
+          onStartConversation={(targetUserId, targetName) => {
+            setFollowPanelViewingUserId(null);
+            setFollowPanel(null);
+            onStartConversation(targetUserId, targetName);
+          }}
+        />
+      )}
+    </div>
+  );
+
   if (anchored) {
     return (
-      <div className="account-card-anchor-backdrop" onClick={onClose}>
-        <div className="account-card-anchor">{card}</div>
-      </div>
+      <>
+        <div className="account-card-anchor-backdrop" onClick={onClose}>
+          <div className="account-card-anchor">{card}</div>
+        </div>
+        {followListModal}
+      </>
     );
   }
   return (
-    <div className="profile-backdrop" onClick={onClose}>
-      {card}
-    </div>
+    <>
+      <div className="profile-backdrop" onClick={onClose}>
+        {card}
+      </div>
+      {followListModal}
+    </>
   );
 }

@@ -3096,6 +3096,39 @@ button.chat-picker-item:disabled {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
 }
 
+/* "X Seguidores"/"Y Seguindo" clicáveis no perfil público -- pedido
+   do Douglas, 30/set (12): "perfil de usuario publico, quero
+   seguidores e seguindo" (ver profile-follow-counts em
+   ProfileViewCard.tsx, abre o painel de lista reaproveitando as
+   classes members-panel e contacts-panel de sempre). Texto simples,
+   sem fundo nem borda (diferente de .profile-action-btn) -- mais
+   perto do "número em negrito + palavra" do Instagram do que um
+   botão de verdade. */
+.profile-follow-counts {
+  display: flex;
+  gap: 14px;
+}
+
+.profile-follow-count-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: #d7d3e2;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.profile-follow-count-btn:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.profile-follow-count-btn strong {
+  color: #ffffff;
+  font-weight: 800;
+}
+
 .profile-instagram-link {
   color: #9fb4ff;
   font-size: 13px;
