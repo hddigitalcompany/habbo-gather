@@ -755,6 +755,12 @@ body {
   flex: 1;
 }
 
+/* 30/set, pedido do Douglas: "a seta pra convidar tem que ser um
+   bolaozinho mais marcado, mas branco" -- era um botão quase invisível
+   (fundo transparente, ícone claro), virou uma bolinha branca sólida
+   de verdade (mesmo tamanho/formato circular do .chat-icon-btn de
+   fechar, só que BRANCA em vez de translúcida) com a seta escura por
+   cima, pra ficar bem marcada no cabeçalho escuro do chat. */
 .chat-invite-toggle-btn {
   flex-shrink: 0;
   width: 24px;
@@ -762,19 +768,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: #fff;
   border: none;
-  border-radius: 6px;
-  color: #cfc7ea;
+  border-radius: 50%;
+  color: #241a3d;
   cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .chat-invite-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: #e9e4fb;
 }
 
 .chat-invite-toggle-btn.open {
-  color: #fff;
+  background: #fff;
   transform: rotate(180deg);
 }
 
