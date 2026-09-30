@@ -6226,15 +6226,16 @@ button.chat-picker-item:disabled {
    quadrado com bordas arredondadas?? nao ta nem na mesma posicao nem
    no mesmo tamanho" -- o círculo de vidro acima não era o balão que
    ele tinha em mente: ele queria o ÍCONE de verdade do app (mesmo
-   desenho de app/icon.png/public/logo-x-badge.png -- já É um
-   quadrado branco de cantos arredondados com o X escuro dentro,
-   cantos de fora transparentes), não uma bolha translúcida. Como a
-   imagem já é o selo inteiro (fundo+borda+X, ver JSX em
-   GameRoom.tsx), o botão vira só moldura de posição/interação --
-   sem fundo/borda/raio próprios (senão apareceria uma segunda forma
-   por trás da primeira). drop-shadow no lugar do glass de antes, pra
-   descolar do fundo escuro da sala do mesmo jeito que os outros
-   elementos flutuantes (.chat-drawer etc) fazem com blur+sombra. */
+   desenho de app/icon.png/public/logo-x-badge.png). ERRO meu aqui:
+   assumi que essa imagem já vinha com o quadrado branco desenhado
+   dentro dela (por isso tinha tirado fundo/borda do botão, achando
+   que ia duplicar a forma) -- conferido com PIL de verdade (29/set
+   (16), depois do Douglas mandar print mostrando só o X boiando sem
+   balão nenhum): a imagem é SÓ o X, 100% transparente em volta,
+   nenhum quadrado nela. O balão branco é o BOTÃO mesmo que tem que
+   desenhar -- fundo branco sólido, cantos arredondados, com um
+   respiro (padding) pro X não encostar na borda, exatamente como o
+   Douglas descreveu desde o início. */
 .room-logo-home-btn {
   position: fixed;
   top: 16px;
@@ -6243,13 +6244,14 @@ button.chat-picker-item:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
+  padding: 9px;
   border: none;
-  background: transparent;
+  border-radius: 14px;
+  background: #fff;
   cursor: pointer;
-  padding: 0;
-  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.45));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
   transition: transform 0.1s ease;
 }
 
