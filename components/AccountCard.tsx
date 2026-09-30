@@ -149,6 +149,7 @@ export default function AccountCard({
           accountAccessToken={accountAccessToken}
           onClose={() => setPanel(null)}
           onStartConversation={(targetUserId, targetName) => onStartConversation?.(targetUserId, targetName)}
+          anchored
         />
       )}
       {panel === "account" && accountAccessToken && (
@@ -279,7 +280,8 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
   }
 
   return (
-    <div className="profile-backdrop" onClick={onClose}>
+    <div className="account-card-anchor-backdrop" onClick={onClose}>
+      <div className="account-card-anchor">
       <div className="profile-card account-data-card" onClick={(e) => e.stopPropagation()}>
         <button className="profile-close" onClick={onClose} title="Fechar">
           ✕
@@ -369,6 +371,7 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
           )}
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -443,7 +446,8 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
   }
 
   return (
-    <div className="profile-backdrop" onClick={onClose}>
+    <div className="account-card-anchor-backdrop" onClick={onClose}>
+      <div className="account-card-anchor">
       <div className="profile-card account-data-card" onClick={(e) => e.stopPropagation()}>
         <button className="profile-close" onClick={onClose} title="Fechar">
           ✕
@@ -480,6 +484,7 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
             </>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

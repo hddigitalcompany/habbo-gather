@@ -43,12 +43,24 @@ export default function ProfileViewCard({
   onClose,
   onStartConversation,
   onFollowChanged,
+  anchored = false,
 }: {
   userId: string;
   accountAccessToken: string;
   onClose: () => void;
   onStartConversation: (targetUserId: string, targetName: string) => void;
   onFollowChanged?: () => void;
+  // Douglas 30/set (2): "quero essas opcoes abrindo ali naquele canto,
+  // prendidas pelo card com nome e foto ali" -- só o AccountCard.tsx
+  // ("Meu perfil público") passa true; FriendsPanel.tsx/Lobby.tsx (ver
+  // outros dois usos de <ProfileViewCard>) continuam com o modal
+  // centralizado de sempre (.profile-backdrop), que faz mais sentido
+  // lá -- podem abrir de QUALQUER lugar da tela (uma linha da lista de
+  // amigos, um avatar na sala), não tem "canto" fixo pra ancorar. Ver
+  // .account-card-anchor/-backdrop em globals.css pro porquê do bug
+  // (.profile-backdrop position:fixed preso pelo backdrop-filter da
+  // topbar) + a explicação de ancorar em vez de centralizar.
+  anchored?: boolean;
 }) {
   const [profile, setProfile] = useState<ViewedProfile | null>(null);
   const [following, setFollowing] = useState(false);
@@ -109,8 +121,7 @@ export default function ProfileViewCard({
   const status = profile ? STATUS_META[profile.status] : null;
   const displayName = profile?.name || "(sem nome)";
 
-  return (
-    <div className="profile-backdrop" onClick={onClose}>
+  const card = (
       <div className="profile-card" onClick={(e) => e.stopPropagation()}>
         <button className="profile-close" onClick={onClose} title="Fechar">
           ✕
@@ -184,6 +195,18 @@ export default function ProfileViewCard({
           </>
         )}
       </div>
+  );
+
+  if (anchored) {
+    return (
+      <div className="account-card-anchor-backdrop" onClick={onClose}>
+        <div className="account-card-anchor">{card}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="profile-backdrop" onClick={onClose}>
+      {card}
     </div>
   );
 }
