@@ -184,6 +184,15 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
 
   const [changingPassword, setChangingPassword] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  // pedido do Douglas, 30/set (3): "ativa a confirmacao do email pra
+  // alteracao de senha tb" -- antes trocava a senha direto
+  // (updateUser({password})). Supabase tem esse fluxo pronto
+  // (reauthenticate() manda um código de 6 dígitos pro email da
+  // conta; updateUser({password, nonce}) só aceita a troca com esse
+  // código) -- "awaiting-code" é o segundo passo, depois que o código
+  // já foi mandado.
+  const [passwordStep, setPasswordStep] = useState<"enter-password" | "awaiting-code">("enter-password");
+  const [reauthCode, setReauthCode] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
   const [passwordErr, setPasswordErr] = useState<string | null>(null);
@@ -250,7 +259,21 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
     }
   }
 
-  async function submitNewPassword() {
+  function resetPasswordFlow() {
+    setChangingPassword(false);
+    setPasswordStep("enter-password");
+    setNewPassword("");
+    setReauthCode("");
+    setPasswordErr(null);
+  }
+
+  // passo 1: valida a senha nova e pede o código de confirmação por
+  // email (supabase.auth.reauthenticate() -- manda um código de 6
+  // dígitos pro email da própria conta). Precisa da opção "Secure
+  // password change" ligada em Authentication > Settings do Supabase
+  // pra essa troca EXIGIR o código (sem isso, o Supabase aceita o
+  // updateUser mesmo sem nonce se a sessão for recente) -- confere lá.
+  async function requestPasswordChangeCode() {
     if (newPassword.trim().length < 6) {
       setPasswordErr("A senha precisa ter pelo menos 6 caracteres.");
       return;
@@ -262,16 +285,43 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
     }
     setPasswordBusy(true);
     setPasswordErr(null);
+    try {
+      const { error } = await supabase.auth.reauthenticate();
+      if (error) {
+        setPasswordErr(error.message);
+        return;
+      }
+      setPasswordStep("awaiting-code");
+    } catch {
+      setPasswordErr("Não deu pra mandar o código agora.");
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
+  // passo 2: código digitado + senha nova (guardada no passo 1) juntos
+  // na troca de verdade.
+  async function submitNewPassword() {
+    if (reauthCode.trim().length < 4) {
+      setPasswordErr("Digite o código que mandamos pro seu email.");
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setPasswordErr("Login não configurado.");
+      return;
+    }
+    setPasswordBusy(true);
+    setPasswordErr(null);
     setPasswordMsg(null);
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword.trim() });
+      const { error } = await supabase.auth.updateUser({ password: newPassword.trim(), nonce: reauthCode.trim() });
       if (error) {
         setPasswordErr(error.message);
         return;
       }
       setPasswordMsg("Senha alterada.");
-      setNewPassword("");
-      setChangingPassword(false);
+      resetPasswordFlow();
     } catch {
       setPasswordErr("Não deu pra trocar a senha agora.");
     } finally {
@@ -330,7 +380,7 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
 
               <div className="account-panel-divider" />
 
-              {changingPassword ? (
+              {changingPassword && passwordStep === "enter-password" ? (
                 <div className="profile-fields">
                   <label className="profile-field">
                     Nova senha
@@ -344,14 +394,40 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
                   </label>
                   {passwordErr && <p className="account-panel-error">{passwordErr}</p>}
                   <div className="profile-actions-row">
+                    <button className="profile-action-btn" onClick={resetPasswordFlow}>
+                      Cancelar
+                    </button>
                     <button
-                      className="profile-action-btn"
-                      onClick={() => {
-                        setChangingPassword(false);
-                        setNewPassword("");
-                        setPasswordErr(null);
-                      }}
+                      className="profile-action-btn primary"
+                      disabled={passwordBusy}
+                      onClick={requestPasswordChangeCode}
                     >
+                      {passwordBusy ? "Enviando..." : "Continuar"}
+                    </button>
+                  </div>
+                </div>
+              ) : changingPassword && passwordStep === "awaiting-code" ? (
+                // pedido do Douglas, 30/set (3): "ativa a confirmacao do
+                // email pra alteracao de senha tb" -- mesmo código de 6
+                // dígitos que o Supabase já manda pro fluxo de
+                // reauthenticate(), confirmando que é o dono da conta
+                // antes da troca valer.
+                <div className="profile-fields">
+                  <p className="account-panel-hint">Mandamos um código pro seu email. Digite ele abaixo pra confirmar a troca de senha.</p>
+                  <label className="profile-field">
+                    Código
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={reauthCode}
+                      onChange={(e) => setReauthCode(e.target.value)}
+                      placeholder="000000"
+                      autoFocus
+                    />
+                  </label>
+                  {passwordErr && <p className="account-panel-error">{passwordErr}</p>}
+                  <div className="profile-actions-row">
+                    <button className="profile-action-btn" onClick={resetPasswordFlow}>
                       Cancelar
                     </button>
                     <button className="profile-action-btn primary" disabled={passwordBusy} onClick={submitNewPassword}>
