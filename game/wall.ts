@@ -625,14 +625,39 @@ export function pairFacadeGlassEdges(
     else byRun.set(runKey, [e]);
   }
 
+  // ACHADO (Douglas testou ao vivo a quina de verdade do prédio: "voce
+  // precisa alinhar eles" -- a imagem larga de um PAR que termina bem
+  // NUMA quina de 90° não bate com a aresta perpendicular do outro lado
+  // -- o ponto médio do par fica ANTES da quina de verdade, então a
+  // imagem sobra/falta uns pixels exatamente ali). Em vez de confiar no
+  // pareamento (que assume uma fileira reta "infinita") numa aresta que
+  // TOCA uma quina de verdade, essas arestas de ponta sempre viram
+  // "single" -- mesma largura/posição exata que o sistema de 1 vidraça
+  // por aresta já usava antes (nunca teve esse problema), preservando o
+  // pareamento largo só no MEIO das fileiras, longe de qualquer quina.
+  const closeEnough = (p1: Point, p2: Point) => Math.abs(p1.x - p2.x) < 0.5 && Math.abs(p1.y - p2.y) < 0.5;
+  const touchesCorner = (e: { col: number; row: number; side: WallSide }): boolean => {
+    const { a, b } = wallEdgeFloorPoints(e.col, e.row, e.side);
+    return edges.some((other) => {
+      if (other.side === e.side) return false;
+      const { a: oa, b: ob } = wallEdgeFloorPoints(other.col, other.row, other.side);
+      return closeEnough(a, oa) || closeEnough(a, ob) || closeEnough(b, oa) || closeEnough(b, ob);
+    });
+  };
+
   const result: FacadeGlassPairing[] = [];
   for (const run of byRun.values()) {
     const sorted = [...run].sort((a, b) => (a.side === "colPlus" ? a.row - b.row : a.col - b.col));
     let i = 0;
     while (i < sorted.length) {
       const a = sorted[i];
+      if (touchesCorner(a)) {
+        result.push({ edge: a, role: "single" });
+        i += 1;
+        continue;
+      }
       const b = sorted[i + 1];
-      const adjacent = !!b && (a.side === "colPlus" ? b.row === a.row + 1 : b.col === a.col + 1);
+      const adjacent = !!b && !touchesCorner(b) && (a.side === "colPlus" ? b.row === a.row + 1 : b.col === a.col + 1);
       if (b && adjacent) {
         result.push({ edge: a, role: "primary", partner: b });
         result.push({ edge: b, role: "secondary", partner: a });
