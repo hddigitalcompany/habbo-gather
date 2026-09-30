@@ -60,7 +60,17 @@ export async function POST(req: NextRequest) {
     birthdate,
     updated_at: new Date().toISOString(),
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // "só pode haver uma conta por cpf" (pedido do Douglas, 30/set) --
+    // barrado no banco por um índice único parcial (ver migration
+    // 0042_account_cpf_unique.sql). Código 23505 = unique_violation
+    // (padrão do Postgres) -- mensagem amigável em vez do erro cru do
+    // banco ("duplicate key value violates unique constraint...").
+    if (error.code === "23505") {
+      return NextResponse.json({ error: "Esse CPF já está cadastrado em outra conta." }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true });
 }
