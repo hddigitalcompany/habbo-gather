@@ -505,11 +505,14 @@ type CompanyProfile = {
   showNameOnEmployeeProfiles: boolean;
   // "Tornar os founders visíveis no perfil da empresa?" -- pedido do
   // Douglas, 30/set (13): "vai aparecer no card da empresa a foto de
-  // perfil dos founders com link clicavel pro perfil pessoal". Sem
-  // lista/tabela nova pra "founder" -- é dona + Membros
-  // (company_members, ver comentário grande na migration 0045), o
-  // GET/POST de app/api/room/company-profile já manda pronta em
-  // `founders`, só quando esse toggle tá ligado (senão vem []).
+  // perfil dos founders com link clicavel pro perfil pessoal". Roster
+  // À PARTE de Membros/colaboradores (companyMembers/company_members
+  // mais abaixo) -- pedido do Douglas, 30/set (14), corrigindo a
+  // primeira versão disso: "somente founders ninguem aqui falou
+  // membros [...] a empresa nao divulga eles apenas os founders". É
+  // dona + public.company_founders (ver migration 0046), o GET/POST
+  // de app/api/room/company-profile já manda pronta em `founders`, só
+  // quando esse toggle tá ligado (senão vem []).
   showFoundersOnCard: boolean;
   founders: { userId: string; name: string; photoUrl: string }[];
   // selo de verdade (pedido do Douglas, 30/set (2)) -- antes o ícone
@@ -2744,6 +2747,86 @@ export default function Lobby({
     }
   }
 
+  // Founders -- pedido do Douglas, 30/set (14), corrigindo o que eu
+  // tinha feito antes (mostrar os Membros/colaboradores no card
+  // público): "somente founders ninguem aqui falou membros / os
+  // membros podem adicionar o card da empresa no perfil deles se
+  // quiserem, mas a empresa nao divulga eles apenas os founders".
+  // Roster À PARTE de companyMembers acima -- mesmo padrão (só o dono
+  // adiciona/remove, direto, sem convite), tabela e rota diferentes
+  // (public.company_founders, ver migration 0046 e
+  // app/api/room/company-founders/route.ts).
+  const [companyFounders, setCompanyFounders] = useState<{ userId: string; name: string; photoUrl: string }[] | null>(null);
+  const [founderPickerOpen, setFounderPickerOpen] = useState(false);
+  const [founderBusyUserId, setFounderBusyUserId] = useState<string | null>(null);
+  const [founderError, setFounderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!companyEditOpen || !selectedRoomSlug || !accountAccessToken) return;
+    let cancelled = false;
+    fetch(`/api/room/company-founders?slug=${encodeURIComponent(selectedRoomSlug)}`, {
+      headers: { Authorization: `Bearer ${accountAccessToken}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setCompanyFounders(Array.isArray(data?.founders) ? data.founders : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyFounders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyEditOpen, selectedRoomSlug, accountAccessToken]);
+
+  async function addCompanyFounder(targetUserId: string) {
+    if (!selectedRoomSlug || !accountAccessToken || founderBusyUserId) return;
+    setFounderBusyUserId(targetUserId);
+    setFounderError(null);
+    try {
+      const res = await fetch("/api/room/company-founders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: selectedRoomSlug, targetUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setFounderError(data?.error || "não deu pra adicionar, tenta de novo");
+        return;
+      }
+      const added = directory?.find((u) => u.userId === targetUserId);
+      setCompanyFounders((prev) => [...(prev ?? []), { userId: targetUserId, name: added?.name || "", photoUrl: "" }]);
+      setFounderPickerOpen(false);
+    } catch {
+      setFounderError("rede caiu no meio, tenta de novo");
+    } finally {
+      setFounderBusyUserId(null);
+    }
+  }
+
+  async function removeCompanyFounder(targetUserId: string) {
+    if (!selectedRoomSlug || !accountAccessToken || founderBusyUserId) return;
+    setFounderBusyUserId(targetUserId);
+    setFounderError(null);
+    try {
+      const res = await fetch("/api/room/company-founders", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: selectedRoomSlug, targetUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setFounderError(data?.error || "não deu pra remover, tenta de novo");
+        return;
+      }
+      setCompanyFounders((prev) => (prev ?? []).filter((m) => m.userId !== targetUserId));
+    } catch {
+      setFounderError("rede caiu no meio, tenta de novo");
+    } finally {
+      setFounderBusyUserId(null);
+    }
+  }
+
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -4225,14 +4308,93 @@ export default function Lobby({
 
             <div className="company-edit-divider" />
 
+            {/* Founders -- pedido do Douglas, 30/set (14): roster À
+                PARTE de "Membros (colaboradores)" acima (ver
+                comentário grande em companyFounders/public.company_founders).
+                Mesmo componente visual (reaproveita as mesmas classes
+                company-edit-members e company-edit-category de
+                Membros, só trocando a fonte de dados/funções pra
+                founder), pra não inventar CSS novo pra algo que já
+                tem a cara idêntica. */}
+            <div className="company-edit-field">
+              <span>Founders</span>
+              <div className="company-edit-category-select">
+                <button
+                  type="button"
+                  className="company-edit-input company-edit-category-trigger"
+                  onClick={() => setFounderPickerOpen((v) => !v)}
+                  aria-expanded={founderPickerOpen}
+                  disabled={!directory}
+                >
+                  <span className="company-edit-category-trigger-text">
+                    {!directory ? "Carregando pessoas…" : "Adicionar founder"}
+                  </span>
+                  <ChevronIcon />
+                </button>
+                {founderPickerOpen && directory && (
+                  <>
+                    <div className="company-edit-category-catcher" onClick={() => setFounderPickerOpen(false)} />
+                    <div className="company-edit-category-list" onClick={(e) => e.stopPropagation()}>
+                      {directory.filter((u) => u.userId !== myUserId && !companyFounders?.some((f) => f.userId === u.userId))
+                        .length === 0 ? (
+                        <p className="lobby-agenda-invited-readonly">Ninguém mais pra adicionar.</p>
+                      ) : (
+                        directory
+                          .filter((u) => u.userId !== myUserId && !companyFounders?.some((f) => f.userId === u.userId))
+                          .map((u) => (
+                            <label
+                              key={u.userId}
+                              className="company-edit-category-option"
+                              onClick={() => addCompanyFounder(u.userId)}
+                            >
+                              <span>{u.name}</span>
+                            </label>
+                          ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              {founderError && <p className="company-edit-save-error">{founderError}</p>}
+              {companyFounders === null ? (
+                <p className="company-edit-members-empty">Carregando founders...</p>
+              ) : companyFounders.length === 0 ? (
+                <p className="company-edit-members-empty">Nenhum founder ainda -- só você (dona).</p>
+              ) : (
+                <div className="company-edit-members-list">
+                  {companyFounders.map((f) => (
+                    <div key={f.userId} className="company-edit-member-row">
+                      <span
+                        className="company-edit-member-avatar"
+                        style={{ backgroundImage: f.photoUrl ? `url(${f.photoUrl})` : undefined }}
+                      >
+                        {!f.photoUrl && (f.name || "?").trim().charAt(0).toUpperCase()}
+                      </span>
+                      <span className="company-edit-member-name">{f.name || "(sem nome)"}</span>
+                      <button
+                        type="button"
+                        className="company-edit-member-remove"
+                        disabled={founderBusyUserId === f.userId}
+                        onClick={() => removeCompanyFounder(f.userId)}
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="company-edit-divider" />
+
             {/* pedido do Douglas, 30/set (13): "no editor do card da
                 empresa coloque Tornar os founders visiveis no perfil
                 da empresa? vai aparecer no card da empresa a foto de
                 perfil dos founders com link clicavel pro perfil
                 pessoal" -- mesmo padrão do toggle de nome logo acima,
-                só que "founders" aqui é a mesma lista de Membros +
-                dona de cima (companyProfile.founders, montada pelo
-                servidor só quando esse toggle tá ligado, ver
+                só que "founders" aqui é a lista de cima (dona +
+                company_founders, ver companyProfile.founders, montada
+                pelo servidor só quando esse toggle tá ligado, ver
                 comentário grande em app/api/room/company-profile). */}
             <label className="company-edit-permission-row">
               <div className="company-edit-permission-text">

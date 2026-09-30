@@ -72,16 +72,20 @@ function toProfile(row: CompanyProfileRow) {
 }
 
 // "founders" pro card público (ver comentário grande na migration
-// 0045_company_founders_visibility.sql) -- dona primeiro, depois os
-// membros (public.company_members, 0044_company_members_and_profile_card.sql),
-// nome/foto de public.profiles. Só chamada quando
+// 0046_company_founders.sql) -- dona primeiro, depois os founders
+// cadastrados (public.company_founders), nome/foto de public.profiles.
+// DIFERENTE de company_members (Membros/colaboradores) -- pedido do
+// Douglas, 30/set (14), corrigindo a versão anterior daqui que lia de
+// lá: "somente founders ninguem aqui falou membros / os membros podem
+// adicionar o card da empresa no perfil deles se quiserem, mas a
+// empresa nao divulga eles apenas os founders". Só chamada quando
 // company_show_founders_on_card tá ligado (ver GET abaixo) -- sem
 // motivo pra montar essa lista (e expor foto+conta de gente) toda
 // visita a um espaço que nem ligou o toggle.
 async function getFounders(admin: NonNullable<ReturnType<typeof getSupabaseAdminClient>>, roomId: string, ownerUserId: string | null) {
-  const { data: memberRows } = await admin.from("company_members").select("user_id").eq("room_id", roomId);
-  const memberIds = (memberRows ?? []).map((r) => r.user_id as string);
-  const orderedIds = [...(ownerUserId ? [ownerUserId] : []), ...memberIds.filter((id) => id !== ownerUserId)];
+  const { data: founderRows } = await admin.from("company_founders").select("user_id").eq("room_id", roomId);
+  const founderIds = (founderRows ?? []).map((r) => r.user_id as string);
+  const orderedIds = [...(ownerUserId ? [ownerUserId] : []), ...founderIds.filter((id) => id !== ownerUserId)];
   if (orderedIds.length === 0) return [];
 
   const { data: profiles } = await admin.from("profiles").select("id, name, photo_url").in("id", orderedIds);
