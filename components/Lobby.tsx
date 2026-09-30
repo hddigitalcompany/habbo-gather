@@ -489,6 +489,12 @@ function FileIcon() {
 type CompanyProfile = {
   name: string;
   handle: string;
+  // "Tagline" (frase de impacto) -- pedido do Douglas, 30/set (17):
+  // "e a frase de impacto da empresa, ela aparecera assim no card,
+  // logo acima do quem somos" + "essa frase, aparecera no perfil do
+  // membro ao lado do icone da empresa" (ver company-card-tagline em
+  // app/globals.css e ProfileViewCard.tsx).
+  tagline: string;
   bio: string;
   followers: number;
   link: string;
@@ -534,6 +540,7 @@ type CompanyProfile = {
 const BLANK_COMPANY_PROFILE: CompanyProfile = {
   name: "",
   handle: "",
+  tagline: "",
   bio: "",
   followers: 0,
   link: "",
@@ -3954,6 +3961,12 @@ export default function Lobby({
               {companyProfile.verified && <VerifiedBadge />}
             </p>
             <p className="company-card-handle">@{companyProfile.handle.replace(/^@/, "")}</p>
+            {/* "Tagline" -- pedido do Douglas, 30/set (17): "logo
+                acima do quem somos, com essa mesma caixa de
+                texto/fonte" (print de referência: texto grande, caixa
+                alta, negrito, branco). Só mostra quando tiver uma
+                definida. */}
+            {companyProfile.tagline && <p className="company-card-tagline">{companyProfile.tagline}</p>}
             {/* pedido do Douglas, 30/set (11): "No card da empresa,
                 bio vira Quem somos / E a frse quem somos fica no card
                 tambem titulando a bio" -- rótulo fixo em cima do texto
@@ -4204,6 +4217,23 @@ export default function Lobby({
                       placeholder="empresaexemplo"
                       maxLength={30}
                       onChange={(e) => setCompanyProfile((prev) => ({ ...prev, handle: e.target.value }))}
+                    />
+                  </label>
+
+                  {/* "Tagline" -- pedido do Douglas, 30/set (17): "a
+                      frase de impacto da empresa, ela aparecera assim
+                      no card, logo acima do quem somos, com essa
+                      mesma caixa de texto/fonte" (print de referência:
+                      texto grande, caixa alta, negrito, branco -- ver
+                      company-card-tagline no card abaixo). */}
+                  <label className="company-edit-field">
+                    <span>Tagline</span>
+                    <input
+                      className="company-edit-input"
+                      value={companyProfile.tagline}
+                      placeholder="A frase de impacto da sua empresa"
+                      maxLength={120}
+                      onChange={(e) => setCompanyProfile((prev) => ({ ...prev, tagline: e.target.value }))}
                     />
                   </label>
 

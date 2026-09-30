@@ -69,14 +69,25 @@ export async function GET(req: NextRequest) {
   // desse espaço -- se deixou de ser (saiu, foi removida, a empresa foi
   // apagada), simplesmente não mostra mais, sem precisar de trigger
   // nenhum limpando o campo salvo.
-  let company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member"; cargo: string } | null = null;
+  let company: {
+    roomId: string;
+    slug: string;
+    name: string;
+    logoUrl: string;
+    relation: "owner" | "member";
+    cargo: string;
+    tagline: string;
+  } | null = null;
   const featuredRoomId = profile.featured_company_room_id as string | null;
   if (featuredRoomId) {
     const relation = await getUserRelationToRoom(admin, targetUserId, featuredRoomId);
     if (relation) {
+      // company_tagline aqui também -- pedido do Douglas, 30/set (17):
+      // "essa frase, aparecera no perfil do membro ao lado do icone
+      // da empresa" (ver ProfileViewCard.tsx).
       const room = await admin
         .from("rooms")
-        .select("id, room_slug, name, company_logo_url")
+        .select("id, room_slug, name, company_logo_url, company_tagline")
         .eq("id", featuredRoomId)
         .maybeSingle();
       if (room.data) {
@@ -103,6 +114,7 @@ export async function GET(req: NextRequest) {
           logoUrl: (room.data.company_logo_url as string) || "",
           relation,
           cargo,
+          tagline: (room.data.company_tagline as string) || "",
         };
       }
     }

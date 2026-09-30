@@ -5568,6 +5568,20 @@ button.chat-picker-item:disabled {
   color: #8b8798;
 }
 
+/* "Tagline" -- pedido do Douglas, 30/set (17): "a frase de impacto da
+   empresa [...] com essa mesma caixa de texto/fonte" (print de
+   referência: texto grande, caixa alta, negrito, branco, ocupando
+   bem a largura do card). Texto simples (sem foto de fundo nenhuma --
+   o print era só a inspiração da FONTE/peso, não um banner novo). */
+.company-card-tagline {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: #ffffff;
+}
+
 /* pedido do Douglas, 30/set (11): "No card da empresa, bio vira Quem
    somos" -- rótulo fixo (não vem de campo nenhum, é só título) em
    cima do texto de sempre (.company-card-bio, sem mudar nada nela). */
@@ -5629,6 +5643,32 @@ button.chat-picker-item:disabled {
 
 .company-card-positions::-webkit-scrollbar {
   display: none;
+}
+
+/* "empresa em destaque" + Tagline lado a lado no perfil pessoal --
+   pedido do Douglas, 30/set (17): "essa frase, aparecera no perfil do
+   membro ao lado do icone da empresa" (ver ProfileViewCard.tsx). O
+   .company-card-positions aqui dentro perde o margin-top próprio (o
+   wrapper que o cerca já cuida disso) -- só nesse contexto, a versão
+   usada em Lobby.tsx pras categorias continua com o margin-top de
+   sempre. */
+.profile-company-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.profile-company-badge .company-card-positions {
+  margin-top: 0;
+}
+
+.profile-company-tagline {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #f5f0ff;
 }
 
 /* fundo placeholder (gradiente) até o Douglas subir as artes de

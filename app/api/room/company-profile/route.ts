@@ -36,6 +36,7 @@ type CompanyProfileRow = {
   name: string;
   owner_user_id: string | null;
   company_handle: string | null;
+  company_tagline: string | null;
   company_bio: string | null;
   company_link: string | null;
   company_logo_url: string | null;
@@ -51,6 +52,9 @@ function toProfile(row: CompanyProfileRow) {
   return {
     name: row.name,
     handle: row.company_handle ?? "",
+    // "Tagline" (frase de impacto) -- pedido do Douglas, 30/set (17),
+    // ver migration 0048_company_tagline.sql.
+    tagline: row.company_tagline ?? "",
     bio: row.company_bio ?? "",
     link: row.company_link ?? "",
     logoUrl: row.company_logo_url ?? "",
@@ -106,7 +110,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await admin
     .from("rooms")
     .select(
-      "id, name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_show_founders_on_card, company_followers, company_verified"
+      "id, name, owner_user_id, company_handle, company_tagline, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_show_founders_on_card, company_followers, company_verified"
     )
     .eq("room_slug", slug)
     .maybeSingle();
@@ -150,6 +154,7 @@ export async function POST(req: NextRequest) {
   const update = {
     name,
     company_handle: typeof body?.handle === "string" ? body.handle.trim().slice(0, 30) : "",
+    company_tagline: typeof body?.tagline === "string" ? body.tagline.trim().slice(0, 120) : "",
     company_bio: typeof body?.bio === "string" ? body.bio.trim().slice(0, 200) : "",
     company_link: typeof body?.link === "string" ? body.link.trim().slice(0, 80) : "",
     company_logo_url: typeof body?.logoUrl === "string" ? body.logoUrl : "",
@@ -168,7 +173,7 @@ export async function POST(req: NextRequest) {
     .update(update)
     .eq("id", room.data.id)
     .select(
-      "id, name, owner_user_id, company_handle, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_show_founders_on_card, company_followers, company_verified"
+      "id, name, owner_user_id, company_handle, company_tagline, company_bio, company_link, company_logo_url, company_banner_url, company_category, company_show_name_on_employee_profiles, company_show_founders_on_card, company_followers, company_verified"
     )
     .single();
   if (updated.error) return NextResponse.json({ error: updated.error.message }, { status: 500 });

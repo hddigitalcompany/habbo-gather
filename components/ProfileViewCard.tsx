@@ -27,7 +27,17 @@ type ViewedProfile = {
   // empresa". null quando não escolheu nenhuma (ou deixou de ser
   // dona/membro da que tinha escolhido -- ver GET /api/profile/view,
   // que já confere de novo antes de mandar isso).
-  company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member"; cargo: string } | null;
+  company: {
+    roomId: string;
+    slug: string;
+    name: string;
+    logoUrl: string;
+    relation: "owner" | "member";
+    cargo: string;
+    // "Tagline" -- pedido do Douglas, 30/set (17): "essa frase,
+    // aparecera no perfil do membro ao lado do icone da empresa".
+    tagline: string;
+  } | null;
   // pedido do Douglas, 30/set (12): "perfil de usuario publico, quero
   // seguidores e seguindo" -- só a CONTAGEM vem junto do perfil; a
   // lista em si (pra abrir clicando) é buscada à parte (ver
@@ -274,8 +284,11 @@ export default function ProfileViewCard({
               // Lobby.tsx) chega na próxima vez que esse perfil for
               // buscado do zero (GET /api/profile/view, que já lê
               // certo -- ver comentário grande lá).
+              // tagline "" aqui pelo mesmo motivo do cargo acima --
+              // myCompanies não carrega isso, valor de verdade chega
+              // no próximo fetch do zero.
               company: chosen
-                ? { roomId: chosen.roomId, slug: chosen.slug, name: chosen.name, logoUrl: chosen.logoUrl, relation: chosen.relation, cargo: "" }
+                ? { roomId: chosen.roomId, slug: chosen.slug, name: chosen.name, logoUrl: chosen.logoUrl, relation: chosen.relation, cargo: "", tagline: "" }
                 : null,
             }
           : prev
@@ -503,28 +516,40 @@ export default function ProfileViewCard({
                         empresa entra no lugar do gradiente de fundo, e
                         "Dona"/"Membro" no lugar do nome da categoria. */}
                     {profile.company && (
-                      <div className="company-card-positions">
-                        <div
-                          className="company-card-position-card"
-                          title={profile.company.name || undefined}
-                          style={{
-                            backgroundImage: profile.company.logoUrl ? `url(${profile.company.logoUrl})` : undefined,
-                          }}
-                        >
-                          <span className="company-card-position-name">
-                            {/* "Cargo" (pedido do Douglas, 30/set (16)) --
-                                completa "a funcao dela na empresa" (30/set
-                                (8)), que até aqui só mostrava "Membro" fixo.
-                                Dona continua "Dona" (não tem cargo, ver
-                                comentário grande em GET /api/profile/view);
-                                Membro mostra o cargo escolhido pelo dono
-                                quando tiver um, senão cai no genérico
-                                "Membro" de sempre. */}
-                            {profile.company.relation === "owner"
-                              ? "Dona"
-                              : profile.company.cargo || "Membro"}
-                          </span>
+                      // "Tagline ao lado do icone" -- pedido do Douglas,
+                      // 30/set (17): "essa frase, aparecera no perfil do
+                      // membro ao lado do icone da empresa" -- wrapper
+                      // próprio (profile-company-badge), NÃO mexe no
+                      // .company-card-positions original (Lobby.tsx
+                      // reaproveita a mesma classe pra outra coisa, o
+                      // scroll horizontal de categorias).
+                      <div className="profile-company-badge">
+                        <div className="company-card-positions">
+                          <div
+                            className="company-card-position-card"
+                            title={profile.company.name || undefined}
+                            style={{
+                              backgroundImage: profile.company.logoUrl ? `url(${profile.company.logoUrl})` : undefined,
+                            }}
+                          >
+                            <span className="company-card-position-name">
+                              {/* "Cargo" (pedido do Douglas, 30/set (16)) --
+                                  completa "a funcao dela na empresa" (30/set
+                                  (8)), que até aqui só mostrava "Membro" fixo.
+                                  Dona continua "Dona" (não tem cargo, ver
+                                  comentário grande em GET /api/profile/view);
+                                  Membro mostra o cargo escolhido pelo dono
+                                  quando tiver um, senão cai no genérico
+                                  "Membro" de sempre. */}
+                              {profile.company.relation === "owner"
+                                ? "Dona"
+                                : profile.company.cargo || "Membro"}
+                            </span>
+                          </div>
                         </div>
+                        {profile.company.tagline && (
+                          <p className="profile-company-tagline">{profile.company.tagline}</p>
+                        )}
                       </div>
                     )}
                   </div>
