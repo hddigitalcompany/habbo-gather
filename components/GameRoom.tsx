@@ -877,6 +877,36 @@ export default function GameRoom({
   const [chatComposerText, setChatComposerText] = useState("");
   const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
   const [newConvName, setNewConvName] = useState("");
+  // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
+  // chat, quero que eles vejam a possibilidade, sempre ali, abriu o
+  // chat, ela ta junto" -- MESMA ideia do Lobby (ver myRoomLogoUrl lá
+  // em components/Lobby.tsx): nome/logo da empresa dessa SALA (a que
+  // tá aberta agora, "onde ele abriu o chat" -- mesma fonte que
+  // getRoomCompanyInfo usa no servidor, só que essa aqui é a versão
+  // pública/cliente, GET /api/room/company-profile) entram como opção
+  // garantida em companyOptions do ChatDrawer, mesmo sem nenhuma
+  // conversa ainda.
+  const [roomCompanyName, setRoomCompanyName] = useState<string | null>(null);
+  const [roomCompanyLogoUrl, setRoomCompanyLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/room/company-profile?slug=${encodeURIComponent(roomSlug)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        setRoomCompanyName(data?.profile?.name || null);
+        setRoomCompanyLogoUrl(data?.profile?.logoUrl || null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRoomCompanyName(null);
+          setRoomCompanyLogoUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomSlug]);
   const [renamingGroup, setRenamingGroup] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const [recordingAudio, setRecordingAudio] = useState(false);
@@ -4879,6 +4909,9 @@ export default function GameRoom({
     roomChatLog: chatLog,
     myUserId,
     onlinePlayers: Array.from(remotePlayersRef.current.values()),
+    roomCompanyName,
+    roomCompanyLogoUrl,
+    accountAccessToken,
     newConvSelection,
     onToggleNewConvSelection: toggleNewConvSelection,
     newConvName,
@@ -8333,6 +8366,9 @@ function ChatDrawer({
   roomChatLog,
   myUserId,
   onlinePlayers,
+  roomCompanyName,
+  roomCompanyLogoUrl,
+  accountAccessToken,
   newConvSelection,
   onToggleNewConvSelection,
   newConvName,
@@ -8385,6 +8421,9 @@ function ChatDrawer({
   roomChatLog: ChatMessage[];
   myUserId: string;
   onlinePlayers: RemotePlayer[];
+  roomCompanyName: string | null;
+  roomCompanyLogoUrl: string | null;
+  accountAccessToken?: string | null;
   newConvSelection: string[];
   onToggleNewConvSelection: (userId: string) => void;
   newConvName: string;
@@ -8493,13 +8532,21 @@ function ChatDrawer({
   // desliga, ver o useEffect logo abaixo e o onClick sem toggle).
   const companyOptions = useMemo(() => {
     const seen = new Map<string, { key: string; name: string; logoUrl: string }>();
+    // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
+    // chat, quero que eles vejam a possibilidade, sempre ali" -- a
+    // empresa DESSA SALA entra sempre primeiro (mesmo sem nenhuma
+    // conversa ainda), ver roomCompanyName/roomCompanyLogoUrl acima.
+    if (roomCompanyName) {
+      const key = `${roomCompanyName}::${roomCompanyLogoUrl || ""}`;
+      seen.set(key, { key, name: roomCompanyName, logoUrl: roomCompanyLogoUrl || "" });
+    }
     for (const c of conversations) {
       if (c.lane !== "company" || !c.companyName) continue;
       const key = `${c.companyName}::${c.companyLogoUrl || ""}`;
       if (!seen.has(key)) seen.set(key, { key, name: c.companyName, logoUrl: c.companyLogoUrl || "" });
     }
     return Array.from(seen.values());
-  }, [conversations]);
+  }, [conversations, roomCompanyName, roomCompanyLogoUrl]);
   // "3 pontinhos" -- id da conversa com o menu de mover-de-aba aberto
   // agora (null = nenhum), ver comentário grande em
   // onMoveConversationLane logo abaixo.

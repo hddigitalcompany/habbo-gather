@@ -5104,30 +5104,6 @@ button.chat-picker-item:disabled {
   color: #ffffff;
 }
 
-/* 30/set, pedido do Douglas: card em branco ao criar espaço novo -- o
-   nome vira um <input> nesse momento (ver showCreateRoomFlow em
-   components/Lobby.tsx), reaproveitando .company-card-name pro
-   tamanho/peso da fonte igual ao <p> de sempre, só resetando as partes
-   de <input> (borda/fundo nativos, largura, cursor centralizado). */
-.company-card-name-input {
-  width: 100%;
-  border: none;
-  background: transparent;
-  text-align: center;
-  outline: none;
-  font-family: inherit;
-}
-
-.company-card-name-input::placeholder {
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: 600;
-}
-
-.company-card-name-input:focus {
-  outline: 2px solid rgba(124, 92, 255, 0.6);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
 
 .company-card-verified {
   flex-shrink: 0;

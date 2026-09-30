@@ -859,6 +859,8 @@ function LobbyChatPanel({
   myUserId,
   myName,
   myRoomSlug,
+  myRoomName,
+  myRoomLogoUrl,
   conversations,
   accountAccessToken,
   onClose,
@@ -876,6 +878,14 @@ function LobbyChatPanel({
   // usada só pra carimbar logo/nome ao mover conversa pra "Empresa"
   // (ver moveConversationLane abaixo).
   myRoomSlug: string | null;
+  // 30/set, pedido do Douglas: "a logo empresa so aparece quando tem
+  // conversa nela, mas nao, quero essa aba sempre aberta com o chat,
+  // quero que eles vejam a possibilidade, sempre ali" -- nome/logo da
+  // empresa PRÓPRIA de quem tá com o painel aberto, pra entrar como
+  // opção garantida em companyOptions mesmo sem nenhuma conversa ainda
+  // (ver companyOptions useMemo mais abaixo).
+  myRoomName: string | null;
+  myRoomLogoUrl: string | null;
   conversations: ConversationSummary[] | null;
   accountAccessToken?: string | null;
   onClose: () => void;
@@ -921,13 +931,23 @@ function LobbyChatPanel({
   // topo do arquivo).
   const companyOptions = useMemo(() => {
     const seen = new Map<string, { key: string; name: string; logoUrl: string }>();
+    // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
+    // chat, quero que eles vejam a possibilidade, sempre ali" -- a
+    // empresa PRÓPRIA de quem tá vendo entra SEMPRE (primeiro, mesmo
+    // sem nenhuma conversa ainda), pra coluna nunca sumir só porque
+    // ainda não rolou papo -- as outras empresas continuam vindo das
+    // conversas que já existem, dedupe pela mesma chave de sempre.
+    if (myRoomName) {
+      const key = `${myRoomName}::${myRoomLogoUrl || ""}`;
+      seen.set(key, { key, name: myRoomName, logoUrl: myRoomLogoUrl || "" });
+    }
     for (const c of conversations ?? []) {
       if (c.lane !== "company" || !c.companyName) continue;
       const key = `${c.companyName}::${c.companyLogoUrl || ""}`;
       if (!seen.has(key)) seen.set(key, { key, name: c.companyName, logoUrl: c.companyLogoUrl || "" });
     }
     return Array.from(seen.values());
-  }, [conversations]);
+  }, [conversations, myRoomName, myRoomLogoUrl]);
   const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
   // 29/set (17), correção do Douglas (depois de eu explicar errado que
   // "com 1 empresa só a coluna nem aparece"): "tem que aparecer mesmo
@@ -1980,23 +2000,18 @@ export default function Lobby({
   // cards enquanto isso, evita clique duplo criando 2 salas.
   const [creatingFromTemplateId, setCreatingFromTemplateId] = useState<string | null>(null);
   const [createRoomError, setCreateRoomError] = useState<string | null>(null);
-  // 30/set, Douglas refinou o pedido acima (29/set (2), revertido e
-  // depois reformulado): "entao quando ele clica em criar novo
-  // espaco, crie uma nova tela dessa com o card ali em branco, ele
-  // tendo que adicionar PRIMEIRO o nome da empresa ali, e so depois
-  // criar o espaco" -- "o card" é o MESMO .lobby-company-card-pin
-  // fixo no canto esquerdo (ver comentário grande dele mais abaixo,
-  // "estou falando desse card"), não um campo solto dentro do modal.
-  // Enquanto showCreateRoomFlow tá true, esse card renderiza um
-  // PERFIL PRÓPRIO (BLANK_COMPANY_PROFILE + esse nome, ver cardProfile
-  // mais abaixo) em vez do companyProfile do espaço selecionado --
-  // assim não mostra/edita por engano o card de um espaço que já
-  // existe (ex: Sala Principal, pra quem clica "Criar espaço" a
-  // partir do dropdown já tendo uma sala reservada selecionada).
-  const [newRoomCompanyName, setNewRoomCompanyName] = useState("");
-  // "e so depois criar o espaco" -- confirma o nome (botão "Continuar"
-  // no modal) antes de revelar o catálogo de modelos, mesmo passo-a-
-  // passo de antes, só que o campo de texto virou o card.
+  // 30/set, Douglas refinou o pedido acima duas vezes: primeiro
+  // "entao quando ele clica em criar novo espaco, crie uma nova tela
+  // dessa com o card ali em branco, ele tendo que adicionar PRIMEIRO o
+  // nome da empresa ali, e so depois criar o espaco" (só o nome, ver
+  // "estou falando desse card"), depois "o card da empresa criando
+  // novo espaco nao tem o negocio de edicao, na vdd, na criacao, deixa
+  // ele aberto ja" -- então agora é o companyProfile/setCompanyProfile
+  // de VERDADE (mesmo estado que a edição normal usa) que vira o
+  // rascunho, com o PAINEL DE EDIÇÃO inteiro (banner/logo/nome/handle/
+  // bio/link/categorias) já aberto, sem precisar da setinha -- ver
+  // .company-edit-panel mais abaixo. Só confirma o passo (revela o
+  // catálogo de modelos) depois que o nome tiver algo digitado.
   const [newRoomNameConfirmed, setNewRoomNameConfirmed] = useState(false);
   // "Espaços visitados" (pedido do Douglas, 29/set: "se eu entrar na
   // sala de um amigo, a sala dele vai ficar ali, como um link rapido")
@@ -2512,17 +2527,17 @@ export default function Lobby({
    * pedido do Douglas: "as pessoas so copiam a sala modelo, pra eles,
    * ai se cria o mapa pra eles vinculado ao id deles". */
   async function handleCreateRoomFromTemplate(templateId: string) {
-    if (!accountAccessToken || creatingFromTemplateId || !newRoomCompanyName.trim()) return;
+    if (!accountAccessToken || creatingFromTemplateId || !companyProfile.name.trim()) return;
     setCreatingFromTemplateId(templateId);
     setCreateRoomError(null);
     try {
       const res = await fetch("/api/room/create-from-template", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
-        // nome digitado no card em branco (ver newRoomCompanyName/
-        // cardProfile, comentário grande mais acima) -- vira rooms.name
-        // direto na criação.
-        body: JSON.stringify({ templateId, companyName: newRoomCompanyName.trim() }),
+        // nome digitado no card em branco/painel de edição aberto (ver
+        // companyProfile virando o rascunho, comentário grande mais
+        // acima) -- vira rooms.name direto na criação.
+        body: JSON.stringify({ templateId, companyName: companyProfile.name.trim() }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || typeof data?.room?.room_slug !== "string") {
@@ -2530,11 +2545,24 @@ export default function Lobby({
         return;
       }
       const created: MyRoom = { id: data.room.id, name: String(data.room.name ?? "Minha sala"), room_slug: data.room.room_slug };
+      // 30/set, pedido do Douglas ("deixa ele aberto ja"): o painel de
+      // edição já tava aberto ANTES da sala existir, então além do
+      // nome (que create-from-template já grava em rooms.name), o
+      // resto (banner/logo/handle/bio/link/categorias) que a pessoa
+      // preencheu no rascunho precisa de um POST /api/room/company-
+      // profile separado agora que a sala (e o slug) já existe --
+      // melhor esforço: se falhar, a sala já foi criada mesmo assim
+      // (não bloqueia o fluxo, a pessoa edita nesses campos depois
+      // pela setinha normal).
+      fetch("/api/room/company-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: created.room_slug, ...companyProfile }),
+      }).catch(() => {});
       setMyRoom(created);
       setCreatingSpaceFromDropdown(false);
       userPickedRoomRef.current = true;
       setSelectedRoomSlug(created.room_slug);
-      setNewRoomCompanyName("");
       setNewRoomNameConfirmed(false);
     } catch {
       setCreateRoomError("Não deu pra criar sua sala agora.");
@@ -2596,6 +2624,34 @@ export default function Lobby({
   // desalinhar nos dois lugares de novo.
   const myRealRoom =
     myRoom && myRoom.room_slug !== "sala-principal" && myRoom.room_slug !== "mapa-modelo" ? myRoom : null;
+  // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
+  // chat, quero que eles vejam a possibilidade, sempre ali" -- logo da
+  // empresa PRÓPRIA (myRealRoom.name já tem o nome, mas não a logo --
+  // MyRoom não carrega esse campo, ver tipo acima) pra alimentar
+  // companyOptions no LobbyChatPanel mesmo sem nenhuma conversa ainda.
+  // Busca separada da do companyProfile/selectedRoomSlug mais acima
+  // (aquela é do espaço SELECIONADO/visitado agora, que pode ser o de
+  // outra pessoa -- essa aqui é sempre a MINHA, pro chat).
+  const [myRoomLogoUrl, setMyRoomLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!myRealRoom) {
+      setMyRoomLogoUrl(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/room/company-profile?slug=${encodeURIComponent(myRealRoom.room_slug)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setMyRoomLogoUrl(data?.profile?.logoUrl || null);
+      })
+      .catch(() => {
+        if (!cancelled) setMyRoomLogoUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myRealRoom?.room_slug]);
   const dropdownEntries = myRealRoom
     ? [...visibleRoomSlugs, { slug: myRealRoom.room_slug, label: myRealRoom.name, teamOnly: false }]
     : visibleRoomSlugs;
@@ -2871,17 +2927,20 @@ export default function Lobby({
     return days;
   }, [calls]);
 
-  // 30/set, pedido do Douglas ("estou falando desse card" + "o card
-  // ali em branco, ele tendo que adicionar PRIMEIRO o nome da
-  // empresa ali") -- enquanto showCreateRoomFlow tá true, o card
-  // fixo (.lobby-company-card-pin mais abaixo) mostra esse perfil
-  // PRÓPRIO (em branco + só o nome que a pessoa tá digitando) em vez
-  // do companyProfile do espaço selecionado -- evita mostrar/editar
-  // por engano o card de um espaço que já existe (ex: alguém clica
-  // "Criar espaço" no dropdown com Sala Principal ainda selecionada).
-  const cardProfile: CompanyProfile = showCreateRoomFlow
-    ? { ...BLANK_COMPANY_PROFILE, name: newRoomCompanyName }
-    : companyProfile;
+  // 30/set, pedido do Douglas ("estou falando desse card" + "deixa
+  // ele aberto ja") -- assim que showCreateRoomFlow liga, zera
+  // companyProfile pra BLANK (rascunho limpo) em vez de deixar o
+  // perfil do espaço que tava selecionado antes (ex: alguém clica
+  // "Criar espaço" no dropdown com Sala Principal ainda selecionada)
+  // -- sem isso editaria/mostraria por engano o card de um espaço que
+  // já existe. Só zera na TRANSIÇÃO pra true (não a cada render).
+  useEffect(() => {
+    if (showCreateRoomFlow) {
+      setCompanyProfile(BLANK_COMPANY_PROFILE);
+      setCompanyProfileCanEdit(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCreateRoomFlow]);
 
   return (
     <div className="lobby-backdrop">
@@ -3161,45 +3220,28 @@ export default function Lobby({
               fazia parte do design ORIGINAL do banner da Obrazur, não
               porque o app deveria desenhar um texto ali). Essa faixa
               clara agora é só a moldura da foto de banner mesmo (ver
-              cardProfile.bannerUrl) -- sem overlay/tinta em cima (não
+              companyProfile.bannerUrl) -- sem overlay/tinta em cima (não
               tem mais texto pra proteger a legibilidade de). */}
           <div
             className="company-card-top"
-            style={cardProfile.bannerUrl ? { backgroundImage: `url(${cardProfile.bannerUrl})` } : undefined}
+            style={companyProfile.bannerUrl ? { backgroundImage: `url(${companyProfile.bannerUrl})` } : undefined}
           >
             <div className="company-card-logo-box">
-              {cardProfile.logoUrl ? (
+              {companyProfile.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={cardProfile.logoUrl} alt="" />
+                <img src={companyProfile.logoUrl} alt="" />
               ) : (
-                cardProfile.name.charAt(0)
+                companyProfile.name.charAt(0)
               )}
             </div>
           </div>
           <div className="company-card-bottom">
-            {/* 30/set, pedido do Douglas: card em branco ao criar
-                espaço novo -- o nome é digitado DIRETO aqui (em vez de
-                um campo solto no modal), showCreateRoomFlow troca o
-                <p> de sempre por um <input>, mesma classe visual
-                (.company-card-name cuida do tamanho/peso da fonte pros
-                dois casos, ver app/globals.css). */}
-            {showCreateRoomFlow ? (
-              <input
-                type="text"
-                className="company-card-name company-card-name-input"
-                placeholder="Nome da empresa"
-                value={newRoomCompanyName}
-                maxLength={80}
-                onChange={(e) => setNewRoomCompanyName(e.target.value)}
-              />
-            ) : (
-              <p className="company-card-name">
-                {cardProfile.name}
-                <VerifiedBadge />
-              </p>
-            )}
-            <p className="company-card-handle">@{cardProfile.handle.replace(/^@/, "")}</p>
-            <p className="company-card-bio">{cardProfile.bio}</p>
+            <p className="company-card-name">
+              {companyProfile.name}
+              <VerifiedBadge />
+            </p>
+            <p className="company-card-handle">@{companyProfile.handle.replace(/^@/, "")}</p>
+            <p className="company-card-bio">{companyProfile.bio}</p>
             {/* pedido do Douglas: "so vai ter Seguidores (o perfil da
                 empresa nao segue ninguem)" -- perfil de empresa não
                 segue outras contas, então só faz sentido mostrar
@@ -3207,12 +3249,12 @@ export default function Lobby({
                 inteiro do CompanyProfile). */}
             <p className="company-card-stats">
               <span>
-                <strong>{cardProfile.followers}</strong> Seguidores
+                <strong>{companyProfile.followers}</strong> Seguidores
               </span>
             </p>
             <p className="company-card-link">
               <LinkIcon />
-              {cardProfile.link}
+              {companyProfile.link}
             </p>
 
             {/* pedido do Douglas (print de referência com cards
@@ -3229,9 +3271,9 @@ export default function Lobby({
                 é feito com bannerUrl/logoUrl acima. Rola só se não
                 couber tudo (overflow-x + nowrap), sem crescer a altura
                 do card. */}
-            {cardProfile.category.length > 0 && (
+            {companyProfile.category.length > 0 && (
               <div className="company-card-positions">
-                {cardProfile.category.map((cat) => (
+                {companyProfile.category.map((cat) => (
                   <div
                     key={cat}
                     className="company-card-position-card"
@@ -3278,21 +3320,39 @@ export default function Lobby({
         )}
       </div>
 
-      {companyEditOpen && companyProfileCanEdit && !showCreateRoomFlow && (
+      {/* 30/set, pedido do Douglas: "o card da empresa criando novo
+          espaco nao tem o negocio de edicao, na vdd, na criacao, deixa
+          ele aberto ja" -- enquanto showCreateRoomFlow tá true, esse
+          painel fica SEMPRE aberto (sem depender de companyEditOpen/
+          companyProfileCanEdit, que exigem um espaço já existente) --
+          a pessoa preenche nome/logo/banner/bio etc. aqui mesmo, ANTES
+          de criar a sala (ver companyProfile virando BLANK_COMPANY_PROFILE
+          nesse modo, no useEffect de showCreateRoomFlow mais acima, e
+          o POST extra em handleCreateRoomFromTemplate que persiste tudo
+          isso assim que a sala nasce). */}
+      {(showCreateRoomFlow || (companyEditOpen && companyProfileCanEdit)) && (
         <>
           {/* clique fora fecha -- mas SEM escurecer o resto da tela
               (o pedido foi só o painel em si ficar "em blur
-              escurecido", não a sala toda por trás dele). */}
-          <div className="company-edit-click-catcher" onClick={() => setCompanyEditOpen(false)} />
+              escurecido", não a sala toda por trás dele). Sem clique-
+              fora nenhum durante showCreateRoomFlow -- não tem "fechar",
+              é obrigatório preencher pra criar a sala. */}
+          {!showCreateRoomFlow && <div className="company-edit-click-catcher" onClick={() => setCompanyEditOpen(false)} />}
           <div className="company-edit-panel" onClick={(e) => e.stopPropagation()}>
             <div className="company-edit-header-row">
               <div>
-                <h2 className="company-edit-title">Editar Empresa</h2>
-                <p className="company-edit-subtitle">Atualize as informações da sua empresa que serão exibidas na plataforma.</p>
+                <h2 className="company-edit-title">{showCreateRoomFlow ? "Sua empresa" : "Editar Empresa"}</h2>
+                <p className="company-edit-subtitle">
+                  {showCreateRoomFlow
+                    ? "Preencha os dados da sua empresa -- eles já nascem junto com a sua sala."
+                    : "Atualize as informações da sua empresa que serão exibidas na plataforma."}
+                </p>
               </div>
-              <button type="button" className="items-panel-close" onClick={() => setCompanyEditOpen(false)} title="Fechar">
-                ✕
-              </button>
+              {!showCreateRoomFlow && (
+                <button type="button" className="items-panel-close" onClick={() => setCompanyEditOpen(false)} title="Fechar">
+                  ✕
+                </button>
+              )}
             </div>
 
             <div className="company-edit-section">
@@ -3509,18 +3569,27 @@ export default function Lobby({
             {/* 29/set (7): agora salva DE VERDADE no espaço (POST
                 /api/room/company-profile, ver saveCompanyProfile
                 acima) -- antes só fechava o painel (era só
-                localStorage, já salvo a cada tecla). */}
-            {companySaveError && <p className="company-edit-save-error">{companySaveError}</p>}
-            <div className="company-edit-save-row">
-              <button
-                type="button"
-                className="company-edit-save-btn"
-                onClick={saveCompanyProfile}
-                disabled={companySaving}
-              >
-                {companySaving ? "Salvando…" : "Salvar alterações"}
-              </button>
-            </div>
+                localStorage, já salvo a cada tecla). 30/set: durante
+                showCreateRoomFlow não tem sala pra salvar AINDA (ver
+                comentário grande no topo desse painel) -- some o botão
+                de salvar, o "Continuar" logo abaixo no modal que
+                confirma o nome (e handleCreateRoomFromTemplate que
+                persiste o resto assim que a sala existe). */}
+            {!showCreateRoomFlow && (
+              <>
+                {companySaveError && <p className="company-edit-save-error">{companySaveError}</p>}
+                <div className="company-edit-save-row">
+                  <button
+                    type="button"
+                    className="company-edit-save-btn"
+                    onClick={saveCompanyProfile}
+                    disabled={companySaving}
+                  >
+                    {companySaving ? "Salvando…" : "Salvar alterações"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
@@ -3638,7 +3707,6 @@ export default function Lobby({
                 className="lobby-create-room-cancel-btn"
                 onClick={() => {
                   setCreatingSpaceFromDropdown(false);
-                  setNewRoomCompanyName("");
                   setNewRoomNameConfirmed(false);
                 }}
               >
@@ -3649,12 +3717,14 @@ export default function Lobby({
             {!accountAccessToken ? (
               <p className="lobby-create-room-hint">Crie uma conta pra ganhar a sua.</p>
             ) : !newRoomNameConfirmed ? (
-              // 30/set, pedido do Douglas ("estou falando desse card",
-              // apontando pro .lobby-company-card-pin): o nome não é
-              // digitado num campo solto aqui dentro -- é digitado
-              // direto NO CARD fixado do lado (ver cardProfile/input em
-              // .company-card-name mais abaixo), esse trecho só
-              // confirma o passo antes de revelar o catálogo.
+              // 30/set, pedido do Douglas ("estou falando desse card" +
+              // "deixa ele aberto ja"): o nome (e o resto: logo/banner/
+              // bio/etc.) não é digitado num campo solto aqui dentro --
+              // é digitado direto no painel de edição do card fixado
+              // do lado, que fica ABERTO nesse momento (ver
+              // .company-edit-panel/showCreateRoomFlow mais abaixo),
+              // esse trecho só confirma o passo antes de revelar o
+              // catálogo.
               <>
                 <p className="lobby-create-room-hint">
                   Preencha o nome da sua empresa no card fixado do lado -- ele já nasce junto com a sua sala.
@@ -3662,7 +3732,7 @@ export default function Lobby({
                 <button
                   type="button"
                   className="lobby-create-room-company-btn"
-                  disabled={!newRoomCompanyName.trim()}
+                  disabled={!companyProfile.name.trim()}
                   onClick={() => setNewRoomNameConfirmed(true)}
                 >
                   Continuar
@@ -3675,7 +3745,7 @@ export default function Lobby({
             ) : (
               <>
                 <p className="lobby-create-room-hint">
-                  Escolha um modelo pra começar a sala de <strong>{newRoomCompanyName.trim()}</strong>:
+                  Escolha um modelo pra começar a sala de <strong>{companyProfile.name.trim()}</strong>:
                 </p>
                 <div className="lobby-create-room-templates">
                   {templates.map((t) => (
@@ -3847,6 +3917,8 @@ export default function Lobby({
           myUserId={myUserId}
           myName={myName}
           myRoomSlug={myRealRoom?.room_slug ?? null}
+          myRoomName={myRealRoom?.name ?? null}
+          myRoomLogoUrl={myRoomLogoUrl}
           conversations={conversations}
           accountAccessToken={accountAccessToken}
           onClose={() => {
