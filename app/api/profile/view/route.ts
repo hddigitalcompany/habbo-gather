@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getVerifiedUserId } from "@/lib/supabase/roomAuth";
+import { getUserRelationToRoom } from "@/lib/supabase/companyMembership";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
 
   const { data: profile, error } = await admin
     .from("profiles")
-    .select("id, name, status, instagram, bio, photo_url")
+    .select("id, name, status, instagram, bio, photo_url, featured_company_room_id")
     .eq("id", targetUserId)
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -47,6 +48,37 @@ export async function GET(req: NextRequest) {
     mutual = !!a.data && !!b.data;
   }
 
+  // empresa destacada (ver profiles.featured_company_room_id, migration
+  // 0044_company_members_and_profile_card.sql) -- pedido do Douglas,
+  // 30/set (8): "as empresas que a pessoa é dona/membro vao aparecer no
+  // perfil dela [...] a logo da empresa que aparecera [...] a funcao
+  // dela na empresa". RE-CONFERE aqui (nunca confia só no que já foi
+  // salvo antes, ver comentário na migration) se ainda é dona/membro
+  // desse espaço -- se deixou de ser (saiu, foi removida, a empresa foi
+  // apagada), simplesmente não mostra mais, sem precisar de trigger
+  // nenhum limpando o campo salvo.
+  let company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member" } | null = null;
+  const featuredRoomId = profile.featured_company_room_id as string | null;
+  if (featuredRoomId) {
+    const relation = await getUserRelationToRoom(admin, targetUserId, featuredRoomId);
+    if (relation) {
+      const room = await admin
+        .from("rooms")
+        .select("id, room_slug, name, company_logo_url")
+        .eq("id", featuredRoomId)
+        .maybeSingle();
+      if (room.data) {
+        company = {
+          roomId: room.data.id as string,
+          slug: (room.data.room_slug as string) || "",
+          name: (room.data.name as string) || "",
+          logoUrl: (room.data.company_logo_url as string) || "",
+          relation,
+        };
+      }
+    }
+  }
+
   return NextResponse.json({
     profile: {
       userId: profile.id as string,
@@ -55,6 +87,7 @@ export async function GET(req: NextRequest) {
       instagram: (profile.instagram as string) || "",
       bio: (profile.bio as string) || "",
       photoUrl: (profile.photo_url as string) || "",
+      company,
     },
     following,
     mutual,

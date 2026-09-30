@@ -2646,6 +2646,86 @@ export default function Lobby({
     });
   }
 
+  // Membros (colaboradores) da empresa -- pedido do Douglas, 30/set
+  // (8): "as empresas que a pessoa é dona/membro vao aparecer no
+  // perfil dela". Perguntado como alguém vira membro de UMA empresa
+  // específica (convite por link "acaba indo pra visitantes também"),
+  // escolheu: "a pessoa tem que ser adicionada como membro por quem
+  // tem direitos na sala" -- então é só o DONO desse espaço quem
+  // adiciona/remove (mesma trava de app/api/room/company-members, ver
+  // rota). Lista carregada só quando o painel de edição abre (não em
+  // toda visita à sala) -- ver useEffect logo abaixo.
+  const [companyMembers, setCompanyMembers] = useState<{ userId: string; name: string; photoUrl: string }[] | null>(null);
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [memberBusyUserId, setMemberBusyUserId] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!companyEditOpen || !selectedRoomSlug || !accountAccessToken) return;
+    let cancelled = false;
+    fetch(`/api/room/company-members?slug=${encodeURIComponent(selectedRoomSlug)}`, {
+      headers: { Authorization: `Bearer ${accountAccessToken}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setCompanyMembers(Array.isArray(data?.members) ? data.members : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyEditOpen, selectedRoomSlug, accountAccessToken]);
+
+  async function addCompanyMember(targetUserId: string) {
+    if (!selectedRoomSlug || !accountAccessToken || memberBusyUserId) return;
+    setMemberBusyUserId(targetUserId);
+    setMemberError(null);
+    try {
+      const res = await fetch("/api/room/company-members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: selectedRoomSlug, targetUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setMemberError(data?.error || "não deu pra adicionar, tenta de novo");
+        return;
+      }
+      const added = directory?.find((u) => u.userId === targetUserId);
+      setCompanyMembers((prev) => [...(prev ?? []), { userId: targetUserId, name: added?.name || "", photoUrl: "" }]);
+      setMemberPickerOpen(false);
+    } catch {
+      setMemberError("rede caiu no meio, tenta de novo");
+    } finally {
+      setMemberBusyUserId(null);
+    }
+  }
+
+  async function removeCompanyMember(targetUserId: string) {
+    if (!selectedRoomSlug || !accountAccessToken || memberBusyUserId) return;
+    setMemberBusyUserId(targetUserId);
+    setMemberError(null);
+    try {
+      const res = await fetch("/api/room/company-members", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ slug: selectedRoomSlug, targetUserId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setMemberError(data?.error || "não deu pra remover, tenta de novo");
+        return;
+      }
+      setCompanyMembers((prev) => (prev ?? []).filter((m) => m.userId !== targetUserId));
+    } catch {
+      setMemberError("rede caiu no meio, tenta de novo");
+    } finally {
+      setMemberBusyUserId(null);
+    }
+  }
+
   const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
@@ -4000,6 +4080,86 @@ export default function Lobby({
                 </span>
               </span>
             </label>
+
+            <div className="company-edit-divider" />
+
+            {/* Membros (colaboradores) -- pedido do Douglas, 30/set
+                (8): "a pessoa tem que ser adicionada como membro por
+                quem tem direitos na sala" (ver companyMembers/
+                addCompanyMember/removeCompanyMember acima,
+                public.company_members). Reaproveita `directory`
+                (mesmo diretório platform-wide do convite de "Convidar
+                pessoas" da Agenda, lá em cima) pra escolher quem
+                adicionar -- clique já adiciona na hora, sem
+                checklist/confirmar. */}
+            <div className="company-edit-field">
+              <span>Membros (colaboradores)</span>
+              <div className="company-edit-category-select">
+                <button
+                  type="button"
+                  className="company-edit-input company-edit-category-trigger"
+                  onClick={() => setMemberPickerOpen((v) => !v)}
+                  aria-expanded={memberPickerOpen}
+                  disabled={!directory}
+                >
+                  <span className="company-edit-category-trigger-text">
+                    {!directory ? "Carregando pessoas…" : "Adicionar membro"}
+                  </span>
+                  <ChevronIcon />
+                </button>
+                {memberPickerOpen && directory && (
+                  <>
+                    <div className="company-edit-category-catcher" onClick={() => setMemberPickerOpen(false)} />
+                    <div className="company-edit-category-list" onClick={(e) => e.stopPropagation()}>
+                      {directory.filter((u) => u.userId !== myUserId && !companyMembers?.some((m) => m.userId === u.userId))
+                        .length === 0 ? (
+                        <p className="lobby-agenda-invited-readonly">Ninguém mais pra adicionar.</p>
+                      ) : (
+                        directory
+                          .filter((u) => u.userId !== myUserId && !companyMembers?.some((m) => m.userId === u.userId))
+                          .map((u) => (
+                            <label
+                              key={u.userId}
+                              className="company-edit-category-option"
+                              onClick={() => addCompanyMember(u.userId)}
+                            >
+                              <span>{u.name}</span>
+                            </label>
+                          ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              {memberError && <p className="company-edit-save-error">{memberError}</p>}
+              {companyMembers === null ? (
+                <p className="company-edit-members-empty">Carregando membros...</p>
+              ) : companyMembers.length === 0 ? (
+                <p className="company-edit-members-empty">Nenhum membro ainda -- só você (dona).</p>
+              ) : (
+                <div className="company-edit-members-list">
+                  {companyMembers.map((m) => (
+                    <div key={m.userId} className="company-edit-member-row">
+                      <span
+                        className="company-edit-member-avatar"
+                        style={{ backgroundImage: m.photoUrl ? `url(${m.photoUrl})` : undefined }}
+                      >
+                        {!m.photoUrl && (m.name || "?").trim().charAt(0).toUpperCase()}
+                      </span>
+                      <span className="company-edit-member-name">{m.name || "(sem nome)"}</span>
+                      <button
+                        type="button"
+                        className="company-edit-member-remove"
+                        disabled={memberBusyUserId === m.userId}
+                        onClick={() => removeCompanyMember(m.userId)}
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div className="company-edit-divider" />
 

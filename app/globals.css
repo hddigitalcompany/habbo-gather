@@ -5284,6 +5284,77 @@ button.chat-picker-item:disabled {
   outline-offset: 2px;
 }
 
+/* Membros (colaboradores) da empresa -- pedido do Douglas, 30/set
+   (8): "a pessoa tem que ser adicionada como membro por quem tem
+   direitos na sala" (ver company-members-section/addCompanyMember em
+   components/Lobby.tsx, public.company_members). Lista simples,
+   avatar + nome + botão de remover -- o "adicionar" reaproveita a
+   MESMA casca de dropdown de .company-edit-category-* (trigger +
+   lista abre/fecha), só que clicar numa pessoa já adiciona na hora
+   (não é multi-seleção com checkbox, cada clique é uma chamada). */
+.company-edit-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.company-edit-member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.company-edit-member-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #5a4b7c center / cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f5f0ff;
+}
+
+.company-edit-member-name {
+  flex: 1;
+  font-size: 13px;
+  color: #f5f0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-edit-member-remove {
+  background: transparent;
+  border: 1px solid rgba(255, 138, 138, 0.4);
+  color: #ff8a8a;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.company-edit-member-remove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.company-edit-members-empty {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: #9d90bb;
+}
+
 /* 29/set (7): mensagem de erro do POST /api/room/company-profile
    (ver saveCompanyProfile em components/Lobby.tsx) -- rede caiu,
    validação falhou, etc. */

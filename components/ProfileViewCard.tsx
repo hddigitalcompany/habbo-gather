@@ -20,7 +20,20 @@ type ViewedProfile = {
   instagram: string;
   bio: string;
   photoUrl: string;
+  // empresa destacada (ver profiles.featured_company_room_id, migration
+  // 0044_company_members_and_profile_card.sql) -- pedido do Douglas,
+  // 30/set (8): "as empresas que a pessoa é dona/membro vao aparecer no
+  // perfil dela, [...] a logo da empresa [...] a funcao dela na
+  // empresa". null quando não escolheu nenhuma (ou deixou de ser
+  // dona/membro da que tinha escolhido -- ver GET /api/profile/view,
+  // que já confere de novo antes de mandar isso).
+  company: { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member" } | null;
 };
+
+// mesma empresa acima, mas na forma que o seletor de edição usa (ver
+// GET /api/account/companies) -- TODAS as que a pessoa é dona/membro,
+// não só a destacada.
+type MyCompany = { roomId: string; slug: string; name: string; logoUrl: string; relation: "owner" | "member" };
 
 // mesma paleta/rótulo do card de dentro da sala (ver STATUS_DOT_COLORS/
 // STATUS_OPTIONS em components/GameRoom.tsx) -- duplicado aqui de
@@ -122,14 +135,29 @@ export default function ProfileViewCard({
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  // seletor "qual empresa mostrar" (ver comentário grande em
+  // ViewedProfile/MyCompany acima) -- só busca (GET
+  // /api/account/companies) quando entra no modo de edição do PRÓPRIO
+  // perfil, não em toda visita a essa tela. editFeaturedCompanyRoomId
+  // vazio ("") = "Nenhuma" no <select> (equivale a null ao salvar).
+  const [myCompanies, setMyCompanies] = useState<MyCompany[] | null>(null);
+  const [editFeaturedCompanyRoomId, setEditFeaturedCompanyRoomId] = useState("");
+
   function startEditing(p: ViewedProfile) {
     setEditName(p.name);
     setEditStatus(p.status || "online");
     setEditInstagram(p.instagram);
     setEditBio(p.bio);
     setEditPhotoUrl(p.photoUrl);
+    setEditFeaturedCompanyRoomId(p.company?.roomId ?? "");
     setSaveErr(null);
     setEditing(true);
+    if (myCompanies === null) {
+      fetch("/api/account/companies", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => setMyCompanies(Array.isArray(data?.companies) ? data.companies : []))
+        .catch(() => setMyCompanies([]));
+    }
   }
 
   async function handleEditPhoto(file: File) {
@@ -168,9 +196,36 @@ export default function ProfileViewCard({
         setSaveErr(error.message);
         return;
       }
+
+      // empresa destacada (ver comentário grande em ViewedProfile
+      // acima) -- rota própria (não é public.profiles direto pelo
+      // browser client como o resto): precisa validar que a pessoa
+      // ainda é dona/membro da empresa escolhida, e RLS nem deixa o
+      // browser client ler company_members pra conferir sozinho (ver
+      // app/api/account/featured-company/route.ts).
+      const chosen = myCompanies?.find((c) => c.roomId === editFeaturedCompanyRoomId) ?? null;
+      const companyRes = await fetch("/api/account/featured-company", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+        body: JSON.stringify({ roomId: editFeaturedCompanyRoomId || null }),
+      });
+      if (!companyRes.ok) {
+        const companyErr = await companyRes.json().catch(() => null);
+        setSaveErr(companyErr?.error || "Perfil salvo, mas não deu pra atualizar a empresa destacada.");
+        return;
+      }
+
       setProfile((prev) =>
         prev
-          ? { ...prev, name: editName.trim(), status: editStatus, instagram: editInstagram.trim(), bio: editBio.trim(), photoUrl: editPhotoUrl }
+          ? {
+              ...prev,
+              name: editName.trim(),
+              status: editStatus,
+              instagram: editInstagram.trim(),
+              bio: editBio.trim(),
+              photoUrl: editPhotoUrl,
+              company: chosen ? { roomId: chosen.roomId, slug: chosen.slug, name: chosen.name, logoUrl: chosen.logoUrl, relation: chosen.relation } : null,
+            }
           : prev
       );
       setEditing(false);
@@ -313,6 +368,29 @@ export default function ProfileViewCard({
                     Bio
                     <textarea value={editBio} maxLength={280} onChange={(e) => setEditBio(e.target.value)} />
                   </label>
+                  {/* "qual empresa mostrar" -- só aparece se a pessoa
+                      for dona/membro de alguma (ver myCompanies acima);
+                      sem nenhuma, nem mostra o campo (nada pra
+                      escolher). Native <select>: é seleção ÚNICA
+                      mesmo, "ele vai escolher qual empresa mostrar"
+                      (diferente do multi-select de categoria da
+                      empresa, que é dropdown custom com checklist). */}
+                  {myCompanies && myCompanies.length > 0 && (
+                    <label className="profile-field">
+                      Empresa em destaque
+                      <select
+                        value={editFeaturedCompanyRoomId}
+                        onChange={(e) => setEditFeaturedCompanyRoomId(e.target.value)}
+                      >
+                        <option value="">Nenhuma</option>
+                        {myCompanies.map((c) => (
+                          <option key={c.roomId} value={c.roomId}>
+                            {c.name || "(sem nome)"} -- {c.relation === "owner" ? "Dona" : "Membro"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {saveErr && <p className="account-panel-error">{saveErr}</p>}
                   <div className="profile-actions-row">
                     <button className="profile-action-btn" onClick={() => setEditing(false)}>
@@ -343,6 +421,33 @@ export default function ProfileViewCard({
                       </a>
                     )}
                     {profile.bio && <p className="profile-bio">{profile.bio}</p>}
+
+                    {/* card da empresa em destaque -- pedido do
+                        Douglas, 30/set (8): "vamos adicionar o mesmo
+                        sistema de cards que tem no da empresa [...]
+                        vai ser a logo da empresa que aaprecera no
+                        lugar do campo" -- mesmas classes CSS do
+                        "quadradinho" de posicionamento em Lobby.tsx
+                        (company-card-positions/company-card-position-
+                        card/company-card-position-name), reaproveitadas
+                        de verdade, não uma cópia: aqui a logo da
+                        empresa entra no lugar do gradiente de fundo, e
+                        "Dona"/"Membro" no lugar do nome da categoria. */}
+                    {profile.company && (
+                      <div className="company-card-positions">
+                        <div
+                          className="company-card-position-card"
+                          title={profile.company.name || undefined}
+                          style={{
+                            backgroundImage: profile.company.logoUrl ? `url(${profile.company.logoUrl})` : undefined,
+                          }}
+                        >
+                          <span className="company-card-position-name">
+                            {profile.company.relation === "owner" ? "Dona" : "Membro"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="profile-actions">
