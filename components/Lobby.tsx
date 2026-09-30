@@ -959,10 +959,24 @@ function LobbyChatPanel({
     { userId: string; name: string; photoUrl: string }[] | null
   >(null);
   const [newConvBusy, setNewConvBusy] = useState<string | null>(null);
+  // 30/set, pedido do Douglas: "quando clicar no chat em nova
+  // conversa buscar uma pessoa pra nova conversa, coloque filtro /
+  // Amigos / Empresa" -- "Amigos" busca só amigo mútuo (GET
+  // /api/friends/list, MESMA fonte do painel de Amigos) e sempre
+  // cria lane "private"; "Empresa" é o comportamento de sempre (busca
+  // QUALQUER conta, GET /api/friends/search) e cria lane "company" (já
+  // sai carimbada com a empresa de quem cria, ver roomSlug em
+  // handleStartConversation mais abaixo). Some com a logo por item
+  // aqui de propósito (Douglas, mesma mensagem de antes: "quero a
+  // logo apenas na aba empresas, porque ter ela nas conversas?").
+  const [newConvFilter, setNewConvFilter] = useState<"company" | "friends">("company");
+  const [newConvFriends, setNewConvFriends] = useState<
+    { userId: string; name: string; photoUrl: string }[] | null
+  >(null);
   const showCompanyRail = !activeId && !newConvOpen && laneFilter === "company" && companyOptions.length > 0;
 
   useEffect(() => {
-    if (!newConvOpen || !accountAccessToken) return;
+    if (!newConvOpen || newConvFilter !== "company" || !accountAccessToken) return;
     let cancelled = false;
     const t = setTimeout(() => {
       fetch(`/api/friends/search?q=${encodeURIComponent(newConvQuery.trim())}`, {
@@ -980,12 +994,41 @@ function LobbyChatPanel({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [newConvOpen, newConvQuery, accountAccessToken]);
+  }, [newConvOpen, newConvFilter, newConvQuery, accountAccessToken]);
+
+  // "Amigos" -- busca a lista inteira uma vez (amigo mútuo raramente
+  // passa de umas dezenas, sem paginação/debounce igual /friends/search
+  // porque não é uma query no banco por texto, é filtro local em cima
+  // de uma lista já pequena, ver visibleNewConvFriends abaixo) sempre
+  // que abre "Nova conversa" nesse modo.
+  useEffect(() => {
+    if (!newConvOpen || newConvFilter !== "friends" || !accountAccessToken) return;
+    let cancelled = false;
+    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setNewConvFriends(Array.isArray(data?.friends) ? data.friends : []);
+      })
+      .catch(() => {
+        if (!cancelled) setNewConvFriends([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [newConvOpen, newConvFilter, accountAccessToken]);
+
+  const visibleNewConvFriends = useMemo(() => {
+    const q = newConvQuery.trim().toLowerCase();
+    const list = newConvFriends ?? [];
+    return q ? list.filter((f) => f.name.toLowerCase().includes(q)) : list;
+  }, [newConvFriends, newConvQuery]);
 
   function closeNewConv() {
     setNewConvOpen(false);
     setNewConvQuery("");
     setNewConvResults(null);
+    setNewConvFriends(null);
+    setNewConvFilter("company");
   }
 
   async function startNewCompanyConversation(targetUserId: string, targetName: string) {
@@ -993,6 +1036,17 @@ function LobbyChatPanel({
     setNewConvBusy(targetUserId);
     try {
       onStartConversation(targetUserId, targetName, "company");
+      closeNewConv();
+    } finally {
+      setNewConvBusy(null);
+    }
+  }
+
+  async function startNewPrivateConversation(targetUserId: string, targetName: string) {
+    if (newConvBusy) return;
+    setNewConvBusy(targetUserId);
+    try {
+      onStartConversation(targetUserId, targetName, "private");
       closeNewConv();
     } finally {
       setNewConvBusy(null);
@@ -1191,6 +1245,28 @@ function LobbyChatPanel({
 
       {newConvOpen ? (
         <div className="chat-new-conv-body">
+          {/* 30/set, pedido do Douglas: "buscar uma pessoa pra nova
+              conversa, coloque filtro / Amigos / Empresa" -- mesmo
+              visual de aba que .chat-lane-tabs, reaproveitado aqui.
+              "Amigos" = só amigo mútuo, cria conversa "private";
+              "Empresa" = qualquer conta (comportamento de sempre),
+              cria "company". */}
+          <div className="chat-lane-tabs">
+            <button
+              type="button"
+              className={`chat-lane-tab${newConvFilter === "friends" ? " chat-lane-tab-active" : ""}`}
+              onClick={() => setNewConvFilter("friends")}
+            >
+              Amigos
+            </button>
+            <button
+              type="button"
+              className={`chat-lane-tab${newConvFilter === "company" ? " chat-lane-tab-active" : ""}`}
+              onClick={() => setNewConvFilter("company")}
+            >
+              Empresa
+            </button>
+          </div>
           <input
             type="text"
             className="contacts-panel-search"
@@ -1199,7 +1275,39 @@ function LobbyChatPanel({
             onChange={(e) => setNewConvQuery(e.target.value)}
             autoFocus
           />
-          {newConvResults === null ? (
+          {newConvFilter === "friends" ? (
+            newConvFriends === null ? (
+              <p className="chat-empty-hint">Buscando…</p>
+            ) : visibleNewConvFriends.length === 0 ? (
+              <p className="chat-empty-hint">
+                {newConvQuery
+                  ? "Nenhum amigo com esse nome."
+                  : "Você ainda não tem amigo mútuo. Vire amigo de alguém no painel de Amigos primeiro."}
+              </p>
+            ) : (
+              <div className="chat-picker-list">
+                {visibleNewConvFriends.map((u) => (
+                  <button
+                    key={u.userId}
+                    type="button"
+                    className={newConvBusy === u.userId ? "chat-picker-item busy" : "chat-picker-item"}
+                    disabled={!!newConvBusy}
+                    onClick={() => startNewPrivateConversation(u.userId, u.name)}
+                  >
+                    <span className="chat-conv-avatar" style={{ background: "#5a4b7c" }}>
+                      {u.photoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={u.photoUrl} alt="" />
+                      ) : (
+                        (u.name || "?").trim().charAt(0).toUpperCase() || "?"
+                      )}
+                    </span>
+                    <span>{u.name || "(sem nome)"}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          ) : newConvResults === null ? (
             <p className="chat-empty-hint">Buscando…</p>
           ) : newConvResults.length === 0 ? (
             <p className="chat-empty-hint">{newConvQuery ? "Ninguém encontrado." : "Ninguém cadastrado ainda."}</p>
@@ -1264,16 +1372,11 @@ function LobbyChatPanel({
               <div className="chat-conv-list">
                 {visibleLaneConversations.map((c) => (
                   <button key={c.id} type="button" className="chat-conv-item" onClick={() => setActiveId(c.id)}>
-                    {c.lane === "company" && (
-                      <span className="chat-conv-company-logo" title={c.companyName || "Empresa"}>
-                        {c.companyLogoUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={c.companyLogoUrl} alt="" />
-                        ) : (
-                          <CompanyIcon />
-                        )}
-                      </span>
-                    )}
+                    {/* 30/set, pedido do Douglas: "quero a logo apenas
+                        na aba empresas, porque ter ela nas conversas?"
+                        -- selo por linha removido (a coluna
+                        .chat-company-rail já mostra/filtra por logo,
+                        repetir aqui era redundante). */}
                     <span
                       className="chat-conv-avatar"
                       style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
@@ -1877,16 +1980,24 @@ export default function Lobby({
   // cards enquanto isso, evita clique duplo criando 2 salas.
   const [creatingFromTemplateId, setCreatingFromTemplateId] = useState<string | null>(null);
   const [createRoomError, setCreateRoomError] = useState<string | null>(null);
-  // nome da empresa (29/set (2), pedido do Douglas: "'empresa' tem que
-  // virar o Nome da empresa / A pessoa so cria o espaco depois que
-  // nomeia a empresa") -- passo NOVO antes de escolher o modelo: sem
-  // nome confirmado (companyName vazio), mostra o campo de nome em vez
-  // do catálogo de modelos (ver JSX de needsToCreateRoom mais abaixo).
-  // Confirmar só troca a TELA (pro catálogo) -- a empresa só existe de
-  // verdade quando a sala é criada (handleCreateRoomFromTemplate manda
-  // esse nome pro servidor, que grava em rooms.name).
-  const [companyNameDraft, setCompanyNameDraft] = useState("");
-  const [companyName, setCompanyName] = useState("");
+  // 30/set, Douglas refinou o pedido acima (29/set (2), revertido e
+  // depois reformulado): "entao quando ele clica em criar novo
+  // espaco, crie uma nova tela dessa com o card ali em branco, ele
+  // tendo que adicionar PRIMEIRO o nome da empresa ali, e so depois
+  // criar o espaco" -- "o card" é o MESMO .lobby-company-card-pin
+  // fixo no canto esquerdo (ver comentário grande dele mais abaixo,
+  // "estou falando desse card"), não um campo solto dentro do modal.
+  // Enquanto showCreateRoomFlow tá true, esse card renderiza um
+  // PERFIL PRÓPRIO (BLANK_COMPANY_PROFILE + esse nome, ver cardProfile
+  // mais abaixo) em vez do companyProfile do espaço selecionado --
+  // assim não mostra/edita por engano o card de um espaço que já
+  // existe (ex: Sala Principal, pra quem clica "Criar espaço" a
+  // partir do dropdown já tendo uma sala reservada selecionada).
+  const [newRoomCompanyName, setNewRoomCompanyName] = useState("");
+  // "e so depois criar o espaco" -- confirma o nome (botão "Continuar"
+  // no modal) antes de revelar o catálogo de modelos, mesmo passo-a-
+  // passo de antes, só que o campo de texto virou o card.
+  const [newRoomNameConfirmed, setNewRoomNameConfirmed] = useState(false);
   // "Espaços visitados" (pedido do Douglas, 29/set: "se eu entrar na
   // sala de um amigo, a sala dele vai ficar ali, como um link rapido")
   // -- salas de OUTRAS pessoas que essa conta já visitou por link (ver
@@ -2401,14 +2512,17 @@ export default function Lobby({
    * pedido do Douglas: "as pessoas so copiam a sala modelo, pra eles,
    * ai se cria o mapa pra eles vinculado ao id deles". */
   async function handleCreateRoomFromTemplate(templateId: string) {
-    if (!accountAccessToken || creatingFromTemplateId || !companyName.trim()) return;
+    if (!accountAccessToken || creatingFromTemplateId || !newRoomCompanyName.trim()) return;
     setCreatingFromTemplateId(templateId);
     setCreateRoomError(null);
     try {
       const res = await fetch("/api/room/create-from-template", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
-        body: JSON.stringify({ templateId, companyName: companyName.trim() }),
+        // nome digitado no card em branco (ver newRoomCompanyName/
+        // cardProfile, comentário grande mais acima) -- vira rooms.name
+        // direto na criação.
+        body: JSON.stringify({ templateId, companyName: newRoomCompanyName.trim() }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || typeof data?.room?.room_slug !== "string") {
@@ -2420,6 +2534,8 @@ export default function Lobby({
       setCreatingSpaceFromDropdown(false);
       userPickedRoomRef.current = true;
       setSelectedRoomSlug(created.room_slug);
+      setNewRoomCompanyName("");
+      setNewRoomNameConfirmed(false);
     } catch {
       setCreateRoomError("Não deu pra criar sua sala agora.");
     } finally {
@@ -2755,6 +2871,18 @@ export default function Lobby({
     return days;
   }, [calls]);
 
+  // 30/set, pedido do Douglas ("estou falando desse card" + "o card
+  // ali em branco, ele tendo que adicionar PRIMEIRO o nome da
+  // empresa ali") -- enquanto showCreateRoomFlow tá true, o card
+  // fixo (.lobby-company-card-pin mais abaixo) mostra esse perfil
+  // PRÓPRIO (em branco + só o nome que a pessoa tá digitando) em vez
+  // do companyProfile do espaço selecionado -- evita mostrar/editar
+  // por engano o card de um espaço que já existe (ex: alguém clica
+  // "Criar espaço" no dropdown com Sala Principal ainda selecionada).
+  const cardProfile: CompanyProfile = showCreateRoomFlow
+    ? { ...BLANK_COMPANY_PROFILE, name: newRoomCompanyName }
+    : companyProfile;
+
   return (
     <div className="lobby-backdrop">
       {/* barra de topo -- pedido do Douglas (28/set, com print de
@@ -3033,28 +3161,45 @@ export default function Lobby({
               fazia parte do design ORIGINAL do banner da Obrazur, não
               porque o app deveria desenhar um texto ali). Essa faixa
               clara agora é só a moldura da foto de banner mesmo (ver
-              companyProfile.bannerUrl) -- sem overlay/tinta em cima
-              (não tem mais texto pra proteger a legibilidade de). */}
+              cardProfile.bannerUrl) -- sem overlay/tinta em cima (não
+              tem mais texto pra proteger a legibilidade de). */}
           <div
             className="company-card-top"
-            style={companyProfile.bannerUrl ? { backgroundImage: `url(${companyProfile.bannerUrl})` } : undefined}
+            style={cardProfile.bannerUrl ? { backgroundImage: `url(${cardProfile.bannerUrl})` } : undefined}
           >
             <div className="company-card-logo-box">
-              {companyProfile.logoUrl ? (
+              {cardProfile.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={companyProfile.logoUrl} alt="" />
+                <img src={cardProfile.logoUrl} alt="" />
               ) : (
-                companyProfile.name.charAt(0)
+                cardProfile.name.charAt(0)
               )}
             </div>
           </div>
           <div className="company-card-bottom">
-            <p className="company-card-name">
-              {companyProfile.name}
-              <VerifiedBadge />
-            </p>
-            <p className="company-card-handle">@{companyProfile.handle.replace(/^@/, "")}</p>
-            <p className="company-card-bio">{companyProfile.bio}</p>
+            {/* 30/set, pedido do Douglas: card em branco ao criar
+                espaço novo -- o nome é digitado DIRETO aqui (em vez de
+                um campo solto no modal), showCreateRoomFlow troca o
+                <p> de sempre por um <input>, mesma classe visual
+                (.company-card-name cuida do tamanho/peso da fonte pros
+                dois casos, ver app/globals.css). */}
+            {showCreateRoomFlow ? (
+              <input
+                type="text"
+                className="company-card-name company-card-name-input"
+                placeholder="Nome da empresa"
+                value={newRoomCompanyName}
+                maxLength={80}
+                onChange={(e) => setNewRoomCompanyName(e.target.value)}
+              />
+            ) : (
+              <p className="company-card-name">
+                {cardProfile.name}
+                <VerifiedBadge />
+              </p>
+            )}
+            <p className="company-card-handle">@{cardProfile.handle.replace(/^@/, "")}</p>
+            <p className="company-card-bio">{cardProfile.bio}</p>
             {/* pedido do Douglas: "so vai ter Seguidores (o perfil da
                 empresa nao segue ninguem)" -- perfil de empresa não
                 segue outras contas, então só faz sentido mostrar
@@ -3062,12 +3207,12 @@ export default function Lobby({
                 inteiro do CompanyProfile). */}
             <p className="company-card-stats">
               <span>
-                <strong>{companyProfile.followers}</strong> Seguidores
+                <strong>{cardProfile.followers}</strong> Seguidores
               </span>
             </p>
             <p className="company-card-link">
               <LinkIcon />
-              {companyProfile.link}
+              {cardProfile.link}
             </p>
 
             {/* pedido do Douglas (print de referência com cards
@@ -3084,9 +3229,9 @@ export default function Lobby({
                 é feito com bannerUrl/logoUrl acima. Rola só se não
                 couber tudo (overflow-x + nowrap), sem crescer a altura
                 do card. */}
-            {companyProfile.category.length > 0 && (
+            {cardProfile.category.length > 0 && (
               <div className="company-card-positions">
-                {companyProfile.category.map((cat) => (
+                {cardProfile.category.map((cat) => (
                   <div
                     key={cat}
                     className="company-card-position-card"
@@ -3119,7 +3264,7 @@ export default function Lobby({
             fetch de /api/room/company-profile mais acima) -- antes
             era sempre visível (o card era um molde só seu, sem
             "espaço de outra pessoa" pra sequer existir). */}
-        {companyProfileCanEdit && (
+        {companyProfileCanEdit && !showCreateRoomFlow && (
           <button
             type="button"
             className="company-card-edit-trigger"
@@ -3133,7 +3278,7 @@ export default function Lobby({
         )}
       </div>
 
-      {companyEditOpen && companyProfileCanEdit && (
+      {companyEditOpen && companyProfileCanEdit && !showCreateRoomFlow && (
         <>
           {/* clique fora fecha -- mas SEM escurecer o resto da tela
               (o pedido foi só o painel em si ficar "em blur
@@ -3493,8 +3638,8 @@ export default function Lobby({
                 className="lobby-create-room-cancel-btn"
                 onClick={() => {
                   setCreatingSpaceFromDropdown(false);
-                  setCompanyName("");
-                  setCompanyNameDraft("");
+                  setNewRoomCompanyName("");
+                  setNewRoomNameConfirmed(false);
                 }}
               >
                 ✕ Cancelar
@@ -3503,29 +3648,22 @@ export default function Lobby({
             <p className="lobby-create-room-title">Você ainda não tem uma sala</p>
             {!accountAccessToken ? (
               <p className="lobby-create-room-hint">Crie uma conta pra ganhar a sua.</p>
-            ) : !companyName ? (
-              // passo novo, ANTES do catálogo (ver comentário grande em
-              // companyNameDraft/companyName mais acima): sem nome de
-              // empresa confirmado, nem mostra os modelos ainda.
+            ) : !newRoomNameConfirmed ? (
+              // 30/set, pedido do Douglas ("estou falando desse card",
+              // apontando pro .lobby-company-card-pin): o nome não é
+              // digitado num campo solto aqui dentro -- é digitado
+              // direto NO CARD fixado do lado (ver cardProfile/input em
+              // .company-card-name mais abaixo), esse trecho só
+              // confirma o passo antes de revelar o catálogo.
               <>
-                <p className="lobby-create-room-hint">Como se chama a sua empresa?</p>
-                <input
-                  type="text"
-                  className="lobby-create-room-company-input"
-                  placeholder="Nome da empresa"
-                  value={companyNameDraft}
-                  maxLength={80}
-                  autoFocus
-                  onChange={(e) => setCompanyNameDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && companyNameDraft.trim()) setCompanyName(companyNameDraft.trim());
-                  }}
-                />
+                <p className="lobby-create-room-hint">
+                  Preencha o nome da sua empresa no card fixado do lado -- ele já nasce junto com a sua sala.
+                </p>
                 <button
                   type="button"
                   className="lobby-create-room-company-btn"
-                  disabled={!companyNameDraft.trim()}
-                  onClick={() => setCompanyName(companyNameDraft.trim())}
+                  disabled={!newRoomCompanyName.trim()}
+                  onClick={() => setNewRoomNameConfirmed(true)}
                 >
                   Continuar
                 </button>
@@ -3537,7 +3675,7 @@ export default function Lobby({
             ) : (
               <>
                 <p className="lobby-create-room-hint">
-                  Escolha um modelo pra começar a sala de <strong>{companyName}</strong>:
+                  Escolha um modelo pra começar a sala de <strong>{newRoomCompanyName.trim()}</strong>:
                 </p>
                 <div className="lobby-create-room-templates">
                   {templates.map((t) => (
@@ -3553,7 +3691,11 @@ export default function Lobby({
                   ))}
                 </div>
                 {createRoomError && <p className="lobby-create-room-error">{createRoomError}</p>}
-                <button type="button" className="lobby-create-room-back-btn" onClick={() => setCompanyName("")}>
+                <button
+                  type="button"
+                  className="lobby-create-room-back-btn"
+                  onClick={() => setNewRoomNameConfirmed(false)}
+                >
                   ← Trocar nome da empresa
                 </button>
               </>

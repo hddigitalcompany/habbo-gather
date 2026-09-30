@@ -10,15 +10,17 @@
 // muda a sala já criada (mesmo contrato descrito no comentário
 // original de source_template_id em 0032_rooms.sql).
 //
-// companyName É OBRIGATÓRIO (29/set (2), pedido do Douglas: "'empresa'
-// tem que virar o Nome da empresa / A pessoa so cria o espaco depois
-// que nomeia a empresa") -- vira o `name` da sala direto (ver comment
-// grande onde é usado, mais abaixo), que por sua vez é o que aparece
-// como rótulo da aba "Empresa" do chat (ver companyName em
-// components/GameRoom.tsx/ChatDrawer e myRoom?.name em
-// components/Lobby.tsx/LobbyChatPanel) -- é por isso que precisa
-// existir ANTES da sala: sem nome de empresa, não tem o que mostrar
-// naquela aba.
+// companyName É OPCIONAL (30/set, Douglas voltou atrás do pedido de
+// 29/set (2) acima: "esse aviso aqui e valido, mas eu quero que a
+// pessoa preencha no card da empresa do lado nao aqui, o card da
+// empresa fica grudado ao espaco, se ele colocar aqui, nao vai
+// preencher o card da empresa, fica meio obsoleto" -- o passo de
+// nomear antes de criar duplicava o Card da Empresa/POST
+// /api/room/company-profile, que é o editor de verdade e já escreve
+// nesse MESMO `rooms.name`). Sem nome enviado, a sala nasce com
+// DEFAULT_COMPANY_NAME abaixo -- a pessoa troca no Card da Empresa
+// (fica "grudado" na sala, ver company-profile/route.ts) assim que
+// quiser, sem duplicar dado nenhum.
 //
 // room_slug da sala nova = o PRÓPRIO id (uuid) dela -- gerado aqui
 // (crypto.randomUUID()) em vez de deixar o Postgres gerar sozinho, só
@@ -43,6 +45,10 @@ export const dynamic = "force-dynamic";
 // sala de verdade: essa rota devolveria Sala Principal de novo pra
 // sempre, achando que já era "a sala" da pessoa).
 const RESERVED_SLUGS = new Set(["sala-principal", "mapa-modelo"]);
+// nome padrão quando a pessoa cria a sala sem passar companyName (ver
+// comentário grande no topo do arquivo) -- ela troca isso no Card da
+// Empresa quando quiser, mesmo rooms.name de sempre.
+const DEFAULT_COMPANY_NAME = "Minha Empresa";
 
 export async function POST(req: NextRequest) {
   const userId = await getVerifiedUserId(req);
@@ -54,8 +60,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const templateId = typeof body?.templateId === "string" ? body.templateId.trim() : "";
   if (!templateId) return NextResponse.json({ error: "templateId é obrigatório" }, { status: 400 });
-  const companyName = typeof body?.companyName === "string" ? body.companyName.trim().slice(0, 80) : "";
-  if (!companyName) return NextResponse.json({ error: "nome da empresa é obrigatório" }, { status: 400 });
+  const bodyCompanyName = typeof body?.companyName === "string" ? body.companyName.trim().slice(0, 80) : "";
+  const companyName = bodyCompanyName || DEFAULT_COMPANY_NAME;
 
   // idempotente -- se a pessoa já tem sala própria (ex: clicou 2x,
   // ou deu refresh no meio do fluxo), devolve ela de novo em vez de
@@ -85,11 +91,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "modelo não encontrado (ou ainda não publicado)" }, { status: 404 });
   }
 
-  // `name` da sala É o nome da empresa que a pessoa acabou de digitar
-  // (ver comentário grande no topo do arquivo) -- antes era um nome
-  // genérico ("Sala de Fulano"/"Minha sala"); agora é sempre o que a
-  // pessoa nomeou, porque esse mesmo campo é o que aparece pros outros
-  // como rótulo da aba "Empresa" do chat.
+  // `name` da sala É o nome da empresa (ver comentário grande no topo
+  // do arquivo) -- companyName aqui já é o que a pessoa digitou (se
+  // mandou) ou DEFAULT_COMPANY_NAME (se não mandou, fluxo atual: ela
+  // troca depois no Card da Empresa). Esse mesmo campo é o que aparece
+  // pros outros como rótulo da aba "Empresa" do chat.
   const newRoomId = randomUUID();
   const inserted = await admin
     .from("rooms")
