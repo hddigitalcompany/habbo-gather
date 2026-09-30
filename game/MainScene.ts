@@ -420,6 +420,12 @@ const DEPTH_FLAT_FURNITURE = -1_000_000;
 // piso pintado (ver game/floor.ts) fica ATRÁS até de um tapete "flat" --
 // é o próprio chão, tudo o mais (móvel flat incluso) fica em cima dele.
 const DEPTH_FLOOR = -2_000_000;
+/** Quantas vezes drawFloorEdgeGlass empilha o mesmo painel de vidro
+ * abaixo do piso (ver comentário grande lá) -- pedido do Douglas:
+ * "repita o piso abaixo, a cada frame de altura de parede". 6 x
+ * heightPx dá uma queda bem longa (sensação de vários andares) sem
+ * desenhar graphics demais à toa. */
+const FLOOR_GLASS_REPEATS = 6;
 
 // tinta de área (ver game/areas.ts) fica ENTRE o piso e a mobília "flat" --
 // é um "verniz" por cima do chão marcando a zona (mesa privada/sala),
@@ -4215,7 +4221,14 @@ export default class MainScene extends Phaser.Scene {
   private drawFloorEdgeGlass() {
     this.floorEdgeGlassGfx?.destroy();
     const gfx = this.add.graphics().setDepth(DEPTH_FLOOR - 1);
-    const heightPx = 120; // mesmo heightPx de FACADE_GLASS_ENTRY.pattern (game/wall.ts) -- consistência visual com a parede
+    const entry = wallEntryById(FACADE_GLASS_STYLE_ID);
+    const heightPx = entry?.pattern?.heightPx ?? 165; // mesmo heightPx de FACADE_GLASS_ENTRY.pattern (game/wall.ts) -- consistência visual com a parede, nunca hardcoded 2x
+    // pedido do Douglas: "repita o piso abaixo, a cada frame de altura
+    // de parede" -- em vez de 1 painel só, repete o MESMO desenho
+    // (laje+vidro+perfil) empilhado FLOOR_GLASS_REPEATS vezes, cada um
+    // exatamente heightPx mais abaixo que o anterior (v crescente desce
+    // na tela, ver mapPoint abaixo) -- dá a sensação de vários andares
+    // do prédio se repetindo lá embaixo, não só 1 tira.
     for (const edge of this.computeFacadeEdges()) {
       const { a, b } = wallEdgeFloorPoints(edge.col, edge.row, edge.side);
       const dx = b.x - a.x;
@@ -4224,8 +4237,11 @@ export default class MainScene extends Phaser.Scene {
       if (edgeLength === 0) continue;
       const alongX = dx / edgeLength;
       const alongY = dy / edgeLength;
-      const mapPoint = (u: number, v: number) => ({ x: a.x + alongX * u, y: a.y + alongY * u + v });
-      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx);
+      for (let i = 0; i < FLOOR_GLASS_REPEATS; i++) {
+        const vOffset = i * heightPx;
+        const mapPoint = (u: number, v: number) => ({ x: a.x + alongX * u, y: a.y + alongY * u + vOffset + v });
+        this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLength, heightPx);
+      }
     }
     this.floorEdgeGlassGfx = gfx;
   }

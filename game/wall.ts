@@ -280,7 +280,7 @@ const FACADE_GLASS_ENTRY: WallCatalogEntry = {
   label: "Fachada de vidro (sistema)",
   file: "",
   pattern: {
-    heightPx: 120,
+    heightPx: 165,
     thicknessPx: 10,
     brickWidthPx: 24,
     brickHeightPx: 14,
