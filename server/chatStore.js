@@ -278,6 +278,77 @@ export function getConversation(conversationId) {
   return store.conversations[conversationId] ?? null;
 }
 
+/** "3 pontinhos" -- mover uma conversa 1x1 de aba (Empresa <-> Privada,
+ * pedido do Douglas, 29/set (18): "nas conversas tem que ter 3
+ * pontinhos do lado lá, que ele pode jogar a conversa pra alguma
+ * empresa, e vice versa, apenas com conversas 1x1, nos grupos nao").
+ * Não mexe na TRAVA de amigo mútuo (essa é só pra CRIAR uma conversa
+ * nova pela aba Empresa/painel de Amigos, ver getOrCreateDirectConversation
+ * e os call sites em server/index.js) -- mover uma conversa que já
+ * existe é ação deliberada da própria pessoa, não passa por ela.
+ *
+ * `directKey` inclui a lane (ver comentário grande dela acima -- o
+ * mesmo par pode ter uma conversa "company" E uma "private" ao mesmo
+ * tempo), então mudar a lane de uma conversa existente pode fazer ela
+ * colidir com outra que já existia na lane de destino. Nesse caso,
+ * MESCLA: todas as mensagens das duas entram na sobrevivente (por
+ * ordem de horário), a outra é apagada -- histórico de nenhum dos dois
+ * lados se perde, só vira uma conversa só, exatamente o que "jogar a
+ * conversa pra lá" quer dizer quando já tinha prosa nas duas.
+ *
+ * `companyInfo` (mesmo formato de getOrCreateDirectConversation) só
+ * importa indo PRA "company" -- indo pra "private" sempre limpa
+ * companyName/companyLogoUrl (conversa privada nunca carimba empresa).
+ * Devolve { conversation, removedConversationId } -- removedConversationId
+ * é o id da OUTRA conversa apagada na mescla (null se não colidiu com
+ * nenhuma), pra quem chamar avisar os dois lados de tirar esse id da
+ * lista local deles (ver sendConversationTo/chat:conversation-removed
+ * em server/index.js). null (não o objeto) se não existir/não for
+ * direta (grupo)/quem pediu não for participante dela.
+ */
+export function setConversationLane(conversationId, requesterUserId, lane, companyInfo = null) {
+  const conv = store.conversations[conversationId];
+  if (!conv || conv.kind !== "direct") return null;
+  if (!conv.participantIds.includes(requesterUserId)) return null;
+  if (lane !== "company" && lane !== "private") return null;
+  if (conv.lane === lane) return { conversation: conv, removedConversationId: null }; // já tá lá, nada pra fazer
+
+  const [userIdA, userIdB] = conv.participantIds;
+  const newKey = directKeyFor(userIdA, userIdB, lane);
+  const collision = Object.values(store.conversations).find(
+    (c) => c.id !== conv.id && c.kind === "direct" && c.directKey === newKey
+  );
+
+  if (collision) {
+    // mescla as mensagens das duas na sobrevivente (conv, a que
+    // mudou de lane) -- ordena por ts pra não embaralhar o histórico.
+    const ownMsgs = store.messages[conv.id] ?? [];
+    const otherMsgs = store.messages[collision.id] ?? [];
+    const merged = [...ownMsgs, ...otherMsgs].sort((a, b) => a.ts - b.ts);
+    if (merged.length > MAX_MESSAGES_PER_CONVERSATION) {
+      merged.splice(0, merged.length - MAX_MESSAGES_PER_CONVERSATION);
+    }
+    store.messages[conv.id] = merged;
+    delete store.messages[collision.id];
+    // lastRead: mantém o mais RECENTE de cada usuário entre as duas
+    // (nunca marca como "lido" algo que a pessoa não tinha visto).
+    const mergedLastRead = { ...collision.lastRead, ...conv.lastRead };
+    for (const uid of Object.keys(collision.lastRead || {})) {
+      if (collision.lastRead[uid] > (conv.lastRead?.[uid] ?? 0)) mergedLastRead[uid] = collision.lastRead[uid];
+    }
+    conv.lastRead = mergedLastRead;
+    if (merged.length > 0) conv.updatedAt = merged[merged.length - 1].ts;
+    delete store.conversations[collision.id];
+  }
+
+  conv.lane = lane;
+  conv.directKey = newKey;
+  conv.companyName = lane === "company" && companyInfo ? companyInfo.name : null;
+  conv.companyLogoUrl = lane === "company" && companyInfo ? companyInfo.logoUrl : null;
+  persist();
+  return { conversation: conv, removedConversationId: collision ? collision.id : null };
+}
+
 export function isParticipant(conversationId, userId) {
   const conv = store.conversations[conversationId];
   return !!conv && conv.participantIds.includes(userId);

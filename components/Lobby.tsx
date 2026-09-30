@@ -864,6 +864,7 @@ function LobbyChatPanel({
   onSent,
   onStartConversation,
   onConversationRead,
+  onConversationsReplaced,
   initialActiveId,
 }: {
   myUserId: string;
@@ -879,9 +880,19 @@ function LobbyChatPanel({
   // depois, ver useEffect grande de "as conversas tambem nao abrem
   // fora da sala" mais abaixo).
   onConversationRead: (conversationId: string) => void;
+  // "3 pontinhos" -- POST /chat/set-lane (ver moveConversationLane
+  // logo abaixo) devolve a conversa já atualizada e (se mesclou com
+  // outra que já existia na lane de destino) o id da que sumiu; esse
+  // callback repassa isso pro Lobby (dono de verdade do state
+  // `conversations`) atualizar a lista, mesmo espírito de
+  // onConversationRead acima.
+  onConversationsReplaced: (removedConversationId: string | null, conversation: ConversationSummary) => void;
   initialActiveId?: string | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
+  // "3 pontinhos" -- id da conversa com o menu de mover-de-aba aberto
+  // agora (null = nenhum), mesmo padrão do ChatDrawer em GameRoom.tsx.
+  const [convMenuOpenId, setConvMenuOpenId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   // corte "mensagens não vistas" (ver comentário grande no POST
   // /chat/open em server/index.js) -- só pra desenhar a linha divisória
@@ -1042,6 +1053,33 @@ function LobbyChatPanel({
   }, [activeId, myUserId]);
 
   const activeConversation = conversations?.find((c) => c.id === activeId) ?? null;
+
+  // "3 pontinhos" -- MESMA ação do case "chat:set_lane" do WebSocket
+  // (ver ChatDrawer/moveConversationLane em GameRoom.tsx), só que sem
+  // socket (POST /chat/set-lane, ver comentário grande no topo do
+  // arquivo sobre esse painel ser REST-only). Sem companyInfo (o Lobby
+  // não tá "dentro" de sala nenhuma) -- mover pra "Empresa" por aqui
+  // nunca carimba logo/nome, só o ícone genérico (ver CompanyIcon).
+  async function moveConversationLane(conversationId: string, lane: "company" | "private") {
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/set-lane`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, userId: myUserId, lane }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.conversation) onConversationsReplaced(data.removedConversationId ?? null, data.conversation);
+      // se a conversa REMOVIDA (mesclada na sobrevivente) era a que
+      // tava aberta aqui, troca pra sobrevivente em vez de deixar o
+      // painel apontando pra um id que não existe mais.
+      if (data?.removedConversationId && activeId === data.removedConversationId) {
+        setActiveId(data.conversation?.id ?? null);
+      }
+    } catch {
+      // rede caiu -- sem feedback especial, a pessoa tenta de novo
+    }
+  }
 
   async function sendMessage() {
     const text = draft.trim();
@@ -1242,6 +1280,39 @@ function LobbyChatPanel({
                         </span>
                       )}
                     </span>
+                    {/* "3 pontinhos" -- mesmo padrão/mesmo motivo do
+                        ChatDrawer (dentro da sala, ver comentário
+                        grande em components/GameRoom.tsx): só conversa
+                        DIRETA, <span> com stopPropagation em vez de
+                        <button> (linha inteira já é um botão). */}
+                    {c.kind === "direct" && (
+                      <span className="chat-conv-menu-wrap" onClick={(e) => e.stopPropagation()}>
+                        <span
+                          className="chat-conv-menu-btn"
+                          title="Mais opções"
+                          onClick={() => setConvMenuOpenId((prev) => (prev === c.id ? null : c.id))}
+                        >
+                          ⋮
+                        </span>
+                        {convMenuOpenId === c.id && (
+                          <>
+                            <div className="chat-conv-menu-backdrop" onClick={() => setConvMenuOpenId(null)} />
+                            <div className="chat-conv-menu">
+                              <button
+                                type="button"
+                                className="chat-conv-menu-item"
+                                onClick={() => {
+                                  moveConversationLane(c.id, c.lane === "company" ? "private" : "company");
+                                  setConvMenuOpenId(null);
+                                }}
+                              >
+                                {c.lane === "company" ? "Mover para Conversas privadas" : "Mover para Empresa"}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -2555,6 +2626,23 @@ export default function Lobby({
     );
   }
 
+  // "3 pontinhos" -- ver onConversationsReplaced/moveConversationLane
+  // em LobbyChatPanel. removedConversationId (mesclou com outra que já
+  // existia na lane de destino) sai da lista; a conversa atualizada
+  // (nova lane, pode ser a mesclada) entra/substitui pelo id dela.
+  function handleConversationsReplaced(removedConversationId: string | null, conversation: ConversationSummary) {
+    setConversations((prev) => {
+      if (!prev) return prev;
+      const withoutRemoved = removedConversationId ? prev.filter((c) => c.id !== removedConversationId) : prev;
+      const rest = withoutRemoved.filter((c) => c.id !== conversation.id);
+      // ConversationSummary não tem updatedAt (diferente do Conversation
+      // de dentro da sala, ver GameRoom.tsx) -- só põe na FRENTE (acabou
+      // de mexer nela agora mesmo), sem tentar reordenar o resto; o
+      // próximo poll de /chat/summary (6s) reordena de verdade.
+      return [conversation, ...rest];
+    });
+  }
+
   function handleMessageSent(conversationId: string, message: ChatMessage) {
     setConversations((prev) =>
       prev
@@ -3604,6 +3692,7 @@ export default function Lobby({
           onSent={handleMessageSent}
           onStartConversation={(targetUserId, _targetName, lane) => handleStartConversation(targetUserId, lane)}
           onConversationRead={handleConversationRead}
+          onConversationsReplaced={handleConversationsReplaced}
           initialActiveId={openChatConversationId}
         />
       )}

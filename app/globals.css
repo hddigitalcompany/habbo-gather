@@ -1023,6 +1023,79 @@ button.chat-picker-item:disabled {
   background: #35d67a;
 }
 
+/* "3 pontinhos" numa conversa 1x1 (ver ChatDrawer em GameRoom.tsx e
+   LobbyChatPanel em Lobby.tsx) -- pedido do Douglas (29/set (18)):
+   "nas conversas tem que ter 3 pontinhos do lado lá, que ele pode
+   jogar a conversa pra alguma empresa, e vice versa, apenas com
+   conversas 1x1, nos grupos nao". wrap precisa de position:relative
+   (âncora do menu) -- o próprio .chat-conv-item (irmão) NÃO pode ser a
+   âncora porque ele é o <button> da linha inteira, ficaria a mesma
+   largura da linha toda em vez de colado no botão de 3 pontos. */
+.chat-conv-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.chat-conv-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-conv-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* mesma ideia do .lobby-topbar-dropdown-backdrop (clique fora fecha),
+   só que sem cor nenhuma de fundo próprio aqui também -- só existe pra
+   capturar o clique. */
+.chat-conv-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+}
+
+.chat-conv-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 21;
+  min-width: 190px;
+  background: rgba(28, 22, 44, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+.chat-conv-menu-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: #e8e4f4;
+  font-size: 12.5px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.chat-conv-menu-item:hover {
+  background: rgba(124, 92, 255, 0.22);
+}
+
+
 /* mesmo botão "ativo" roxo dos outros ícones do cabeçalho, mas em verde
    -- fica ligado enquanto EU tô na chamada dessa conversa. */
 .chat-icon-btn.call-active {
@@ -6299,18 +6372,21 @@ button.chat-picker-item:disabled {
   pointer-events: none;
 }
 
-/* .slid some um frame depois de montar (ver useEffect em
-   RoomLoadingScreen -- precisa nascer no estado INICIAL pra transição
-   ter de onde sair, não já no final) -- 88px = largura do selo (72px)
-   + gap (16px) logo abaixo, o suficiente pra o selo nascer exatamente
-   em cima de onde "Tower" vai ficar, escondendo ele, e "desliza pra
-   esquerda" (translateX volta a 0) até a posição final lado a lado. */
+/* .slid só entra depois de ROOM_LOADING_LOGO_ALONE_MS (3s, ver
+   RoomLoadingScreen em components/GameRoom.tsx -- pedido do Douglas,
+   29/set (18): "3 so com a logo, depois o texto sai") -- precisa
+   nascer no estado INICIAL pra transição ter de onde sair, não já no
+   final. 88px = largura do selo (72px) + gap (16px) logo abaixo, o
+   suficiente pra o selo nascer exatamente em cima de onde "Tower" vai
+   ficar, escondendo ele, e "desliza pra esquerda" (translateX volta a
+   0) até a posição final lado a lado -- 1.1s (era 0.7s) pelo mesmo
+   pedido: "ficou legal o efeito mas ele tem que ser mais estenso". */
 .room-loading-lockup {
   display: flex;
   align-items: center;
   gap: 16px;
   transform: translateX(88px);
-  transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 1.1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .room-loading-lockup.slid {
@@ -6355,7 +6431,8 @@ button.chat-picker-item:disabled {
   white-space: nowrap;
   opacity: 0;
   clip-path: inset(0 100% 0 0);
-  transition: opacity 0.5s ease 0.25s, clip-path 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.2s;
+  /* durações estendidas junto com o selo acima (era 0.5s/0.6s) */
+  transition: opacity 0.8s ease 0.3s, clip-path 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.25s;
 }
 
 .room-loading-lockup.slid .room-loading-tower {

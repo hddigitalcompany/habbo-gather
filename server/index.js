@@ -471,12 +471,40 @@ function sendToUser(userId, data) {
   }
 }
 
+/** Acha o `player` de verdade (com .accountVerified, .name etc) de um
+ * userId, se ele estiver conectado AGORA em qualquer sala -- mesma
+ * varredura de handleGetPresence (GET /room/presence) logo abaixo,
+ * reaproveitada aqui pro fix "visitante não cai no chat empresa" (ver
+ * comentário grande em chat:create_direct). connectionsByUserId só
+ * guarda o Set<ws>, não o player -- o player de verdade vive dentro do
+ * Map por sala (rooms), então precisa varrer. Retorna undefined se a
+ * pessoa não estiver conectada em NENHUMA sala nesse instante (ex:
+ * desconectou entre o clique e essa mensagem chegar) -- quem chama
+ * trata esse caso como "não dá pra confirmar, assume visitante" (mais
+ * seguro: nunca carimba "Empresa" numa dúvida). */
+function findLivePlayerByUserId(userId) {
+  for (const room of rooms.values()) {
+    for (const { player } of room.values()) {
+      if (player.userId === userId) return player;
+    }
+  }
+  return undefined;
+}
+
 /** Manda a versão "enriquecida" (com participantes/preview) de UMA
  * conversa específica pro dono de um userId -- usado depois de criar/
  * renomear, cada participante vê a lista atualizar sozinha. */
 function sendConversationTo(userId, conversationId) {
   const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conversationId);
   if (enriched) sendToUser(userId, { type: "chat:conversation", conversation: enriched });
+}
+
+/** Avisa um usuário que uma conversa SUMIU da lista dele -- só
+ * acontece hoje quando setConversationLane (ver chatStore.js) mescla
+ * duas conversas em uma (mover pra uma aba que já tinha conversa com
+ * a mesma pessoa) e a "perdedora" é apagada de vez. */
+function sendConversationRemovedTo(userId, conversationId) {
+  sendToUser(userId, { type: "chat:conversation_removed", conversationId });
 }
 
 // --- lembrete de call agendada (ver server/agendaStore.js) ---
@@ -1024,6 +1052,50 @@ async function handlePostChatOpen(req, res) {
   const unreadSinceTs = chatStore.markConversationRead(conversationId, userId) ?? 0;
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
   res.end(JSON.stringify({ ok: true, unreadSinceTs }));
+}
+
+/** POST /chat/set-lane -- MESMA ação do case "chat:set_lane" do
+ * WebSocket acima ("3 pontinhos" -- mover conversa 1x1 pra outra aba),
+ * só que sem socket -- o Lobby chama isso (ver comentário grande no
+ * topo de components/Lobby.tsx sobre esse painel ser REST-only). SEM
+ * companyInfo: o Lobby não tá "dentro" de nenhuma sala específica (não
+ * tem roomId nenhum aqui, diferente do WS que sabe a sala da conexão),
+ * então mover pra "company" pelo Lobby nunca carimba logo/nome de
+ * empresa (fica com o ícone genérico, ver CompanyIcon em
+ * components/Lobby.tsx) -- só um "jogar pra lá dentro da sala" (ver
+ * chat:set_lane) carimba de verdade. Empurra em tempo real
+ * (sendToUser) pra quem já tiver socket aberto (ex: a outra pessoa tá
+ * dentro de uma sala agora), mesmo espírito de handlePostChatSend
+ * abaixo. */
+async function handlePostChatSetLane(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId, lane } = body;
+  if (typeof conversationId !== "string" || typeof userId !== "string" || !userId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"');
+    return;
+  }
+  if (lane !== "company" && lane !== "private") {
+    res.writeHead(400, corsHeaders());
+    res.end('"lane" precisa ser "company" ou "private"');
+    return;
+  }
+  const result = chatStore.setConversationLane(conversationId, userId, lane, null);
+  if (!result) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não dá pra mover essa conversa (não existe, é grupo, ou você não participa dela).");
+    return;
+  }
+  const { conversation, removedConversationId } = result;
+  for (const uid of conversation.participantIds) {
+    if (uid === userId) continue;
+    if (removedConversationId) sendConversationRemovedTo(uid, removedConversationId);
+    sendConversationTo(uid, conversation.id);
+  }
+  const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conversation.id);
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, conversation: enriched, removedConversationId }));
 }
 
 /** POST /chat/send -- manda mensagem de TEXTO numa conversa já
@@ -1629,6 +1701,11 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/chat/set-lane") {
+    handlePostChatSetLane(req, res);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/chat/send") {
     handlePostChatSend(req, res);
     return;
@@ -2111,15 +2188,32 @@ wss.on("connection", async (ws, req) => {
       case "chat:create_direct": {
         if (typeof data.targetUserId !== "string" || !data.targetUserId) break;
         if (data.targetUserId === player.userId) break;
+        const targetUserId = data.targetUserId;
+        // "Visitante nao cai no chat empresa / vai pra conversas
+        // privadas" (Douglas, 29/set (18)) -- "Empresa" é pra contato
+        // de negócio de verdade (fica carimbado com a logo da sala,
+        // ver companyInfo abaixo); visitante SEM CONTA (ou o próprio
+        // remetente ainda sem conta) não tem esse contexto nenhum, cai
+        // sempre em "private" -- e SEM a trava de amigo mútuo de baixo
+        // (ela não faz sentido pra quem não tem conta pra ser "amigo"
+        // de ninguém -- ver areMutualFriends em chatStore.js, que
+        // consulta a tabela followers, ligada a auth.users). Só entre
+        // DUAS contas confirmadas que a lane pedida pelo cliente (e a
+        // trava de amigo mútuo pra "private") continuam valendo, igual
+        // sempre foi. targetPlayer pode vir undefined (desconectou
+        // entre o clique e essa mensagem chegar) -- trata como
+        // visitante nessa dúvida, nunca carimba "Empresa" errado.
+        const targetPlayer = findLivePlayerByUserId(targetUserId);
+        const eitherIsGuest = !player.accountVerified || !(targetPlayer?.accountVerified);
+        const requestedLane = data.lane === "private" ? "private" : "company";
+        const lane = eitherIsGuest ? "private" : requestedLane;
         // mesma trava/mesmo motivo do POST /chat/direct em cima (lane
         // "private" só entre amigos mútuos) -- async porque confere
         // a tabela followers no Supabase, ver comentário grande sobre
         // esse padrão de IIFE no topo do "identify" (não dá pra usar
         // await direto aqui, o handler de "message" é síncrono).
-        const targetUserId = data.targetUserId;
-        const lane = data.lane === "private" ? "private" : "company";
         (async () => {
-          if (lane === "private" && !(await chatStore.areMutualFriends(player.userId, targetUserId))) {
+          if (lane === "private" && !eitherIsGuest && !(await chatStore.areMutualFriends(player.userId, targetUserId))) {
             ws.send(JSON.stringify({ type: "error", message: "Só dá pra abrir conversa privada com quem é amigo mútuo." }));
             return;
           }
@@ -2133,6 +2227,34 @@ wss.on("connection", async (ws, req) => {
           const conv = chatStore.getOrCreateDirectConversation(player.userId, targetUserId, lane, companyInfo);
           sendConversationTo(player.userId, conv.id);
           sendConversationTo(targetUserId, conv.id);
+        })();
+        break;
+      }
+      // "3 pontinhos" -- mover uma conversa 1x1 já existente pra outra
+      // aba (Empresa <-> Privada, ver comentário grande de
+      // setConversationLane em chatStore.js). Diferente de
+      // chat:create_direct: aqui NÃO confere amigo mútuo (mover uma
+      // conversa que já existe é ação deliberada da própria pessoa que
+      // já tá nela, não uma criação nova) e funciona só com conversa
+      // DIRETA (setConversationLane já recusa "group" sozinho).
+      case "chat:set_lane": {
+        if (typeof data.conversationId !== "string" || !data.conversationId) break;
+        if (data.lane !== "company" && data.lane !== "private") break;
+        const targetLane = data.lane;
+        (async () => {
+          const conv = chatStore.getConversation(data.conversationId);
+          if (!conv || !conv.participantIds.includes(player.userId)) return;
+          // mesma origem de companyInfo do chat:create_direct acima --
+          // "onde" é a sala dessa CONEXÃO (roomId), só busca indo pra
+          // "company" (única lane que carimba empresa).
+          const companyInfo = targetLane === "company" ? await getRoomCompanyInfo(roomId) : null;
+          const result = chatStore.setConversationLane(data.conversationId, player.userId, targetLane, companyInfo);
+          if (!result) return;
+          const { conversation, removedConversationId } = result;
+          for (const uid of conversation.participantIds) {
+            if (removedConversationId) sendConversationRemovedTo(uid, removedConversationId);
+            sendConversationTo(uid, conversation.id);
+          }
         })();
         break;
       }

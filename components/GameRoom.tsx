@@ -852,6 +852,16 @@ export default function GameRoom({
   // nao some a marcacao").
   const readingConversationIdRef = useRef<string | null>(null);
   readingConversationIdRef.current = chatOpen && chatView === "thread" ? activeConversationId : null;
+  // mesmo padrão do readingConversationIdRef acima -- espelha
+  // activeConversationId (state) num ref, reatribuído a CADA render,
+  // pra dar pra ler o valor ATUAL de dentro do handler de mensagens do
+  // WebSocket (fechado sobre o estado "congelado" do mount, ver
+  // comentário grande do efeito do Phaser). Usado por
+  // "chat:conversation_removed" (ver handlePartyMessage) pra saber se a
+  // conversa que acabou de sumir (mesclada em outra, "3 pontinhos") era
+  // a que tava aberta na hora.
+  const activeConversationIdRef = useRef<string | null>(null);
+  activeConversationIdRef.current = activeConversationId;
   // chamada de voz/vídeo de uma conversa ("tipo discord") -- ver o tipo
   // ChatCallParticipant lá em cima e o mesh em callPeersRef/
   // sendCallSignal. callParticipantsByConversation cobre TODAS as
@@ -2704,6 +2714,27 @@ export default function GameRoom({
           setChatView("thread");
           socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: conv.id }));
         }
+      } else if (data.type === "chat:conversation_removed") {
+        // "3 pontinhos" -- mover conversa de aba mesclou ela com outra
+        // que já existia na lane de destino (ver setConversationLane em
+        // server/chatStore.js); essa aqui é a "perdedora", some da
+        // lista. Se era a conversa ABERTA agora, volta pra lista em vez
+        // de deixar a gaveta apontando pra um id que não existe mais --
+        // a sobrevivente já chega logo em seguida via "chat:conversation"
+        // (mesmo servidor manda os dois eventos juntos, ver
+        // chat:set_lane em server/index.js).
+        const removedId = data.conversationId as string;
+        setConversations((prev) => prev.filter((c) => c.id !== removedId));
+        setMessagesByConv((prev) => {
+          if (!(removedId in prev)) return prev;
+          const next = { ...prev };
+          delete next[removedId];
+          return next;
+        });
+        if (activeConversationIdRef.current === removedId) {
+          setActiveConversationId(null);
+          setChatView("list");
+        }
       } else if (data.type === "chat:history") {
         setMessagesByConv((prev) => ({ ...prev, [data.conversationId]: data.messages }));
         // 29/set (14): corte "mensagens não vistas" de ANTES de marcar
@@ -3609,6 +3640,18 @@ export default function GameRoom({
     socketRef.current?.send(JSON.stringify({ type: "chat:create_direct", targetUserId, lane }));
     setNewConvSelection([]);
     setNewConvName("");
+  }
+
+  // "3 pontinhos" numa conversa 1x1 já existente (pedido do Douglas,
+  // 29/set (18): "nas conversas tem que ter 3 pontinhos do lado lá,
+  // que ele pode jogar a conversa pra alguma empresa, e vice versa,
+  // apenas com conversas 1x1, nos grupos nao") -- ChatDrawer já filtra
+  // pra só mostrar o menu em c.kind === "direct", aqui só manda pro
+  // servidor decidir de verdade (ver case "chat:set_lane" em
+  // server/index.js, que confere participante/kind de novo -- nunca
+  // confia só no filtro do cliente).
+  function moveConversationLane(conversationId: string, lane: "company" | "private") {
+    socketRef.current?.send(JSON.stringify({ type: "chat:set_lane", conversationId, lane }));
   }
 
   function submitNewConversation() {
@@ -4864,6 +4907,7 @@ export default function GameRoom({
     onDiscardRecordedAudio: discardRecordedAudio,
     onSendRecordedAudio: sendRecordedAudio,
     onDeleteMessage: deleteMessage,
+    onMoveConversationLane: moveConversationLane,
     callParticipantsByConversation,
     myCallConversationId,
     callRemoteStreams,
@@ -6797,31 +6841,55 @@ function instagramHref(handle: string) {
  * (ver roomAssetsReady em GameRoom.tsx, que só vira true depois que as
  * 6 buscas de estado salvo da sala já tiverem TODAS terminado).
  *
- * `visible` controla as DUAS fases da animação: false na primeira
- * renderização (só o X, ver .room-loading-mark) e depois de um pulo de
- * frame (ver useEffect abaixo -- precisa ser depois do PRIMEIRO paint
- * pra a transição de verdade acontecer, não só "nascer" já no estado
- * final) vira true (X desliza, "Tower" aparece). `ready=false` (prop)
- * mantém isso tudo montado; quando `ready` vira true de vez (as 6
- * buscas terminaram) o componente pai troca pra `exiting` mais um
- * tick depois, e essa tela mesma cuida do fade-out (onTransitionEnd)
- * antes de desmontar de vez -- fica pelo `unmount` que o pai só chama
- * depois da transição de opacidade acabar, senão sumiria seco.
+ * `slid` controla as DUAS fases da animação: false nos primeiros
+ * ROOM_LOADING_LOGO_ALONE_MS (só o X, parado, ver .room-loading-mark),
+ * depois vira true (X desliza, "Tower" aparece). Independente disso, a
+ * tela só começa a SUMIR quando as duas coisas forem true ao mesmo
+ * tempo: `ready` (prop -- as 6 buscas da sala terminaram) E
+ * ROOM_LOADING_MIN_DISPLAY_MS já ter passado (pedido do Douglas, 29/set
+ * (18): "deixe como padrao 10 segundo" -- vinheta de marca, não só uma
+ * barreira contra pop-in, então tem duração mínima mesmo quando a sala
+ * carrega rápido). Daí entra `exiting`, e essa tela mesma cuida do
+ * fade-out (onTransitionEnd) antes de avisar o pai (`onExited`) pra
+ * desmontar de vez -- nunca antes da transição de opacidade acabar,
+ * senão sumiria seco.
  */
+// 3s só com o X parado no meio, depois desliza revelando "Tower" --
+// pedido do Douglas (29/set (18)): "coloque o X do tower mais tempo no
+// meio, ficou legal o efeito mas ele tem que ser mais estenso / deixe
+// como padrao 10segundo / 3 so com a logo, depois o texto sai".
+const ROOM_LOADING_LOGO_ALONE_MS = 3000;
+// duração PADRÃO da tela inteira -- diferente do fallback de 10s lá no
+// useEffect do Phaser (esse é só rede de segurança contra a sala nunca
+// terminar de carregar, ver comentário grande dele): esse aqui é o
+// MÍNIMO de tempo que a tela fica visível mesmo quando a sala carrega
+// rápido (a intenção agora é ser uma vinheta de marca de verdade, não
+// só uma barreira contra pop-in -- por isso não soma com o fallback,
+// os dois só coincidem por terem o mesmo número).
+const ROOM_LOADING_MIN_DISPLAY_MS = 10000;
+
 function RoomLoadingScreen({ ready, onExited }: { ready: boolean; onExited: () => void }) {
   // anima em 2 passos -- ver comentário grande acima: nasce com
-  // slid=false (só o X, parado) e um efeito troca pra true no PRÓXIMO
-  // frame, senão o CSS não tem "de onde" fazer a transição (montar já
-  // com a classe final não anima nada, é só o estado final direto).
+  // slid=false (só o X, parado) por ROOM_LOADING_LOGO_ALONE_MS, depois
+  // troca pra true (desliza revelando "Tower").
   const [slid, setSlid] = useState(false);
   const [exiting, setExiting] = useState(false);
+  // só true depois de ROOM_LOADING_MIN_DISPLAY_MS -- a tela só começa a
+  // sumir quando ISSO E `ready` (prop, sala terminou de carregar) forem
+  // true AO MESMO TEMPO, não importa a ordem que cada um chega primeiro
+  // (ver o useEffect logo abaixo, que depende dos dois).
+  const [minDisplayElapsed, setMinDisplayElapsed] = useState(false);
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setSlid(true));
-    return () => cancelAnimationFrame(raf);
+    const t = setTimeout(() => setSlid(true), ROOM_LOADING_LOGO_ALONE_MS);
+    return () => clearTimeout(t);
   }, []);
   useEffect(() => {
-    if (ready) setExiting(true);
-  }, [ready]);
+    const t = setTimeout(() => setMinDisplayElapsed(true), ROOM_LOADING_MIN_DISPLAY_MS);
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (ready && minDisplayElapsed) setExiting(true);
+  }, [ready, minDisplayElapsed]);
   return (
     <div
       className={exiting ? "room-loading-screen exiting" : "room-loading-screen"}
@@ -8290,6 +8358,7 @@ function ChatDrawer({
   onDiscardRecordedAudio,
   onSendRecordedAudio,
   onDeleteMessage,
+  onMoveConversationLane,
   callParticipantsByConversation,
   myCallConversationId,
   callRemoteStreams,
@@ -8341,6 +8410,10 @@ function ChatDrawer({
   onDiscardRecordedAudio: () => void;
   onSendRecordedAudio: () => void;
   onDeleteMessage: (conversationId: string | null, messageId: string) => void;
+  // "3 pontinhos" -- mover uma conversa 1x1 pra outra lane (Empresa <->
+  // Privada, ver comentário grande em moveConversationLane/GameRoom.tsx
+  // e setConversationLane em server/chatStore.js).
+  onMoveConversationLane: (conversationId: string, lane: "company" | "private") => void;
   callParticipantsByConversation: Record<string, ChatCallParticipant[]>;
   myCallConversationId: string | null;
   callRemoteStreams: Record<string, MediaStream>;
@@ -8427,6 +8500,10 @@ function ChatDrawer({
     }
     return Array.from(seen.values());
   }, [conversations]);
+  // "3 pontinhos" -- id da conversa com o menu de mover-de-aba aberto
+  // agora (null = nenhum), ver comentário grande em
+  // onMoveConversationLane logo abaixo.
+  const [convMenuOpenId, setConvMenuOpenId] = useState<string | null>(null);
   const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
   // mantém sempre uma empresa válida selecionada (nunca null enquanto
   // existir pelo menos uma) -- cobre tanto o primeiro carregamento
@@ -8575,6 +8652,44 @@ function ChatDrawer({
                     >
                       <PhoneIcon />
                       {activeCall.length}
+                    </span>
+                  )}
+                  {/* "3 pontinhos" -- pedido do Douglas (29/set (18)):
+                      "nas conversas tem que ter 3 pontinhos do lado
+                      lá, que ele pode jogar a conversa pra alguma
+                      empresa, e vice versa, apenas com conversas 1x1,
+                      nos grupos nao" -- só conversa DIRETA (kind
+                      "direct"), grupo nunca mostra esse menu. Igual ao
+                      chat-call-badge acima: <span> com stopPropagation
+                      em vez de <button>, porque a linha inteira já É
+                      um <button> (chat-conv-item), e botão dentro de
+                      botão é HTML inválido. */}
+                  {c.kind === "direct" && (
+                    <span className="chat-conv-menu-wrap" onClick={(e) => e.stopPropagation()}>
+                      <span
+                        className="chat-conv-menu-btn"
+                        title="Mais opções"
+                        onClick={() => setConvMenuOpenId((prev) => (prev === c.id ? null : c.id))}
+                      >
+                        ⋮
+                      </span>
+                      {convMenuOpenId === c.id && (
+                        <>
+                          <div className="chat-conv-menu-backdrop" onClick={() => setConvMenuOpenId(null)} />
+                          <div className="chat-conv-menu">
+                            <button
+                              type="button"
+                              className="chat-conv-menu-item"
+                              onClick={() => {
+                                onMoveConversationLane(c.id, c.lane === "company" ? "private" : "company");
+                                setConvMenuOpenId(null);
+                              }}
+                            >
+                              {c.lane === "company" ? "Mover para Conversas privadas" : "Mover para Empresa"}
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </span>
                   )}
                 </button>
