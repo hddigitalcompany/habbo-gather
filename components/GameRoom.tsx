@@ -80,7 +80,7 @@ import {
   SeatTuningInfo,
 } from "@/game/furniture";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
-import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
+import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, registerCustomWallModels, wallEdgeLengthPx, FACADE_GLASS_STYLE_ID } from "@/game/wall";
 import {
   DOOR_CATALOG,
   DOOR_FACING_ROTATE_ORDER,
@@ -6120,9 +6120,15 @@ function EditPanel({
   const filteredFloorCatalog = normalizedQuery
     ? FLOOR_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
     : FLOOR_CATALOG;
+  // fachada de vidro do prédio (FACADE_GLASS_STYLE_ID, ver
+  // WallPatternConfig.material em game/wall.ts) nunca aparece na paleta
+  // de "Criar Parede" -- pedido do Douglas ("fixa, ninguem mexe"), ela
+  // só entra numa sala via script/banco direto, nunca escolhida por um
+  // usuário comum daqui.
+  const pickableWallCatalog = WALL_CATALOG.filter((entry) => entry.id !== FACADE_GLASS_STYLE_ID);
   const filteredWallCatalog = normalizedQuery
-    ? WALL_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
-    : WALL_CATALOG;
+    ? pickableWallCatalog.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
+    : pickableWallCatalog;
   const filteredDoorCatalog = normalizedQuery
     ? DOOR_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
     : DOOR_CATALOG;

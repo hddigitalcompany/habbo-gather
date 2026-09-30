@@ -96,6 +96,7 @@ import {
   wallEdgeLengthPx,
   wallBrickRects,
   nearestWallEdge,
+  FACADE_GLASS_STYLE_ID,
 } from "./wall";
 import {
   DoorSide,
@@ -596,6 +597,40 @@ const WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR = 0xffffff;
  * sulco). */
 const WALL_BASEBOARD_TOP_LINE_PX = 1;
 const WALL_BASEBOARD_TOP_LINE_COLOR = WALL_BASEBOARD_GROOVE_SHADOW_COLOR;
+
+// FACHADA DE VIDRO (pedido do Douglas, ver WallPatternConfig.material em
+// game/wall.ts pro histórico completo) -- constantes da face da FRENTE
+// só, trocada por completo no lugar do tijolo+rodapé branco quando
+// `pattern.material === "glass"` (ver isGlass em
+// createWallPatternGraphics abaixo).
+/** faixa escura colada no CHÃO da vidraça -- "embaixo do vidro aquele
+ * esmaecido da laje" (confirmado pelo Douglas ao vivo). Mesma altura do
+ * rodapé branco de sempre (WALL_BASEBOARD_HEIGHT_PX) só que essa NÃO é
+ * fixa/igual em toda parede -- é exclusiva do material "glass", troca o
+ * rodapé branco por completo (nunca as 2 juntas na mesma parede). */
+const WALL_GLASS_SLAB_HEIGHT_PX = 16;
+const WALL_GLASS_SLAB_COLOR = 0x23262c;
+/** linha fina separando a laje do vidro (emenda visível, mesma ideia da
+ * WALL_BASEBOARD_TOP_LINE_PX do rodapé comum). */
+const WALL_GLASS_SLAB_LINE_PX = 2;
+const WALL_GLASS_SLAB_LINE_COLOR = 0x14161a;
+/** gradiente do vidro em si -- claro/reflexo em cima (céu), mais escuro/
+ * fundo embaixo (pedido do Douglas: "vidraca toda reflexo, vidraca
+ * mesmo"). Alpha < 1 (não opaco) pra dar a sensação de transparência de
+ * vidro de verdade, não uma pintura sólida. */
+const WALL_GLASS_COLOR_TOP = 0xcdeaf2;
+const WALL_GLASS_COLOR_BOTTOM = 0x3c6e82;
+const WALL_GLASS_ALPHA = 0.82;
+/** perfil metálico vertical -- 1 faixa em CADA ponta do painel (pedido:
+ * "com perfis metalicos na vertical... na largura exata do tile" -- o
+ * painel já É 1 tile de largura, então o perfil da ponta B de um
+ * encosta exatamente no da ponta A do vizinho, formando a grade
+ * contínua de esquadria sem precisar desenhar 2x na emenda). Cobre a
+ * altura TODA do painel (laje + vidro), não só o vidro -- perfil de
+ * fachada de verdade corre inteiriço, sem quebrar na viga. */
+const WALL_GLASS_MULLION_WIDTH_PX = 6;
+const WALL_GLASS_MULLION_COLOR = 0x9aa3ad;
+const WALL_GLASS_MULLION_LINE_COLOR = 0x6b727a;
 
 // fonte usada em todo texto desenhado DENTRO do canvas do jogo
 // (plaquinha de nome, label de área/assento) -- mesma pilha do resto
@@ -1475,7 +1510,17 @@ export default class MainScene extends Phaser.Scene {
     // mesma ideia acima, pra parede de sistema (ver WALL_CATALOG,
     // game/wall.ts) -- também uma imagem PLANA só (sem poses/direção),
     // um painel já desenhado na inclinação certa da aresta do tile.
+    // Pula quem é "padrão" (`pattern` preenchido, `file` vazio -- ver
+    // comentário de WallCatalogEntry.file em game/wall.ts): não tem
+    // imagem nenhuma pra carregar (createWallPatternGraphics desenha
+    // ela por código). Antes disso nunca dava problema porque um
+    // "padrão" custom só entrava em WALL_CATALOG depois do preload (via
+    // registerCustomWallModels, chamado pelo React já com a cena
+    // pronta) -- FACADE_GLASS_ENTRY (fachada de vidro, ver
+    // FACADE_GLASS_STYLE_ID em game/wall.ts) é o primeiro "padrão" que
+    // já nasce DENTRO do array, presente desde o preload.
     for (const entry of WALL_CATALOG) {
+      if (entry.pattern) continue;
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
     }
   }
@@ -1987,6 +2032,82 @@ export default class MainScene extends Phaser.Scene {
     const g = Math.round(((hex >> 8) & 0xff) * factor);
     const b = Math.round((hex & 0xff) * factor);
     return (r << 16) | (g << 8) | b;
+  }
+
+  /** Interpola linear entre 2 cores hex (t=0 -> `from`, t=1 -> `to`) --
+   * mesma ideia/estilo de darkenColor acima, usado só pelo gradiente da
+   * fachada de vidro (ver drawFacadeGlassFrontFace mais abaixo). */
+  private lerpColor(from: number, to: number, t: number): number {
+    const clampT = Math.max(0, Math.min(1, t));
+    const r = Math.round(((from >> 16) & 0xff) + (((to >> 16) & 0xff) - ((from >> 16) & 0xff)) * clampT);
+    const g = Math.round(((from >> 8) & 0xff) + (((to >> 8) & 0xff) - ((from >> 8) & 0xff)) * clampT);
+    const b = Math.round((from & 0xff) + ((to & 0xff) - (from & 0xff)) * clampT);
+    return (r << 16) | (g << 8) | b;
+  }
+
+  /** Desenha a face da FRENTE da fachada de vidro (ver isGlass em
+   * createWallPatternGraphics abaixo e WallPatternConfig.material em
+   * game/wall.ts) -- 3 pedaços, de baixo pra cima (v crescente = sobe
+   * na tela): laje escura colada no chão até WALL_GLASS_SLAB_HEIGHT_PX
+   * ("embaixo do vidro aquele esmaecido da laje", confirmado pelo
+   * Douglas ao vivo), uma linha fina separando, e o vidro em si
+   * (fatiado em tiras finas com lerpColor entre WALL_GLASS_COLOR_BOTTOM/
+   * TOP -- mais simples e previsível que depender do gradiente nativo
+   * do Phaser num paralelogramo isométrico não-alinhado aos eixos) até
+   * `heightPx`, com alpha < 1 pra parecer vidro de verdade, não pintura
+   * sólida. Os perfis metálicos verticais (pedido: "com perfis
+   * metalicos na vertical") entram por CIMA de tudo, 1 faixa inteiriça
+   * (laje+vidro) em CADA ponta do painel -- o painel já É a largura
+   * exata de 1 tile (ver FACADE_GLASS_ENTRY em game/wall.ts), então o
+   * perfil da ponta B de um encosta exatamente no da ponta A do
+   * vizinho, formando a grade contínua da esquadria sem desenhar 2x na
+   * emenda. */
+  private drawFacadeGlassFrontFace(
+    gfx: Phaser.GameObjects.Graphics,
+    mapPoint: (u: number, v: number) => { x: number; y: number },
+    edgeLengthExt: number,
+    heightPx: number
+  ) {
+    const slabH = WALL_GLASS_SLAB_HEIGHT_PX;
+    const slabLineTop = slabH + WALL_GLASS_SLAB_LINE_PX;
+    gfx.fillStyle(WALL_GLASS_SLAB_COLOR, 1);
+    gfx.fillPoints([mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, slabH), mapPoint(0, slabH)], true);
+    gfx.fillStyle(WALL_GLASS_SLAB_LINE_COLOR, 1);
+    gfx.fillPoints(
+      [mapPoint(0, slabH), mapPoint(edgeLengthExt, slabH), mapPoint(edgeLengthExt, slabLineTop), mapPoint(0, slabLineTop)],
+      true
+    );
+    const glassV0 = slabLineTop;
+    const glassV1 = Math.max(glassV0 + 1, heightPx);
+    const stripes = 10;
+    const stripeH = (glassV1 - glassV0) / stripes;
+    for (let i = 0; i < stripes; i++) {
+      const v0 = glassV0 + i * stripeH;
+      const v1 = i === stripes - 1 ? glassV1 : v0 + stripeH;
+      const t = (i + 0.5) / stripes; // 0 perto da laje (fundo), 1 perto do topo (céu)
+      gfx.fillStyle(this.lerpColor(WALL_GLASS_COLOR_BOTTOM, WALL_GLASS_COLOR_TOP, t), WALL_GLASS_ALPHA);
+      gfx.fillPoints([mapPoint(0, v0), mapPoint(edgeLengthExt, v0), mapPoint(edgeLengthExt, v1), mapPoint(0, v1)], true);
+    }
+    const mw = WALL_GLASS_MULLION_WIDTH_PX;
+    gfx.fillStyle(WALL_GLASS_MULLION_COLOR, 1);
+    gfx.fillPoints([mapPoint(0, 0), mapPoint(mw, 0), mapPoint(mw, heightPx), mapPoint(0, heightPx)], true);
+    gfx.fillPoints(
+      [mapPoint(edgeLengthExt - mw, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, heightPx), mapPoint(edgeLengthExt - mw, heightPx)],
+      true
+    );
+    // linha fina escura na borda de DENTRO de cada perfil -- separa do
+    // vidro, dá volume ao caixilho (mesma ideia da "cava" do rodapé).
+    gfx.fillStyle(WALL_GLASS_MULLION_LINE_COLOR, 1);
+    gfx.fillPoints([mapPoint(mw - 1, 0), mapPoint(mw, 0), mapPoint(mw, heightPx), mapPoint(mw - 1, heightPx)], true);
+    gfx.fillPoints(
+      [
+        mapPoint(edgeLengthExt - mw, 0),
+        mapPoint(edgeLengthExt - mw + 1, 0),
+        mapPoint(edgeLengthExt - mw + 1, heightPx),
+        mapPoint(edgeLengthExt - mw, heightPx),
+      ],
+      true
+    );
   }
 
   /**
@@ -4819,28 +4940,39 @@ export default class MainScene extends Phaser.Scene {
     });
 
     const gfx = this.add.graphics();
-    // argamassa como fundo (o paralelogramo inteiro, já esticado),
-    // tijolo desenhado por cima já com a folga -- mesma ideia visual de
-    // FloorPatternConfig (linha de junta = a cor de baixo "vazando" pela
-    // folga entre tábuas). Passa edgeLengthExt (não o bruto) pra
-    // wallBrickRects, então a amarração de tijolo continua natural
-    // dentro do trechinho esticado, sem faixa vazia nas pontas.
-    gfx.fillStyle(pattern.mortarColor, 1);
-    gfx.fillPoints(
-      [
-        mapPoint(0, 0),
-        mapPoint(edgeLengthExt, 0),
-        mapPoint(edgeLengthExt, pattern.heightPx),
-        mapPoint(0, pattern.heightPx),
-      ],
-      true
-    );
-    gfx.fillStyle(pattern.brickColor, 1);
-    for (const rect of wallBrickRects(pattern, edgeLengthExt)) {
+    // FACHADA DE VIDRO (pedido do Douglas, ver WallPatternConfig.material
+    // em game/wall.ts) -- troca a face da frente inteira (e pula o
+    // rodapé branco de sempre, ver os `if (!isGlass)` mais abaixo); tudo
+    // mais (face de cima/topColor, faces de ponta, quina, corte de
+    // avatar) continua o MESMO código de qualquer parede "padrão", sem
+    // saber que essa é diferente.
+    const isGlass = pattern.material === "glass";
+    if (isGlass) {
+      this.drawFacadeGlassFrontFace(gfx, mapPoint, edgeLengthExt, pattern.heightPx);
+    } else {
+      // argamassa como fundo (o paralelogramo inteiro, já esticado),
+      // tijolo desenhado por cima já com a folga -- mesma ideia visual de
+      // FloorPatternConfig (linha de junta = a cor de baixo "vazando" pela
+      // folga entre tábuas). Passa edgeLengthExt (não o bruto) pra
+      // wallBrickRects, então a amarração de tijolo continua natural
+      // dentro do trechinho esticado, sem faixa vazia nas pontas.
+      gfx.fillStyle(pattern.mortarColor, 1);
       gfx.fillPoints(
-        [mapPoint(rect.u0, rect.v0), mapPoint(rect.u1, rect.v0), mapPoint(rect.u1, rect.v1), mapPoint(rect.u0, rect.v1)],
+        [
+          mapPoint(0, 0),
+          mapPoint(edgeLengthExt, 0),
+          mapPoint(edgeLengthExt, pattern.heightPx),
+          mapPoint(0, pattern.heightPx),
+        ],
         true
       );
+      gfx.fillStyle(pattern.brickColor, 1);
+      for (const rect of wallBrickRects(pattern, edgeLengthExt)) {
+        gfx.fillPoints(
+          [mapPoint(rect.u0, rect.v0), mapPoint(rect.u1, rect.v0), mapPoint(rect.u1, rect.v1), mapPoint(rect.u0, rect.v1)],
+          true
+        );
+      }
     }
     // RODAPÉ -- pedido do Douglas, com foto de referência (rodapé
     // branco, moldura fina, contornando a quina de uma parede/coluna
@@ -4863,37 +4995,39 @@ export default class MainScene extends Phaser.Scene {
     const baseboardGrooveTop = WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_GROOVE_OFFSET_PX;
     const baseboardGrooveMid = baseboardGrooveTop - WALL_BASEBOARD_GROOVE_LINE_PX;
     const baseboardGrooveBottom = baseboardGrooveMid - WALL_BASEBOARD_GROOVE_LINE_PX;
-    gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
-    gfx.fillPoints(
-      [mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX), mapPoint(0, WALL_BASEBOARD_HEIGHT_PX)],
-      true
-    );
-    // sombra (parede do sulco que olha pra BAIXO -- fica em CIMA, mais
-    // perto do topo da faixa).
-    gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
-    gfx.fillPoints(
-      [mapPoint(0, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveTop), mapPoint(0, baseboardGrooveTop)],
-      true
-    );
-    // brilho (parede do sulco que olha pra CIMA -- fica GRUDADA embaixo
-    // da linha de sombra, formando o entalhe).
-    gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
-    gfx.fillPoints(
-      [mapPoint(0, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(0, baseboardGrooveMid)],
-      true
-    );
-    // linha de CIMA -- marca a emenda rodapé/parede (ver
-    // WALL_BASEBOARD_TOP_LINE_* acima), bem no topo da faixa.
-    gfx.fillStyle(WALL_BASEBOARD_TOP_LINE_COLOR, 1);
-    gfx.fillPoints(
-      [
-        mapPoint(0, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
-        mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
-        mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX),
-        mapPoint(0, WALL_BASEBOARD_HEIGHT_PX),
-      ],
-      true
-    );
+    if (!isGlass) {
+      gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX), mapPoint(0, WALL_BASEBOARD_HEIGHT_PX)],
+        true
+      );
+      // sombra (parede do sulco que olha pra BAIXO -- fica em CIMA, mais
+      // perto do topo da faixa).
+      gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(0, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveTop), mapPoint(0, baseboardGrooveTop)],
+        true
+      );
+      // brilho (parede do sulco que olha pra CIMA -- fica GRUDADA embaixo
+      // da linha de sombra, formando o entalhe).
+      gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(0, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(0, baseboardGrooveMid)],
+        true
+      );
+      // linha de CIMA -- marca a emenda rodapé/parede (ver
+      // WALL_BASEBOARD_TOP_LINE_* acima), bem no topo da faixa.
+      gfx.fillStyle(WALL_BASEBOARD_TOP_LINE_COLOR, 1);
+      gfx.fillPoints(
+        [
+          mapPoint(0, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
+          mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
+          mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX),
+          mapPoint(0, WALL_BASEBOARD_HEIGHT_PX),
+        ],
+        true
+      );
+    }
     // face de CIMA -- percurso ao redor da tira (farA2 -> farB2 ->
     // nearB2 -> nearA2), SEM pivô nenhum em NENHUM tipo de ponta --
     // "straight" e "open" usam farX/nearX crus (corte reto exato, sem
@@ -4993,34 +5127,38 @@ export default class MainScene extends Phaser.Scene {
     if (junctionA.kind === "open" && visibleCapEnd === "A") {
       gfx.fillStyle(shadeColor, 1);
       gfx.fillPoints([nearA, raise(nearA), raise(farA), farA], true);
-      gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
-      gfx.fillPoints([nearA, raiseBaseboard(nearA, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farA, WALL_BASEBOARD_HEIGHT_PX), farA], true);
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(nearA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveMid)],
-        true
-      );
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearA, baseboardGrooveBottom), raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveBottom)],
-        true
-      );
+      if (!isGlass) {
+        gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
+        gfx.fillPoints([nearA, raiseBaseboard(nearA, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farA, WALL_BASEBOARD_HEIGHT_PX), farA], true);
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(nearA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveMid)],
+          true
+        );
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearA, baseboardGrooveBottom), raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveBottom)],
+          true
+        );
+      }
     }
     if (junctionB.kind === "open" && visibleCapEnd === "B") {
       gfx.fillStyle(shadeColor, 1);
       gfx.fillPoints([nearB, raise(nearB), raise(farB), farB], true);
-      gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
-      gfx.fillPoints([nearB, raiseBaseboard(nearB, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farB, WALL_BASEBOARD_HEIGHT_PX), farB], true);
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(nearB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveMid)],
-        true
-      );
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearB, baseboardGrooveBottom), raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveBottom)],
-        true
-      );
+      if (!isGlass) {
+        gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
+        gfx.fillPoints([nearB, raiseBaseboard(nearB, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farB, WALL_BASEBOARD_HEIGHT_PX), farB], true);
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(nearB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveMid)],
+          true
+        );
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearB, baseboardGrooveBottom), raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveBottom)],
+          true
+        );
+      }
     }
     gfx.setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
     this.applyWallAvatarCutoutMask(gfx); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
@@ -5178,6 +5316,12 @@ export default class MainScene extends Phaser.Scene {
     if (tool.kind === "erase") {
       const existing = this.draftWall.get(key);
       if (!existing) return;
+      // fachada de vidro (ver FACADE_GLASS_STYLE_ID em game/wall.ts) é
+      // fixa -- "niguem mexe" (pedido do Douglas) -- "Apagar" não sabe
+      // de estilo nenhum normalmente (some com QUALQUER parede que
+      // encontrar na aresta), então precisa desse guard explícito ou a
+      // fachada some igual a uma parede comum no primeiro clique.
+      if (existing.styleId === FACADE_GLASS_STYLE_ID) return;
       this.draftWallSprites.get(key)?.destroy();
       this.draftWallSprites.delete(key);
       this.draftWall.delete(key);
@@ -5198,6 +5342,11 @@ export default class MainScene extends Phaser.Scene {
 
     const existing = this.draftWall.get(key);
     if (existing && existing.styleId === tool.entry.id) return;
+    // mesma trava do "Apagar" acima -- pintar OUTRO estilo em cima da
+    // fachada de vidro também não pode valer (senão bastava escolher
+    // qualquer parede normal e clicar em cima pra substituir a fachada
+    // sem passar pelo "Apagar" nenhuma vez).
+    if (existing && existing.styleId === FACADE_GLASS_STYLE_ID) return;
 
     this.draftWallSprites.get(key)?.destroy();
     const def: WallSegmentDef = { col, row, side, styleId: tool.entry.id };

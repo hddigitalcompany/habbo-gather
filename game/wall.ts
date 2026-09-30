@@ -137,6 +137,24 @@ export interface WallPatternConfig {
    * em MainScene.ts) não leem este campo, continuam escurecendo
    * brickColor automaticamente. */
   topColor: number;
+  /** "brick" (padrão, ausente = "brick" pra não quebrar nenhuma parede
+   * já salva no banco antes deste campo existir) desenha tijolo+
+   * argamassa+rodapé de sempre na face da frente. "glass" é a FACHADA
+   * FIXA do prédio (pedido do Douglas: "quero montar uma vidraca na
+   * parte de baixo, qmostrando que eles estao em um andar alto...
+   * vidraca toda reflexo, vidraca mesmo, com perfis metalicos na
+   * vertical... embaixo do vidro aquele esmaecido da laje") -- troca só
+   * a face da frente (gradiente de vidro + perfil metálico vertical nas
+   * 2 pontas do painel + faixa escura de "laje" colada no chão, em vez
+   * de tijolo+rodapé branco) e pula o rodapé branco de sempre (nas 3
+   * faces: frente e as 2 de ponta) -- ver isGlass em
+   * createWallPatternGraphics (MainScene.ts). Face de CIMA (topColor) e
+   * faces de PONTA (brickColor escurecido) continuam iguais, sem
+   * branch nenhum -- só a frente + rodapé mudam. Nunca editável pelo
+   * formulário "Criar Parede" (não é campo do form, só existe no
+   * catálogo fixo FACADE_GLASS_ENTRY abaixo) -- todo registro vindo do
+   * banco (room_wall_items) sempre cai em "brick". */
+  material?: "brick" | "glass";
 }
 
 /**
@@ -241,7 +259,40 @@ export interface WallCatalogEntry {
 // com `npm run dev`) -- NÃO editar esse import nem o arquivo dele à mão.
 import { GENERATED_WALL_CATALOG } from "./wallCatalog.generated";
 
-export const WALL_CATALOG: WallCatalogEntry[] = [...GENERATED_WALL_CATALOG];
+/** Id fixo (nunca vem do banco) da fachada de vidro do prédio -- pedido
+ * do Douglas pra dar a sensação de "prédio de verdade" (ver
+ * WallPatternConfig.material acima). Comparado direto (===) em vários
+ * lugares (MainScene.ts: bloqueia apagar/mover; ItemEditor.tsx: não
+ * lista no catálogo de "Criar Parede" pro usuário comum) -- é assim que
+ * ela fica "fixa, ninguem mexe": não tem UI nenhuma pra um usuário
+ * comum colocar ou remover essa parede, só entra numa sala via script/
+ * banco direto (mesma ideia do Douglas escolher à mão "os tiles que eu
+ * fixar embaixo nas salas modelo"). */
+export const FACADE_GLASS_STYLE_ID = "sistema-fachada-vidro";
+
+/** Catálogo fixo (1 item só) da fachada -- NÃO vem de
+ * GENERATED_WALL_CATALOG (pasta de imagem) nem de room_wall_items
+ * (tabela de padrão customizado pelo usuário): é código puro, igual
+ * pensado, pra nunca aparecer nem editável nem deletável por ninguém
+ * além de quem mexe direto no banco/servidor. */
+const FACADE_GLASS_ENTRY: WallCatalogEntry = {
+  id: FACADE_GLASS_STYLE_ID,
+  label: "Fachada de vidro (sistema)",
+  file: "",
+  pattern: {
+    heightPx: 120,
+    thicknessPx: 10,
+    brickWidthPx: 24,
+    brickHeightPx: 14,
+    brickColor: 0x3c6e82,
+    mortarColor: 0x3c6e82,
+    mortarWidthPx: 0,
+    topColor: 0xb9c3c9,
+    material: "glass",
+  },
+};
+
+export const WALL_CATALOG: WallCatalogEntry[] = [...GENERATED_WALL_CATALOG, FACADE_GLASS_ENTRY];
 
 export function wallEntryById(id: string): WallCatalogEntry | undefined {
   return WALL_CATALOG.find((e) => e.id === id);
