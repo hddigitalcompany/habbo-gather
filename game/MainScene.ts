@@ -4154,19 +4154,98 @@ export default class MainScene extends Phaser.Scene {
     return false;
   }
 
+  /** Recalcula a lista de arestas que DEVEM ter a fachada de vidro
+   * fixa (ver FACADE_GLASS_STYLE_ID em game/wall.ts) hoje, a partir do
+   * roomShape ATUAL -- pedido do Douglas (30/set): antes a vidraça era
+   * colocada segmento por segmento na mão (nunca mais de novo -- ver
+   * paintRoomShapeAt/eraseRoomShapeAt abaixo, que chamam isso toda vez
+   * que a sala cresce/encolhe), agora ela SEGUE a borda de baixo
+   * sozinha sempre que o dono mexe na aba "Tamanho".
+   *
+   * Uma aresta é "fachada" quando o tile (c,r) é da sala MAS o vizinho
+   * de trás dela (c-1,r para o lado colPlus, c,r-1 para rowPlus) NÃO é
+   * -- ou seja, é uma borda VOLTADA pra fora pelo lado de baixo/frente
+   * (o oposto de roomBackNeighbors, que só deixa crescer pelo lado de
+   * cima/trás -- por isso essa borda nunca se move sozinha por causa
+   * de "Adicionar", só por causa de "Apagar" abrindo/fechando buraco). */
+  private computeFacadeEdges(): { col: number; row: number; side: WallSide }[] {
+    const edges: { col: number; row: number; side: WallSide }[] = [];
+    for (const key of this.roomShape) {
+      const [c, r] = key.split(",").map(Number);
+      if (!this.isTileInRoom(c - 1, r)) edges.push({ col: c - 1, row: r, side: "colPlus" });
+      if (!this.isTileInRoom(c, r - 1)) edges.push({ col: c, row: r - 1, side: "rowPlus" });
+    }
+    return edges;
+  }
+
+  /** Aplica o resultado de computeFacadeEdges de verdade: cria sprite
+   * de vidro em toda aresta nova da borda de baixo, remove o que tiver
+   * ficado pra trás (a sala encolheu ali), e deixa QUALQUER aresta que
+   * já tenha outra coisa (parede comum do dono, ou porta) em paz --
+   * nunca troca o que já tava lá por cima, só warn no console (mesma
+   * cautela de addWallSprite acima quando falta textura). Chamada
+   * DEPOIS de toda mudança em roomShape (ver paintRoomShapeAt/
+   * eraseRoomShapeAt) -- nunca do carregamento inicial
+   * (loadSavedRoomShape), que roda em QUALQUER cliente (dono ou
+   * visitante): salvar daqui só pode acontecer numa edição de verdade
+   * do dono, senão visitante nenhum devia estar disparando POST
+   * /room/walls sozinho. */
+  private syncFacadeGlassWalls() {
+    const expected = this.computeFacadeEdges();
+    const expectedKeys = new Set(expected.map((e) => wallSegmentId(e.col, e.row, e.side)));
+    let changed = false;
+
+    // remove fachada que não é mais borda (a sala encolheu/mudou ali)
+    for (const [key, seg] of Array.from(this.draftWall.entries())) {
+      if (seg.styleId !== FACADE_GLASS_STYLE_ID) continue;
+      if (expectedKeys.has(key)) continue;
+      this.draftWallSprites.get(key)?.destroy();
+      this.draftWallSprites.delete(key);
+      this.draftWall.delete(key);
+      this.refreshWallNeighbors(seg.col, seg.row, seg.side);
+      changed = true;
+    }
+
+    // cria fachada em toda aresta nova da borda de baixo
+    for (const edge of expected) {
+      const key = wallSegmentId(edge.col, edge.row, edge.side);
+      const existing = this.draftWall.get(key);
+      if (existing?.styleId === FACADE_GLASS_STYLE_ID) continue; // já é fachada, nada a fazer
+      if (existing) {
+        console.warn(`[fachada] aresta ${key} já tem parede "${existing.styleId}" -- não troquei por vidro.`);
+        continue;
+      }
+      if (this.draftDoor.has(key)) continue; // não pode parede E porta na mesma aresta
+      const def: WallSegmentDef = { col: edge.col, row: edge.row, side: edge.side, styleId: FACADE_GLASS_STYLE_ID };
+      const sprite = this.addWallSprite(def);
+      if (!sprite) continue;
+      this.draftWall.set(key, def);
+      this.draftWallSprites.set(key, sprite);
+      this.refreshWallNeighbors(edge.col, edge.row, edge.side);
+      changed = true;
+    }
+
+    if (changed) {
+      this.onDraftWallChange?.(this.getDraftWallList());
+      this.updateAreaDim(true);
+    }
+  }
+
   /** Pinta (adiciona) um tile novo na sala -- só aceita se ele AINDA
    * não for da sala e encostar num tile que já é, SÓ pelo lado de
    * trás/cima (ver roomBackNeighbors acima -- antes eram as 4 direções
    * livres; a borda de baixo agora é fachada fixa, ver
-   * drawFacadeGlass). Mantém a sala sempre conectada, crescendo só
-   * pela borda de cima, nunca uma ilha solta nem empurrando a fachada
-   * de baixo pra frente. Silencioso quando inválido (mesmo padrão de
-   * clicar num tile já ocupado com outra ferramenta -- não faz nada). */
+   * syncFacadeGlassWalls acima). Mantém a sala sempre conectada,
+   * crescendo só pela borda de cima, nunca uma ilha solta nem
+   * empurrando a fachada de baixo pra frente. Silencioso quando
+   * inválido (mesmo padrão de clicar num tile já ocupado com outra
+   * ferramenta -- não faz nada). */
   private paintRoomShapeAt(col: number, row: number) {
     const key = this.roomTileKey(col, row);
     if (this.roomShape.has(key)) return;
     if (this.roomBackNeighbors(col, row).length === 0) return;
     this.roomShape.add(key);
+    this.syncFacadeGlassWalls();
     this.drawEditGrid();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
   }
@@ -4191,6 +4270,7 @@ export default class MainScene extends Phaser.Scene {
       return "Isso ia separar a sala em duas partes -- apague de um jeito que não isole nenhum pedaço.";
     }
     this.roomShape.delete(key);
+    this.syncFacadeGlassWalls();
     this.drawEditGrid();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
     return null;
