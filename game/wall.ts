@@ -278,19 +278,30 @@ export const FACADE_GLASS_STYLE_ID = "sistema-fachada-vidro";
 const FACADE_GLASS_ENTRY: WallCatalogEntry = {
   id: FACADE_GLASS_STYLE_ID,
   label: "Fachada de vidro (sistema)",
-  file: "",
-  pattern: {
-    heightPx: 165,
-    thicknessPx: 10,
-    brickWidthPx: 24,
-    brickHeightPx: 14,
-    brickColor: 0x3c6e82,
-    mortarColor: 0x3c6e82,
-    mortarWidthPx: 0,
-    topColor: 0xb9c3c9,
-    material: "glass",
-  },
+  // ACHADO (Douglas: "voce acha que se eu fizesse uma imagem da
+  // vidraca pesaria mais que as linhas que vc ta criando?" -> testou e
+  // mandou a arte pronta) -- virou um modelo de IMAGEM de verdade (ver
+  // WallCatalogEntry.pattern acima: ausente = imagem), não mais
+  // desenhado por código (o vetor antigo -- drawFacadeGlassFrontFace em
+  // MainScene.ts -- ficou pra trás, sem chamador nenhum agora). A arte
+  // já sai da largura EXATA de 1 aresta de tile (FACADE_GLASS_TILE_WIDTH_PX,
+  // 71.55px arredondado) e do ângulo certo (2:1, mesma inclinação de
+  // ISO_TILE_WIDTH/HEIGHT), então addWallSprite() -- o caminho de
+  // sempre pra parede com imagem -- já posiciona ela sozinha, sem
+  // código especial nenhum aqui.
+  file: "facade-glass-tile.png",
 };
+
+/** Tamanho de verdade (px) da arte de facade-glass-tile.png -- MESMA
+ * arte usada em 2 lugares (addWallSprite pra parede de verdade, e
+ * drawFloorEdgeGlass em MainScene.ts pra vidraça repetida abaixo do
+ * piso), então mora aqui, não hardcoded 2x. Largura = comprimento de 1
+ * aresta de tile (128x64, ver ISO_TILE_WIDTH/HEIGHT em grid.ts:
+ * Math.hypot(64,32) = 71.55, arredondado); altura segue proporcional
+ * (não é mais um valor "escolhido" tipo o heightPx antigo do vetor --
+ * é só o tamanho de verdade do arquivo .png). */
+export const FACADE_GLASS_TILE_WIDTH_PX = 72;
+export const FACADE_GLASS_TILE_HEIGHT_PX = 152;
 
 export const WALL_CATALOG: WallCatalogEntry[] = [...GENERATED_WALL_CATALOG, FACADE_GLASS_ENTRY];
 
