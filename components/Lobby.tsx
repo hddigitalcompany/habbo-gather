@@ -4033,8 +4033,16 @@ export default function Lobby({
                 Membros), então aqui é só desenhar. Clique abre
                 ProfileViewCard (ver viewingFounderUserId acima),
                 mesmo padrão de qualquer outra foto clicável no app. */}
+            {/* "Founders:" -- pedido do Douglas, 30/set (19): "antes
+                do nome dos founders, titulo de apresentacao / Founders:"
+                -- mesmo padrão visual de "Quem somos" (rótulo fixo, sem
+                vir de campo nenhum), só que aqui SEM bloco/wrapper
+                próprio (a lista já tem margin-top: 14px sozinha, ver
+                .company-card-founders em app/globals.css). */}
             {companyProfile.showFoundersOnCard && companyProfile.founders.length > 0 && (
-              <div className="company-card-founders">
+              <>
+                <p className="company-card-founders-label">Founders:</p>
+                <div className="company-card-founders">
                 {companyProfile.founders.map((f) => (
                   <button
                     key={f.userId}
@@ -4051,7 +4059,8 @@ export default function Lobby({
                     </span>
                   </button>
                 ))}
-              </div>
+                </div>
+              </>
             )}
           </div>
         </div>

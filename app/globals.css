@@ -5657,11 +5657,25 @@ button.chat-picker-item:disabled {
    wrapper que o cerca já cuida disso) -- só nesse contexto, a versão
    usada em Lobby.tsx pras categorias continua com o margin-top de
    sempre. */
+/* "Founder:" -- pedido do Douglas, 30/set (19): "antes da foto da
+   empresa+tagline, titulo de apresentacao / Founder:" -- mesmo padrão
+   de .company-card-founders-label acima, só que singular (ver
+   ProfileViewCard.tsx: fica ACIMA de .profile-company-badge, que
+   continua sendo só o flex-row ícone+tagline). */
+.profile-company-founder-label {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8b8798;
+}
+
 .profile-company-badge {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 0;
 }
 
 .profile-company-badge .company-card-positions {
@@ -5714,10 +5728,22 @@ button.chat-picker-item:disabled {
    ideia de company-edit-member-avatar no painel de edição, só
    redonda em vez de quadrada (esse aqui é PÚBLICO, no card, não o
    editor). */
+/* "Founders:" -- pedido do Douglas, 30/set (19): "antes do nome dos
+   founders, titulo de apresentacao / Founders:" -- mesmo padrão visual
+   de .company-card-bio-label (rótulo fixo, cinza, caixa alta). */
+.company-card-founders-label {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8b8798;
+}
+
 .company-card-founders {
   display: flex;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 0;
 }
 
 .company-card-founder {

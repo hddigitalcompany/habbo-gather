@@ -523,7 +523,20 @@ export default function ProfileViewCard({
                       // .company-card-positions original (Lobby.tsx
                       // reaproveita a mesma classe pra outra coisa, o
                       // scroll horizontal de categorias).
-                      <div className="profile-company-badge">
+                      <>
+                        {/* "Founder:" -- pedido do Douglas, 30/set
+                            (19): "antes da foto da empresa+tagline,
+                            titulo de apresentacao / Founder:" -- mesmo
+                            padrão de "Founders:" no card da empresa
+                            (ver company-card-founders-label em
+                            Lobby.tsx/app/globals.css), só que aqui no
+                            singular (é UMA pessoa mostrando a empresa
+                            dela). FORA do .profile-company-badge (que
+                            é flex-row ícone+tagline lado a lado) --
+                            esse rótulo é um título em CIMA do bloco
+                            inteiro, não mais um item lado a lado. */}
+                        <p className="profile-company-founder-label">Founder:</p>
+                        <div className="profile-company-badge">
                         <div className="company-card-positions">
                           <div
                             className="company-card-position-card"
@@ -550,7 +563,8 @@ export default function ProfileViewCard({
                         {profile.company.tagline && (
                           <p className="profile-company-tagline">{profile.company.tagline}</p>
                         )}
-                      </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
