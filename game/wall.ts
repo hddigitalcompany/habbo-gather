@@ -309,9 +309,22 @@ const FACADE_GLASS_ENTRY: WallCatalogEntry = {
  * createFacadeGlassSprite em MainScene.ts que consome o pareamento).
  * Sobra ímpar (fileira de tamanho ímpar, ou quina) cai no fallback de 1
  * vidraça só -- facade-glass-tile-single.png, metade exata da arte
- * larga (recorte, não redimensionado, então sem distorcer o ângulo). */
+ * larga (recorte, não redimensionado, então sem distorcer o ângulo).
+ *
+ * ACHADO 2 (Douglas testou ao vivo 2 peças lado a lado: "as imagens em
+ * si, tao distantes umas das outras... olhe pro conteudo nao pras
+ * bordas") -- a arte original tinha uma margem transparente de verdade
+ * do lado esquerdo (o canto do perfil/laje, que tem profundidade 3D,
+ * projeta um pouquinho além do plano do vidro nesse lado só -- o lado
+ * direito já saía coladinho). Aresta a aresta (bounding box) as peças
+ * ENCOSTAVAM certinho, mas o vidro (o conteúdo que o olho segue) ficava
+ * uns pixels "pra dentro" de cada peça -- daí a sensação de afastado
+ * mesmo com as peças grudadas. Cortei essa margem morta (a arte já vem
+ * com esse recorte pronto agora), então a largura/altura aqui são só o
+ * tamanho de verdade do PNG já cortado -- não precisa mexer em mais
+ * nada além de gerar a arte certa se isso mudar de novo. */
 export const FACADE_GLASS_TILE_WIDTH_PX = 144;
-export const FACADE_GLASS_TILE_HEIGHT_PX = 199;
+export const FACADE_GLASS_TILE_HEIGHT_PX = 208;
 /** Largura/altura do fallback de 1 vidraça só (facade-glass-tile-single.png)
  * -- ver comentário grande acima. Também usado pelo caminho genérico
  * addWallSprite (MainScene.ts, chamado por refreshWallNeighbors/
@@ -323,7 +336,7 @@ export const FACADE_GLASS_TILE_HEIGHT_PX = 199;
  * (syncFacadeGlassWalls) reconstrói a fachada inteira do zero,
  * reparando o pareamento certo de novo. */
 export const FACADE_GLASS_SINGLE_TILE_WIDTH_PX = 72;
-export const FACADE_GLASS_SINGLE_TILE_HEIGHT_PX = 199;
+export const FACADE_GLASS_SINGLE_TILE_HEIGHT_PX = 208;
 
 export const WALL_CATALOG: WallCatalogEntry[] = [...GENERATED_WALL_CATALOG, FACADE_GLASS_ENTRY];
 
