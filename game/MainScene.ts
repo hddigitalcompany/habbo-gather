@@ -1151,6 +1151,30 @@ export default class MainScene extends Phaser.Scene {
   // desenhar nada.
   private areaOwnerByAreaId: Map<string, { playerId: string | null; name: string }> = new Map();
 
+  // true só DEPOIS que o "init" (ver comentário grande de
+  // areaOwnerByAreaId acima) já preencheu esse Map com a posse de
+  // mesa de TODO MUNDO, inclusive a minha própria -- pedido do
+  // Douglas, 30/set (20): "esse balao [Assumir essa mesa?] ainda
+  // aparece quando eu dou spawn na sala, mesmo eu ja tendo mesa
+  // assumida". updateAreaDim (ver showAreaClaimPrompt mais abaixo) já
+  // pulava a PRIMEIRA transição de área (isInitialSpawnFrame, pro bug
+  // antigo do spawn caindo em cima de mesa livre), mas isso só cobre
+  // o exato frame de nascer -- se o boneco local andar (ou for
+  // reposicionado) ANTES do "init" chegar (rede lenta/servidor
+  // dormindo no Render free tier), o Map ainda tava VAZIO nesse
+  // instante: localOwnsAnyArea() dava false mesmo eu já sendo dona de
+  // outra mesa de verdade, e o balão abria à toa. Setado uma vez só
+  // (ver markAreaOwnersSynced, chamado por GameRoom.tsx assim que
+  // processa data.areaOwners do "init"), nunca mais volta a false.
+  private areaOwnersSynced = false;
+
+  /** Chamado de fora (GameRoom.tsx) assim que os area-owners do
+   * "init" já foram todos aplicados (ver comentário de
+   * areaOwnersSynced acima). */
+  markAreaOwnersSynced() {
+    this.areaOwnersSynced = true;
+  }
+
   /**
    * Pedido do Douglas: "uma pessoa só pode assumir uma mesa por espaço"
    * -- true se o jogador LOCAL já é dono de QUALQUER área nessa sala
@@ -5965,7 +5989,12 @@ export default class MainScene extends Phaser.Scene {
       // espaço já conhecido -- null ou outra área -- pra essa), nunca
       // no cálculo inicial do spawn.
       const isInitialSpawnFrame = previousAreaId === undefined;
-      if (areaId && !this.editMode && !isInitialSpawnFrame) {
+      // areaOwnersSynced (ver comentário grande dele lá em cima) --
+      // sem os area-owners do "init" ainda aplicados, esse Map pode
+      // estar vazio mesmo eu já sendo dona de mesa de verdade (rede
+      // lenta), então nem VALE testar ownership ainda -- espera
+      // sincronizar antes de decidir mostrar o balão.
+      if (areaId && !this.editMode && !isInitialSpawnFrame && this.areaOwnersSynced) {
         const def = this.areaDefs.get(areaId);
         if (def?.type === "mesa-privada" && !this.areaOwnerByAreaId.has(areaId) && !this.localOwnsAnyArea()) {
           this.showAreaClaimPrompt(areaId);

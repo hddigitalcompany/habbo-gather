@@ -2724,6 +2724,14 @@ export default function GameRoom({
           const playerId = o.playerId === data.selfId ? "local" : o.playerId;
           scene?.setAreaOwner(o.areaId, playerId, o.name);
         }
+        // pedido do Douglas, 30/set (20): "esse balao [Assumir essa
+        // mesa?] ainda aparece quando eu dou spawn na sala, mesmo eu
+        // ja tendo mesa assumida" -- ver comentário grande de
+        // areaOwnersSynced em MainScene.ts. Só DEPOIS que o for acima
+        // já aplicou toda posse (inclusive a minha própria, ver
+        // "local" acima) é que faz sentido o balão de "Assumir essa
+        // mesa?" confiar no que updateAreaDim vê em areaOwnerByAreaId.
+        scene?.markAreaOwnersSynced();
 
         // status de cada jogador (parado/ocupado/etc, ver "profile" abaixo)
         // já vindo no "init" -- sem isso, updateDoorOpenState (MainScene.ts)
