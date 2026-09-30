@@ -5627,11 +5627,11 @@ button.chat-picker-item:disabled {
 
 /* 29/set (12), pedido do Douglas: "QUERO O CHAT DE FORA IGUAL AO CHAT
    DE DENTRO, ATE NA POSICAO, IGUAL" -- o painel de Conversas do Lobby
-   passou a usar as MESMAS classes .chat-lane-tabs/.chat-conv-*/
-   .chat-messages/.chat-message*/.chat-composer* do ChatDrawer de
+   passou a usar as MESMAS classes .chat-lane-tabs, .chat-conv-*,
+   .chat-messages, .chat-message*, .chat-composer* do ChatDrawer de
    dentro da sala (ver LobbyChatPanel em components/Lobby.tsx) em vez
-   de ter sua própria cópia -- por isso as antigas .lobby-lane-tabs/
-   .lobby-conv-item/.lobby-message*/.lobby-compose* saíram daqui:
+   de ter sua própria cópia -- por isso as antigas .lobby-lane-tabs,
+   .lobby-conv-item, .lobby-message*, .lobby-compose* saíram daqui:
    eram justamente a causa da gaveta de fora ir desalinhando da de
    dentro aos poucos (cada uma com seus próprios valores, ver
    comentário grande em .chat-drawer, .lobby-panel mais acima). O
