@@ -6005,11 +6005,31 @@ button.chat-picker-item:disabled {
      (overflow-x) quando não cabem todos, em vez de sumir (era o bug
      "e nao apareceu no lobby" de antes). Escondida de vez só em
      telas bem estreitas, igual .company-card-pin (900px). */
-.lobby-agenda-preview {
+/* pedido do Douglas, 30/set (20): "coloca um titulo na agenda /
+   Minha agenda:" -- wrapper novo que empilha título + fileira de
+   cards em coluna; o position:fixed que a fileira tinha sozinha
+   morou pra cá (ver .lobby-agenda-preview logo abaixo, que virou só
+   o flex-row de dentro). */
+.lobby-agenda-home {
   position: fixed;
   left: 322px;
   bottom: 100px;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: min(842px, calc(100vw - 754px));
+}
+
+.lobby-agenda-title {
+  margin: 0;
+  font-family: var(--font-raleway), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  color: #14121f;
+}
+
+.lobby-agenda-preview {
   display: flex;
   gap: 16px;
   /* pedido do Douglas: "diminui um pouco o corte de exibicao, ta
@@ -6017,7 +6037,7 @@ button.chat-picker-item:disabled {
      cards inteiros (3*270 + 2*16 = 842px), suficiente pra mostrar uma
      tirinha cortada do 4º card. Trocado pro valor exato de 3 cards +
      2 gaps (842px), sem sobra nenhuma. */
-  max-width: min(842px, calc(100vw - 754px));
+  max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -6028,7 +6048,10 @@ button.chat-picker-item:disabled {
 }
 
 @media (max-width: 900px) {
-  .lobby-agenda-preview {
+  /* .lobby-agenda-home (título + fileira) em vez de só
+     .lobby-agenda-preview -- senão o título "Minha agenda:" ficava
+     sozinho, sem a fileira de cards embaixo. */
+  .lobby-agenda-home {
     display: none;
   }
 }

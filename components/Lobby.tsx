@@ -4702,8 +4702,20 @@ export default function Lobby({
           "home" inteira, por enquanto (ver lobbyView lá em cima). Saiu
           de perto do card da empresa (onde morava antes, mostrando
           junto) -- agora só aparece em home, o card da empresa só
-          aparece em spaces. */}
+          aparece em spaces.
+
+          30/set (20) (2): "coloca um titulo na agenda / Minha
+          agenda:" -- título fixo (mesmo padrão de "Founders:"/"Quem
+          somos" no resto do app, só maior -- é título de página, não
+          rótulo de campo). O position:fixed que morava direto em
+          .lobby-agenda-preview subiu pra esse wrapper novo
+          (.lobby-agenda-home), que empilha título + fileira de cards
+          em coluna -- .lobby-agenda-preview virou só a fileira
+          (flex-row) de dentro, sem se preocupar mais com a própria
+          posição na tela. */}
       {lobbyView === "home" && (
+      <div className="lobby-agenda-home">
+        <p className="lobby-agenda-title">Minha agenda:</p>
       <div className="lobby-agenda-preview">
         {agendaPreviewDays.map((day) => {
           const badge = formatAgendaDayBadge(day.ts);
@@ -4757,6 +4769,7 @@ export default function Lobby({
             </div>
           );
         })}
+      </div>
       </div>
       )}
 
