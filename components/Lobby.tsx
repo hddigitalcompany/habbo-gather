@@ -2585,6 +2585,27 @@ export default function Lobby({
   useEffect(() => {
     if (visitSlug) setLobbyView("spaces");
   }, [visitSlug]);
+  // pedido do Douglas, 30/set (20): "quando ja entrou antes, seja bem
+  // vindo de volta" -- não existe "primeiro login" registrado em
+  // lugar nenhum no backend (accountProfile não tem createdAt, ver
+  // AuthGate.tsx), então marca por localStorage mesmo, POR CONTA
+  // (accountUserId na chave -- se alguém trocar de conta no mesmo
+  // navegador não herda o "já visitei" de outra pessoa). Lê e já
+  // marca como visto na mesma passada -- só reflete "visitou antes"
+  // de verdade a partir da SEGUNDA vez que esse accountUserId entra
+  // aqui.
+  const [returningVisitor, setReturningVisitor] = useState(false);
+  useEffect(() => {
+    if (!accountUserId || typeof window === "undefined") return;
+    const key = `xtower_visited_home_${accountUserId}`;
+    try {
+      setReturningVisitor(window.localStorage.getItem(key) === "1");
+      window.localStorage.setItem(key, "1");
+    } catch {
+      // localStorage pode falhar (modo privado/quota) -- sem isso só
+      // perde o "de volta", não quebra a saudação.
+    }
+  }, [accountUserId]);
   // qual espaço tá selecionado em "Meus espaços" agora (ver dropdown
   // mais abaixo/ROOM_SLUGS acima) -- vazio até confirmar algo válido
   // (nunca cai em "mapa-modelo"/"sala-principal" por padrão pra quem
@@ -4712,8 +4733,18 @@ export default function Lobby({
           (.lobby-agenda-home), que empilha título + fileira de cards
           em coluna -- .lobby-agenda-preview virou só a fileira
           (flex-row) de dentro, sem se preocupar mais com a própria
-          posição na tela. */}
+          posição na tela.
+
+          30/set (20) (3): "pagina inicial coloca um texto grande nas
+          letras do card / Seja bem vindo (a), Fulano" -- saudação
+          grande no topo da home, mesmo displayName já usado em
+          .lobby-greeting (ver handleEnter/RoomPreview mais abaixo),
+          só que essa versão é a manchete da página, bem maior. */}
       {lobbyView === "home" && (
+      <>
+        <p className="lobby-home-welcome">
+          Seja bem-vindo(a){returningVisitor ? " de volta" : ""}, {displayName} 😉
+        </p>
       <div className="lobby-agenda-home">
         <p className="lobby-agenda-title">Minha agenda:</p>
       <div className="lobby-agenda-preview">
@@ -4771,6 +4802,7 @@ export default function Lobby({
         })}
       </div>
       </div>
+      </>
       )}
 
       {lobbyView === "spaces" && (

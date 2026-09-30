@@ -6005,6 +6005,35 @@ button.chat-picker-item:disabled {
      (overflow-x) quando não cabem todos, em vez de sumir (era o bug
      "e nao apareceu no lobby" de antes). Escondida de vez só em
      telas bem estreitas, igual .company-card-pin (900px). */
+/* pedido do Douglas, 30/set (20): "pagina inicial coloca um texto
+   grande nas letras do card / Seja bem vindo (a), Fulano" -- manchete
+   da página inicial (bem maior que .lobby-greeting, que é só a
+   saudação pequena dentro do card "Entrar na sala" em spaces).
+   position:fixed próprio (não empilha junto de .lobby-agenda-home
+   porque mora um pouco mais acima dele na tela, ver left/bottom). */
+.lobby-home-welcome {
+  position: fixed;
+  left: 322px;
+  /* 100px (base do .lobby-agenda-home) + 232px (altura do card de
+     agenda) + 12px (gap entre título e fileira) + ~26px (linha do
+     título "Minha agenda:") + 24px de respiro = 394px. */
+  bottom: 394px;
+  z-index: 5;
+  margin: 0;
+  max-width: min(842px, calc(100vw - 754px));
+  font-family: var(--font-raleway), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: #14121f;
+}
+
+@media (max-width: 900px) {
+  .lobby-home-welcome {
+    display: none;
+  }
+}
+
 /* pedido do Douglas, 30/set (20): "coloca um titulo na agenda /
    Minha agenda:" -- wrapper novo que empilha título + fileira de
    cards em coluna; o position:fixed que a fileira tinha sozinha
