@@ -556,6 +556,20 @@ body {
    teve sozinho (bottom/left/z-index) -- a gaveta em si (.chat-drawer
    drawerBody, ver regra logo abaixo) vira position:static dentro do
    shell, só flui ao lado da coluna. */
+/* 29/set (19): "SIGA EXATAMENTE OQ TEM NELA, tamanho de logo, aba
+   fixa do lado do chat, titulo empresas" -- Douglas mandou o mockup de
+   novo (a versão original tinha saído do meu histórico numa limpeza
+   de contexto). Medido em pixel de verdade (PIL, grid sample) e
+   convertido pra escala real (o mockup tá ~2x o tamanho de .chat-drawer:
+   748x938 lá vs 380x480px aqui, ratio quase idêntico -- é o MESMO
+   card, só desenhado maior): rail e gaveta são uma peça SÓ (sem gap
+   nem sombra própria entre eles -- por isso gap:0 aqui embaixo e cada
+   lado perde o arredondado/borda que faria costura, ver
+   .chat-drawer-shell .chat-drawer logo abaixo), ícone de logo bem
+   maior (~64px, não mais 52px) e ENCOSTADO um no outro (sem respiro
+   entre eles, ver gap:0 em .chat-company-rail-list), título "Empresas"
+   do tamanho/peso do "Chat" (ver .chat-drawer-header h3, mesmo
+   15px/700), alinhado à ESQUERDA, não mais pequeno/maiúsculo/apagado. */
 .chat-drawer-shell {
   position: absolute;
   bottom: 82px;
@@ -564,7 +578,7 @@ body {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: 8px;
+  gap: 0;
   max-width: calc(100vw - 32px);
 }
 
@@ -579,20 +593,31 @@ body {
   max-width: none;
 }
 
+/* encostada na coluna (gap:0 acima) -- perde o arredondado E a borda
+   do lado ESQUERDO (ficaria uma costura dupla com a borda direita da
+   coluna, ver .chat-company-rail abaixo), mesma técnica de
+   .chat-drawer-sidebar (perde border-left/arredondado do lado que
+   encosta) só que espelhada pro outro lado. */
 .chat-drawer-shell .chat-drawer {
   position: static;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
 }
 
 .chat-company-rail {
-  width: 76px;
+  width: 92px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 8px;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
   background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
   border: 1px solid rgba(255, 255, 255, 0.2);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
   border-radius: 20px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
@@ -600,39 +625,43 @@ body {
 }
 
 .chat-company-rail-title {
-  font-size: 10px;
+  font-size: 15px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: #f5f0ff;
-  opacity: 0.7;
-  text-align: center;
+  text-align: left;
 }
 
 .chat-company-rail-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   overflow-y: auto;
   width: 100%;
-  align-items: center;
 }
 
+/* sem borda/fundo translúcido própria (ver histórico logo acima) --
+   no mockup os 4 ícones são blocos de cor CHEIA encostados, sem
+   respiro nem moldura nenhuma; o "ativo" (sempre tem UM selecionado
+   agora, ver comentário grande de selectedCompanyKey em
+   ChatDrawer/GameRoom.tsx) vira uma barra roxa na borda de FORA em vez
+   de mudar o quadrado em si, pra não estragar essa leitura de bloco de
+   cor sólido. */
 .chat-company-rail-item {
-  width: 52px;
-  height: 52px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   flex-shrink: 0;
-  border-radius: 14px;
-  border: 2px solid transparent;
-  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 16px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   cursor: pointer;
   color: #f5f0ff;
-  opacity: 0.75;
-  transition: opacity 0.15s, border-color 0.15s, transform 0.1s;
+  opacity: 0.72;
+  box-shadow: inset 3px 0 0 0 transparent;
+  transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 
 .chat-company-rail-item:hover {
@@ -640,13 +669,12 @@ body {
 }
 
 .chat-company-rail-item:active {
-  transform: scale(0.94);
+  transform: scale(0.96);
 }
 
 .chat-company-rail-item.active {
   opacity: 1;
-  border-color: #7c5cff;
-  background: rgba(124, 92, 255, 0.18);
+  box-shadow: inset 3px 0 0 0 #7c5cff;
 }
 
 .chat-company-rail-item img {
