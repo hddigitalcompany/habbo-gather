@@ -3760,12 +3760,19 @@ export default function Lobby({
           <div className="lobby-topbar-tab-wrap">
             <button
               type="button"
-              // sempre "active" -- é a seção atual (mesma ideia da
-              // bolinha atrás de "PRODUCTS" no print de referência,
-              // que marca a aba selecionada, não se o menu tá aberto;
-              // aberto/fechado é só a setinha girar, ver
-              // lobby-topbar-chevron logo abaixo).
-              className="lobby-topbar-tab active"
+              // pedido do Douglas, 30/set (20): "ta aparecendo como
+              // se ele tivesse dentro do lobby, mas nao e ali, e
+              // dentro do X tower, e a pagina inicial nao e o lobby
+              // das salas" -- antes tava sempre "active" (a bolinha
+              // atrás de "PRODUCTS" no print de referência, que marca
+              // a aba selecionada) mesmo estando na página inicial
+              // (home), dando a entender que home seria "dentro" de
+              // Meus espaços. Só fica active de verdade quando a
+              // página atual REALMENTE é a de espaços (lobbyView,
+              // ver mais acima) -- aberto/fechado do dropdown é só a
+              // setinha girar, ver lobby-topbar-chevron logo abaixo,
+              // continua independente disso.
+              className={lobbyView === "spaces" ? "lobby-topbar-tab active" : "lobby-topbar-tab"}
               // pedido do Douglas, 30/set (20): "cliquei em meus
               // espacos e ele ja pulou direto, nao e assim, ele tem
               // que selecionar o espaco primeiro" -- clicar na ABA só
