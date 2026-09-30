@@ -96,6 +96,13 @@ type ConversationSummary = {
   // server/chatStore.js). Só lane "company" tem valor aqui.
   companyName: string | null;
   companyLogoUrl: string | null;
+  // 29/set (14), pedido do Douglas: "gostei da forma de mostrar que
+  // tem mensagem, mantenha / mas nao esta funcionando" -- contador de
+  // mensagem não vista de verdade (ver unreadCount em
+  // server/chatStore.js/listConversationsForUser, GET /chat/summary
+  // reaproveita a mesma função). Opcional só por segurança, mesmo
+  // motivo do campo igual em components/GameRoom.tsx.
+  unreadCount?: number;
   lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
 };
 
@@ -856,6 +863,7 @@ function LobbyChatPanel({
   onClose,
   onSent,
   onStartConversation,
+  onConversationRead,
   initialActiveId,
 }: {
   myUserId: string;
@@ -865,10 +873,22 @@ function LobbyChatPanel({
   onClose: () => void;
   onSent: (conversationId: string, message: ChatMessage) => void;
   onStartConversation: (targetUserId: string, targetName: string, lane?: "private" | "company") => void;
+  // 29/set (14), pedido do Douglas: "quando eu vejo, ela nao some a
+  // marcacao" -- zera o unreadCount dessa conversa na lista do Lobby
+  // NA HORA que abre (sem esperar o próximo poll de /chat/summary, 6s
+  // depois, ver useEffect grande de "as conversas tambem nao abrem
+  // fora da sala" mais abaixo).
+  onConversationRead: (conversationId: string) => void;
   initialActiveId?: string | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  // corte "mensagens não vistas" (ver comentário grande no POST
+  // /chat/open em server/index.js) -- só pra desenhar a linha divisória
+  // na conversa ABERTA agora; congela no momento que abre (não
+  // recalcula sozinho enquanto a pessoa lê, senão a linha ficaria
+  // pulando pra baixo a cada mensagem nova).
+  const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
@@ -929,10 +949,12 @@ function LobbyChatPanel({
   useEffect(() => {
     if (!activeId) {
       setMessages(null);
+      setUnreadSinceTs(null);
       return;
     }
     let cancelled = false;
     setMessages(null);
+    setUnreadSinceTs(null);
     const conversationId = activeId;
 
     function fetchMessages() {
@@ -951,10 +973,37 @@ function LobbyChatPanel({
     fetchMessages();
     const messagesPoll = setInterval(fetchMessages, 4000);
 
+    // 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
+    // mostra onde ta a mensagem nao vista, e quando eu vejo, ela nao
+    // some a marcacao" -- marca como lida SÓ UMA VEZ nessa abertura
+    // (não a cada poll de mensagem ali em cima, senão o corte
+    // unreadSinceTs ficaria avançando sozinho e a linha divisória
+    // pularia de lugar enquanto a pessoa ainda tá lendo). Mesmo POST
+    // /chat/open que o servidor expõe pro Lobby (sem WebSocket, ver
+    // comentário grande no topo do arquivo) -- devolve o lastRead de
+    // ANTES de marcar, pra desenhar a linha "mensagens não vistas".
+    fetch(`${REALTIME_HTTP_BASE}/chat/open`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId, userId: myUserId }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        setUnreadSinceTs(typeof data?.unreadSinceTs === "number" ? data.unreadSinceTs : 0);
+        onConversationRead(conversationId);
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
       clearInterval(messagesPoll);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onConversationRead
+    // não entra nas deps de propósito: é só um setState do componente pai
+    // (função nova a cada render dele), incluir aqui faria esse efeito
+    // reabrir POST /chat/open toda vez que o Lobby re-renderizar, não só
+    // quando a conversa aberta muda de verdade.
   }, [activeId, myUserId]);
 
   const activeConversation = conversations?.find((c) => c.id === activeId) ?? null;
@@ -1144,14 +1193,33 @@ function LobbyChatPanel({
             ) : messages.length === 0 ? (
               <p className="chat-empty-hint">Nenhuma mensagem ainda.</p>
             ) : (
-              messages.map((m) => (
-                <div key={m.id} className={m.senderId === myUserId ? "chat-message own" : "chat-message"}>
-                  {m.senderId !== myUserId && <span className="chat-message-sender">{m.senderName}</span>}
-                  <div className="chat-bubble">
-                    <span>{m.deleted ? "Mensagem apagada" : m.kind === "text" ? m.text : "anexo enviado"}</span>
+              (() => {
+                // 29/set (14), pedido do Douglas: "quando eu abro a
+                // conversa nao mostra onde ta a mensagem nao vista" --
+                // linha divisória antes da PRIMEIRA mensagem de outro
+                // participante depois do corte unreadSinceTs (ver
+                // comentário grande no efeito de cima). unreadSinceTs
+                // null (ainda buscando) não desenha nada.
+                const dividerIndex =
+                  unreadSinceTs != null
+                    ? messages.findIndex((m) => m.senderId !== myUserId && m.ts > unreadSinceTs)
+                    : -1;
+                return messages.map((m, i) => (
+                  <div key={m.id}>
+                    {i === dividerIndex && (
+                      <div className="chat-unread-divider">
+                        <span>Mensagens não vistas</span>
+                      </div>
+                    )}
+                    <div className={m.senderId === myUserId ? "chat-message own" : "chat-message"}>
+                      {m.senderId !== myUserId && <span className="chat-message-sender">{m.senderName}</span>}
+                      <div className="chat-bubble">
+                        <span>{m.deleted ? "Mensagem apagada" : m.kind === "text" ? m.text : "anexo enviado"}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                ));
+              })()
             )}
           </div>
           <div className="chat-composer">
@@ -2405,6 +2473,16 @@ export default function Lobby({
   // atualiza a prévia da conversa na lista (lastMessage) na hora,
   // sem esperar reabrir o painel -- mesma ideia do "chat:conversation"
   // que o WebSocket manda de dentro da sala.
+  // 29/set (14), pedido do Douglas: "quando eu vejo, ela nao some a
+  // marcacao" -- zera o unreadCount na lista assim que o
+  // LobbyChatPanel confirma que marcou como lida no servidor (POST
+  // /chat/open), sem esperar o próximo poll de 6s de /chat/summary.
+  function handleConversationRead(conversationId: string) {
+    setConversations((prev) =>
+      prev ? prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c)) : prev
+    );
+  }
+
   function handleMessageSent(conversationId: string, message: ChatMessage) {
     setConversations((prev) =>
       prev
@@ -2449,6 +2527,16 @@ export default function Lobby({
   const pendingCallCount = useMemo(
     () => (calls ?? []).filter((c) => c.participants.find((p) => p.id === myUserId)?.status === "pending").length,
     [calls, myUserId]
+  );
+
+  // 29/set (14), pedido do Douglas: "gostei da forma de mostrar que
+  // tem mensagem, mantenha / mas nao esta funcionando" -- a marcação
+  // antiga era conversations.length (quantas conversas EXISTEM, não
+  // quantas têm mensagem não vista de verdade). Soma o unreadCount de
+  // cada conversa (ver server/chatStore.js/listConversationsForUser).
+  const totalUnreadMessages = useMemo(
+    () => (conversations ?? []).reduce((sum, c) => sum + (c.unreadCount ?? 0), 0),
+    [conversations]
   );
 
   // agrupa os compromissos futuros (calls, já vem do /agenda/summary
@@ -3377,9 +3465,7 @@ export default function Lobby({
         >
           <span className="lobby-badge-wrap">
             <ChatIcon />
-            {conversations && conversations.length > 0 && (
-              <span className="lobby-icon-badge">{conversations.length}</span>
-            )}
+            {totalUnreadMessages > 0 && <span className="lobby-icon-badge">{totalUnreadMessages}</span>}
           </span>
         </button>
         <button
@@ -3445,6 +3531,7 @@ export default function Lobby({
           }}
           onSent={handleMessageSent}
           onStartConversation={(targetUserId, _targetName, lane) => handleStartConversation(targetUserId, lane)}
+          onConversationRead={handleConversationRead}
           initialActiveId={openChatConversationId}
         />
       )}

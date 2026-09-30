@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   memo,
   useEffect,
   useLayoutEffect,
@@ -260,6 +261,13 @@ type Conversation = {
   participantIds: string[];
   participants: ConversationParticipant[]; // só os OUTROS, sem mim
   updatedAt: number;
+  // 29/set (14), pedido do Douglas: "gostei da forma de mostrar que
+  // tem mensagem, mantenha / mas nao esta funcionando" -- contador de
+  // mensagem não vista de verdade (ver unreadCount em
+  // server/chatStore.js/listConversationsForUser). Opcional só pra
+  // não quebrar nada que construía um Conversation na mão antes dessa
+  // mudança (nenhum lugar faz isso hoje, mas por segurança).
+  unreadCount?: number;
   lastMessage: { senderId: string; senderName: string; kind: ChatMsgKind; text: string; ts: number } | null;
 };
 
@@ -803,6 +811,24 @@ export default function GameRoom({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMsg[]>>({});
+  // 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
+  // mostra onde ta a mensagem nao vista" -- corte "mensagens não
+  // vistas" de CADA conversa (ver "chat:history"/unreadSinceTs em
+  // server/index.js), guardado por conversationId igual messagesByConv
+  // ali em cima -- pra ChatDrawer desenhar a linha divisória na
+  // conversa que tiver aberta no momento sem se confundir se a
+  // resposta de "chat:open" de uma conversa antiga chegar atrasada
+  // depois de já ter trocado pra outra.
+  const [unreadSinceTsByConv, setUnreadSinceTsByConv] = useState<Record<string, number>>({});
+  // espelha "tô literalmente vendo essa conversa AGORA" (drawer aberto
+  // + na aba de thread + é essa a conversa ativa) pro handler de
+  // "chat:message" (fechado uma vez só dentro do useEffect de conexão
+  // do socket, mesmo motivo/mesmo padrão de myCallConversationIdRef
+  // logo abaixo) saber se soma no contador de não-lida ou se já
+  // considera "vista" na hora (pedido do Douglas: "quando eu vejo, ela
+  // nao some a marcacao").
+  const readingConversationIdRef = useRef<string | null>(null);
+  readingConversationIdRef.current = chatOpen && chatView === "thread" ? activeConversationId : null;
   // chamada de voz/vídeo de uma conversa ("tipo discord") -- ver o tipo
   // ChatCallParticipant lá em cima e o mesh em callPeersRef/
   // sendCallSignal. callParticipantsByConversation cobre TODAS as
@@ -2657,6 +2683,17 @@ export default function GameRoom({
         }
       } else if (data.type === "chat:history") {
         setMessagesByConv((prev) => ({ ...prev, [data.conversationId]: data.messages }));
+        // 29/set (14): corte "mensagens não vistas" de ANTES de marcar
+        // como lida (ver comentário grande no case "chat:open" em
+        // server/index.js) -- guarda por conversationId (ver
+        // unreadSinceTsByConv lá em cima) e já zera o unreadCount dessa
+        // conversa na lista, sem esperar a próxima "chat:conversations"/
+        // "chat:conversation" (pedido do Douglas: "quando eu vejo, ela
+        // nao some a marcacao").
+        if (typeof data.unreadSinceTs === "number") {
+          setUnreadSinceTsByConv((prev) => ({ ...prev, [data.conversationId]: data.unreadSinceTs }));
+        }
+        setConversations((prev) => prev.map((c) => (c.id === data.conversationId ? { ...c, unreadCount: 0 } : c)));
       } else if (data.type === "chat:message_deleted") {
         // "apaga pra todos" numa conversa direta/grupo -- a mensagem já
         // chega tarjada do servidor (ver deleteMessage em
@@ -2676,12 +2713,29 @@ export default function GameRoom({
           ...prev,
           [data.conversationId]: [...(prev[data.conversationId] ?? []), msg],
         }));
+        // 29/set (14), pedido do Douglas: "quando eu abro a conversa
+        // nao mostra onde ta a mensagem nao vista, e quando eu vejo,
+        // ela nao some a marcacao" -- se essa mensagem é de OUTRA
+        // pessoa e a conversa dela é a que eu tô literalmente com o
+        // olho em cima agora (ver readingConversationIdRef lá em
+        // cima), já considera "vista" na hora: reabre "chat:open" (o
+        // servidor marca lastRead de novo e responde chat:history com
+        // unreadSinceTs atualizado, ver handler acima) em vez de somar
+        // no contador. Senão, soma 1 no unreadCount local (o servidor
+        // só sabe o número certo na próxima chat:list/chat:summary --
+        // isso aqui é só pra não esperar).
+        const isMine = msg.senderId === myUserId;
+        if (!isMine && readingConversationIdRef.current === data.conversationId) {
+          socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: data.conversationId }));
+        }
         setConversations((prev) => {
           const idx = prev.findIndex((c) => c.id === data.conversationId);
           if (idx === -1) return prev;
+          const bumpUnread = !isMine && readingConversationIdRef.current !== data.conversationId;
           const updated: Conversation = {
             ...prev[idx],
             updatedAt: msg.ts,
+            unreadCount: bumpUnread ? (prev[idx].unreadCount ?? 0) + 1 : prev[idx].unreadCount ?? 0,
             lastMessage: { senderId: msg.senderId, senderName: msg.senderName, kind: msg.kind, text: msg.text, ts: msg.ts },
           };
           const rest = prev.filter((c) => c.id !== data.conversationId);
@@ -4694,6 +4748,16 @@ export default function GameRoom({
     socketRef.current?.send(JSON.stringify({ type: "poke", to: targetId, kind: "note", text: trimmed }));
   }
 
+  // 29/set (14), pedido do Douglas: "gostei da forma de mostrar que
+  // tem mensagem, mantenha / mas nao esta funcionando" -- soma real de
+  // não-lida (ver unreadCount em server/chatStore.js/
+  // listConversationsForUser), usada no badge do botão "Chat" da
+  // av-bar (ver mais abaixo).
+  const totalUnreadMessages = useMemo(
+    () => conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0),
+    [conversations]
+  );
+
   // props compartilhadas do ChatDrawer -- o MESMO componente é usado em
   // dois lugares do JSX agora (flutuante por cima do jogo, ou fixo como
   // barra lateral à esquerda, ver chatPinned), só a posição/pinned muda.
@@ -4704,6 +4768,11 @@ export default function GameRoom({
     activeConversationId,
     onOpenConversation: openConversation,
     messages: activeConversationId === null ? [] : messagesByConv[activeConversationId] ?? [],
+    // 29/set (14): corte "mensagens não vistas" da conversa aberta
+    // agora (ver unreadSinceTsByConv lá em cima e o comentário grande
+    // no handler de "chat:history") -- null enquanto ainda não chegou
+    // (ou é a Sala, que não tem esse conceito).
+    unreadSinceTs: activeConversationId === null ? null : unreadSinceTsByConv[activeConversationId] ?? null,
     roomChatLog: chatLog,
     myUserId,
     onlinePlayers: Array.from(remotePlayersRef.current.values()),
@@ -5164,7 +5233,19 @@ export default function GameRoom({
             aria-label={chatOpen ? "Fechar chat" : "Abrir chat"}
             data-tooltip={chatOpen ? "Fechar chat" : "Chat"}
           >
-            <ChatIcon />
+            {/* 29/set (14), pedido do Douglas: "gostei da forma de
+                mostrar que tem mensagem, mantenha / mas nao esta
+                funcionando" -- mesma marcação vermelha que o Lobby já
+                tinha (ver .lobby-badge-wrap/.lobby-icon-badge em
+                app/globals.css, reaproveitada aqui igual pedido de
+                sempre "quero X igual a Y"), só que de dentro da sala
+                não existia NENHUMA ainda. Soma real (unreadCount de
+                cada conversa, ver server/chatStore.js), não mais
+                quantidade de conversa. */}
+            <span className="lobby-badge-wrap">
+              <ChatIcon />
+              {totalUnreadMessages > 0 && <span className="lobby-icon-badge">{totalUnreadMessages}</span>}
+            </span>
           </button>
           <button
             className={agendaOpen ? "av-btn on" : "av-btn"}
@@ -8050,6 +8131,7 @@ function ChatDrawer({
   activeConversationId,
   onOpenConversation,
   messages,
+  unreadSinceTs,
   roomChatLog,
   myUserId,
   onlinePlayers,
@@ -8096,6 +8178,11 @@ function ChatDrawer({
   activeConversationId: string | null;
   onOpenConversation: (id: string | null) => void;
   messages: ChatMsg[];
+  // 29/set (14): ver comentário grande em unreadSinceTsByConv/
+  // chatDrawerProps em GameRoom.tsx -- corte "mensagens não vistas" da
+  // conversa aberta agora, null pra Sala (isRoom) ou enquanto ainda
+  // não chegou do servidor.
+  unreadSinceTs: number | null;
   roomChatLog: ChatMessage[];
   myUserId: string;
   onlinePlayers: RemotePlayer[];
@@ -8513,19 +8600,38 @@ function ChatDrawer({
                     onDelete={m.senderId === myUserId && !m.deleted ? () => onDeleteMessage(null, m.id) : undefined}
                   />
                 ))
-              : messages.filter(Boolean).map((m) => (
-                  <ChatMessageRow
-                    key={m.id}
-                    msg={m}
-                    own={m.senderId === myUserId}
-                    showSenderName={m.senderId !== myUserId && activeConv?.kind === "group"}
-                    onDelete={
-                      m.senderId === myUserId && !m.deleted && activeConversationId
-                        ? () => onDeleteMessage(activeConversationId, m.id)
-                        : undefined
-                    }
-                  />
-                ))}
+              : (() => {
+                  const filtered = messages.filter(Boolean);
+                  // 29/set (14), pedido do Douglas: "quando eu abro a
+                  // conversa nao mostra onde ta a mensagem nao vista"
+                  // -- linha divisória antes da PRIMEIRA mensagem de
+                  // outro participante depois do corte unreadSinceTs
+                  // (ver comentário grande em unreadSinceTsByConv lá
+                  // em cima).
+                  const dividerIndex =
+                    unreadSinceTs != null
+                      ? filtered.findIndex((m) => m.senderId !== myUserId && m.ts > unreadSinceTs)
+                      : -1;
+                  return filtered.map((m, i) => (
+                    <Fragment key={m.id}>
+                      {i === dividerIndex && (
+                        <div className="chat-unread-divider">
+                          <span>Mensagens não vistas</span>
+                        </div>
+                      )}
+                      <ChatMessageRow
+                        msg={m}
+                        own={m.senderId === myUserId}
+                        showSenderName={m.senderId !== myUserId && activeConv?.kind === "group"}
+                        onDelete={
+                          m.senderId === myUserId && !m.deleted && activeConversationId
+                            ? () => onDeleteMessage(activeConversationId, m.id)
+                            : undefined
+                        }
+                      />
+                    </Fragment>
+                  ));
+                })()}
             {isRoom && roomChatLog.length === 0 && (
               <p className="chat-empty-hint">Nenhuma mensagem ainda -- diga oi pra quem tiver por perto!</p>
             )}

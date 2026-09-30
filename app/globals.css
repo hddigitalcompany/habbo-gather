@@ -1080,6 +1080,30 @@ button.chat-picker-item:disabled {
   word-break: break-word;
 }
 
+/* 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
+   mostra onde ta a mensagem nao vista" -- linha divisória antes da
+   primeira mensagem não vista (ver unreadSinceTs em ChatDrawer/
+   LobbyChatPanel), mesmo espírito visual de .auth-gate-divider (linha
+   dos dois lados + rótulo no meio), só tingida da mesma cor vermelha
+   do badge de não-lida (.lobby-icon-badge) pra associar visualmente. */
+.chat-unread-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  color: #ff8080;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chat-unread-divider::before,
+.chat-unread-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 69, 69, 0.35);
+}
+
 .chat-message.own .chat-bubble {
   background: #7c5cff;
 }

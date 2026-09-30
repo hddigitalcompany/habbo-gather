@@ -58,7 +58,11 @@
 //   chat:list        -> cliente->servidor: { type: "chat:list" }
 //                        servidor->cliente: { type: "chat:conversations", conversations }
 //   chat:open        -> cliente->servidor: { type: "chat:open", conversationId }
-//                        servidor->cliente: { type: "chat:history", conversationId, messages }
+//                        servidor->cliente: { type: "chat:history", conversationId, messages, unreadSinceTs }
+//                        (marca a conversa como lida na hora -- unreadSinceTs é o lastRead
+//                        de ANTES de marcar, pro cliente desenhar a linha "mensagens não
+//                        vistas"; ver chatStore.markConversationRead. POST /chat/open faz o
+//                        mesmo sem socket, usado pelo Lobby.)
 //   chat:create_direct -> cliente->servidor: { type: "chat:create_direct", targetUserId }
 //   chat:create_group  -> cliente->servidor: { type: "chat:create_group", name, participantIds }
 //   chat:rename_group  -> cliente->servidor: { type: "chat:rename_group", conversationId, name }
@@ -997,6 +1001,31 @@ function handleGetChatMessages(req, res, url) {
   res.end(JSON.stringify({ messages: chatStore.getMessages(conversationId) }));
 }
 
+/** POST /chat/open -- marca uma conversa como lida pro Lobby, MESMA
+ * ideia/mesmo retorno do case "chat:open" do WebSocket acima
+ * (chatStore.markConversationRead + unreadSinceTs pra linha "mensagens
+ * não vistas"), só que sem socket -- o Lobby chama isso toda vez que
+ * abre uma conversa no LobbyChatPanel (ver comentário grande no topo
+ * de components/Lobby.tsx sobre esse painel ser REST-only). */
+async function handlePostChatOpen(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId } = body;
+  if (typeof conversationId !== "string" || typeof userId !== "string" || !userId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  const unreadSinceTs = chatStore.markConversationRead(conversationId, userId) ?? 0;
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, unreadSinceTs }));
+}
+
 /** POST /chat/send -- manda mensagem de TEXTO numa conversa já
  * existente, sem precisar abrir WebSocket -- pedido do Douglas: os
  * botões de chat/agenda do Lobby "mantenha igual de dentro da sala"
@@ -1595,6 +1624,11 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/chat/open") {
+    handlePostChatOpen(req, res);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/chat/send") {
     handlePostChatSend(req, res);
     return;
@@ -2058,7 +2092,20 @@ wss.on("connection", async (ws, req) => {
         if (typeof data.conversationId !== "string") break;
         if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
         const messages = chatStore.getMessages(data.conversationId);
-        ws.send(JSON.stringify({ type: "chat:history", conversationId: data.conversationId, messages }));
+        // 29/set (14), pedido do Douglas: "quando eu abro a conversa
+        // nao mostra onde ta a mensagem nao vista, e quando eu vejo,
+        // ela nao some a marcacao" -- marca como lida NA HORA que abre
+        // (mesmo instante que já buscava o histórico, só isso não
+        // fazia nada com "lido" ainda) e manda junto o corte de ANTES
+        // de marcar (unreadSinceTs), pro cliente desenhar a linha
+        // "mensagens não vistas" na posição certa (ver ChatDrawer/
+        // LobbyChatPanel -- ChatDrawer também reabre esse mesmo evento
+        // quando uma mensagem nova chega com a conversa JÁ aberta, pra
+        // "ver" continuar marcando como lido em tempo real).
+        const unreadSinceTs = chatStore.markConversationRead(data.conversationId, player.userId) ?? 0;
+        ws.send(
+          JSON.stringify({ type: "chat:history", conversationId: data.conversationId, messages, unreadSinceTs })
+        );
         break;
       }
       case "chat:create_direct": {

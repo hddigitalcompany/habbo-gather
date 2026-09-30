@@ -196,6 +196,13 @@ export function getOrCreateDirectConversation(userIdA, userIdB, lane = "company"
     createdBy: userIdA,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    // 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
+    // mostra onde ta a mensagem nao vista, e quando eu vejo, ela nao
+    // some a marcacao" -- contador de não-lida de verdade (ver
+    // markConversationRead/listConversationsForUser abaixo). Quem CRIA
+    // a conversa já "leu" ela na hora (sem isso, o próprio criador
+    // veria a marcação de não-lida na conversa que ele mesmo abriu).
+    lastRead: { [userIdA]: Date.now() },
   };
   store.conversations[conv.id] = conv;
   store.messages[conv.id] = [];
@@ -249,6 +256,9 @@ export function createGroupConversation({ name, participantIds, createdBy, compa
     createdBy,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    // ver comentário grande em getOrCreateDirectConversation acima --
+    // mesmo motivo (quem cria já leu a própria conversa).
+    lastRead: { [createdBy]: Date.now() },
   };
   store.conversations[conv.id] = conv;
   store.messages[conv.id] = [];
@@ -273,6 +283,25 @@ export function isParticipant(conversationId, userId) {
   return !!conv && conv.participantIds.includes(userId);
 }
 
+/** Marca uma conversa como lida por um usuário (chamado quando abre a
+ * conversa -- ver o case "chat:open" no WebSocket e POST /chat/open
+ * em server/index.js, esse último pro Lobby que não tem socket).
+ * Devolve o lastRead ANTERIOR (ou 0 se nunca tinha lido) -- é o corte
+ * que o cliente usa pra desenhar a linha "mensagens não vistas" na
+ * hora que abre (pedido do Douglas, 29/set: "quando eu abro a
+ * conversa nao mostra onde ta a mensagem nao vista"), antes desse
+ * corte avançar pro "agora". null se a conversa não existe ou o
+ * usuário não é participante dela. */
+export function markConversationRead(conversationId, userId) {
+  const conv = store.conversations[conversationId];
+  if (!conv || !conv.participantIds.includes(userId)) return null;
+  if (!conv.lastRead) conv.lastRead = {};
+  const previous = conv.lastRead[userId] ?? 0;
+  conv.lastRead[userId] = Date.now();
+  persist();
+  return previous;
+}
+
 /** Todas as conversas de um usuário, mais recente primeiro, já com um
  * preview da última mensagem e os dados (nome/cor) dos outros
  * participantes -- pronto pra desenhar a lista sem consulta extra. */
@@ -282,6 +311,20 @@ export function listConversationsForUser(userId) {
     .map((c) => {
       const msgs = store.messages[c.id] ?? [];
       const last = msgs[msgs.length - 1] ?? null;
+      // 29/set (14), pedido do Douglas: "gostei da forma de mostrar
+      // que tem mensagem, mantenha / mas nao esta funcionando" -- a
+      // marcação antiga era só "tem conversa nenhuma" (contava TODAS
+      // as conversas, não as com mensagem não vista de verdade). Conta
+      // de verdade: mensagens de QUALQUER outro participante, depois
+      // do último lastRead salvo pra esse userId (0 == nunca leu, ver
+      // markConversationRead acima -- conversa criada por ESSE userId
+      // já nasce com lastRead preenchido, ver getOrCreateDirectConversation/
+      // createGroupConversation).
+      const lastReadTs = c.lastRead?.[userId] ?? 0;
+      const unreadCount = msgs.reduce(
+        (n, m) => (m.senderId !== userId && m.ts > lastReadTs ? n + 1 : n),
+        0
+      );
       return {
         id: c.id,
         kind: c.kind,
@@ -302,6 +345,7 @@ export function listConversationsForUser(userId) {
           .filter((id) => id !== userId)
           .map((id) => ({ id, ...getUser(id) })),
         updatedAt: c.updatedAt,
+        unreadCount,
         lastMessage: last
           ? { senderId: last.senderId, senderName: last.senderName, kind: last.kind, text: last.text, ts: last.ts }
           : null,
