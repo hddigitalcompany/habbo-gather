@@ -1575,7 +1575,15 @@ export default class MainScene extends Phaser.Scene {
         this.roomShape.add(this.roomTileKey(col, row));
       }
     }
-    this.positionFacade(); // reposicionada de novo em loadSavedRoomShape/paint/erase
+    // NÃO chama positionFacade() aqui -- esse retângulo é só o valor
+    // PROVISÓRIO antes do formato de verdade chegar (loadSavedRoomShape,
+    // assíncrono, abaixo). positionFacade agora trava pra sempre na
+    // primeira vez que roda (ver comentário grande nela) -- se rodasse
+    // aqui travaria na quina ERRADA desse retângulo padrão 13x8, antes
+    // do formato real/calibrado existir ("bugou foram lá pra trás"
+    // reportado pelo Douglas). loadSavedRoomShape chama positionFacade
+    // assim que o formato de verdade chega, e é aí que a trava deve
+    // travar pela primeira vez.
 
     // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
     // escolhidos -- por isso desenha antes até dos móveis fixos (ver
