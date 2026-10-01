@@ -900,6 +900,12 @@ export default class MainScene extends Phaser.Scene {
   private gridGraphics?: Phaser.GameObjects.Graphics;
   /** fachada do prédio colada na quina de baixo da sala (ver FACADE_TEXTURE_KEY / positionFacade). */
   private facadeImage?: Phaser.GameObjects.Image;
+  /** tile onde facadeImage foi ancorada da PRIMEIRA vez (ver
+   * positionFacade) -- guardado separado do cálculo de "main" de cada
+   * chamada porque agora congela pra sempre assim que criado (pedido
+   * do Douglas, "trava ela nessa posição"); serve só pra excluir esse
+   * tile de virar também uma quina2 (perto do fim de positionFacade). */
+  private facadeMainTile?: { col: number; row: number };
   /** quinas EXTRAS da fachada, 1 sprite por quina (sala em L/escada com
    * mais de 1 quina externa -- ver roomFrontCorners/positionFacade),
    * indexado por "col,row" do tile-quina (mesmo padrão de
@@ -4029,25 +4035,37 @@ export default class MainScene extends Phaser.Scene {
    * formato da sala muda. */
   private positionFacade() {
     const corners = this.roomFrontCorners();
-    if (corners.length === 0) return;
 
-    let main = corners[0];
-    for (const c of corners) {
-      if (
-        c.col + c.row > main.col + main.row ||
-        (c.col + c.row === main.col + main.row && Math.abs(c.col - c.row) < Math.abs(main.col - main.row))
-      ) {
-        main = c;
+    // TRAVA (pedido do Douglas depois de calibrar a dedo, print por
+    // print: "trava ela nessa posição, não vou mais mexer nela, vou
+    // desenhar uma sacada encima dela") -- mas travar TUDO (como a
+    // primeira tentativa fez) quebrou quando ele cresceu a sala de
+    // verdade: a sacada nova virou uma quina externa nova e ficou sem
+    // NENHUMA peça de fachada, porque o bloco de criação inteiro
+    // estava pulando ("vish bugou foi tudo"). O que ele queria era só
+    // congelar a peça que ELE JÁ calibrou -- não impedir quina nova de
+    // ganhar a dela. Por isso agora: a peça PRINCIPAL (facadeImage) é
+    // ancorada só na primeira vez (this.facadeMainTile guarda o tile
+    // escolhido então) e nunca mais se move; já a quina2 cria uma
+    // peça nova pra cada quina detectada que AINDA não tem sprite
+    // (this.facadeCornerSprites), mas nunca mexe nem apaga uma quina2
+    // que já existe, mesmo que ela pare de ser detectada como quina
+    // (sala cresceu por cima dela, por exemplo).
+    if (!this.facadeMainTile && corners.length > 0) {
+      let main = corners[0];
+      for (const c of corners) {
+        if (
+          c.col + c.row > main.col + main.row ||
+          (c.col + c.row === main.col + main.row && Math.abs(c.col - c.row) < Math.abs(main.col - main.row))
+        ) {
+          main = c;
+        }
       }
+      this.facadeMainTile = main;
     }
-    // TRAVADA junto com a quina 2 (mesmo pedido do Douglas, "trava
-    // ela nessa posição") -- sem isso, crescer a sala pra fazer a
-    // sacada muda qual tile tem o maior col+row e a peça PRINCIPAL
-    // pula de posição sozinha (foi isso que causou o "moveu" depois de
-    // eu só ter travado a quina 2). Só cria uma vez; depois disso
-    // nunca mais chama setPosition nela, não importa como a sala mude.
-    if (this.textures.exists(FACADE_TEXTURE_KEY) && !this.facadeImage) {
-      const w = tileToWorld(main.col, main.row);
+
+    if (this.facadeMainTile && this.textures.exists(FACADE_TEXTURE_KEY) && !this.facadeImage) {
+      const w = tileToWorld(this.facadeMainTile.col, this.facadeMainTile.row);
       const x = w.x;
       const y = w.y + ISO_TILE_HEIGHT / 2;
       const tex = this.textures.get(FACADE_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
@@ -4058,29 +4076,19 @@ export default class MainScene extends Phaser.Scene {
         .setDepth(DEPTH_FACADE);
     }
 
-    // as demais quinas -- 1 sprite da peça pequena por quina, indexado
-    // por tile (mesmo padrão de draftFloor/draftWall/etc no resto do
-    // arquivo) pra sobreviver entre chamadas e sumir sozinho se a
-    // quina deixar de existir (sala encolheu de novo, ver
-    // eraseRoomShapeAt).
-    //
-    // TRAVADA (pedido do Douglas depois de calibrar a posição a dedo,
-    // print por print: "trava ela nessa posição, não vou mais mexer
-    // nela, vou desenhar uma sacada encima dela") -- ele vai continuar
-    // crescendo a sala (uma sacada por cima/na frente dessa quina), o
-    // que mudaria qual tile é "quina da frente" e reposicionaria/
-    // destruiria essa peça sozinha via roomFrontCorners. Pra isso não
-    // acontecer mais, uma vez que já existe pelo menos 1 sprite de
-    // quina2 nesta sessão da cena, esse bloco inteiro é pulado -- a
-    // posição fica congelada no que já foi calculado, não importa como
-    // a sala mude dali pra frente. Só volta a recalcular se a cena for
-    // recriada do zero (recarregar a página).
-    const mainKey = this.roomTileKey(main.col, main.row);
-    if (this.facadeCornerSprites.size === 0 && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
+    // demais quinas -- 1 sprite da peça pequena por quina nova
+    // detectada (ver roomFrontCorners), indexado por tile (mesmo
+    // padrão de draftFloor/draftWall/etc no resto do arquivo). Uma vez
+    // criada, uma quina2 nunca mais é movida nem apagada por aqui
+    // (congelada, igual a principal) -- só uma quina que AINDA não
+    // tem sprite ganha uma nova.
+    const mainKey = this.facadeMainTile ? this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row) : null;
+    if (this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
       const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
       for (const c of corners) {
         const key = this.roomTileKey(c.col, c.row);
         if (key === mainKey) continue;
+        if (this.facadeCornerSprites.has(key)) continue;
         const w = tileToWorld(c.col, c.row);
         const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
         const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
