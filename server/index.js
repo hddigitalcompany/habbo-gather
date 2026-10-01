@@ -526,6 +526,229 @@ function handleChatTyping(player, conversationId) {
   }
 }
 
+// ---------------------------------------------------------------
+// 1/out -- Douglas, depois de ver a unificação do CHAT só de aparência
+// (mesmo componente, mas duas conexões/dois donos de estado diferentes
+// por baixo -- REST+socket reduzido no Lobby, WebSocket completo na
+// sala): "nao tem que ter chat de fora chat de dentro, tem que ter
+// CHAT... pega o chat de dentro e transforma ele em CHAT que acompanha
+// toda a plataforma". Essas funções são o "motor" de conversas diretas/
+// grupo (histórico, enviar, apagar, reagir, fixar, arquivos, digitando,
+// chamada) extraídas do switch da sala (ver case "chat:*"/"call:*"
+// embaixo) pra serem chamadas tanto de lá quanto da conexão ÚNICA da
+// plataforma (ver handlePlatformConnection mais abaixo, antigo
+// handleLobbySocketConnection) -- a MESMA função roda pros dois casos,
+// nunca duas implementações paralelas de novo. Nenhuma delas depende de
+// `room`/`roomId` de conexão (a Sala continua um conceito à parte, só
+// ela é de fato amarrada a UMA sala específica, ver chat:react/chat:pin/
+// chat:unpin/chat:attachments com conversationId null mais abaixo, que
+// CONTINUAM só no switch da sala) -- as que precisavam de roomId
+// (carimbar "Empresa" com a logo/nome de uma sala) recebem esse valor
+// como PARÂMETRO explícito agora (roomSlugForCompany), MESMO padrão que
+// as rotas REST /chat/direct e /chat/create-group já usavam (o Lobby,
+// sem WebSocket até aqui, nunca teve "a sala dessa conexão" pra inferir
+// sozinho -- sempre mandou explícito, ver handlePostChatDirect acima).
+// ---------------------------------------------------------------
+
+function handleChatList(player, ws) {
+  const conversations = chatStore.listConversationsForUser(player.userId);
+  ws.send(JSON.stringify({ type: "chat:conversations", conversations }));
+  for (const conv of conversations) {
+    const participants = callParticipantsPayload(conv.id);
+    if (participants.length > 0) {
+      ws.send(JSON.stringify({ type: "call:state", conversationId: conv.id, participants }));
+    }
+  }
+}
+
+function handleChatOpen(player, ws, data) {
+  if (typeof data.conversationId !== "string") return;
+  if (!chatStore.isParticipant(data.conversationId, player.userId)) return;
+  const messages = chatStore.getMessages(data.conversationId);
+  const unreadSinceTs = chatStore.markConversationRead(data.conversationId, player.userId) ?? 0;
+  ws.send(
+    JSON.stringify({
+      type: "chat:history",
+      conversationId: data.conversationId,
+      messages,
+      unreadSinceTs,
+      pins: chatStore.getConversationPins(data.conversationId),
+      lastRead: chatStore.getConversationLastRead(data.conversationId),
+    })
+  );
+  const conv = chatStore.getConversation(data.conversationId);
+  if (conv) {
+    for (const uid of conv.participantIds) {
+      if (uid === player.userId) continue;
+      sendToUser(uid, { type: "chat:read", conversationId: data.conversationId, userId: player.userId, ts: Date.now() });
+    }
+  }
+}
+
+async function handleChatCreateDirect(player, data, roomSlugForCompany) {
+  if (typeof data.targetUserId !== "string" || !data.targetUserId) return;
+  if (data.targetUserId === player.userId) return;
+  const targetUserId = data.targetUserId;
+  const targetPlayer = findLivePlayerByUserId(targetUserId);
+  const eitherIsGuest = !player.accountVerified || !(targetPlayer?.accountVerified);
+  const requestedLane = data.lane === "private" ? "private" : "company";
+  const lane = eitherIsGuest ? "private" : requestedLane;
+  if (lane === "private" && !eitherIsGuest && !(await chatStore.areMutualFriends(player.userId, targetUserId))) {
+    return { error: "Só dá pra abrir conversa privada com quem é amigo mútuo." };
+  }
+  const companyInfo = lane === "company" && roomSlugForCompany ? await getRoomCompanyInfo(roomSlugForCompany) : null;
+  const conv = chatStore.getOrCreateDirectConversation(player.userId, targetUserId, lane, companyInfo);
+  sendConversationTo(player.userId, conv.id);
+  sendConversationTo(targetUserId, conv.id);
+  return { conversationId: conv.id };
+}
+
+async function handleChatSetLane(player, data, roomSlugForCompany) {
+  if (typeof data.conversationId !== "string" || !data.conversationId) return;
+  if (data.lane !== "company" && data.lane !== "private") return;
+  const targetLane = data.lane;
+  const conv = chatStore.getConversation(data.conversationId);
+  if (!conv || !conv.participantIds.includes(player.userId)) return;
+  const companyInfo = targetLane === "company" && roomSlugForCompany ? await getRoomCompanyInfo(roomSlugForCompany) : null;
+  const result = chatStore.setConversationLane(data.conversationId, player.userId, targetLane, companyInfo);
+  if (!result) return;
+  const { conversation, removedConversationId } = result;
+  for (const uid of conversation.participantIds) {
+    if (removedConversationId) sendConversationRemovedTo(uid, removedConversationId);
+    sendConversationTo(uid, conversation.id);
+  }
+  return { conversation, removedConversationId };
+}
+
+async function handleChatCreateGroup(player, data, roomSlugForCompany) {
+  if (!Array.isArray(data.participantIds)) return;
+  const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
+  if (participantIds.length === 0) return;
+  const companyInfo = roomSlugForCompany ? await getRoomCompanyInfo(roomSlugForCompany) : null;
+  const conv = chatStore.createGroupConversation({
+    name: data.name,
+    participantIds,
+    createdBy: player.userId,
+    companyInfo,
+  });
+  for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+  return { conversationId: conv.id };
+}
+
+function handleChatRenameGroup(player, data) {
+  if (typeof data.conversationId !== "string" || typeof data.name !== "string") return;
+  if (!chatStore.isParticipant(data.conversationId, player.userId)) return;
+  const conv = chatStore.renameGroupConversation(data.conversationId, data.name);
+  if (!conv) return;
+  for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+}
+
+function handleChatSend(player, data) {
+  if (typeof data.conversationId !== "string") return;
+  if (!chatStore.isParticipant(data.conversationId, player.userId)) return;
+  const text = typeof data.text === "string" ? data.text.slice(0, 2000) : "";
+  const attachment =
+    data.attachment && typeof data.attachment === "object"
+      ? {
+          url: data.attachment.url,
+          name: data.attachment.name,
+          size: data.attachment.size,
+          mime: data.attachment.mime,
+        }
+      : null;
+  const roomCard =
+    data.roomCard && typeof data.roomCard === "object"
+      ? {
+          action: data.roomCard.action === "invite" ? "invite" : "visit",
+          roomSlug: String(data.roomCard.roomSlug || "").slice(0, 200),
+          roomName: String(data.roomCard.roomName || "").slice(0, 200),
+          roomLogoUrl: String(data.roomCard.roomLogoUrl || "").slice(0, 500),
+        }
+      : null;
+  if (!text.trim() && !attachment && !roomCard) return;
+  const kind = roomCard
+    ? "room_card"
+    : !attachment
+      ? "text"
+      : data.kind === "audio"
+        ? "audio"
+        : data.kind === "image"
+          ? "image"
+          : "file";
+  const msg = chatStore.addMessage(data.conversationId, {
+    senderId: player.userId,
+    senderName: player.name,
+    kind,
+    text,
+    attachment,
+    roomCard,
+    mentionedUserIds: data.mentionedUserIds,
+  });
+  if (!msg) return;
+  const conv = chatStore.getConversation(data.conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:message", conversationId: data.conversationId, message: msg });
+  }
+}
+
+function handleChatDeleteMessage(player, data) {
+  if (typeof data.conversationId !== "string" || typeof data.messageId !== "string") return;
+  if (!chatStore.isParticipant(data.conversationId, player.userId)) return;
+  const deleted = chatStore.deleteMessage(data.conversationId, data.messageId, player.userId);
+  if (!deleted) return;
+  const conv = chatStore.getConversation(data.conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:message_deleted", conversationId: data.conversationId, messageId: deleted.id });
+  }
+}
+
+/** "chat:react" numa conversa de VERDADE (conversationId presente) --
+ * o ramo Sala (conversationId ausente/null) continua só no switch da
+ * sala, ver case "chat:react" embaixo: aquele depende de `room`/roomId
+ * de verdade, não faz sentido fora de uma sala. */
+function handleChatReactConversation(player, conversationId, messageId, emoji) {
+  if (!chatStore.isParticipant(conversationId, player.userId)) return;
+  const result = chatStore.toggleConversationReaction(conversationId, messageId, player.userId, emoji);
+  if (!result) return;
+  const conv = chatStore.getConversation(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:reaction", conversationId, messageId, reactions: result.reactions });
+  }
+}
+
+/** "chat:pin" numa conversa de VERDADE -- mesmo motivo de
+ * handleChatReactConversation acima, ramo Sala fica só no switch da
+ * sala. */
+function handleChatPinConversation(player, conversationId, messageId, durationMs) {
+  if (!chatStore.isParticipant(conversationId, player.userId)) return;
+  const pin = chatStore.pinConversationMessage(conversationId, messageId, player.userId, player.name, durationMs);
+  if (!pin) return;
+  const conv = chatStore.getConversation(conversationId);
+  const pins = chatStore.getConversationPins(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:pins", conversationId, pins });
+  }
+}
+
+/** "chat:unpin" numa conversa de VERDADE -- mesmo motivo de
+ * handleChatReactConversation acima. */
+function handleChatUnpinConversation(player, conversationId, messageId) {
+  if (!chatStore.isParticipant(conversationId, player.userId)) return;
+  if (!chatStore.unpinConversationMessage(conversationId, messageId)) return;
+  const conv = chatStore.getConversation(conversationId);
+  const pins = chatStore.getConversationPins(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:pins", conversationId, pins });
+  }
+}
+
+/** "chat:attachments" (painel "arquivos da conversa") numa conversa de
+ * VERDADE -- mesmo motivo de handleChatReactConversation acima. */
+function handleChatAttachmentsConversation(player, ws, conversationId) {
+  if (!chatStore.isParticipant(conversationId, player.userId)) return;
+  ws.send(JSON.stringify({ type: "chat:attachments", conversationId, items: chatStore.getConversationAttachments(conversationId) }));
+}
+
 function broadcast(room, data, excludeId) {
   const msg = JSON.stringify(data);
   for (const [id, conn] of room) {
@@ -2304,6 +2527,80 @@ async function handleLobbySocketConnection(ws) {
         if (typeof data.name === "string") player.name = data.name.slice(0, 80);
         if (typeof data.color === "string") player.color = data.color.slice(0, 20);
         if (typeof data.photoUrl === "string") player.photoUrl = data.photoUrl.slice(0, 500);
+        syncChatUser(player);
+        handleChatList(player, ws);
+        break;
+      }
+      // 1/out, pedido do Douglas ("nao tem que ter chat de fora chat de
+      // dentro, tem que ter CHAT ... pega o chat de dentro e transforma
+      // ele em CHAT que acompanha toda a plataforma") -- essa conexão
+      // (antes só chamada/digitando do Lobby) agora fala o protocolo de
+      // chat INTEIRO (conversas/mensagens/reação/fixar/arquivos), MESMAS
+      // funções do switch da sala (ver comentário grande delas lá em
+      // cima) -- nenhuma lógica nova, só reuso. roomSlug pra carimbar
+      // "Empresa" vem EXPLÍCITO de data.roomSlug (mesmo padrão das rotas
+      // REST /chat/direct e /chat/create-group) já que essa conexão não
+      // tem roomId nenhum pra inferir sozinha.
+      case "chat:open": {
+        handleChatOpen(player, ws, data);
+        break;
+      }
+      case "chat:create_direct": {
+        (async () => {
+          const result = await handleChatCreateDirect(player, data, typeof data.roomSlug === "string" ? data.roomSlug : "");
+          if (result?.error) ws.send(JSON.stringify({ type: "error", message: result.error }));
+        })();
+        break;
+      }
+      case "chat:set_lane": {
+        handleChatSetLane(player, data, typeof data.roomSlug === "string" ? data.roomSlug : "");
+        break;
+      }
+      case "chat:create_group": {
+        handleChatCreateGroup(player, data, typeof data.roomSlug === "string" ? data.roomSlug : "");
+        break;
+      }
+      case "chat:rename_group": {
+        handleChatRenameGroup(player, data);
+        break;
+      }
+      case "chat:send": {
+        handleChatSend(player, data);
+        break;
+      }
+      case "chat:delete": {
+        handleChatDeleteMessage(player, data);
+        break;
+      }
+      case "chat:react": {
+        if (typeof data.conversationId !== "string" || !data.conversationId) break;
+        const messageId = typeof data.messageId === "string" ? data.messageId : "";
+        const emoji = typeof data.emoji === "string" ? data.emoji : "";
+        if (!messageId || !emoji) break;
+        handleChatReactConversation(player, data.conversationId, messageId, emoji);
+        break;
+      }
+      case "chat:pin": {
+        if (typeof data.conversationId !== "string" || !data.conversationId) break;
+        const messageId = typeof data.messageId === "string" ? data.messageId : "";
+        if (!messageId) break;
+        const durationMs =
+          Number.isFinite(data.durationMs) && data.durationMs > 0
+            ? Math.min(Number(data.durationMs), MAX_PIN_DURATION_MS)
+            : null;
+        handleChatPinConversation(player, data.conversationId, messageId, durationMs);
+        break;
+      }
+      case "chat:unpin": {
+        if (typeof data.conversationId !== "string" || !data.conversationId) break;
+        const messageId = typeof data.messageId === "string" ? data.messageId : "";
+        if (!messageId) break;
+        handleChatUnpinConversation(player, data.conversationId, messageId);
+        break;
+      }
+      case "chat:attachments": {
+        if (typeof data.conversationId !== "string" || !data.conversationId) break;
+        handleChatAttachmentsConversation(player, ws, data.conversationId);
         break;
       }
       case "chat:typing": {
@@ -2805,228 +3102,41 @@ wss.on("connection", async (ws, req) => {
       // --- chat de verdade: direta/grupo, histórico, foto/arquivo/áudio
       // (ver comentário grande no topo do arquivo e server/chatStore.js) ---
       case "chat:list": {
-        const conversations = chatStore.listConversationsForUser(player.userId);
-        ws.send(JSON.stringify({ type: "chat:conversations", conversations }));
-        // já manda o estado de chamada de quem já tiver uma rolando --
-        // sem isso o botão verde "entrar na call" só apareceria depois
-        // da PRÓXIMA mudança (ver broadcastCallState), não já na
-        // primeira vez que a lista de conversas carrega.
-        for (const conv of conversations) {
-          const participants = callParticipantsPayload(conv.id);
-          if (participants.length > 0) {
-            ws.send(JSON.stringify({ type: "call:state", conversationId: conv.id, participants }));
-          }
-        }
+        handleChatList(player, ws);
         break;
       }
       case "chat:open": {
-        if (typeof data.conversationId !== "string") break;
-        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
-        const messages = chatStore.getMessages(data.conversationId);
-        // 29/set (14), pedido do Douglas: "quando eu abro a conversa
-        // nao mostra onde ta a mensagem nao vista, e quando eu vejo,
-        // ela nao some a marcacao" -- marca como lida NA HORA que abre
-        // (mesmo instante que já buscava o histórico, só isso não
-        // fazia nada com "lido" ainda) e manda junto o corte de ANTES
-        // de marcar (unreadSinceTs), pro cliente desenhar a linha
-        // "mensagens não vistas" na posição certa (ver ChatDrawer/
-        // LobbyChatPanel -- ChatDrawer também reabre esse mesmo evento
-        // quando uma mensagem nova chega com a conversa JÁ aberta, pra
-        // "ver" continuar marcando como lido em tempo real).
-        const unreadSinceTs = chatStore.markConversationRead(data.conversationId, player.userId) ?? 0;
-        ws.send(
-          JSON.stringify({
-            type: "chat:history",
-            conversationId: data.conversationId,
-            messages,
-            unreadSinceTs,
-            // 1/out: manda junto a faixa de fixadas (pedido do Douglas,
-            // "mensagem fixada") -- sem round-trip extra pra desenhar a
-            // faixa assim que a conversa abre.
-            pins: chatStore.getConversationPins(data.conversationId),
-            // 1/out: "semente" de quem já leu até onde (ver
-            // chatStore.getConversationLastRead) -- sem isso o "visto
-            // por"/"✓✓" só apareceria depois do PRÓXIMO chat:read ao
-            // vivo, nunca pra um estado que já existia de antes dessa
-            // sessão abrir a conversa.
-            lastRead: chatStore.getConversationLastRead(data.conversationId),
-          })
-        );
-        // 1/out, pedido do Douglas: "confirmação de leitura (visto por
-        // quem)" -- avisa o RESTO da conversa em tempo real que esse
-        // userId leu até agora (ts aproximado do lastRead que acabou de
-        // ser gravado acima) -- antes só o próprio leitor sabia disso
-        // (lastRead sempre existiu, ver markConversationRead, só nunca
-        // tinha sido EXPOSTO pro resto da conversa). Não manda pra mim
-        // mesmo -- não preciso saber que eu li minha própria conversa.
-        {
-          const conv = chatStore.getConversation(data.conversationId);
-          if (conv) {
-            for (const uid of conv.participantIds) {
-              if (uid === player.userId) continue;
-              sendToUser(uid, { type: "chat:read", conversationId: data.conversationId, userId: player.userId, ts: Date.now() });
-            }
-          }
-        }
+        handleChatOpen(player, ws, data);
         break;
       }
       case "chat:create_direct": {
-        if (typeof data.targetUserId !== "string" || !data.targetUserId) break;
-        if (data.targetUserId === player.userId) break;
-        const targetUserId = data.targetUserId;
-        // "Visitante nao cai no chat empresa / vai pra conversas
-        // privadas" (Douglas, 29/set (18)) -- "Empresa" é pra contato
-        // de negócio de verdade (fica carimbado com a logo da sala,
-        // ver companyInfo abaixo); visitante SEM CONTA (ou o próprio
-        // remetente ainda sem conta) não tem esse contexto nenhum, cai
-        // sempre em "private" -- e SEM a trava de amigo mútuo de baixo
-        // (ela não faz sentido pra quem não tem conta pra ser "amigo"
-        // de ninguém -- ver areMutualFriends em chatStore.js, que
-        // consulta a tabela followers, ligada a auth.users). Só entre
-        // DUAS contas confirmadas que a lane pedida pelo cliente (e a
-        // trava de amigo mútuo pra "private") continuam valendo, igual
-        // sempre foi. targetPlayer pode vir undefined (desconectou
-        // entre o clique e essa mensagem chegar) -- trata como
-        // visitante nessa dúvida, nunca carimba "Empresa" errado.
-        const targetPlayer = findLivePlayerByUserId(targetUserId);
-        const eitherIsGuest = !player.accountVerified || !(targetPlayer?.accountVerified);
-        const requestedLane = data.lane === "private" ? "private" : "company";
-        const lane = eitherIsGuest ? "private" : requestedLane;
-        // mesma trava/mesmo motivo do POST /chat/direct em cima (lane
-        // "private" só entre amigos mútuos) -- async porque confere
-        // a tabela followers no Supabase, ver comentário grande sobre
-        // esse padrão de IIFE no topo do "identify" (não dá pra usar
-        // await direto aqui, o handler de "message" é síncrono).
         (async () => {
-          if (lane === "private" && !eitherIsGuest && !(await chatStore.areMutualFriends(player.userId, targetUserId))) {
-            ws.send(JSON.stringify({ type: "error", message: "Só dá pra abrir conversa privada com quem é amigo mútuo." }));
-            return;
-          }
-          // 29/set (13), pedido do Douglas: "quero a logo da empresa em
-          // que ele abriu o chat" -- "onde" é a sala dessa CONEXÃO
-          // (roomId, ver "aceita qualquer caminho ... nome da sala"
-          // logo no começo do onConnect) -- só busca pra lane
-          // "company" (a única que carimba empresa, ver comentário
-          // grande em chatStore.js).
-          const companyInfo = lane === "company" ? await getRoomCompanyInfo(roomId) : null;
-          const conv = chatStore.getOrCreateDirectConversation(player.userId, targetUserId, lane, companyInfo);
-          sendConversationTo(player.userId, conv.id);
-          sendConversationTo(targetUserId, conv.id);
+          const result = await handleChatCreateDirect(player, data, roomId);
+          if (result?.error) ws.send(JSON.stringify({ type: "error", message: result.error }));
         })();
         break;
       }
       // "3 pontinhos" -- mover uma conversa 1x1 já existente pra outra
-      // aba (Empresa <-> Privada, ver comentário grande de
-      // setConversationLane em chatStore.js). Diferente de
-      // chat:create_direct: aqui NÃO confere amigo mútuo (mover uma
-      // conversa que já existe é ação deliberada da própria pessoa que
-      // já tá nela, não uma criação nova) e funciona só com conversa
-      // DIRETA (setConversationLane já recusa "group" sozinho).
+      // aba (Empresa <-> Privada). roomId aqui é a sala dessa CONEXÃO,
+      // mesmo valor que a função já recebia antes da extração.
       case "chat:set_lane": {
-        if (typeof data.conversationId !== "string" || !data.conversationId) break;
-        if (data.lane !== "company" && data.lane !== "private") break;
-        const targetLane = data.lane;
-        (async () => {
-          const conv = chatStore.getConversation(data.conversationId);
-          if (!conv || !conv.participantIds.includes(player.userId)) return;
-          // mesma origem de companyInfo do chat:create_direct acima --
-          // "onde" é a sala dessa CONEXÃO (roomId), só busca indo pra
-          // "company" (única lane que carimba empresa).
-          const companyInfo = targetLane === "company" ? await getRoomCompanyInfo(roomId) : null;
-          const result = chatStore.setConversationLane(data.conversationId, player.userId, targetLane, companyInfo);
-          if (!result) return;
-          const { conversation, removedConversationId } = result;
-          for (const uid of conversation.participantIds) {
-            if (removedConversationId) sendConversationRemovedTo(uid, removedConversationId);
-            sendConversationTo(uid, conversation.id);
-          }
-        })();
+        handleChatSetLane(player, data, roomId);
         break;
       }
       case "chat:create_group": {
-        if (!Array.isArray(data.participantIds)) break;
-        const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
-        if (participantIds.length === 0) break;
-        (async () => {
-          const companyInfo = await getRoomCompanyInfo(roomId);
-          const conv = chatStore.createGroupConversation({
-            name: data.name,
-            participantIds,
-            createdBy: player.userId,
-            companyInfo,
-          });
-          for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
-        })();
+        handleChatCreateGroup(player, data, roomId);
         break;
       }
       case "chat:rename_group": {
-        if (typeof data.conversationId !== "string" || typeof data.name !== "string") break;
-        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
-        const conv = chatStore.renameGroupConversation(data.conversationId, data.name);
-        if (!conv) break;
-        for (const uid of conv.participantIds) sendConversationTo(uid, conv.id);
+        handleChatRenameGroup(player, data);
         break;
       }
       case "chat:send": {
-        if (typeof data.conversationId !== "string") break;
-        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
-        const text = typeof data.text === "string" ? data.text.slice(0, 2000) : "";
-        const attachment =
-          data.attachment && typeof data.attachment === "object"
-            ? {
-                url: data.attachment.url,
-                name: data.attachment.name,
-                size: data.attachment.size,
-                mime: data.attachment.mime,
-              }
-            : null;
-        const roomCard =
-          data.roomCard && typeof data.roomCard === "object"
-            ? {
-                action: data.roomCard.action === "invite" ? "invite" : "visit",
-                roomSlug: String(data.roomCard.roomSlug || "").slice(0, 200),
-                roomName: String(data.roomCard.roomName || "").slice(0, 200),
-                roomLogoUrl: String(data.roomCard.roomLogoUrl || "").slice(0, 500),
-              }
-            : null;
-        if (!text.trim() && !attachment && !roomCard) break;
-        const kind = roomCard
-          ? "room_card"
-          : !attachment
-            ? "text"
-            : data.kind === "audio"
-              ? "audio"
-              : data.kind === "image"
-                ? "image"
-                : "file";
-        const msg = chatStore.addMessage(data.conversationId, {
-          senderId: player.userId,
-          senderName: player.name,
-          kind,
-          text,
-          attachment,
-          roomCard,
-          mentionedUserIds: data.mentionedUserIds,
-        });
-        if (!msg) break;
-        const conv = chatStore.getConversation(data.conversationId);
-        for (const uid of conv.participantIds) {
-          sendToUser(uid, { type: "chat:message", conversationId: data.conversationId, message: msg });
-        }
+        handleChatSend(player, data);
         break;
       }
       case "chat:delete": {
-        // "apagar mensagem" numa conversa direta/grupo -- apaga PRA
-        // TODOS (ver deleteMessage em chatStore.js), só quem mandou pode
-        // apagar a própria mensagem.
-        if (typeof data.conversationId !== "string" || typeof data.messageId !== "string") break;
-        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
-        const deleted = chatStore.deleteMessage(data.conversationId, data.messageId, player.userId);
-        if (!deleted) break;
-        const conv = chatStore.getConversation(data.conversationId);
-        for (const uid of conv.participantIds) {
-          sendToUser(uid, { type: "chat:message_deleted", conversationId: data.conversationId, messageId: deleted.id });
-        }
+        handleChatDeleteMessage(player, data);
         break;
       }
       case "chat:delete_room": {
@@ -3052,14 +3162,7 @@ wss.on("connection", async (ws, req) => {
         const emoji = typeof data.emoji === "string" ? data.emoji : "";
         if (!messageId || !emoji) break;
         if (typeof data.conversationId === "string" && data.conversationId) {
-          const conversationId = data.conversationId;
-          if (!chatStore.isParticipant(conversationId, player.userId)) break;
-          const result = chatStore.toggleConversationReaction(conversationId, messageId, player.userId, emoji);
-          if (!result) break;
-          const conv = chatStore.getConversation(conversationId);
-          for (const uid of conv.participantIds) {
-            sendToUser(uid, { type: "chat:reaction", conversationId, messageId, reactions: result.reactions });
-          }
+          handleChatReactConversation(player, data.conversationId, messageId, emoji);
         } else {
           const result = chatStore.toggleRoomReaction(roomId, messageId, player.userId, emoji);
           if (!result) break;
@@ -3094,15 +3197,7 @@ wss.on("connection", async (ws, req) => {
             ? Math.min(Number(data.durationMs), MAX_PIN_DURATION_MS)
             : null;
         if (typeof data.conversationId === "string" && data.conversationId) {
-          const conversationId = data.conversationId;
-          if (!chatStore.isParticipant(conversationId, player.userId)) break;
-          const pin = chatStore.pinConversationMessage(conversationId, messageId, player.userId, player.name, durationMs);
-          if (!pin) break;
-          const conv = chatStore.getConversation(conversationId);
-          const pins = chatStore.getConversationPins(conversationId);
-          for (const uid of conv.participantIds) {
-            sendToUser(uid, { type: "chat:pins", conversationId, pins });
-          }
+          handleChatPinConversation(player, data.conversationId, messageId, durationMs);
         } else {
           const pin = chatStore.pinRoomMessage(roomId, messageId, player.userId, player.name, durationMs);
           if (!pin) break;
@@ -3114,14 +3209,7 @@ wss.on("connection", async (ws, req) => {
         const messageId = typeof data.messageId === "string" ? data.messageId : "";
         if (!messageId) break;
         if (typeof data.conversationId === "string" && data.conversationId) {
-          const conversationId = data.conversationId;
-          if (!chatStore.isParticipant(conversationId, player.userId)) break;
-          if (!chatStore.unpinConversationMessage(conversationId, messageId)) break;
-          const conv = chatStore.getConversation(conversationId);
-          const pins = chatStore.getConversationPins(conversationId);
-          for (const uid of conv.participantIds) {
-            sendToUser(uid, { type: "chat:pins", conversationId, pins });
-          }
+          handleChatUnpinConversation(player, data.conversationId, messageId);
         } else {
           if (!chatStore.unpinRoomMessage(roomId, messageId)) break;
           broadcast(room, { type: "chat:pins", conversationId: null, pins: chatStore.getRoomPins(roomId) });
@@ -3135,9 +3223,7 @@ wss.on("connection", async (ws, req) => {
       // mandado sozinho em nenhum outro momento. ---
       case "chat:attachments": {
         if (typeof data.conversationId === "string" && data.conversationId) {
-          const conversationId = data.conversationId;
-          if (!chatStore.isParticipant(conversationId, player.userId)) break;
-          ws.send(JSON.stringify({ type: "chat:attachments", conversationId, items: chatStore.getConversationAttachments(conversationId) }));
+          handleChatAttachmentsConversation(player, ws, data.conversationId);
         } else {
           ws.send(JSON.stringify({ type: "chat:attachments", conversationId: null, items: chatStore.getRoomAttachments(roomId) }));
         }
