@@ -482,6 +482,50 @@ function leaveAllCalls(connectionId) {
   }
 }
 
+/** Entrar numa chamada de conversa -- MESMO corpo que já vivia inline no
+ * case "call:join" do switch grande (ver comentário dele), extraído pra
+ * dar pra chamar também do socket do Lobby (ver handleLobbySocketConnection/
+ * LOBBY_SOCKET_ROOM_ID mais abaixo, pedido do Douglas 1/out: "eles tem
+ * que ser o mesmo, e ponto final" -- chamada de voz/vídeo não podia
+ * continuar só-dentro-da-sala). Room-independente de propósito: só usa
+ * chatStore/activeCalls, nunca precisou de roomId nenhum. */
+function handleCallJoin(player, connectionId, conversationId) {
+  if (typeof conversationId !== "string") return;
+  if (!chatStore.isParticipant(conversationId, player.userId)) return;
+  let set = activeCalls.get(conversationId);
+  if (!set) {
+    set = new Set();
+    activeCalls.set(conversationId, set);
+  }
+  set.add(connectionId);
+  broadcastCallState(conversationId);
+}
+
+/** Sair de uma chamada de conversa -- ver handleCallJoin acima. */
+function handleCallLeave(connectionId, conversationId) {
+  if (typeof conversationId !== "string") return;
+  const set = activeCalls.get(conversationId);
+  if (set) {
+    set.delete(connectionId);
+    if (set.size === 0) activeCalls.delete(conversationId);
+  }
+  broadcastCallState(conversationId);
+}
+
+/** "Fulano está digitando..." numa conversa de verdade (nunca a Sala,
+ * que não faz sentido pro socket do Lobby) -- MESMO corpo que já vivia
+ * inline no ramo "if" do case "chat:typing" (ver comentário grande dele),
+ * extraído pelo mesmo motivo de handleCallJoin acima. */
+function handleChatTyping(player, conversationId) {
+  if (typeof conversationId !== "string" || !conversationId) return;
+  if (!chatStore.isParticipant(conversationId, player.userId)) return;
+  const conv = chatStore.getConversation(conversationId);
+  for (const uid of conv.participantIds) {
+    if (uid === player.userId) continue;
+    sendToUser(uid, { type: "chat:typing", conversationId, userId: player.userId, name: player.name });
+  }
+}
+
 function broadcast(room, data, excludeId) {
   const msg = JSON.stringify(data);
   for (const [id, conn] of room) {
@@ -2203,6 +2247,103 @@ const heartbeatInterval = setInterval(() => {
 }, HEARTBEAT_INTERVAL_MS);
 wss.on("close", () => clearInterval(heartbeatInterval));
 
+// 1/out, pedido do Douglas ("eles tem que ser o mesmo, e ponto final",
+// depois de perguntar "porque chamada de voz/video so dentro da sala?")
+// -- nome de sala RESERVADO que o Lobby usa pra abrir um WebSocket só
+// pra chamada de voz/vídeo e "digitando..." (ver handleLobbySocketConnection
+// logo abaixo), sem o Lobby virar um jogador FANTASMA numa sala de
+// verdade que a pessoa nunca visitou (ver comentário grande de sempre
+// sobre o resto do Lobby ficar em REST). Nunca passa por getRoom/
+// roomStore/áreas/portas -- nada disso faz sentido sem sala nenhuma.
+const LOBBY_SOCKET_ROOM_ID = "__lobby__";
+
+/** Conexão do socket do Lobby (ver LOBBY_SOCKET_ROOM_ID acima) -- fala só
+ * o SUBCONJUNTO do protocolo que não depende de posição/mobília/porta/
+ * área: identify (versão enxuta, sem broadcast de sala nenhum -- o
+ * Lobby já tem o próprio nome/foto via conta, só precisa registrar
+ * essa conexão com o userId certo), chat:typing e call:join/call:leave/
+ * signal (handleChatTyping/handleCallJoin/handleCallLeave/connectionsById
+ * já eram 100% independentes de sala, ver comentário grande deles). */
+async function handleLobbySocketConnection(ws) {
+  const id = randomUUID();
+  const player = { id, userId: id, name: "", color: "", photoUrl: "", accountVerified: false };
+  connectionsById.set(id, { ws, player });
+  registerUserConnection(player.userId, ws);
+  ws.send(JSON.stringify({ type: "init", selfId: id }));
+
+  ws.on("message", async (raw) => {
+    let data;
+    try {
+      data = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    switch (data.type) {
+      case "identify": {
+        // mesma verificação de token/ban do identify de sala (ver
+        // comentário grande dele mais abaixo), só que sem broadcast de
+        // sala nenhum -- o Lobby já manda name/color/photoUrl direto
+        // (tira da própria conta, ver identify no client) em vez de
+        // depender de "look"/chatStore.upsertUser (que podia sobrescrever
+        // o que já existe com valor vazio, já que esse player nasce
+        // sem nenhum dos dois).
+        const verifiedUserId = await verifyAccessToken(data.accessToken);
+        if (verifiedUserId && (await isBanned(verifiedUserId))) {
+          ws.close(4403, "banido da sala");
+          return;
+        }
+        const newUserId =
+          verifiedUserId ??
+          (typeof data.userId === "string" && data.userId.trim() ? data.userId.trim().slice(0, 80) : id);
+        player.accountVerified = Boolean(verifiedUserId);
+        if (newUserId !== player.userId) {
+          unregisterUserConnection(player.userId, ws);
+          player.userId = newUserId;
+          registerUserConnection(player.userId, ws);
+        }
+        if (typeof data.name === "string") player.name = data.name.slice(0, 80);
+        if (typeof data.color === "string") player.color = data.color.slice(0, 20);
+        if (typeof data.photoUrl === "string") player.photoUrl = data.photoUrl.slice(0, 500);
+        break;
+      }
+      case "chat:typing": {
+        handleChatTyping(player, data.conversationId);
+        break;
+      }
+      case "call:join": {
+        handleCallJoin(player, id, data.conversationId);
+        break;
+      }
+      case "call:leave": {
+        handleCallLeave(id, data.conversationId);
+        break;
+      }
+      case "signal": {
+        const target = connectionsById.get(data.to);
+        if (target && target.ws.readyState === target.ws.OPEN) {
+          target.ws.send(JSON.stringify({ type: "signal", from: id, data: data.data }));
+        }
+        break;
+      }
+      default:
+        // movimento/assento/porta/área/"look"/chat da Sala etc. não
+        // fazem sentido sem sala nenhuma -- ignora silenciosamente em
+        // vez de derrubar a conexão por uma mensagem inesperada.
+        break;
+    }
+  });
+
+  ws.on("close", () => {
+    connectionsById.delete(id);
+    unregisterUserConnection(player.userId, ws);
+    leaveAllCalls(id);
+  });
+
+  ws.on("error", (err) => {
+    console.error("Erro de conexão (lobby)", id, err);
+  });
+}
+
 wss.on("connection", async (ws, req) => {
   ws.isAlive = true;
   ws.on("pong", () => {
@@ -2213,6 +2354,10 @@ wss.on("connection", async (ws, req) => {
   const segments = url.pathname.split("/").filter(Boolean);
   // aceita qualquer caminho; usa o último pedaço da URL como nome da sala
   const roomId = segments[segments.length - 1] || "default";
+  if (roomId === LOBBY_SOCKET_ROOM_ID) {
+    await handleLobbySocketConnection(ws);
+    return;
+  }
   const room = getRoom(roomId);
 
   const id = randomUUID();
@@ -2528,7 +2673,16 @@ wss.on("connection", async (ws, req) => {
         break;
       }
       case "signal": {
-        const target = room.get(data.to);
+        // 1/out -- ERA room.get(data.to) (só achava o alvo se estivesse
+        // na MESMA sala de quem mandou); pra uma chamada de conversa
+        // direta/grupo (diferente da chamada de proximidade da Sala,
+        // ver comentário grande de channel:"call" em call:join acima)
+        // os dois lados podem estar em QUALQUER lugar -- salas
+        // diferentes, ou um deles no socket do Lobby (sem sala nenhuma,
+        // ver handleLobbySocketConnection/LOBBY_SOCKET_ROOM_ID mais
+        // abaixo) -- então o endereçamento certo é o Map GLOBAL por
+        // connectionId (connectionsById), não o da sala de quem mandou.
+        const target = connectionsById.get(data.to);
         if (target && target.ws.readyState === target.ws.OPEN) {
           target.ws.send(
             JSON.stringify({ type: "signal", from: id, data: data.data })
@@ -2921,13 +3075,7 @@ wss.on("connection", async (ws, req) => {
       // do servidor. ---
       case "chat:typing": {
         if (typeof data.conversationId === "string" && data.conversationId) {
-          const conversationId = data.conversationId;
-          if (!chatStore.isParticipant(conversationId, player.userId)) break;
-          const conv = chatStore.getConversation(conversationId);
-          for (const uid of conv.participantIds) {
-            if (uid === player.userId) continue;
-            sendToUser(uid, { type: "chat:typing", conversationId, userId: player.userId, name: player.name });
-          }
+          handleChatTyping(player, data.conversationId);
         } else {
           broadcast(room, { type: "chat:typing", conversationId: null, userId: player.userId, name: player.name }, id);
         }
@@ -3003,25 +3151,11 @@ wss.on("connection", async (ws, req) => {
       // connectionId, ver comentário em activeCalls) -- só a lista de
       // quem tá dentro passa por aqui. ---
       case "call:join": {
-        if (typeof data.conversationId !== "string") break;
-        if (!chatStore.isParticipant(data.conversationId, player.userId)) break;
-        let set = activeCalls.get(data.conversationId);
-        if (!set) {
-          set = new Set();
-          activeCalls.set(data.conversationId, set);
-        }
-        set.add(id);
-        broadcastCallState(data.conversationId);
+        handleCallJoin(player, id, data.conversationId);
         break;
       }
       case "call:leave": {
-        if (typeof data.conversationId !== "string") break;
-        const set = activeCalls.get(data.conversationId);
-        if (set) {
-          set.delete(id);
-          if (set.size === 0) activeCalls.delete(data.conversationId);
-        }
-        broadcastCallState(data.conversationId);
+        handleCallLeave(id, data.conversationId);
         break;
       }
 
