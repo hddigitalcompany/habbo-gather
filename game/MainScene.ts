@@ -492,23 +492,24 @@ const FACADE_SCALE = 128 / 53.6;
 // (ver roomFrontCorners/positionFacade).
 //
 // ARTE TROCADA (pedido do Douglas: "vamos precisar mudar a vidraca 2 de
-// lugar, e trocar a imagem tambem") -- PNG novo (1750x1000, zigue-zague
-// com 2 "V"s + faixa diagonal dourada). Douglas reportou ("lado
-// direito nao encaixou") e reposicionou o desenho DENTRO do PNG (2ª
-// versão da arte, mesmo arquivo substituído de novo) -- o conteúdo
-// opaco agora só vai até x≈1020 (antes ia além de x≈1190), ou seja
-// todo o zigue-zague foi deslocado pra esquerda dentro do canvas. O
-// vão entre janelas continua o mesmo (54px, conferido de novo em 5
-// faixas horizontais diferentes -- mesma arte, só reposicionada), mas
-// o ápice (V mais FUNDO dos dois) mudou de lugar dentro do arquivo:
-// agora x≈740 -> y≈285 (era x≈911 -> y≈286 na versão anterior do PNG).
-// Raso continua relativo logo depois (não remedido, só desloca junto).
-// Ainda NÃO testado ao vivo -- ápice é só a medição bruta do PNG novo,
-// sem ajuste fino por cima (ver FACADE_CORNER2_OFFSET_X_PX/Y_PX
-// abaixo, mantidos zerados: Douglas disse que já reposicionou pelo
-// lado da arte, offset de tile fica por conta do próximo print).
+// lugar, e trocar a imagem tambem") -- PNG 1750x1000, zigue-zague com
+// 2 "V"s + faixa diagonal dourada. Teve 3 versões do arquivo até
+// agora: (1) original, conteúdo opaco até x≈1190, ápice (V mais
+// FUNDO) em x≈911->y≈286; (2) Douglas reportou "lado direito nao
+// encaixou" e reposicionou o desenho dentro do canvas (conteúdo só
+// até x≈1020), ápice foi pra x≈740->y≈285; (3) a versão ATUAL (depois
+// de "de novo" + nova imagem) voltou a bater com a geometria da
+// versão (1) -- conteúdo de novo até x≈1190, ápice medido de novo em
+// x≈910->y≈285 (conferido coluna a coluna no PNG recebido, não assumido
+// -- bate com a v1 dentro de 1px). Se um dia "não encaixar" de novo
+// depois de reabrir esse arquivo, é sinal de que ele trocou de versão
+// outra vez -- remedir o ápice (perfil de alpha coluna a coluna, pico
+// mais fundo dos dois "V"s) antes de mexer em qualquer outra coisa.
+// Vão entre janelas sempre ~53-54px nas 3 versões (mesma arte-base,
+// só a posição dentro do canvas muda), por isso FACADE_CORNER2_SCALE
+// abaixo não mudou entre as versões.
 const FACADE_CORNER2_TEXTURE_KEY = "fachada-predio-quina-2";
-const FACADE_CORNER2_APEX_X_PX = 740;
+const FACADE_CORNER2_APEX_X_PX = 910;
 const FACADE_CORNER2_APEX_Y_PX = 285;
 /** Escala PRÓPRIA dessa peça -- Douglas confirmou a regra depois de ver
  * o primeiro resultado ("ta do mesmo tamanho que a fachada 01" / "a
