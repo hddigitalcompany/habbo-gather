@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import PartySocket from "partysocket";
 
 // Lobby -- tela de entrada mostrada ANTES da sala (pedido do Douglas,
 // 28/set: "nao deve abrir direto na sala, crie um lobby igual do
@@ -47,7 +48,7 @@ import dynamic from "next/dynamic";
 // sala (dependem de WebRTC/WebSocket de verdade, ver ChatDrawer em
 // GameRoom.tsx).
 
-import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 import {
@@ -100,7 +101,7 @@ const ChatDrawer = dynamic(() => import("@/components/ChatDrawer").then((m) => m
   // PRIMEIRA vez que a pessoa abre o chat na sessão.
   ssr: false,
 });
-import type { Conversation, ChatMsg, ChatMsgKind } from "@/components/GameRoom";
+import type { Conversation, ChatMsg, ChatMsgKind, ChatCallParticipant, ChatTypingEntry } from "@/components/GameRoom";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -115,6 +116,12 @@ import {
 } from "@/lib/mediaPrefs";
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
+// 1/out, pedido do Douglas ("eles tem que ser o mesmo, e ponto final") --
+// MESMO nome reservado que LOBBY_SOCKET_ROOM_ID em server/index.js, usado
+// pra abrir um WebSocket SÓ pra chamada de voz/vídeo e "digitando..." do
+// chat de fora da sala (ver useEffect de lobbySocketRef mais abaixo) --
+// nunca uma sala de verdade, nunca vira jogador fantasma em lugar nenhum.
+const LOBBY_CALL_SOCKET_ROOM = "__lobby__";
 const REALTIME_HTTP_BASE =
   (typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http") +
   `://${REALTIME_HOST}`;
@@ -1246,6 +1253,22 @@ function LobbyChatPanel({
   onConversationRead,
   onConversationsReplaced,
   initialActiveId,
+  // chamada de voz/vídeo + "digitando..." (pedido do Douglas, 1/out:
+  // "eles tem que ser o mesmo, e ponto final") -- dono de verdade
+  // desses dados é o Lobby (componente de fora, nunca desmonta por
+  // abrir/fechar esse painel, ver lobbySocketRef/joinCall/leaveCall no
+  // Lobby), esse painel só REPASSA pro ChatDrawer, mesmo espírito de
+  // conversations/accountAccessToken acima.
+  callParticipantsByConversation,
+  myCallConversationId,
+  callRemoteStreams,
+  onJoinCall,
+  onLeaveCall,
+  localStreamRef,
+  camOn,
+  callVolume,
+  typingByConv,
+  onTypingNotify,
 }: {
   pinMode: "float" | "side";
   onToggleSidePin: () => void;
@@ -1285,6 +1308,16 @@ function LobbyChatPanel({
   // onConversationRead acima.
   onConversationsReplaced: (removedConversationId: string | null, conversation: ConversationSummary) => void;
   initialActiveId?: string | null;
+  callParticipantsByConversation: Record<string, ChatCallParticipant[]>;
+  myCallConversationId: string | null;
+  callRemoteStreams: Record<string, MediaStream>;
+  onJoinCall: (conversationId: string) => void;
+  onLeaveCall: () => void;
+  localStreamRef: RefObject<MediaStream | null>;
+  camOn: boolean;
+  callVolume: number;
+  typingByConv: Record<string, ChatTypingEntry[]>;
+  onTypingNotify: (conversationId: string | null) => void;
 }) {
   // ---------------------------------------------------------------
   // 1/out -- unificação com o ChatDrawer da sala (ver import no topo
@@ -1367,17 +1400,12 @@ function LobbyChatPanel({
   const recordingStartRef = useRef(0);
   const discardRecordingRef = useRef(false);
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
-  // chamada de voz/vídeo (pedido do Douglas, 1/out) -- o ChatDrawer já
-  // sabe desenhar tudo isso (botão verde "tipo discord", vídeo local/
-  // remoto), só que esse painel REST-only não tem WebRTC/mesh nenhum
-  // montado (isso é TODO WebSocket, ver callPeersRef/joinCall em
-  // GameRoom.tsx) -- gap conhecido por enquanto: nunca tem ninguém
-  // numa chamada, nunca entra numa (callParticipantsByConversation
-  // sempre vazio mais abaixo), o ChatDrawer simplesmente não desenha
-  // nada de chamada nesse caso. localStreamRef precisa de UM ref de
-  // verdade (ChatDrawer lê .current), mesmo nunca tendo stream nenhum
-  // aqui.
-  const dummyLocalStreamRef = useRef<MediaStream | null>(null);
+  // chamada de voz/vídeo (pedido do Douglas, 1/out: "eles tem que ser
+  // o mesmo, e ponto final") -- WebRTC de verdade agora, ver
+  // lobbySocketRef/callPeersRef/joinCall/leaveCall no componente Lobby
+  // (dono de verdade desse estado, repassado pra cá via props, mesmo
+  // padrão de conversations/accountAccessToken acima -- esse painel
+  // nunca guarda estado de chamada, só REPASSA pro ChatDrawer).
 
   // "Conversa" (1:1) vs "Criar grupo" (pedido do Douglas, 1/out) --
   // MESMO modo explícito escolhido no topo da tela "Nova conversa" que
@@ -1941,7 +1969,7 @@ function LobbyChatPanel({
         roomCompanyName={myRoomName}
         roomCompanyLogoUrl={myRoomLogoUrl}
         accountAccessToken={accountAccessToken}
-        callVolume={1}
+        callVolume={callVolume}
         newConvMode={newConvMode}
         onChangeNewConvMode={changeNewConvMode}
         newConvSelection={newConvSelection}
@@ -1977,15 +2005,17 @@ function LobbyChatPanel({
         onDeleteMessage={deleteMessage}
         onSendRoomCard={sendRoomCard}
         onMoveConversationLane={moveConversationLane}
-        // chamada de voz/vídeo -- gap conhecido, ver comentário grande
-        // de dummyLocalStreamRef lá em cima.
-        callParticipantsByConversation={{}}
-        myCallConversationId={null}
-        callRemoteStreams={{}}
-        onJoinCall={() => {}}
-        onLeaveCall={() => {}}
-        localStreamRef={dummyLocalStreamRef}
-        camOn={false}
+        // chamada de voz/vídeo (pedido do Douglas, 1/out: "eles tem que
+        // ser o mesmo, e ponto final") -- estado de verdade vem do
+        // Lobby (componente de fora, ver comentário grande de
+        // lobbySocketRef lá), esse painel só repassa.
+        callParticipantsByConversation={callParticipantsByConversation}
+        myCallConversationId={myCallConversationId}
+        callRemoteStreams={callRemoteStreams}
+        onJoinCall={onJoinCall}
+        onLeaveCall={onLeaveCall}
+        localStreamRef={localStreamRef}
+        camOn={camOn}
         onClose={onClose}
         pinMode={pinMode}
         onToggleSidePin={onToggleSidePin}
@@ -1998,15 +2028,16 @@ function LobbyChatPanel({
         sidebarClassName="lobby-chat-drawer-shell-sidebar"
         onOpenProfile={(playerId) => setViewingProfileUserId(playerId)}
         pins={pins}
-        // REST não tem como empurrar "digitando..." em tempo real sem
-        // WebSocket -- gap conhecido (não é regressão: o Lobby nunca
-        // teve isso antes da unificação também).
-        typingUsers={[]}
+        // "digitando..." (pedido do Douglas, 1/out) -- vem do socket
+        // dedicado do Lobby agora (ver lobbySocketRef lá), não mais um
+        // gap -- mesmo filtro por conversa ativa de GameRoom.tsx
+        // (typingByConv[activeConversationId]).
+        typingUsers={activeId ? typingByConv[activeId] ?? [] : []}
         lastRead={lastReadByUserId}
         onToggleReaction={toggleReaction}
         onPinMessage={pinMessage}
         onUnpinMessage={unpinMessage}
-        onTypingNotify={() => {}}
+        onTypingNotify={() => onTypingNotify(activeId)}
         filesPanelOpen={filesPanelOpen}
         filesPanelItems={filesPanelItems}
         filesPanelFilter={filesPanelFilter}
@@ -3023,11 +3054,311 @@ export default function Lobby({
     };
   }, []);
 
+  // ---------------------------------------------------------------
+  // chamada de voz/vídeo + "digitando..." do chat de FORA da sala
+  // (pedido do Douglas, 1/out, depois de perguntar "porque chamada de
+  // voz/video so dentro da sala?" e "tem que ter": "nao vou ficar
+  // falando oq tem dentro do que nao tem fora, eles tem que ser o
+  // mesmo. e ponto final.") -- MESMO protocolo de GameRoom.tsx (socket
+  // dedicado, endereçado por connectionId, ver "signal"/call:join/
+  // call:leave/call:state/chat:typing em server/index.js), só que:
+  //   1) conecta na sala RESERVADA "__lobby__" (ver LOBBY_CALL_SOCKET_ROOM
+  //      acima / LOBBY_SOCKET_ROOM_ID em server/index.js) em vez de uma
+  //      sala de verdade -- nunca vira jogador fantasma numa sala que a
+  //      pessoa nunca visitou (ver handleLobbySocketConnection lá, que
+  //      fala só esse subconjunto reduzido do protocolo);
+  //   2) mora AQUI, no componente Lobby (que só desmonta saindo do
+  //      Lobby de vez, ver onEnter/handleEnter), não dentro de
+  //      LobbyChatPanel (que desmonta TODA vez que fecha o painel, ver
+  //      {chatPanelOpen && <LobbyChatPanel .../>} mais abaixo) -- MESMA
+  //      ideia de GameRoom.tsx manter esse estado no componente de
+  //      fora da gaveta, pra fechar/abrir o chat não derrubar uma
+  //      chamada em andamento nem perder "quem tá na chamada" de
+  //      quem ainda não entrou;
+  //   3) sem stream ambiente nenhuma pra reaproveitar (diferente da
+  //      Sala, o Lobby não liga câmera/mic sozinho) -- entrar numa
+  //      chamada pede um getUserMedia NOVO na hora (ver joinCall
+  //      abaixo, mesmo padrão de requestMedia em GameRoom.tsx: sempre
+  //      pede vídeo E áudio juntos, câmera desligada é só a track
+  //      ficar com enabled=false, pra dar pra ligar DEPOIS sem
+  //      renegociar o WebRTC com ninguém), solta tudo de novo ao sair.
+  // ---------------------------------------------------------------
+  const lobbySocketRef = useRef<PartySocket | null>(null);
+  const lobbySelfIdRef = useRef<string>("");
+  const callLocalStreamRef = useRef<MediaStream | null>(null);
+  const callPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const myCallConversationIdRef = useRef<string | null>(null);
+  const [callParticipantsByConversation, setCallParticipantsByConversation] = useState<
+    Record<string, ChatCallParticipant[]>
+  >({});
+  const [myCallConversationId, setMyCallConversationId] = useState<string | null>(null);
+  myCallConversationIdRef.current = myCallConversationId;
+  const [callRemoteStreams, setCallRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [typingByConv, setTypingByConv] = useState<Record<string, ChatTypingEntry[]>>({});
+
+  function lobbyWsSend(data: Record<string, unknown>): boolean {
+    const ws = lobbySocketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(data));
+    return true;
+  }
+
+  // mesmo "channel":"call" dentro do "data" que GameRoom.tsx usa, pra
+  // não se misturar com sinal nenhum de proximidade (aqui nem existe
+  // proximidade -- o Lobby não tem mapa -- mas o servidor relay é o
+  // MESMO endpoint "signal", endereçado globalmente por connectionId,
+  // ver comentário grande dele em server/index.js).
+  function sendCallSignal(to: string, data: unknown) {
+    lobbyWsSend({ type: "signal", to, data: { channel: "call", ...(data as object) } });
+  }
+
+  function createCallPeerConnection(peerId: string): RTCPeerConnection {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const localStream = callLocalStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+    }
+    pc.ontrack = (event) => {
+      setCallRemoteStreams((prev) => ({ ...prev, [peerId]: event.streams[0] }));
+    };
+    pc.onicecandidate = (event) => {
+      if (event.candidate) sendCallSignal(peerId, { candidate: event.candidate });
+    };
+    callPeersRef.current.set(peerId, pc);
+    return pc;
+  }
+
+  function closeCallPeer(peerId: string) {
+    const pc = callPeersRef.current.get(peerId);
+    if (pc) {
+      pc.close();
+      callPeersRef.current.delete(peerId);
+    }
+    setCallRemoteStreams((prev) => {
+      const next = { ...prev };
+      delete next[peerId];
+      return next;
+    });
+  }
+
+  function closeAllCallPeers() {
+    callPeersRef.current.forEach((pc) => pc.close());
+    callPeersRef.current.clear();
+    setCallRemoteStreams({});
+  }
+
+  async function connectToCallPeer(peerId: string) {
+    if (callPeersRef.current.has(peerId)) return;
+    const pc = createCallPeerConnection(peerId);
+    // mesmo critério de empate de GameRoom.tsx: quem tem o id "menor"
+    // oferta primeiro, assim os dois lados não ofertam ao mesmo tempo.
+    const amInitiator = lobbySelfIdRef.current < peerId;
+    if (amInitiator) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sendCallSignal(peerId, { sdp: pc.localDescription });
+    }
+  }
+
+  async function handleCallSignal(from: string, data: any) {
+    let pc = callPeersRef.current.get(from);
+    if (!pc) pc = createCallPeerConnection(from);
+    if (data.sdp) {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      if (data.sdp.type === "offer") {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendCallSignal(from, { sdp: pc.localDescription });
+      }
+    } else if (data.candidate) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } catch (e) {
+        console.warn("Falha ao adicionar candidato ICE (chamada, Lobby)", e);
+      }
+    }
+  }
+
+  function stopCallLocalStream() {
+    callLocalStreamRef.current?.getTracks().forEach((t) => t.stop());
+    callLocalStreamRef.current = null;
+  }
+
+  // opt-in, só dá pra estar numa chamada por vez (ver call:join/
+  // call:leave em server/index.js) -- entrar numa nova sai da anterior
+  // sozinho, mesmo espírito de joinCall em GameRoom.tsx.
+  async function joinCall(conversationId: string) {
+    if (myCallConversationId === conversationId) return;
+    if (myCallConversationId) {
+      lobbyWsSend({ type: "call:leave", conversationId: myCallConversationId });
+      closeAllCallPeers();
+    }
+    if (!callLocalStreamRef.current) {
+      let stream: MediaStream;
+      try {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: selectedCamId ? { deviceId: { exact: selectedCamId } } : true,
+            audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true,
+          });
+        } catch {
+          // sem câmera (ou negada) -- ainda assim tenta só com áudio, pra
+          // chamada de VOZ continuar funcionando sem webcam nenhuma (ver
+          // comentário grande acima do bloco).
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } catch (e) {
+        console.warn("Sem acesso a câmera/microfone -- não foi possível entrar na chamada.", e);
+        return;
+      }
+      // mudo/câmera desligada escolhidos no av-bar do Lobby também valem
+      // aqui (mesma ideia de requestMedia em GameRoom.tsx) -- a track de
+      // vídeo fica deitada (enabled=false) em vez de nunca existir, pra
+      // ligar a câmera DEPOIS (ver toggleCam) não precisar renegociar o
+      // WebRTC com ninguém.
+      stream.getAudioTracks().forEach((t) => (t.enabled = micOn));
+      stream.getVideoTracks().forEach((t) => (t.enabled = camOn));
+      callLocalStreamRef.current = stream;
+    }
+    setMyCallConversationId(conversationId);
+    lobbyWsSend({ type: "call:join", conversationId });
+  }
+
+  function leaveCall() {
+    if (!myCallConversationId) return;
+    lobbyWsSend({ type: "call:leave", conversationId: myCallConversationId });
+    setMyCallConversationId(null);
+    closeAllCallPeers();
+    stopCallLocalStream();
+  }
+
+  // "fulano está digitando..." -- throttled (no máximo 1x a cada 2.5s),
+  // MESMA ideia de sendTypingNotification em GameRoom.tsx.
+  const TYPING_THROTTLE_MS = 2500;
+  const lastTypingSentAtRef = useRef<Record<string, number>>({});
+  function sendTypingNotification(conversationId: string | null) {
+    if (!conversationId) return;
+    const now = Date.now();
+    if (now - (lastTypingSentAtRef.current[conversationId] ?? 0) < TYPING_THROTTLE_MS) return;
+    lastTypingSentAtRef.current[conversationId] = now;
+    lobbyWsSend({ type: "chat:typing", conversationId });
+  }
+
+  // "digitando..." não tem "parei de digitar" explícito (ver comentário
+  // grande em TYPING_EXPIRE_MS/chat:typing em server/index.js) -- MESMO
+  // esquema de varredura de GameRoom.tsx, só que sem a parte da Sala
+  // (roomTyping), que não existe aqui.
+  useEffect(() => {
+    const TYPING_EXPIRE_MS = 4000;
+    const interval = setInterval(() => {
+      const cutoff = Date.now() - TYPING_EXPIRE_MS;
+      setTypingByConv((prev) => {
+        let changed = false;
+        const next: Record<string, ChatTypingEntry[]> = {};
+        for (const [convId, list] of Object.entries(prev)) {
+          const filtered = list.filter((t) => t.ts >= cutoff);
+          if (filtered.length !== list.length) changed = true;
+          next[convId] = filtered;
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const socket = new PartySocket({ host: REALTIME_HOST, room: LOBBY_CALL_SOCKET_ROOM });
+    lobbySocketRef.current = socket;
+
+    socket.addEventListener("open", () => {
+      socket.send(
+        JSON.stringify({
+          type: "identify",
+          userId: myUserId,
+          accessToken: accountAccessToken,
+          name: myName,
+          photoUrl: accountProfile?.photoUrl || "",
+        })
+      );
+      // reconectou (PartySocket reconecta sozinho) com uma chamada que
+      // já tava ativa do lado de cá -- o servidor derrubou essa
+      // participação quando a conexão ANTERIOR fechou (ver "close" em
+      // handleLobbySocketConnection/leaveAllCalls, server/index.js),
+      // então reentra na hora pra não ficar "achando" que ainda tá na
+      // chamada sem estar de verdade pro resto da conversa.
+      if (myCallConversationIdRef.current) {
+        socket.send(JSON.stringify({ type: "call:join", conversationId: myCallConversationIdRef.current }));
+      }
+    });
+
+    socket.addEventListener("message", (evt) => {
+      let data: any;
+      try {
+        data = JSON.parse(evt.data);
+      } catch {
+        return;
+      }
+      if (data.type === "init") {
+        lobbySelfIdRef.current = data.selfId;
+      } else if (data.type === "signal") {
+        if (data.data && data.data.channel === "call") handleCallSignal(data.from, data.data);
+      } else if (data.type === "call:state") {
+        const conversationId = data.conversationId as string;
+        const participants = data.participants as ChatCallParticipant[];
+        setCallParticipantsByConversation((prev) => ({ ...prev, [conversationId]: participants }));
+        if (myCallConversationIdRef.current === conversationId) {
+          const stillIn = participants.some((p) => p.userId === myUserId);
+          if (!stillIn) {
+            // saí (ou outra aba minha saiu) -- limpa o lado local também.
+            myCallConversationIdRef.current = null;
+            setMyCallConversationId(null);
+            closeAllCallPeers();
+            stopCallLocalStream();
+          } else {
+            const wantedPeerIds = new Set(
+              participants.filter((p) => p.userId !== myUserId).map((p) => p.connectionId)
+            );
+            callPeersRef.current.forEach((_pc, peerId) => {
+              if (!wantedPeerIds.has(peerId)) closeCallPeer(peerId);
+            });
+            wantedPeerIds.forEach((peerId) => {
+              if (!callPeersRef.current.has(peerId)) connectToCallPeer(peerId);
+            });
+          }
+        }
+      } else if (data.type === "chat:typing") {
+        const { conversationId, userId, name } = data as { conversationId: string; userId: string; name: string };
+        if (!conversationId || userId === myUserId) return;
+        const entry: ChatTypingEntry = { userId, name, ts: Date.now() };
+        setTypingByConv((prev) => ({
+          ...prev,
+          [conversationId]: [...(prev[conversationId] ?? []).filter((t) => t.userId !== userId), entry],
+        }));
+      }
+    });
+
+    socket.addEventListener("error", (err) => {
+      console.warn("Erro no socket de chamada/digitando do Lobby", err);
+    });
+
+    return () => {
+      socket.close();
+      lobbySocketRef.current = null;
+      closeAllCallPeers();
+      stopCallLocalStream();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myUserId, accountAccessToken]);
+
   // Sem stream ativa no Lobby por padrão -- os botões só trocam a
   // preferência salva (aplicada de verdade quando entra na sala, ver
   // requestMedia em GameRoom.tsx).
   function toggleMic() {
     localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !micOn));
+    // mesmo botão também controla o mic de uma chamada de chat em
+    // andamento (pedido do Douglas, 1/out) -- sem isso, mutar aqui
+    // durante uma chamada não faria nada pro outro lado ouvir.
+    callLocalStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !micOn));
     setMicOn((v) => {
       setStoredMicOn(!v);
       return !v;
@@ -3036,6 +3367,12 @@ export default function Lobby({
 
   function toggleCam() {
     localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = !camOn));
+    // mesmo motivo do toggleMic acima -- liga/desliga a câmera de uma
+    // chamada em andamento também; a track já existe (joinCall sempre
+    // pede vídeo junto, só com enabled=false se camOn começou desligado,
+    // ver comentário grande de joinCall), então não precisa renegociar
+    // nada com o outro lado, só ligar/desligar a track.
+    callLocalStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = !camOn));
     setCamOn((v) => {
       setStoredCamOn(!v);
       return !v;
@@ -5071,6 +5408,16 @@ export default function Lobby({
           onConversationRead={handleConversationRead}
           onConversationsReplaced={handleConversationsReplaced}
           initialActiveId={openChatConversationId}
+          callParticipantsByConversation={callParticipantsByConversation}
+          myCallConversationId={myCallConversationId}
+          callRemoteStreams={callRemoteStreams}
+          onJoinCall={joinCall}
+          onLeaveCall={leaveCall}
+          localStreamRef={callLocalStreamRef}
+          camOn={camOn}
+          callVolume={callVolume}
+          typingByConv={typingByConv}
+          onTypingNotify={sendTypingNotification}
         />
       )}
       {contactsOpen && (
