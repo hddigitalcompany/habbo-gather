@@ -474,6 +474,16 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 // pra baixo a partir da quina de baixo da sala.
 const FACADE_TEXTURE_KEY = "fachada-predio";
 const DEPTH_FACADE = -2_500_000;
+/** Profundidade SÓ da vidraça 2 (quina2, fachada-predio-quina-2) --
+ * pedido do Douglas: "coloque o vidro acima do piso em questao de
+ * camada, sem mudar a posicao dele". Diferente da fachada principal
+ * (DEPTH_FACADE, que fica ATRÁS do piso de propósito, "pendurada" pra
+ * fora/baixo da sala) -- essa peça é tratada como vidro visível DENTRO
+ * da sala, então precisa ficar NA FRENTE do piso (DEPTH_FLOOR). x/y
+ * continuam exatamente iguais (tileToWorld + offset), só a ordem de
+ * desenho muda -- por isso "+ 1", logo acima do piso, sem entrar na
+ * faixa de tinta de área/móvel/boneco (DEPTH_AREA pra cima). */
+const DEPTH_FACADE_CORNER2_GLASS = DEPTH_FLOOR + 1;
 /** vértice do "V" de cima da fachada DENTRO do PNG (px) -- é esse ponto
  * que cola no vértice de baixo do piso. A quina já está centralizada na
  * largura da arte (1613px), então x = metade. */
@@ -4261,7 +4271,7 @@ export default class MainScene extends Phaser.Scene {
         .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
         .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
         .setScale(FACADE_CORNER2_SCALE)
-        .setDepth(DEPTH_FACADE);
+        .setDepth(DEPTH_FACADE_CORNER2_GLASS);
       this.facadeCornerSprites.set(this.roomTileKey(secondary.col, secondary.row), sprite);
     }
   }
