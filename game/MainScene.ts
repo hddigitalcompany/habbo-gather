@@ -514,13 +514,12 @@ const FACADE_CORNER2_APEX_Y_PX = 285;
 /** Escala PRÓPRIA dessa peça -- base é a MESMA fórmula de sempre
  * (FACADE_SCALE): vão de janela medido em 54px por detecção de borda
  * vertical, então 128/54 cobre os 2 tiles certinho em teoria. Depois
- * de ver renderizado, Douglas pediu 2 ajustes finos em sequência:
- * primeiro "diminui um pouquinho" (-5%), depois "aumenta 2%" em cima
- * do resultado anterior -- cada um é um tapa-olho sobre o anterior,
- * não uma remedição do PNG (0.95 * 1.02 = 0.969 do valor medido
- * original). Ainda sujeito a mais ajuste se não bater exato -- ver
- * print. */
-const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02;
+ * de ver renderizado, Douglas pediu uma sequência de ajustes finos
+ * (tapa-olho sobre o anterior, não remedição do PNG): "diminui um
+ * pouquinho" (-5%), "aumenta 2%", "diminui 1% dimensao" (-1%) --
+ * acumulado: 0.95 * 1.02 * 0.99 = 0.9593 do valor medido original.
+ * Ainda sujeito a mais ajuste se não bater exato -- ver print. */
+const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99;
 /** Offset manual em cima da posição calculada por tile (ver
  * tileToWorld) -- ZERADO de propósito: a arte E a posição (tile) dessa
  * peça mudaram junto (ver comentário grande acima), então todo o
