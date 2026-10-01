@@ -516,18 +516,16 @@ const FACADE_CORNER2_APEX_Y_PX = 285;
  * vertical, então 128/54 cobre os 2 tiles certinho em teoria. Depois
  * de ver renderizado, Douglas pediu uma sequência de ajustes finos
  * (tapa-olho sobre o anterior, não remedição do PNG): "diminui um
- * pouquinho" (-5%), "aumenta 2%", "diminui 1% dimensao" (-1%) --
- * acumulado: 0.95 * 1.02 * 0.99 = 0.9593 do valor medido original.
- * Ainda sujeito a mais ajuste se não bater exato -- ver print. */
-const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99;
+ * pouquinho" (-5%), "aumenta 2%", "diminui 1% dimensao" (-1%),
+ * "diminui mais 1%" (-1% de novo) -- acumulado:
+ * 0.95 * 1.02 * 0.99 * 0.99 = 0.9497 do valor medido original. Ainda
+ * sujeito a mais ajuste se não bater exato -- ver print. */
+const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99 * 0.99;
 /** Offset manual em cima da posição calculada por tile (ver
- * tileToWorld) -- ZERADO de propósito: a arte E a posição (tile) dessa
- * peça mudaram junto (ver comentário grande acima), então todo o
- * histórico de ajuste fino acumulado pra combinação ANTIGA não tem
- * mais relação nenhuma com essa. Recalibrar do zero igual da primeira
- * vez (prints com o grid do editor ligado, "move tal direção", etc --
- * não dá pra acertar isso só olhando o PNG fora do jogo). */
-const FACADE_CORNER2_OFFSET_X_PX = 0;
+ * tileToWorld) -- recalibrado do zero com prints depois da troca de
+ * arte/posição. Douglas: "mova 2px pra esquerda" -- X negativo move
+ * a peça pra esquerda na tela. */
+const FACADE_CORNER2_OFFSET_X_PX = -2;
 const FACADE_CORNER2_OFFSET_Y_PX = 0;
 
 /** TRAVA DEFINITIVA (pedido do Douglas: "trava elas de alguma outra
