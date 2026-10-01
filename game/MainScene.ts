@@ -508,11 +508,14 @@ const FACADE_CORNER2_APEX_Y_PX = 276;
  * grid.ts pra cada direção; "direita"/"esquerda" sempre só no eixo X
  * da tela, sem mexer no Y): "move ela tres tile pra direita" (+3
  * tiles em X), depois "4 tiles pra frente esquerda" (direção +row:
- * dx=-ISO_TILE_WIDTH/2, dy=+ISO_TILE_HEIGHT/2 por tile), depois "meio
- * tile pra direita" (+0.5 tile em X). Reajustar aqui e testar local
- * (npm run dev) se precisar de mais/menos -- não dá pra calibrar isso
- * de fora sem ver o resultado ao vivo. */
-const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2) + 0.5 * ISO_TILE_WIDTH;
+ * dx=-ISO_TILE_WIDTH/2, dy=+ISO_TILE_HEIGHT/2 por tile). Tentei somar
+ * mais "meio tile pra direita" em cima disso e foi isso que abriu um
+ * vão GRANDE (print "esse espaço preto precisa fechar") -- ou seja
+ * empurrar mais pra direita daqui pra frente só afasta, não ajuda;
+ * voltei pro valor de antes desse passo (sem o +0.5 tile). Reajustar
+ * aqui e testar local (npm run dev) se precisar de mais/menos -- não
+ * dá pra calibrar isso de fora sem ver o resultado ao vivo. */
+const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2);
 const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2);
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
