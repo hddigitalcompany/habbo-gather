@@ -114,180 +114,28 @@ import {
   setStoredCamDeviceId,
   setStoredSpeakerDeviceId,
 } from "@/lib/mediaPrefs";
+// 1/out -- motor único de chat (ver comentário grande dele),
+// montado uma vez em app/page.tsx e passado aqui via prop
+// `platformChat` (mesma instância que a sala vai consumir quando
+// ela também migrar, ver comentário em app/page.tsx).
+import { usePlatformChat } from "@/components/usePlatformChat";
+type PlatformChat = ReturnType<typeof usePlatformChat>;
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
-// 1/out, pedido do Douglas ("eles tem que ser o mesmo, e ponto final") --
-// MESMO nome reservado que LOBBY_SOCKET_ROOM_ID em server/index.js, usado
-// pra abrir um WebSocket SÓ pra chamada de voz/vídeo e "digitando..." do
-// chat de fora da sala (ver useEffect de lobbySocketRef mais abaixo) --
-// nunca uma sala de verdade, nunca vira jogador fantasma em lugar nenhum.
-const LOBBY_CALL_SOCKET_ROOM = "__lobby__";
 const REALTIME_HTTP_BASE =
   (typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http") +
   `://${REALTIME_HOST}`;
 
-// 30/set, pedido do Douglas: "fora da sala nao deixa anexar e mandar
-// audio, adicione" -- o Lobby (REST, sem WebSocket) ganhou o mesmo
-// anexo/áudio que o chat de dentro da sala já tinha (ver comentário
-// grande no topo do arquivo sobre esse painel ser REST-only, e
-// uploadChatFile/attachmentUrl em GameRoom.tsx -- copiado, não
-// importado, mesmo motivo de sempre). MESMO endpoint POST /upload de
-// sempre (bytes crus, sem multipart), não depende de sala nenhuma.
+// 1/out, pedido do Douglas ("pega o chat de dentro e transforma ele em
+// CHAT que acompanha toda a plataforma") -- Lobby não tem mais chat/
+// chamada/socket próprios: tudo (conversas, chamada, digitando...) vem
+// de usePlatformChat (ver import no topo do arquivo e `chat` logo no
+// começo do componente Lobby), a MESMA conexão/engine que a sala vai
+// consumir. Só sobra aqui a preferência de UI (flutuante x encaixado)
+// de onde esse painel fica.
 const LOBBY_CHAT_PINNED_STORAGE_KEY = "habbo-gather-lobby-chat-pinned";
 
-function attachmentUrl(path: string): string {
-  return path.startsWith("http") ? path : `${REALTIME_HTTP_BASE}${path}`;
-}
-
-async function uploadChatFile(file: Blob, filename: string): Promise<ChatAttachment> {
-  const res = await fetch(`${REALTIME_HTTP_BASE}/upload?filename=${encodeURIComponent(filename)}`, {
-    method: "POST",
-    headers: { "Content-Type": (file as File).type || "application/octet-stream" },
-    body: file,
-  });
-  if (!res.ok) throw new Error(`upload falhou (${res.status})`);
-  return (await res.json()) as ChatAttachment;
-}
-
-function formatFileSize(bytes: number): string {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatChatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-}
-
-// @menção (pedido do Douglas, 1/out) -- MESMA função de GameRoom.tsx
-// (copiada, não importada): destaca "@Palavra" dentro do texto. Mesma
-// limitação aceita lá -- nomes com espaço só destacam a primeira
-// palavra depois do @ (não tem como casar o nome inteiro sem a lista
-// de candidatos aqui).
-function renderMentionText(text: string) {
-  const parts = text.split(/(@[^\s@]+)/g);
-  return parts.map((part, i) =>
-    part.startsWith("@") ? (
-      <span key={i} className="chat-mention-tag">
-        {part}
-      </span>
-    ) : (
-      <Fragment key={i}>{part}</Fragment>
-    )
-  );
-}
-
-// "0:07", "1:23" etc -- usado no contador de gravação de áudio.
-function formatRecordingTime(totalSec: number): string {
-  const m = Math.floor(totalSec / 60);
-  const s2 = totalSec % 60;
-  return `${m}:${s2 < 10 ? "0" : ""}${s2}`;
-}
-
-// tenta mimeTypes em ordem de preferência -- nem todo navegador aceita
-// "audio/webm;codecs=opus" (ex: Safari), então cai pro próximo que o
-// MediaRecorder confirmar que suporta.
-function pickSupportedAudioMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return undefined;
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
-  return candidates.find((t) => {
-    try {
-      return MediaRecorder.isTypeSupported(t);
-    } catch {
-      return false;
-    }
-  });
-}
-
-// mesmo link "?visitar=<slug>" que handleCopyRoomLink copia pra área de
-// transferência mais abaixo -- POST /api/room/visit só registra um
-// bookmark (nunca vira membro), então "Entrar" num cardzinho de
-// convite nunca torna quem clicou um membro da sala (pedido do
-// Douglas: "visitante nao se tornam membros").
-function visitRoomLink(roomSlug: string): string {
-  if (typeof window === "undefined") return "";
-  return `${window.location.origin}${window.location.pathname}?visitar=${encodeURIComponent(roomSlug)}`;
-}
-
 type PresenceInfo = { totalOnline: number } | null;
-
-type ConversationSummary = {
-  id: string;
-  name: string;
-  kind: "direct" | "group";
-  // "company" (padrão de sempre, sem trava) ou "private" (só entre
-  // amigos mútuos) -- ver comentário grande em server/chatStore.js/
-  // getOrCreateDirectConversation e a aba "Conversas privadas" em
-  // LobbyChatPanel mais abaixo.
-  lane: "company" | "private";
-  // 29/set (12), pedido do Douglas: "QUERO O CHAT DE FORA IGUAL AO
-  // CHAT DE DENTRO, ATE NA POSICAO, IGUAL" -- color/photoUrl JÁ
-  // vinham nessa resposta (GET /chat/summary reaproveita
-  // chatStore.listConversationsForUser, que já soma ...getUser(id) em
-  // cada participante, ver server/chatStore.js), só o tipo aqui não
-  // declarava os campos e o painel não desenhava nada com eles -- por
-  // isso a lista/cabeçalho de conversa direta ficavam sem avatar
-  // nenhum enquanto o de dentro da sala (ChatDrawer) já mostrava.
-  participants: { id: string; name?: string; color?: string; photoUrl?: string }[];
-  // 29/set (13), pedido do Douglas: "quero a logo da empresa em que
-  // ele abriu o chat, porque funcionarios podem participar de mais
-  // empresas" -- nome/logo da empresa (sala) onde essa conversa
-  // nasceu, congelados na criação (mesmo comentário grande em
-  // server/chatStore.js). Só lane "company" tem valor aqui.
-  companyName: string | null;
-  companyLogoUrl: string | null;
-  // 29/set (14), pedido do Douglas: "gostei da forma de mostrar que
-  // tem mensagem, mantenha / mas nao esta funcionando" -- contador de
-  // mensagem não vista de verdade (ver unreadCount em
-  // server/chatStore.js/listConversationsForUser, GET /chat/summary
-  // reaproveita a mesma função). Opcional só por segurança, mesmo
-  // motivo do campo igual em components/GameRoom.tsx.
-  unreadCount?: number;
-  lastMessage: { senderId: string; senderName: string; kind: string; text: string; ts: number } | null;
-};
-
-// mesmo formato de anexo do WebSocket (ver ChatAttachment em
-// GameRoom.tsx) -- copiado, não importado (mesmo motivo de sempre
-// nesse arquivo, ver comentário grande no topo).
-type ChatAttachment = { url: string; name: string; size: number; mime: string };
-// cardzinho de "convidar amigo pra sua sala" / "pedir pra visitar"
-// (pedido do Douglas, 30/set) -- ver comentário grande em
-// chatStore.addMessage (server/chatStore.js) e sendRoomCard mais
-// abaixo.
-type RoomCard = { action: "invite" | "visit"; roomSlug: string; roomName: string; roomLogoUrl: string };
-// reação com emoji (pedido do Douglas, 1/out, comparando com o Slack)
-// -- emoji -> lista de userId que reagiram com ele, mesmo formato de
-// ChatReactions em GameRoom.tsx (copiado, não importado).
-type ChatReactions = Record<string, string[]>;
-type ChatMessage = {
-  id: string;
-  senderId: string;
-  senderName: string;
-  kind: string;
-  text: string;
-  attachment?: ChatAttachment | null;
-  roomCard?: RoomCard | null;
-  ts: number;
-  deleted?: boolean;
-  // 1/out, pedido do Douglas (comparando com o Slack) -- reação/
-  // @menção, mesmo par opcional de GameRoom.tsx (ver ChatMsgBase lá).
-  reactions?: ChatReactions;
-  mentionedUserIds?: string[];
-};
-// mensagem fixada (pedido do Douglas, 1/out: "mensagem fixada (definir
-// tempo de fixacao)") -- MESMO formato de ChatPin em GameRoom.tsx.
-type ChatPin = { messageId: string; pinnedBy: string; pinnedByName: string; pinnedAt: number; expiresAt: number | null };
-// item do painel lateral "arquivos da conversa" -- MESMO formato de
-// ChatAttachmentItem em GameRoom.tsx.
-type ChatAttachmentItem = {
-  messageId: string;
-  senderId: string;
-  senderName: string;
-  ts: number;
-  kind: "image" | "file" | "audio";
-  attachment: ChatAttachment;
-};
 
 type CallParticipant = { id: string; name: string; status: string };
 type CallSummary = {
@@ -1237,854 +1085,162 @@ function formatAgendaEventTime(startTs: number, durationMinutes: number): string
  * histórico + campo de resposta. Ver comentário grande no topo do
  * arquivo pra entender o porquê de tudo aqui ser REST (sem WebSocket,
  * sem virar presença fantasma na sala). */
+// ---------------------------------------------------------------
+// 1/out -- Douglas rejeitou a unificação "só de aparência" entre o
+// chat de fora (aqui) e o de dentro (GameRoom.tsx): "nao tem que ter
+// chat de fora chat de dentro, tem que ter CHAT ... pega o chat de
+// dentro e transforma ele em CHAT que acompanha toda a plataforma".
+// Esse painel PARA de ter qualquer estado/REST próprio (listar via
+// GET /chat/summary, abrir via POST /chat/open, mandar via POST
+// /chat/send, etc, tudo isso REMOVIDO) e passa a só DESENHAR o que o
+// motor único (usePlatformChat, montado uma vez em app/page.tsx, ver
+// comentário grande dele) já mantém -- é o MESMO hook, a MESMA
+// conexão, os MESMOS dados que a sala usa, não uma cópia parecida.
+// Sobra aqui só o que é genuinamente deste PAINEL (não do chat em si):
+// visualizar perfil de quem apareceu numa conversa, e o input de
+// arquivo escondido que aciona o anexo.
+// ---------------------------------------------------------------
 function LobbyChatPanel({
   pinMode,
   onToggleSidePin,
   myUserId,
-  myName,
-  myRoomSlug,
   myRoomName,
   myRoomLogoUrl,
-  conversations,
   accountAccessToken,
-  onClose,
-  onSent,
-  onStartConversation,
-  onConversationRead,
-  onConversationsReplaced,
-  initialActiveId,
-  // chamada de voz/vídeo + "digitando..." (pedido do Douglas, 1/out:
-  // "eles tem que ser o mesmo, e ponto final") -- dono de verdade
-  // desses dados é o Lobby (componente de fora, nunca desmonta por
-  // abrir/fechar esse painel, ver lobbySocketRef/joinCall/leaveCall no
-  // Lobby), esse painel só REPASSA pro ChatDrawer, mesmo espírito de
-  // conversations/accountAccessToken acima.
-  callParticipantsByConversation,
-  myCallConversationId,
-  callRemoteStreams,
-  onJoinCall,
-  onLeaveCall,
-  localStreamRef,
-  camOn,
   callVolume,
-  typingByConv,
-  onTypingNotify,
+  camOn,
+  onClose,
+  chat,
 }: {
   pinMode: "float" | "side";
   onToggleSidePin: () => void;
   myUserId: string;
-  myName: string;
-  // 30/set, bug reportado pelo Douglas: "adicionei logo a empresa e no
-  // chat nao carregou" -- sala PRÓPRIA de quem tá com o painel aberto
-  // (myRealRoom.room_slug lá no Lobby, null se ainda não tem uma),
-  // usada só pra carimbar logo/nome ao mover conversa pra "Empresa"
-  // (ver moveConversationLane abaixo).
-  myRoomSlug: string | null;
-  // 30/set, pedido do Douglas: "a logo empresa so aparece quando tem
-  // conversa nela, mas nao, quero essa aba sempre aberta com o chat,
-  // quero que eles vejam a possibilidade, sempre ali" -- nome/logo da
-  // empresa PRÓPRIA de quem tá com o painel aberto, pra entrar como
-  // opção garantida em companyOptions mesmo sem nenhuma conversa ainda
-  // (ver companyOptions useMemo em components/ChatDrawer.tsx, que recebe
-  // esse valor como roomCompanyName -- ver ChatDrawer mais abaixo).
   myRoomName: string | null;
   myRoomLogoUrl: string | null;
-  conversations: ConversationSummary[] | null;
   accountAccessToken?: string | null;
-  onClose: () => void;
-  onSent: (conversationId: string, message: ChatMessage) => void;
-  onStartConversation: (targetUserId: string, targetName: string, lane?: "private" | "company") => void;
-  // 29/set (14), pedido do Douglas: "quando eu vejo, ela nao some a
-  // marcacao" -- zera o unreadCount dessa conversa na lista do Lobby
-  // NA HORA que abre (sem esperar o próximo poll de /chat/summary, 6s
-  // depois, ver useEffect grande de "as conversas tambem nao abrem
-  // fora da sala" mais abaixo).
-  onConversationRead: (conversationId: string) => void;
-  // "3 pontinhos" -- POST /chat/set-lane (ver moveConversationLane
-  // logo abaixo) devolve a conversa já atualizada e (se mesclou com
-  // outra que já existia na lane de destino) o id da que sumiu; esse
-  // callback repassa isso pro Lobby (dono de verdade do state
-  // `conversations`) atualizar a lista, mesmo espírito de
-  // onConversationRead acima.
-  onConversationsReplaced: (removedConversationId: string | null, conversation: ConversationSummary) => void;
-  initialActiveId?: string | null;
-  callParticipantsByConversation: Record<string, ChatCallParticipant[]>;
-  myCallConversationId: string | null;
-  callRemoteStreams: Record<string, MediaStream>;
-  onJoinCall: (conversationId: string) => void;
-  onLeaveCall: () => void;
-  localStreamRef: RefObject<MediaStream | null>;
-  camOn: boolean;
   callVolume: number;
-  typingByConv: Record<string, ChatTypingEntry[]>;
-  onTypingNotify: (conversationId: string | null) => void;
+  camOn: boolean;
+  onClose: () => void;
+  chat: PlatformChat;
 }) {
-  // ---------------------------------------------------------------
-  // 1/out -- unificação com o ChatDrawer da sala (ver import no topo
-  // do arquivo, pedido do Douglas: "eu quero a mesma estrutura nao
-  // que seja separado"). Esse painel passou de "desenha a própria
-  // gaveta" pra "busca/guarda os dados certos (REST) e desenha com o
-  // MESMO ChatDrawer que a sala usa" (components/GameRoom.tsx chama
-  // ele do mesmo jeito, ver chatDrawerProps lá) -- só os DADOS vêm de
-  // fontes diferentes (REST aqui, WebSocket lá, ver comentário grande
-  // no topo do arquivo sobre esse painel ser REST-only); a tela/
-  // estrutura/CSS é uma só agora. Composer com @menção, popover de
-  // reação/fixar, coluna de empresas, painel de arquivos e menu de
-  // mover-de-lane SAÍRAM daqui -- o ChatDrawer já faz tudo isso
-  // sozinho (ver comentário grande dele em components/ChatDrawer.tsx),
-  // só sobra aqui o que é genuinamente REST-only: buscar/mandar pro
-  // servidor e guardar a resposta em state.
-  // ---------------------------------------------------------------
-
-  const [view, setView] = useState<"list" | "thread" | "new">(initialActiveId ? "thread" : "list");
-  const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
-  // 30/set, bug reportado pelo Douglas: "quando eu vou em nova
-  // conversa clico no contato, nada acontece, nao inicia uma
-  // conversa" -- initialActiveId só é lido no useState acima, que só
-  // roda no PRIMEIRO mount; como o painel já tava aberto (a pessoa
-  // clicou "+" com o chat já na tela), ele nunca desmonta, então
-  // onStartConversation (handleStartConversation no Lobby) cria a
-  // conversa (vira initialActiveId de novo) mas nada reagia à
-  // mudança. Esse efeito sincroniza activeId/view toda vez que
-  // initialActiveId muda, não só na primeira vez -- MESMO par
-  // activeConversationId/chatView que GameRoom.tsx troca junto em
-  // openConversation.
-  useEffect(() => {
-    if (initialActiveId) {
-      setActiveId(initialActiveId);
-      setView("thread");
-    }
-  }, [initialActiveId]);
-
-  function openConversation(id: string | null) {
-    setActiveId(id);
-    setView(id === null ? "list" : "thread");
-  }
-
-  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
-  // corte "mensagens não vistas" (ver comentário grande no POST
-  // /chat/open em server/index.js) -- só pra desenhar a linha divisória
-  // na conversa ABERTA agora; congela no momento que abre.
-  const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
-  // "mensagem fixada"/"confirmação de leitura" (pedido do Douglas,
-  // 1/out) -- vem embutido na resposta do GET /chat/messages (ver
-  // fetchMessages mais abaixo), em vez de um evento de WebSocket,
-  // porque esse painel não tem socket nenhum.
-  const [pins, setPins] = useState<ChatPin[]>([]);
-  const [lastReadByUserId, setLastReadByUserId] = useState<Record<string, number>>({});
-  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out).
-  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
-  const [filesPanelItems, setFilesPanelItems] = useState<ChatAttachmentItem[] | null>(null);
-  const [filesPanelFilter, setFilesPanelFilter] = useState<"all" | "image" | "file" | "audio">("all");
-  const [filesPanelQuery, setFilesPanelQuery] = useState("");
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
-  // @menção (pedido do Douglas, 1/out) -- MESMO pendingMentionIds de
-  // GameRoom.tsx: quem eu já @mencionei na mensagem que tô escrevendo
-  // agora, zerado a cada envio. O resto do mecanismo (dropdown/
-  // detectar "@algo"/inserir o nome no texto) agora é TODO interno do
-  // ChatDrawer -- esse painel só guarda a lista final pra mandar
-  // junto no POST /chat/send (ver onAddPendingMentionId mais abaixo).
-  const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
-  // anexo/áudio no chat de fora da sala (pedido do Douglas, 30/set:
-  // "fora da sala nao deixa anexar e mandar audio, adicione").
-  const chatFileInputRef = useRef<HTMLInputElement>(null);
-  const [sendingAttachment, setSendingAttachment] = useState(false);
-  const [recordingAudio, setRecordingAudio] = useState(false);
-  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
-  const [recordedPreview, setRecordedPreview] = useState<{ url: string; durationSec: number } | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recordedBlobRef = useRef<Blob | null>(null);
-  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recordingStartRef = useRef(0);
-  const discardRecordingRef = useRef(false);
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
-  // chamada de voz/vídeo (pedido do Douglas, 1/out: "eles tem que ser
-  // o mesmo, e ponto final") -- WebRTC de verdade agora, ver
-  // lobbySocketRef/callPeersRef/joinCall/leaveCall no componente Lobby
-  // (dono de verdade desse estado, repassado pra cá via props, mesmo
-  // padrão de conversations/accountAccessToken acima -- esse painel
-  // nunca guarda estado de chamada, só REPASSA pro ChatDrawer).
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
 
-  // "Conversa" (1:1) vs "Criar grupo" (pedido do Douglas, 1/out) --
-  // MESMO modo explícito escolhido no topo da tela "Nova conversa" que
-  // o ChatDrawer ganhou (ver newConvMode/changeNewConvMode em
-  // GameRoom.tsx).
-  const [newConvMode, setNewConvMode] = useState<"direct" | "group">("direct");
-  const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
-  const [newConvName, setNewConvName] = useState("");
-  // filtro Amigos/Empresa em "Nova conversa" (pedido do Douglas,
-  // 30/set) -- "Amigos" busca só amigo mútuo (GET /api/friends/list) e
-  // sempre cria lane "private"; "Empresa" busca qualquer conta (GET
-  // /api/friends/search) e cria lane "company".
-  const [newConvFilter, setNewConvFilter] = useState<"company" | "friends">("company");
-  const [newConvQuery, setNewConvQuery] = useState("");
-  const [newConvResults, setNewConvResults] = useState<
-    { userId: string; name: string; photoUrl: string }[] | null
-  >(null);
-  const [newConvFriends, setNewConvFriends] = useState<
-    { userId: string; name: string; photoUrl: string }[] | null
-  >(null);
-  const [renamingGroup, setRenamingGroup] = useState(false);
-  const [groupNameDraft, setGroupNameDraft] = useState("");
-
+  // espelha "tô literalmente vendo essa conversa agora" pro motor
+  // único (ver updateReadingState/readingConversationIdRef em
+  // usePlatformChat.ts) -- MESMO conceito de readingConversationIdRef
+  // em GameRoom.tsx, só que escrito de fora (o hook não sabe sozinho
+  // se o painel que o usa tá mesmo visível na tela).
   useEffect(() => {
-    if (view !== "new" || newConvFilter !== "company" || !accountAccessToken) return;
-    let cancelled = false;
-    const t = setTimeout(() => {
-      fetch(`/api/friends/search?q=${encodeURIComponent(newConvQuery.trim())}`, {
-        headers: { Authorization: `Bearer ${accountAccessToken}` },
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!cancelled) setNewConvResults(Array.isArray(data?.users) ? data.users : []);
-        })
-        .catch(() => {
-          if (!cancelled) setNewConvResults([]);
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [view, newConvFilter, newConvQuery, accountAccessToken]);
-
-  // "Amigos" -- busca a lista inteira uma vez (amigo mútuo raramente
-  // passa de umas dezenas), o ChatDrawer filtra pelo texto sozinho.
-  useEffect(() => {
-    if (view !== "new" || newConvFilter !== "friends" || !accountAccessToken) return;
-    let cancelled = false;
-    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setNewConvFriends(Array.isArray(data?.friends) ? data.friends : []);
-      })
-      .catch(() => {
-        if (!cancelled) setNewConvFriends([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view, newConvFilter, accountAccessToken]);
-
-  // sai da tela "Nova conversa" -- limpa busca/filtro/seleção pra
-  // próxima vez que abrir começar do zero (MESMO efeito de "sai do
-  // chatView 'new'" em GameRoom.tsx).
-  useEffect(() => {
-    if (view !== "new") {
-      setNewConvQuery("");
-      setNewConvFilter("company");
-      setNewConvResults(null);
-      setNewConvFriends(null);
-      setNewConvMode("direct");
-      setNewConvSelection([]);
-      setNewConvName("");
-    }
-  }, [view]);
-
-  function changeNewConvMode(mode: "direct" | "group") {
-    setNewConvMode(mode);
-    setNewConvSelection([]);
-    setNewConvName("");
-  }
-
-  function toggleNewConvSelection(userId: string) {
-    setNewConvSelection((prev) =>
-      newConvMode === "direct"
-        ? prev.includes(userId)
-          ? []
-          : [userId]
-        : prev.includes(userId)
-          ? prev.filter((x) => x !== userId)
-          : [...prev, userId]
-    );
-  }
-
-  // POST /chat/create-group (ver server/index.js) pra grupo, ou
-  // onStartConversation (handleStartConversation no Lobby, mesmo POST
-  // /chat/direct de sempre) pra 1:1 -- MESMA ramificação de
-  // submitNewConversation em GameRoom.tsx, via REST (sem socket, ver
-  // comentário grande no topo do arquivo sobre esse painel ser
-  // REST-only).
-  async function submitNewConversation() {
-    if (newConvMode === "direct") {
-      if (newConvSelection.length !== 1) return;
-      // "Amigos" sempre inicia "private" (servidor confere amigo mútuo
-      // de novo), "Empresa" continua "company" -- MESMA regra de
-      // newConvFilter em GameRoom.tsx.
-      onStartConversation(newConvSelection[0], "", newConvFilter === "friends" ? "private" : "company");
-      setNewConvSelection([]);
-      setNewConvName("");
-      return;
-    }
-    const name = newConvName.trim();
-    if (newConvSelection.length === 0 || !name) return;
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/create-group`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: myUserId,
-          userName: myName,
-          participantIds: newConvSelection,
-          name,
-          roomSlug: myRoomSlug,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.conversation) {
-          onConversationsReplaced(null, data.conversation);
-          openConversation(data.conversation.id);
-        }
-      }
-    } catch {
-      // rede caiu -- pessoa continua na tela "Nova conversa" e tenta de novo
-    }
-    setNewConvSelection([]);
-    setNewConvName("");
-  }
-
-  function startRenameGroup(currentName: string) {
-    setGroupNameDraft(currentName);
-    setRenamingGroup(true);
-  }
-
-  // POST /chat/rename-group (ver server/index.js) -- MESMA ação do
-  // case "chat:rename_group" do WebSocket (ver submitRenameGroup em
-  // GameRoom.tsx).
-  async function submitRenameGroup() {
-    const name = groupNameDraft.trim();
-    if (!activeId || !name) return;
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/rename-group`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: activeId, userId: myUserId, name }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.conversation) onConversationsReplaced(null, data.conversation);
-      }
-    } catch {
-      // rede caiu -- pessoa tenta de novo
-    }
-    setRenamingGroup(false);
-  }
-
-  useEffect(() => {
-    if (!activeId) {
-      setMessages(null);
-      setUnreadSinceTs(null);
-      setPins([]);
-      setLastReadByUserId({});
-      setFilesPanelOpen(false);
-      setFilesPanelItems(null);
-      return;
-    }
-    let cancelled = false;
-    setMessages(null);
-    setUnreadSinceTs(null);
-    setPins([]);
-    setLastReadByUserId({});
-    setFilesPanelOpen(false);
-    setFilesPanelItems(null);
-    const conversationId = activeId;
-
-    function fetchMessages() {
-      fetch(
-        `${REALTIME_HTTP_BASE}/chat/messages?conversationId=${encodeURIComponent(conversationId)}&userId=${encodeURIComponent(myUserId)}`
-      )
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (cancelled) return;
-          setMessages(Array.isArray(data?.messages) ? data.messages : []);
-          // 1/out: esse GET agora manda pins/lastRead junto (ver
-          // comentário grande dele em server/index.js) -- é por isso
-          // que a faixa de fixadas e o "visto por" atualizam sozinhos
-          // a cada 4s, sem precisar de WebSocket.
-          if (data?.pins) setPins(data.pins);
-          if (data?.lastRead) setLastReadByUserId(data.lastRead);
-        })
-        .catch(() => {
-          if (!cancelled) setMessages([]);
-        });
-    }
-
-    fetchMessages();
-    const messagesPoll = setInterval(fetchMessages, 4000);
-
-    // marca como lida SÓ UMA VEZ nessa abertura (ver comentário grande
-    // de sempre -- não recalcula sozinho enquanto a pessoa ainda tá
-    // lendo).
-    fetch(`${REALTIME_HTTP_BASE}/chat/open`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, userId: myUserId }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled) return;
-        setUnreadSinceTs(typeof data?.unreadSinceTs === "number" ? data.unreadSinceTs : 0);
-        if (data?.pins) setPins(data.pins);
-        if (data?.lastRead) setLastReadByUserId(data.lastRead);
-        onConversationRead(conversationId);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-      clearInterval(messagesPoll);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onConversationRead
-    // não entra nas deps de propósito: é só um setState do componente pai
-    // (função nova a cada render dele), incluir aqui faria esse efeito
-    // reabrir POST /chat/open toda vez que o Lobby re-renderizar, não só
-    // quando a conversa aberta muda de verdade.
-  }, [activeId, myUserId]);
-
-  async function toggleReaction(messageId: string, emoji: string) {
-    if (!activeId) return;
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/react`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: activeId, userId: myUserId, messageId, emoji }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data?.reactions) {
-        setMessages((prev) => (prev ? prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions } : m)) : prev));
-      }
-    } catch {
-      // rede caiu -- o próximo poll corrige sozinho
-    }
-  }
-
-  async function pinMessage(messageId: string, durationMs: number | null) {
-    if (!activeId) return;
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/pin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: activeId, userId: myUserId, userName: myName, messageId, durationMs }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data?.pins) setPins(data.pins);
-    } catch {
-      // rede caiu -- próximo poll corrige sozinho
-    }
-  }
-
-  async function unpinMessage(messageId: string) {
-    if (!activeId) return;
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/unpin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: activeId, userId: myUserId, messageId }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data?.pins) setPins(data.pins);
-    } catch {
-      // rede caiu -- próximo poll corrige sozinho
-    }
-  }
-
-  // apagar mensagem (pedido do Douglas, 1/out, comparando com o
-  // Slack) -- POST /chat/delete (ver server/index.js), MESMA ação do
-  // case "chat:delete" do WebSocket (ver deleteMessage/GameRoom.tsx).
-  async function deleteMessage(conversationId: string | null, messageId: string) {
-    if (!conversationId) return;
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, userId: myUserId, messageId }),
-      });
-      if (!res.ok) return;
-      // o texto/anexo original já vem vazio do servidor nesse caso
-      // (ver chatStore.deleteMessage) -- espelha isso localmente sem
-      // esperar o próximo poll de 4s (mesma ideia de toggleReaction/
-      // pinMessage acima).
-      setMessages((prev) =>
-        prev ? prev.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null, roomCard: null } : m)) : prev
-      );
-    } catch {
-      // rede caiu -- pessoa tenta de novo
-    }
-  }
-
-  async function openFilesPanel() {
-    setFilesPanelOpen(true);
-    if (!activeId) return;
-    try {
-      const res = await fetch(
-        `${REALTIME_HTTP_BASE}/chat/attachments?conversationId=${encodeURIComponent(activeId)}&userId=${encodeURIComponent(myUserId)}`
-      );
-      const data = res.ok ? await res.json() : null;
-      setFilesPanelItems(Array.isArray(data?.attachments) ? data.attachments : []);
-    } catch {
-      setFilesPanelItems([]);
-    }
-  }
-
-  function closeFilesPanel() {
-    setFilesPanelOpen(false);
-  }
-
-  async function moveConversationLane(conversationId: string, lane: "company" | "private") {
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/set-lane`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, userId: myUserId, lane, roomSlug: myRoomSlug }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data?.conversation) onConversationsReplaced(data.removedConversationId ?? null, data.conversation);
-      if (data?.removedConversationId && activeId === data.removedConversationId) {
-        setActiveId(data.conversation?.id ?? null);
-      }
-    } catch {
-      // rede caiu -- sem feedback especial, a pessoa tenta de novo
-    }
-  }
-
-  // POST /chat/send genérico -- text (chat de sempre), attachment+kind
-  // (foto/arquivo/áudio) ou roomCard (cardzinho de convite/visita).
-  async function sendChatPayload(payload: {
-    text?: string;
-    attachment?: ChatAttachment;
-    kind?: string;
-    roomCard?: RoomCard;
-    mentionedUserIds?: string[];
-  }) {
-    if (!activeId) return null;
-    const res = await fetch(`${REALTIME_HTTP_BASE}/chat/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: activeId, userId: myUserId, userName: myName, ...payload }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data?.message) {
-      setMessages((prev) => (prev ? [...prev, data.message] : [data.message]));
-      onSent(activeId, data.message);
-    }
-    return data?.message ?? null;
-  }
-
-  async function sendMessage() {
-    const text = draft.trim();
-    if (!text || !activeId || sending) return;
-    setSending(true);
-    try {
-      const msg = await sendChatPayload({ text, mentionedUserIds: pendingMentionIds });
-      if (msg) {
-        setDraft("");
-        setPendingMentionIds([]);
-      }
-    } catch {
-      // rede caiu no meio -- deixa o texto no campo pra pessoa tentar de novo
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function sendChatAttachment(file: Blob, filename: string, kind: "image" | "file" | "audio") {
-    if (!activeId) return;
-    setSendingAttachment(true);
-    try {
-      const attachment = await uploadChatFile(file, filename);
-      await sendChatPayload({ attachment, kind });
-    } catch (e) {
-      console.warn("Falha ao enviar anexo no chat (Lobby)", e);
-    } finally {
-      setSendingAttachment(false);
-    }
-  }
+    chat.updateReadingState(chat.chatView === "thread");
+    return () => chat.updateReadingState(false);
+  }, [chat.chatView, chat.activeConversationId]);
 
   function handleChatFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
+    chat.sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
   }
 
-  // --- gravação de áudio, MESMO fluxo "estilo WhatsApp" do chat de
-  // dentro da sala (grava -> PARA -> preview -> só manda quando
-  // confirma, ver ChatDrawer/GameRoom.tsx) -- aqui o Lobby não tem
-  // câmera/mic da sala já capturados (localStreamRef não existe fora
-  // da sala), então é sempre um getUserMedia novo mesmo.
-  async function startVoiceRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = pickSupportedAudioMimeType();
-      const mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      discardRecordingRef.current = false;
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      mr.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        if (recordingIntervalRef.current) {
-          clearInterval(recordingIntervalRef.current);
-          recordingIntervalRef.current = null;
-        }
-        setRecordingAudio(false);
-        if (discardRecordingRef.current) {
-          discardRecordingRef.current = false;
-          audioChunksRef.current = [];
-          return;
-        }
-        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
-        if (blob.size > 0) {
-          recordedBlobRef.current = blob;
-          const durationSec = Math.max(0, Math.round((Date.now() - recordingStartRef.current) / 1000));
-          setRecordedPreview({ url: URL.createObjectURL(blob), durationSec });
-        }
-      };
-      mediaRecorderRef.current = mr;
-      mr.start(250);
-      recordingStartRef.current = Date.now();
-      setRecordingElapsedSec(0);
-      recordingIntervalRef.current = setInterval(() => {
-        setRecordingElapsedSec(Math.floor((Date.now() - recordingStartRef.current) / 1000));
-      }, 250);
-      setRecordedPreview(null);
-      setRecordingAudio(true);
-    } catch (e) {
-      console.warn("Sem acesso ao microfone pra gravar áudio (Lobby)", e);
-    }
-  }
-
-  function stopVoiceRecording() {
-    mediaRecorderRef.current?.stop();
-  }
-
-  function cancelVoiceRecording() {
-    discardRecordingRef.current = true;
-    mediaRecorderRef.current?.stop();
-  }
-
-  function discardRecordedAudio() {
-    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
-    recordedBlobRef.current = null;
-    setRecordedPreview(null);
-  }
-
-  async function sendRecordedAudio() {
-    const blob = recordedBlobRef.current;
-    if (!blob) return;
-    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
-    recordedBlobRef.current = null;
-    setRecordedPreview(null);
-    await sendChatAttachment(blob, `gravacao-${Date.now()}.webm`, "audio");
-  }
-
-  // "Convidar amigo" / "Visitar amigo" (pedido do Douglas, 30/set) --
-  // MESMO mecanismo/mesmos nomes de campo que o ChatDrawer usa dentro
-  // da sala (ver sendRoomCard/GameRoom.tsx).
-  async function sendRoomCard(action: "invite" | "visit") {
-    const roomCard: RoomCard =
-      action === "invite"
-        ? { action, roomSlug: myRoomSlug || "", roomName: myRoomName || "Minha sala", roomLogoUrl: myRoomLogoUrl || "" }
-        : { action, roomSlug: "", roomName: "", roomLogoUrl: "" };
-    await sendChatPayload({ roomCard });
-  }
-
-  // --- adapta o formato leve que o REST devolve (ConversationSummary/
-  // ChatMessage, ver comentário grande deles no topo do arquivo) pro
-  // formato que o ChatDrawer espera (Conversation/ChatMsg, importados
-  // de GameRoom.tsx) -- a ÚNICA diferença de verdade entre os dois é
-  // participantIds/updatedAt (que o resumo do REST não carrega) e
-  // conversationId (que mensagem de Sala não tem, mas aqui SEMPRE tem
-  // uma conversa aberta); todo o resto (pins/anexo/reação/cardzinho)
-  // já é o MESMO formato (ver comentário "copiado, não importado" nos
-  // tipos acima), sem precisar de conversão nenhuma.
-  const drawerConversations: Conversation[] = useMemo(
-    () =>
-      (conversations ?? []).map((c) => ({
-        id: c.id,
-        kind: c.kind,
-        lane: c.lane,
-        name: c.name,
-        companyName: c.companyName,
-        companyLogoUrl: c.companyLogoUrl,
-        participantIds: c.participants.map((p) => p.id),
-        participants: c.participants.map((p) => ({
-          id: p.id,
-          name: p.name || "",
-          color: p.color || "",
-          photoUrl: p.photoUrl || "",
-        })),
-        updatedAt: c.lastMessage?.ts ?? 0,
-        unreadCount: c.unreadCount,
-        lastMessage: c.lastMessage
-          ? {
-              senderId: c.lastMessage.senderId,
-              senderName: c.lastMessage.senderName,
-              kind: c.lastMessage.kind as ChatMsgKind,
-              text: c.lastMessage.text,
-              ts: c.lastMessage.ts,
-            }
-          : null,
-      })),
-    [conversations]
-  );
-
-  const drawerMessages: ChatMsg[] = useMemo(() => {
-    if (!activeId || !messages) return [];
-    return messages.map((m) => ({
-      ...m,
-      kind: m.kind as ChatMsgKind,
-      attachment: m.attachment ?? null,
-      roomCard: m.roomCard ?? null,
-      conversationId: activeId,
-    }));
-  }, [activeId, messages]);
-
-  // 1/out, bug reportado pelo Douglas depois da unificação: "continuam
-  // nao sendo a mesma coisa, tem diferencas entre eles, estetica,
-  // posicao, abertura" -- causa: o shell fixo que ancora o chat PRESO
-  // na lateral (.lobby-chat-drawer-shell-sidebar, ver globals.css) só
-  // nasce quando o ChatDrawer mostra a coluna de empresas por DENTRO
-  // (showCompanyRail em ChatDrawer.tsx -- só true com view==="list" E
-  // lane "Empresa"). Em QUALQUER outra tela com o chat preso --
-  // abrir uma conversa ("abertura", vira view "thread"), "Nova
-  // conversa", lane "Amigos" -- o ChatDrawer devolve só a gaveta NUA
-  // (ver `if (!companyRail) return drawerBody` lá), que na SALA
-  // funciona pq o pai permanente dela é .room-and-editor (flex
-  // esticado, sempre existe, ver GameRoom.tsx); o Lobby não tem um
-  // pai permanente desses (.lobby-backdrop só tem .lobby-card no
-  // fluxo normal, ver comentário grande dela) -- sem o shell, a
-  // gaveta nua perdia TODO posicionamento fixo (vira um bloco solto
-  // no canto, sem o top/bottom/left de sempre). Isso explicava as
-  // "diferenças de posição/estética" (um painel fora do lugar não
-  // parece "a mesma coisa" mesmo usando o mesmíssimo CSS do card) E
-  // a diferença de "abertura" (acontecia bem na hora de abrir uma
-  // conversa, que é exatamente quando showCompanyRail vira false).
-  //
-  // Fix: .lobby-chat-pin-anchor (globals.css) dá à gaveta NUA o MESMO
-  // ancoradouro fixo que o shell já dava (MESMOS números: top:80/
-  // bottom:0/left:0) -- sempre presente quando preso na lateral,
-  // independente do ChatDrawer mostrar a coluna por dentro ou não.
-  // Quando o shell TAMBÉM aparece (lane Empresa, lista), fica um
-  // dentro do outro com os MESMOS números fixos -- position:fixed
-  // sempre resolve contra a VIEWPORT (não contra o ancestral mais
-  // próximo, a não ser que ele tenha transform/filter, que esse não
-  // tem), então aninhar os dois não desloca nada, só duplica a
-  // mesma caixa (sem efeito visual).
+  const activeId = chat.activeConversationId;
   const chatDrawerEl = (
-      <ChatDrawer
-        view={view}
-        onChangeView={setView}
-        conversations={drawerConversations}
-        activeConversationId={activeId}
-        onOpenConversation={openConversation}
-        messages={drawerMessages}
-        unreadSinceTs={unreadSinceTs}
-        // o Lobby não tem Sala/"quem ta por perto" nenhuma (ver hasRoom
-        // abaixo) -- roomChatLog fica sempre vazio, nunca é lido de
-        // verdade.
-        roomChatLog={[]}
-        hasRoom={false}
-        myUserId={myUserId}
-        onlinePlayers={[]}
-        roomCompanyName={myRoomName}
-        roomCompanyLogoUrl={myRoomLogoUrl}
-        accountAccessToken={accountAccessToken}
-        callVolume={callVolume}
-        newConvMode={newConvMode}
-        onChangeNewConvMode={changeNewConvMode}
-        newConvSelection={newConvSelection}
-        onToggleNewConvSelection={toggleNewConvSelection}
-        newConvName={newConvName}
-        onChangeNewConvName={setNewConvName}
-        onSubmitNewConversation={submitNewConversation}
-        newConvFilter={newConvFilter}
-        onChangeNewConvFilter={setNewConvFilter}
-        newConvQuery={newConvQuery}
-        onChangeNewConvQuery={setNewConvQuery}
-        newConvSearchResults={newConvResults}
-        newConvFriends={newConvFriends}
-        renamingGroup={renamingGroup}
-        onStartRenameGroup={startRenameGroup}
-        onCancelRenameGroup={() => setRenamingGroup(false)}
-        groupNameDraft={groupNameDraft}
-        onChangeGroupNameDraft={setGroupNameDraft}
-        onSubmitRenameGroup={submitRenameGroup}
-        composerText={draft}
-        onChangeComposerText={setDraft}
-        onSendComposer={sendMessage}
-        onPickFile={() => chatFileInputRef.current?.click()}
-        sendingAttachment={sendingAttachment}
-        recordingAudio={recordingAudio}
-        recordingElapsedSec={recordingElapsedSec}
-        recordedPreview={recordedPreview}
-        onStartRecording={startVoiceRecording}
-        onStopRecording={stopVoiceRecording}
-        onCancelRecording={cancelVoiceRecording}
-        onDiscardRecordedAudio={discardRecordedAudio}
-        onSendRecordedAudio={sendRecordedAudio}
-        onDeleteMessage={deleteMessage}
-        onSendRoomCard={sendRoomCard}
-        onMoveConversationLane={moveConversationLane}
-        // chamada de voz/vídeo (pedido do Douglas, 1/out: "eles tem que
-        // ser o mesmo, e ponto final") -- estado de verdade vem do
-        // Lobby (componente de fora, ver comentário grande de
-        // lobbySocketRef lá), esse painel só repassa.
-        callParticipantsByConversation={callParticipantsByConversation}
-        myCallConversationId={myCallConversationId}
-        callRemoteStreams={callRemoteStreams}
-        onJoinCall={onJoinCall}
-        onLeaveCall={onLeaveCall}
-        localStreamRef={localStreamRef}
-        camOn={camOn}
-        onClose={onClose}
-        pinMode={pinMode}
-        onToggleSidePin={onToggleSidePin}
-        // "fixar" (pedido do Douglas, 1/out: "o layout do chat de fora
-        // tem que ser igual ao de dentro") -- MESMOS números de
-        // top/bottom do .chat-drawer-shell-sidebar da sala, só muda o
-        // NOME da classe porque o Lobby não tem o layout flex com
-        // align-items:stretch que a sala tem (ver comentário grande de
-        // .lobby-chat-drawer-shell-sidebar em globals.css).
-        sidebarClassName="lobby-chat-drawer-shell-sidebar"
-        onOpenProfile={(playerId) => setViewingProfileUserId(playerId)}
-        pins={pins}
-        // "digitando..." (pedido do Douglas, 1/out) -- vem do socket
-        // dedicado do Lobby agora (ver lobbySocketRef lá), não mais um
-        // gap -- mesmo filtro por conversa ativa de GameRoom.tsx
-        // (typingByConv[activeConversationId]).
-        typingUsers={activeId ? typingByConv[activeId] ?? [] : []}
-        lastRead={lastReadByUserId}
-        onToggleReaction={toggleReaction}
-        onPinMessage={pinMessage}
-        onUnpinMessage={unpinMessage}
-        onTypingNotify={() => onTypingNotify(activeId)}
-        filesPanelOpen={filesPanelOpen}
-        filesPanelItems={filesPanelItems}
-        filesPanelFilter={filesPanelFilter}
-        onChangeFilesPanelFilter={setFilesPanelFilter}
-        filesPanelQuery={filesPanelQuery}
-        onChangeFilesPanelQuery={setFilesPanelQuery}
-        onOpenFilesPanel={openFilesPanel}
-        onCloseFilesPanel={closeFilesPanel}
-        onMentionAttachmentInChat={(item) => {
-          sendChatPayload({ attachment: item.attachment, kind: item.kind });
-          setFilesPanelOpen(false);
-        }}
-        pendingMentionIds={pendingMentionIds}
-        onAddPendingMentionId={(userId) =>
-          setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]))
-        }
-      />
+    <ChatDrawer
+      view={chat.chatView}
+      onChangeView={chat.setChatView}
+      conversations={chat.conversations}
+      activeConversationId={activeId}
+      onOpenConversation={chat.openConversation}
+      messages={activeId === null ? [] : chat.messagesByConv[activeId] ?? []}
+      unreadSinceTs={activeId === null ? null : chat.unreadSinceTsByConv[activeId] ?? null}
+      // o Lobby não tem Sala/"quem ta por perto" nenhuma (ver hasRoom
+      // abaixo) -- roomChatLog fica sempre vazio, nunca é lido de
+      // verdade.
+      roomChatLog={[]}
+      hasRoom={false}
+      myUserId={myUserId}
+      onlinePlayers={[]}
+      roomCompanyName={myRoomName}
+      roomCompanyLogoUrl={myRoomLogoUrl}
+      accountAccessToken={accountAccessToken}
+      callVolume={callVolume}
+      newConvMode={chat.newConvMode}
+      onChangeNewConvMode={chat.changeNewConvMode}
+      newConvSelection={chat.newConvSelection}
+      onToggleNewConvSelection={chat.toggleNewConvSelection}
+      newConvName={chat.newConvName}
+      onChangeNewConvName={chat.setNewConvName}
+      onSubmitNewConversation={chat.submitNewConversation}
+      newConvFilter={chat.newConvFilter}
+      onChangeNewConvFilter={chat.setNewConvFilter}
+      newConvQuery={chat.newConvQuery}
+      onChangeNewConvQuery={chat.setNewConvQuery}
+      newConvSearchResults={chat.newConvSearchResults}
+      newConvFriends={chat.newConvFriends}
+      renamingGroup={chat.renamingGroup}
+      onStartRenameGroup={(currentName: string) => {
+        chat.setGroupNameDraft(currentName);
+        chat.setRenamingGroup(true);
+      }}
+      onCancelRenameGroup={() => chat.setRenamingGroup(false)}
+      groupNameDraft={chat.groupNameDraft}
+      onChangeGroupNameDraft={chat.setGroupNameDraft}
+      onSubmitRenameGroup={chat.submitRenameGroup}
+      composerText={chat.composerText}
+      onChangeComposerText={chat.setComposerText}
+      onSendComposer={chat.onSendComposer}
+      onPickFile={() => chatFileInputRef.current?.click()}
+      sendingAttachment={chat.sendingAttachment}
+      recordingAudio={chat.recordingAudio}
+      recordingElapsedSec={chat.recordingElapsedSec}
+      recordedPreview={chat.recordedPreview}
+      onStartRecording={chat.startVoiceRecording}
+      onStopRecording={chat.stopVoiceRecording}
+      onCancelRecording={chat.cancelVoiceRecording}
+      onDiscardRecordedAudio={chat.discardRecordedAudio}
+      onSendRecordedAudio={chat.sendRecordedAudio}
+      onDeleteMessage={chat.deleteMessage}
+      onSendRoomCard={chat.sendRoomCard}
+      onMoveConversationLane={chat.moveConversationLane}
+      callParticipantsByConversation={chat.callParticipantsByConversation}
+      myCallConversationId={chat.myCallConversationId}
+      callRemoteStreams={chat.callRemoteStreams}
+      onJoinCall={chat.joinCall}
+      onLeaveCall={chat.leaveCall}
+      localStreamRef={chat.callLocalStreamRef}
+      camOn={camOn}
+      onClose={onClose}
+      pinMode={pinMode}
+      onToggleSidePin={onToggleSidePin}
+      // "fixar" (pedido do Douglas, 1/out: "o layout do chat de fora
+      // tem que ser igual ao de dentro") -- MESMOS números de
+      // top/bottom do .chat-drawer-shell-sidebar da sala, só muda o
+      // NOME da classe porque o Lobby não tem o layout flex com
+      // align-items:stretch que a sala tem (ver comentário grande de
+      // .lobby-chat-drawer-shell-sidebar em globals.css).
+      sidebarClassName="lobby-chat-drawer-shell-sidebar"
+      onOpenProfile={(playerId: string) => setViewingProfileUserId(playerId)}
+      pins={activeId === null ? [] : chat.pinsByConv[activeId] ?? []}
+      typingUsers={activeId ? chat.typingByConv[activeId] ?? [] : []}
+      lastRead={activeId === null ? {} : chat.lastReadByConv[activeId] ?? {}}
+      onToggleReaction={(messageId: string, emoji: string) => chat.toggleReaction(activeId, messageId, emoji)}
+      onPinMessage={(messageId: string, durationMs: number | null) => chat.pinMessage(activeId, messageId, durationMs)}
+      onUnpinMessage={(messageId: string) => chat.unpinMessage(activeId, messageId)}
+      onTypingNotify={() => chat.sendTypingNotification(activeId)}
+      filesPanelOpen={chat.filesPanelOpen}
+      filesPanelItems={chat.filesPanelItems}
+      filesPanelFilter={chat.filesPanelFilter}
+      onChangeFilesPanelFilter={chat.setFilesPanelFilter}
+      filesPanelQuery={chat.filesPanelQuery}
+      onChangeFilesPanelQuery={chat.setFilesPanelQuery}
+      onOpenFilesPanel={chat.openFilesPanel}
+      onCloseFilesPanel={chat.closeFilesPanel}
+      onMentionAttachmentInChat={chat.mentionAttachmentInChat}
+      pendingMentionIds={chat.pendingMentionIds}
+      onAddPendingMentionId={(userId: string) =>
+        chat.setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]))
+      }
+    />
   );
 
   return (
@@ -2096,20 +1252,14 @@ function LobbyChatPanel({
           userId={viewingProfileUserId}
           accountAccessToken={accountAccessToken}
           onClose={() => setViewingProfileUserId(null)}
-          onStartConversation={(targetUserId, targetName) => {
+          onStartConversation={(targetUserId) => {
             setViewingProfileUserId(null);
-            onStartConversation(targetUserId, targetName);
+            chat.startDirectWith(targetUserId);
           }}
         />
       )}
     </>
   );
-}
-
-function conversationTitle(c: ConversationSummary | null | undefined): string {
-  if (!c) return "Conversa";
-  if (c.kind === "group") return c.name || "Grupo";
-  return c.participants[0]?.name || "Conversa";
 }
 
 /** Painel de agenda do Lobby -- lista de compromissos, com Aceitar/
@@ -2532,13 +1682,20 @@ export default function Lobby({
   accountAccessToken,
   onEnter,
   onSignOut,
+  platformChat,
 }: {
   accountUserId: string | null;
   accountProfile: Partial<AccountProfile> | null;
   accountAccessToken?: string | null;
   onEnter: (roomSlug: string) => void;
   onSignOut: (() => void) | null;
+  // motor único de chat (ver comentário grande em
+  // usePlatformChat.ts) -- montado uma vez em app/page.tsx (Home()),
+  // repassado aqui já pronto; esse componente NUNCA cria a própria
+  // conexão/estado de chat.
+  platformChat: PlatformChat;
 }) {
+  const chat = platformChat;
   const [presence, setPresence] = useState<PresenceInfo>(null);
   // papel na sala do Douglas (ver comentário grande "teamOnly" em
   // ROOM_SLUGS acima) -- MESMA fonte que GameRoom.tsx já usa pra
@@ -2654,7 +1811,6 @@ export default function Lobby({
   const userPickedRoomRef = useRef(false);
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
-  const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [calls, setCalls] = useState<CallSummary[] | null>(null);
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   // "fixar" o chat de fora da sala também na lateral (pedido do
@@ -2690,13 +1846,12 @@ export default function Lobby({
   // de contatos") -- diretório platform-wide via GET /users/directory
   // (mesma fonte de chatStore.listAllUsers que o WS manda como
   // "users:list" de dentro da sala, ver comentário grande em
-  // ContactsPanel.tsx). openChatConversationId é a "ponte" pra abrir o
-  // LobbyChatPanel JÁ na conversa certa ao clicar "Conversar" (ver
-  // handleStartConversation mais abaixo).
+  // ContactsPanel.tsx). Abrir já na conversa certa ao clicar
+  // "Conversar" agora é o motor único quem decide sozinho (ver
+  // autoOpenNextConversationRef/startDirectWith em
+  // usePlatformChat.ts) -- não precisa de ponte nenhuma daqui.
   const [directory, setDirectory] = useState<ContactUser[] | null>(null);
   const [contactsOpen, setContactsOpen] = useState(false);
-  const [contactsBusy, setContactsBusy] = useState(false);
-  const [openChatConversationId, setOpenChatConversationId] = useState<string | null>(null);
 
   // Barra de topo (28/set, pedido do Douglas com print de referência
   // do site da Pepsi -- só a DIAGRAMAÇÃO, canto superior esquerdo:
@@ -3089,301 +2244,6 @@ export default function Lobby({
     };
   }, []);
 
-  // ---------------------------------------------------------------
-  // chamada de voz/vídeo + "digitando..." do chat de FORA da sala
-  // (pedido do Douglas, 1/out, depois de perguntar "porque chamada de
-  // voz/video so dentro da sala?" e "tem que ter": "nao vou ficar
-  // falando oq tem dentro do que nao tem fora, eles tem que ser o
-  // mesmo. e ponto final.") -- MESMO protocolo de GameRoom.tsx (socket
-  // dedicado, endereçado por connectionId, ver "signal"/call:join/
-  // call:leave/call:state/chat:typing em server/index.js), só que:
-  //   1) conecta na sala RESERVADA "__lobby__" (ver LOBBY_CALL_SOCKET_ROOM
-  //      acima / LOBBY_SOCKET_ROOM_ID em server/index.js) em vez de uma
-  //      sala de verdade -- nunca vira jogador fantasma numa sala que a
-  //      pessoa nunca visitou (ver handleLobbySocketConnection lá, que
-  //      fala só esse subconjunto reduzido do protocolo);
-  //   2) mora AQUI, no componente Lobby (que só desmonta saindo do
-  //      Lobby de vez, ver onEnter/handleEnter), não dentro de
-  //      LobbyChatPanel (que desmonta TODA vez que fecha o painel, ver
-  //      {chatPanelOpen && <LobbyChatPanel .../>} mais abaixo) -- MESMA
-  //      ideia de GameRoom.tsx manter esse estado no componente de
-  //      fora da gaveta, pra fechar/abrir o chat não derrubar uma
-  //      chamada em andamento nem perder "quem tá na chamada" de
-  //      quem ainda não entrou;
-  //   3) sem stream ambiente nenhuma pra reaproveitar (diferente da
-  //      Sala, o Lobby não liga câmera/mic sozinho) -- entrar numa
-  //      chamada pede um getUserMedia NOVO na hora (ver joinCall
-  //      abaixo, mesmo padrão de requestMedia em GameRoom.tsx: sempre
-  //      pede vídeo E áudio juntos, câmera desligada é só a track
-  //      ficar com enabled=false, pra dar pra ligar DEPOIS sem
-  //      renegociar o WebRTC com ninguém), solta tudo de novo ao sair.
-  // ---------------------------------------------------------------
-  const lobbySocketRef = useRef<PartySocket | null>(null);
-  const lobbySelfIdRef = useRef<string>("");
-  const callLocalStreamRef = useRef<MediaStream | null>(null);
-  const callPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const myCallConversationIdRef = useRef<string | null>(null);
-  const [callParticipantsByConversation, setCallParticipantsByConversation] = useState<
-    Record<string, ChatCallParticipant[]>
-  >({});
-  const [myCallConversationId, setMyCallConversationId] = useState<string | null>(null);
-  myCallConversationIdRef.current = myCallConversationId;
-  const [callRemoteStreams, setCallRemoteStreams] = useState<Record<string, MediaStream>>({});
-  const [typingByConv, setTypingByConv] = useState<Record<string, ChatTypingEntry[]>>({});
-
-  function lobbyWsSend(data: Record<string, unknown>): boolean {
-    const ws = lobbySocketRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify(data));
-    return true;
-  }
-
-  // mesmo "channel":"call" dentro do "data" que GameRoom.tsx usa, pra
-  // não se misturar com sinal nenhum de proximidade (aqui nem existe
-  // proximidade -- o Lobby não tem mapa -- mas o servidor relay é o
-  // MESMO endpoint "signal", endereçado globalmente por connectionId,
-  // ver comentário grande dele em server/index.js).
-  function sendCallSignal(to: string, data: unknown) {
-    lobbyWsSend({ type: "signal", to, data: { channel: "call", ...(data as object) } });
-  }
-
-  function createCallPeerConnection(peerId: string): RTCPeerConnection {
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    const localStream = callLocalStreamRef.current;
-    if (localStream) {
-      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
-    }
-    pc.ontrack = (event) => {
-      setCallRemoteStreams((prev) => ({ ...prev, [peerId]: event.streams[0] }));
-    };
-    pc.onicecandidate = (event) => {
-      if (event.candidate) sendCallSignal(peerId, { candidate: event.candidate });
-    };
-    callPeersRef.current.set(peerId, pc);
-    return pc;
-  }
-
-  function closeCallPeer(peerId: string) {
-    const pc = callPeersRef.current.get(peerId);
-    if (pc) {
-      pc.close();
-      callPeersRef.current.delete(peerId);
-    }
-    setCallRemoteStreams((prev) => {
-      const next = { ...prev };
-      delete next[peerId];
-      return next;
-    });
-  }
-
-  function closeAllCallPeers() {
-    callPeersRef.current.forEach((pc) => pc.close());
-    callPeersRef.current.clear();
-    setCallRemoteStreams({});
-  }
-
-  async function connectToCallPeer(peerId: string) {
-    if (callPeersRef.current.has(peerId)) return;
-    const pc = createCallPeerConnection(peerId);
-    // mesmo critério de empate de GameRoom.tsx: quem tem o id "menor"
-    // oferta primeiro, assim os dois lados não ofertam ao mesmo tempo.
-    const amInitiator = lobbySelfIdRef.current < peerId;
-    if (amInitiator) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      sendCallSignal(peerId, { sdp: pc.localDescription });
-    }
-  }
-
-  async function handleCallSignal(from: string, data: any) {
-    let pc = callPeersRef.current.get(from);
-    if (!pc) pc = createCallPeerConnection(from);
-    if (data.sdp) {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      if (data.sdp.type === "offer") {
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        sendCallSignal(from, { sdp: pc.localDescription });
-      }
-    } else if (data.candidate) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      } catch (e) {
-        console.warn("Falha ao adicionar candidato ICE (chamada, Lobby)", e);
-      }
-    }
-  }
-
-  function stopCallLocalStream() {
-    callLocalStreamRef.current?.getTracks().forEach((t) => t.stop());
-    callLocalStreamRef.current = null;
-  }
-
-  // opt-in, só dá pra estar numa chamada por vez (ver call:join/
-  // call:leave em server/index.js) -- entrar numa nova sai da anterior
-  // sozinho, mesmo espírito de joinCall em GameRoom.tsx.
-  async function joinCall(conversationId: string) {
-    if (myCallConversationId === conversationId) return;
-    if (myCallConversationId) {
-      lobbyWsSend({ type: "call:leave", conversationId: myCallConversationId });
-      closeAllCallPeers();
-    }
-    if (!callLocalStreamRef.current) {
-      let stream: MediaStream;
-      try {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: selectedCamId ? { deviceId: { exact: selectedCamId } } : true,
-            audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true,
-          });
-        } catch {
-          // sem câmera (ou negada) -- ainda assim tenta só com áudio, pra
-          // chamada de VOZ continuar funcionando sem webcam nenhuma (ver
-          // comentário grande acima do bloco).
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        }
-      } catch (e) {
-        console.warn("Sem acesso a câmera/microfone -- não foi possível entrar na chamada.", e);
-        return;
-      }
-      // mudo/câmera desligada escolhidos no av-bar do Lobby também valem
-      // aqui (mesma ideia de requestMedia em GameRoom.tsx) -- a track de
-      // vídeo fica deitada (enabled=false) em vez de nunca existir, pra
-      // ligar a câmera DEPOIS (ver toggleCam) não precisar renegociar o
-      // WebRTC com ninguém.
-      stream.getAudioTracks().forEach((t) => (t.enabled = micOn));
-      stream.getVideoTracks().forEach((t) => (t.enabled = camOn));
-      callLocalStreamRef.current = stream;
-    }
-    setMyCallConversationId(conversationId);
-    lobbyWsSend({ type: "call:join", conversationId });
-  }
-
-  function leaveCall() {
-    if (!myCallConversationId) return;
-    lobbyWsSend({ type: "call:leave", conversationId: myCallConversationId });
-    setMyCallConversationId(null);
-    closeAllCallPeers();
-    stopCallLocalStream();
-  }
-
-  // "fulano está digitando..." -- throttled (no máximo 1x a cada 2.5s),
-  // MESMA ideia de sendTypingNotification em GameRoom.tsx.
-  const TYPING_THROTTLE_MS = 2500;
-  const lastTypingSentAtRef = useRef<Record<string, number>>({});
-  function sendTypingNotification(conversationId: string | null) {
-    if (!conversationId) return;
-    const now = Date.now();
-    if (now - (lastTypingSentAtRef.current[conversationId] ?? 0) < TYPING_THROTTLE_MS) return;
-    lastTypingSentAtRef.current[conversationId] = now;
-    lobbyWsSend({ type: "chat:typing", conversationId });
-  }
-
-  // "digitando..." não tem "parei de digitar" explícito (ver comentário
-  // grande em TYPING_EXPIRE_MS/chat:typing em server/index.js) -- MESMO
-  // esquema de varredura de GameRoom.tsx, só que sem a parte da Sala
-  // (roomTyping), que não existe aqui.
-  useEffect(() => {
-    const TYPING_EXPIRE_MS = 4000;
-    const interval = setInterval(() => {
-      const cutoff = Date.now() - TYPING_EXPIRE_MS;
-      setTypingByConv((prev) => {
-        let changed = false;
-        const next: Record<string, ChatTypingEntry[]> = {};
-        for (const [convId, list] of Object.entries(prev)) {
-          const filtered = list.filter((t) => t.ts >= cutoff);
-          if (filtered.length !== list.length) changed = true;
-          next[convId] = filtered;
-        }
-        return changed ? next : prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const socket = new PartySocket({ host: REALTIME_HOST, room: LOBBY_CALL_SOCKET_ROOM });
-    lobbySocketRef.current = socket;
-
-    socket.addEventListener("open", () => {
-      socket.send(
-        JSON.stringify({
-          type: "identify",
-          userId: myUserId,
-          accessToken: accountAccessToken,
-          name: myName,
-          photoUrl: accountProfile?.photoUrl || "",
-        })
-      );
-      // reconectou (PartySocket reconecta sozinho) com uma chamada que
-      // já tava ativa do lado de cá -- o servidor derrubou essa
-      // participação quando a conexão ANTERIOR fechou (ver "close" em
-      // handleLobbySocketConnection/leaveAllCalls, server/index.js),
-      // então reentra na hora pra não ficar "achando" que ainda tá na
-      // chamada sem estar de verdade pro resto da conversa.
-      if (myCallConversationIdRef.current) {
-        socket.send(JSON.stringify({ type: "call:join", conversationId: myCallConversationIdRef.current }));
-      }
-    });
-
-    socket.addEventListener("message", (evt) => {
-      let data: any;
-      try {
-        data = JSON.parse(evt.data);
-      } catch {
-        return;
-      }
-      if (data.type === "init") {
-        lobbySelfIdRef.current = data.selfId;
-      } else if (data.type === "signal") {
-        if (data.data && data.data.channel === "call") handleCallSignal(data.from, data.data);
-      } else if (data.type === "call:state") {
-        const conversationId = data.conversationId as string;
-        const participants = data.participants as ChatCallParticipant[];
-        setCallParticipantsByConversation((prev) => ({ ...prev, [conversationId]: participants }));
-        if (myCallConversationIdRef.current === conversationId) {
-          const stillIn = participants.some((p) => p.userId === myUserId);
-          if (!stillIn) {
-            // saí (ou outra aba minha saiu) -- limpa o lado local também.
-            myCallConversationIdRef.current = null;
-            setMyCallConversationId(null);
-            closeAllCallPeers();
-            stopCallLocalStream();
-          } else {
-            const wantedPeerIds = new Set(
-              participants.filter((p) => p.userId !== myUserId).map((p) => p.connectionId)
-            );
-            callPeersRef.current.forEach((_pc, peerId) => {
-              if (!wantedPeerIds.has(peerId)) closeCallPeer(peerId);
-            });
-            wantedPeerIds.forEach((peerId) => {
-              if (!callPeersRef.current.has(peerId)) connectToCallPeer(peerId);
-            });
-          }
-        }
-      } else if (data.type === "chat:typing") {
-        const { conversationId, userId, name } = data as { conversationId: string; userId: string; name: string };
-        if (!conversationId || userId === myUserId) return;
-        const entry: ChatTypingEntry = { userId, name, ts: Date.now() };
-        setTypingByConv((prev) => ({
-          ...prev,
-          [conversationId]: [...(prev[conversationId] ?? []).filter((t) => t.userId !== userId), entry],
-        }));
-      }
-    });
-
-    socket.addEventListener("error", (err) => {
-      console.warn("Erro no socket de chamada/digitando do Lobby", err);
-    });
-
-    return () => {
-      socket.close();
-      lobbySocketRef.current = null;
-      closeAllCallPeers();
-      stopCallLocalStream();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myUserId, accountAccessToken]);
 
   // Sem stream ativa no Lobby por padrão -- os botões só trocam a
   // preferência salva (aplicada de verdade quando entra na sala, ver
@@ -3392,8 +2252,11 @@ export default function Lobby({
     localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !micOn));
     // mesmo botão também controla o mic de uma chamada de chat em
     // andamento (pedido do Douglas, 1/out) -- sem isso, mutar aqui
-    // durante uma chamada não faria nada pro outro lado ouvir.
-    callLocalStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !micOn));
+    // durante uma chamada não faria nada pro outro lado ouvir. A
+    // track de verdade agora mora no motor único (ver
+    // callLocalStreamRef em usePlatformChat.ts) -- esse botão só liga/
+    // desliga, nunca é dono dela.
+    chat.callLocalStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !micOn));
     setMicOn((v) => {
       setStoredMicOn(!v);
       return !v;
@@ -3405,9 +2268,10 @@ export default function Lobby({
     // mesmo motivo do toggleMic acima -- liga/desliga a câmera de uma
     // chamada em andamento também; a track já existe (joinCall sempre
     // pede vídeo junto, só com enabled=false se camOn começou desligado,
-    // ver comentário grande de joinCall), então não precisa renegociar
-    // nada com o outro lado, só ligar/desligar a track.
-    callLocalStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = !camOn));
+    // ver comentário grande de joinCall em usePlatformChat.ts), então
+    // não precisa renegociar nada com o outro lado, só ligar/desligar
+    // a track.
+    chat.callLocalStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = !camOn));
     setCamOn((v) => {
       setStoredCamOn(!v);
       return !v;
@@ -3823,6 +2687,17 @@ export default function Lobby({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myRealRoom?.room_slug]);
+  // avisa o motor único (ver setRoomContext/roomContext em
+  // usePlatformChat.ts) qual é "minha sala" agora, pra "convidar
+  // amigo"/carimbar "Empresa" numa conversa criada daqui usarem a
+  // sala certa -- MESMA informação que esse componente já buscava
+  // sozinho antes (myRealRoom/myRoomLogoUrl), só agora também
+  // alimenta o hook compartilhado.
+  useEffect(() => {
+    chat.setRoomContext(
+      myRealRoom ? { slug: myRealRoom.room_slug, name: myRealRoom.name, logoUrl: myRoomLogoUrl } : null
+    );
+  }, [chat, myRealRoom, myRoomLogoUrl]);
   const dropdownEntries = myRealRoom
     ? [...visibleRoomSlugs, { slug: myRealRoom.room_slug, label: myRealRoom.name, teamOnly: false }]
     : visibleRoomSlugs;
@@ -3876,38 +2751,17 @@ export default function Lobby({
     setLobbyView("spaces");
   }
 
-  // 29/set, Douglas: "as conversas tambem nao abrem fora da sala" --
-  // causa raiz: o Lobby não abre WebSocket de propósito (ver
-  // comentário grande no topo de server/index.js -- não virar
-  // presença fantasma na sala), então o resumo de conversas só era
-  // buscado UMA vez ao montar. Se alguém iniciava uma conversa com
-  // você enquanto você tava parado no Lobby, ela simplesmente nunca
-  // aparecia até recarregar a página inteira -- não é a mesma causa
-  // do bug da agenda (aquele era CSS/breakpoint), mas é a mesma
-  // categoria de sintoma ("não aparece fora da sala"). Fix: reconsulta
-  // /chat/summary de tempos em tempos (mesmo padrão de polling leve
-  // usado no resto do Lobby REST-only, sem abrir socket nenhum).
+  // conversas (ver chat.conversations/usePlatformChat.ts) não
+  // precisam mais de polling nenhum -- chegam ao vivo pela conexão
+  // única de plataforma, igual a sala sempre teve (pedido do Douglas,
+  // 1/out). Agenda continua REST (o Lobby genuinamente não abre
+  // WebSocket nenhum fora desse motor de chat).
   useEffect(() => {
     let cancelled = false;
     if (!myUserId) {
-      setConversations([]);
       setCalls([]);
       return;
     }
-
-    function fetchConversations() {
-      fetch(`${REALTIME_HTTP_BASE}/chat/summary?userId=${encodeURIComponent(myUserId)}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!cancelled) setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
-        })
-        .catch(() => {
-          if (!cancelled) setConversations([]);
-        });
-    }
-
-    fetchConversations();
-    const conversationsPoll = setInterval(fetchConversations, 6000);
 
     fetch(`${REALTIME_HTTP_BASE}/agenda/summary?userId=${encodeURIComponent(myUserId)}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -3920,7 +2774,6 @@ export default function Lobby({
 
     return () => {
       cancelled = true;
-      clearInterval(conversationsPoll);
     };
   }, [myUserId]);
 
@@ -3941,107 +2794,17 @@ export default function Lobby({
     };
   }, []);
 
-  // "Conversar" no painel de Amigos (antigo "Contatos", ver
-  // FriendsPanel.tsx) -- cria (ou acha) a conversa direta via POST
-  // /chat/direct (sem WebSocket, mesma arquitetura do resto do Lobby,
-  // ver comentário grande no topo do arquivo), soma o resultado na
-  // lista de conversas (upsert por id, pra não duplicar se já
-  // existia) e manda o LobbyChatPanel abrir JÁ nela. Lane sempre
-  // "private" -- esse painel só lista amigo mútuo (ver aba "Conversas
-  // privadas" em LobbyChatPanel mais abaixo e a mesma trava do
-  // servidor em POST /chat/direct).
-  async function handleStartConversation(targetUserId: string, lane: "private" | "company" = "private") {
-    if (!myUserId || contactsBusy) return;
-    setContactsBusy(true);
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/direct`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // 30/set, bug reportado pelo Douglas: "adicionei logo a
-        // empresa e no chat nao carregou" -- o Lobby não tem roomId de
-        // conexão (sem WebSocket) igual o case "chat:create_direct"
-        // tem, então manda a sala PRÓPRIA de quem está criando
-        // (myRealRoom) explícito; o server só usa isso quando
-        // lane === "company" (ver POST /chat/direct em server/index.js).
-        body: JSON.stringify({
-          userId: myUserId,
-          userName: myName,
-          targetUserId,
-          lane,
-          roomSlug: myRealRoom?.room_slug ?? null,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const conv = data?.conversation as ConversationSummary | undefined;
-        if (conv) {
-          setConversations((prev) => {
-            const rest = (prev ?? []).filter((c) => c.id !== conv.id);
-            return [conv, ...rest];
-          });
-          setOpenChatConversationId(conv.id);
-          setContactsOpen(false);
-          setChatPanelOpen(true);
-        }
-      }
-    } catch {
-      // rede caiu -- painel de Contatos continua aberto, pessoa tenta de novo
-    } finally {
-      setContactsBusy(false);
-    }
-  }
-
-  // atualiza a prévia da conversa na lista (lastMessage) na hora,
-  // sem esperar reabrir o painel -- mesma ideia do "chat:conversation"
-  // que o WebSocket manda de dentro da sala.
-  // 29/set (14), pedido do Douglas: "quando eu vejo, ela nao some a
-  // marcacao" -- zera o unreadCount na lista assim que o
-  // LobbyChatPanel confirma que marcou como lida no servidor (POST
-  // /chat/open), sem esperar o próximo poll de 6s de /chat/summary.
-  function handleConversationRead(conversationId: string) {
-    setConversations((prev) =>
-      prev ? prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c)) : prev
-    );
-  }
-
-  // "3 pontinhos" -- ver onConversationsReplaced/moveConversationLane
-  // em LobbyChatPanel. removedConversationId (mesclou com outra que já
-  // existia na lane de destino) sai da lista; a conversa atualizada
-  // (nova lane, pode ser a mesclada) entra/substitui pelo id dela.
-  function handleConversationsReplaced(removedConversationId: string | null, conversation: ConversationSummary) {
-    setConversations((prev) => {
-      if (!prev) return prev;
-      const withoutRemoved = removedConversationId ? prev.filter((c) => c.id !== removedConversationId) : prev;
-      const rest = withoutRemoved.filter((c) => c.id !== conversation.id);
-      // ConversationSummary não tem updatedAt (diferente do Conversation
-      // de dentro da sala, ver GameRoom.tsx) -- só põe na FRENTE (acabou
-      // de mexer nela agora mesmo), sem tentar reordenar o resto; o
-      // próximo poll de /chat/summary (6s) reordena de verdade.
-      return [conversation, ...rest];
-    });
-  }
-
-  function handleMessageSent(conversationId: string, message: ChatMessage) {
-    setConversations((prev) =>
-      prev
-        ? prev
-            .map((c) =>
-              c.id === conversationId
-                ? {
-                    ...c,
-                    lastMessage: {
-                      senderId: message.senderId,
-                      senderName: message.senderName,
-                      kind: message.kind,
-                      text: message.text,
-                      ts: message.ts,
-                    },
-                  }
-                : c
-            )
-            .sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0))
-        : prev
-    );
+  // "Conversar" no painel de Amigos / clique num founder -- cria (ou
+  // acha) a conversa direta pelo motor único (ver startDirectWith em
+  // usePlatformChat.ts, MESMO fluxo que a sala usa), sem POST nenhum
+  // daqui: a conversa chega via "chat:conversation" na conexão de
+  // plataforma e já abre sozinha (ver autoOpenNextConversationRef no
+  // hook), só precisa fechar Contatos/founder e abrir o painel.
+  function handleStartConversation(targetUserId: string, lane: "private" | "company" = "private") {
+    setContactsOpen(false);
+    setViewingFounderUserId(null);
+    chat.startDirectWith(targetUserId, lane);
+    setChatPanelOpen(true);
   }
 
   const displayName = accountProfile?.name?.trim() || "visitante";
@@ -4059,15 +2822,10 @@ export default function Lobby({
     [calls, myUserId]
   );
 
-  // 29/set (14), pedido do Douglas: "gostei da forma de mostrar que
-  // tem mensagem, mantenha / mas nao esta funcionando" -- a marcação
-  // antiga era conversations.length (quantas conversas EXISTEM, não
-  // quantas têm mensagem não vista de verdade). Soma o unreadCount de
-  // cada conversa (ver server/chatStore.js/listConversationsForUser).
-  const totalUnreadMessages = useMemo(
-    () => (conversations ?? []).reduce((sum, c) => sum + (c.unreadCount ?? 0), 0),
-    [conversations]
-  );
+  // badge de "tem mensagem não vista" -- vem pronto do motor único
+  // agora (ver totalUnreadMessages em usePlatformChat.ts, MESMO
+  // cálculo que tinha aqui, soma unreadCount de cada conversa).
+  const totalUnreadMessages = chat.totalUnreadMessages;
 
   // agrupa os compromissos futuros (calls, já vem do /agenda/summary
   // de verdade -- ver useEffect logo acima) por dia, pega os 3
@@ -5428,31 +4186,13 @@ export default function Lobby({
           pinMode={chatPinMode}
           onToggleSidePin={toggleLobbyChatPinSide}
           myUserId={myUserId}
-          myName={myName}
-          myRoomSlug={myRealRoom?.room_slug ?? null}
           myRoomName={myRealRoom?.name ?? null}
           myRoomLogoUrl={myRoomLogoUrl}
-          conversations={conversations}
           accountAccessToken={accountAccessToken}
-          onClose={() => {
-            setChatPanelOpen(false);
-            setOpenChatConversationId(null);
-          }}
-          onSent={handleMessageSent}
-          onStartConversation={(targetUserId, _targetName, lane) => handleStartConversation(targetUserId, lane)}
-          onConversationRead={handleConversationRead}
-          onConversationsReplaced={handleConversationsReplaced}
-          initialActiveId={openChatConversationId}
-          callParticipantsByConversation={callParticipantsByConversation}
-          myCallConversationId={myCallConversationId}
-          callRemoteStreams={callRemoteStreams}
-          onJoinCall={joinCall}
-          onLeaveCall={leaveCall}
-          localStreamRef={callLocalStreamRef}
-          camOn={camOn}
           callVolume={callVolume}
-          typingByConv={typingByConv}
-          onTypingNotify={sendTypingNotification}
+          camOn={camOn}
+          onClose={() => setChatPanelOpen(false)}
+          chat={chat}
         />
       )}
       {contactsOpen && (

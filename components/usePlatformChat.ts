@@ -91,15 +91,6 @@ export type PlatformChatParams = {
   accountUserId: string | null;
   accountProfile: { name?: string | null; photoUrl?: string | null } | null;
   accountAccessToken: string | null | undefined;
-  // "convidar amigo pra minha sala"/"pedir pra visitar" (ver RoomCard em
-  // GameRoom.tsx) precisa saber QUAL é "minha sala" agora -- dentro da
-  // sala é a sala aberta (roomSlug), fora é a sala que a própria pessoa
-  // já tem (myRealRoom.room_slug no Lobby) -- cada chamador passa o que
-  // tiver, null quando não tiver sala nenhuma ainda (o botão de convidar
-  // já nem aparece nesse caso, ver ChatDrawer).
-  myRoomSlug?: string | null;
-  myRoomName?: string | null;
-  myRoomLogoUrl?: string | null;
   // "chamada reaproveita stream ambiente" -- SÓ a sala de verdade tem
   // isso (câmera/mic já capturados pra ficar visível pra quem tá perto,
   // ver localStreamRef em GameRoom.tsx): entrar numa chamada de
@@ -121,15 +112,27 @@ export function usePlatformChat(params: PlatformChatParams) {
     accountUserId,
     accountProfile,
     accountAccessToken,
-    myRoomSlug = null,
-    myRoomName = null,
-    myRoomLogoUrl = null,
     ambientStreamRef,
     micOn = true,
     camOn = true,
     selectedMicId = null,
     selectedCamId = null,
   } = params;
+
+  // "convidar amigo pra minha sala"/"pedir pra visitar" (RoomCard) e
+  // carimbar "Empresa" numa conversa (ver getRoomCompanyInfo em
+  // server/roomAuth.js) precisam saber QUAL é "minha sala" agora --
+  // dentro da sala é a sala aberta, fora (Lobby) é a sala que a
+  // própria pessoa já tem (myRealRoom). Isso NÃO é fixo desde o mount
+  // (o hook monta ANTES de qualquer uma das duas telas saber disso --
+  // ver PlatformChatHost em app/page.tsx), então é estado de verdade
+  // que quem usa o hook atualiza via setRoomContext sempre que souber
+  // (ou deixar de saber, null) sua própria sala.
+  const [roomContext, setRoomContext] = useState<{
+    slug: string;
+    name: string | null;
+    logoUrl: string | null;
+  } | null>(null);
 
   const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
   const myName = accountProfile?.name?.trim() || "Visitante";
@@ -251,7 +254,7 @@ export function usePlatformChat(params: PlatformChatParams) {
 
   function startDirectWith(targetUserId: string, lane: "company" | "private" = "company") {
     autoOpenNextConversationRef.current = true;
-    send({ type: "chat:create_direct", targetUserId, lane, roomSlug: myRoomSlug ?? undefined });
+    send({ type: "chat:create_direct", targetUserId, lane, roomSlug: roomContext?.slug ?? undefined });
     setNewConvSelection([]);
     setNewConvName("");
   }
@@ -267,14 +270,14 @@ export function usePlatformChat(params: PlatformChatParams) {
       type: "chat:create_group",
       name: newConvName.trim(),
       participantIds: newConvSelection,
-      roomSlug: myRoomSlug ?? undefined,
+      roomSlug: roomContext?.slug ?? undefined,
     });
     setNewConvSelection([]);
     setNewConvName("");
   }
 
   function moveConversationLane(conversationId: string, lane: "company" | "private") {
-    send({ type: "chat:set_lane", conversationId, lane, roomSlug: myRoomSlug ?? undefined });
+    send({ type: "chat:set_lane", conversationId, lane, roomSlug: roomContext?.slug ?? undefined });
   }
 
   const [renamingGroup, setRenamingGroup] = useState(false);
@@ -322,8 +325,13 @@ export function usePlatformChat(params: PlatformChatParams) {
   function sendRoomCard(action: "invite" | "visit") {
     if (activeConversationId === null) return;
     const roomCard: RoomCard =
-      action === "invite"
-        ? { action, roomSlug: myRoomSlug || "", roomName: myRoomName || "Minha sala", roomLogoUrl: myRoomLogoUrl || "" }
+      action === "invite" && roomContext
+        ? {
+            action,
+            roomSlug: roomContext.slug,
+            roomName: roomContext.name || "Minha sala",
+            roomLogoUrl: roomContext.logoUrl || "",
+          }
         : { action, roomSlug: "", roomName: "", roomLogoUrl: "" };
     send({ type: "chat:send", conversationId: activeConversationId, roomCard });
   }
@@ -860,12 +868,6 @@ export function usePlatformChat(params: PlatformChatParams) {
   function updateReadingState(isDrawerOpenOnThisConversation: boolean) {
     readingConversationIdRef.current = isDrawerOpenOnThisConversation ? activeConversationId : null;
   }
-  useEffect(() => {
-    // mantém em dia mesmo sem o chamador chamar updateReadingState de
-    // novo a cada render -- ver efeito de chatOpen/chatView em quem usa
-    // esse hook.
-  }, [activeConversationId]);
-
   const totalUnreadMessages = useMemo(
     () => conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0),
     [conversations]
@@ -874,6 +876,7 @@ export function usePlatformChat(params: PlatformChatParams) {
   return {
     connected,
     myUserId,
+    setRoomContext,
     // conversas/mensagens
     conversations,
     chatView,
