@@ -444,6 +444,26 @@ const FLOOR_GLASS_REPEATS = 6;
  * conferido numa simulação local de empilhamento (vstack) antes de
  * subir -- sem vão visível entre andares. */
 const FACADE_GLASS_FLOOR_REPEAT_STEP_PX = 122;
+/** Empurra TODA a pilha de repetições de drawFloorEdgeGlass pra baixo
+ * (em px), sem mexer no espaçamento ENTRE elas (FACADE_GLASS_FLOOR_
+ * REPEAT_STEP_PX acima continua intacto). ACHADO (Douglas, depois de
+ * subir a arte lisa nova: "aumentei os pisos pra tras e apareceu uma
+ * linha inteiro encima do piso... olha as janelas encima do piso") --
+ * a art nova (flat, sem perfil) quase não tem margem transparente no
+ * TOPO (conteúdo visível já começa a poucos px de y=0 do PNG, numa
+ * rampa contínua que cresce rápido -- ver ACHADO 3 em
+ * FACADE_GLASS_TILE_WIDTH_PX em game/wall.ts), então a 1ª repetição
+ * (i=0), ancorada EXATAMENTE na borda do piso (origem 0.5,0 -- ver
+ * comentário grande abaixo), começa a aparecer um pouco ACIMA dessa
+ * borda em vez de só abaixo/por fora dela -- como não tem nada
+ * desenhado em cima pra cobrir esse pedacinho (ao contrário das
+ * repetições i>=1, que ficam atrás uma da outra), esse "vazamento"
+ * fica visível por cima do piso de verdade, repetindo a cada vidraça
+ * ao longo da borda (daí parecer uma linha inteira). Empurrando a
+ * pilha inteira pra baixo por esse tanto, a parte que vazava fica
+ * escondida atrás do piso de verdade (que tem depth MAIOR, DEPTH_FLOOR,
+ * e cobre o que tiver atrás dele onde os dois se sobrepõem). */
+const FACADE_GLASS_FLOOR_REPEAT_TOP_OFFSET_PX = 16;
 
 // tinta de área (ver game/areas.ts) fica ENTRE o piso e a mobília "flat" --
 // é um "verniz" por cima do chão marcando a zona (mesa privada/sala),
@@ -4410,7 +4430,7 @@ export default class MainScene extends Phaser.Scene {
       const normalKey = wide ? wallTextureKey(FACADE_GLASS_STYLE_ID) : FACADE_GLASS_SINGLE_TEXTURE_KEY;
       const litKey = wide ? FACADE_GLASS_LIT_TEXTURE_KEY : FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY;
       for (let i = 0; i < FLOOR_GLASS_REPEATS; i++) {
-        const vOffset = i * repeatStepPx;
+        const vOffset = FACADE_GLASS_FLOOR_REPEAT_TOP_OFFSET_PX + i * repeatStepPx;
         const lit = this.glassPaneIsLit(edge.col * 928371 + edge.row * 17431 + i * 5197 + sideSeed);
         const key = lit ? litKey : normalKey;
         if (!this.textures.exists(key)) continue; // mesma cautela de addWallSprite -- textura ainda não carregada
