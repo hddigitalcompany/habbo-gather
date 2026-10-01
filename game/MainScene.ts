@@ -99,6 +99,7 @@ import {
   FACADE_GLASS_STYLE_ID,
   pairFacadeGlassEdges,
   FacadeGlassPairing,
+  FACADE_GLASS_SINGLE_TILE_HEIGHT_PX,
 } from "./wall";
 import {
   DoorSide,
@@ -703,6 +704,18 @@ const FACADE_GLASS_LIT_TEXTURE_KEY = "facade-glass-tile-lit";
  * FACADE_GLASS_LIT_TEXTURE_KEY: não é estilo de parede à parte, carrega
  * à mão em vez de entrar no loop genérico do catálogo. */
 const FACADE_GLASS_SINGLE_TEXTURE_KEY = "facade-glass-tile-single";
+/** Correção vertical (px) só pra peça "single" (fallback de 1 vidraça,
+ * usada na aresta que toca uma quina de 90° -- ver touchesCorner em
+ * game/wall.ts) -- ACHADO (Douglas testou a quina depois da arte
+ * nivelada: "voce deixou as quinas numa posicao mais alta" -> "baixe a
+ * posicao das quinas em 7%") -- mesmo com a arte nivelada (ACHADO 4 em
+ * FACADE_GLASS_TILE_WIDTH_PX, game/wall.ts) e recortada na costura
+ * certa, a peça single ainda renderiza um pouco mais alta (mais perto
+ * do piso) que as peças largas vizinhas -- empurra ela pra baixo
+ * (soma no Y, cresce pra BAIXO na tela) tanto na parede de verdade
+ * (createFacadeGlassSprite) quanto na vidraça repetida abaixo do piso
+ * (drawFloorEdgeGlass), já que as duas usam essa mesma textura. */
+const FACADE_GLASS_SINGLE_Y_CORRECTION_PX = Math.round(FACADE_GLASS_SINGLE_TILE_HEIGHT_PX * 0.07);
 const FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY = "facade-glass-tile-single-lit";
 /** perfil metálico vertical -- 1 faixa em CADA ponta do painel (pedido:
  * "com perfis metalicos na vertical... na largura exata do tile" -- o
@@ -4427,6 +4440,9 @@ export default class MainScene extends Phaser.Scene {
         const partnerMidY = (pa.y + pb.y) / 2;
         midX = (midX + partnerMidX) / 2;
         midY = (midY + partnerMidY) / 2;
+      } else {
+        // ACHADO -- ver comentário grande de FACADE_GLASS_SINGLE_Y_CORRECTION_PX acima.
+        midY += FACADE_GLASS_SINGLE_Y_CORRECTION_PX;
       }
       const sideSeed = edge.side === "colPlus" ? 1 : 0;
       const normalKey = wide ? wallTextureKey(FACADE_GLASS_STYLE_ID) : FACADE_GLASS_SINGLE_TEXTURE_KEY;
@@ -4881,6 +4897,9 @@ export default class MainScene extends Phaser.Scene {
       const partnerAnchor = wallWorldAnchor(partnerDef);
       anchor.x = (anchor.x + partnerAnchor.x) / 2;
       anchor.y = (anchor.y + partnerAnchor.y) / 2;
+    } else {
+      // ACHADO -- ver comentário grande de FACADE_GLASS_SINGLE_Y_CORRECTION_PX acima.
+      anchor.y += FACADE_GLASS_SINGLE_Y_CORRECTION_PX;
     }
     const image = this.add
       .image(anchor.x, anchor.y, finalKey)
