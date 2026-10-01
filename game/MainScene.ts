@@ -4321,6 +4321,19 @@ export default class MainScene extends Phaser.Scene {
   private eraseRoomShapeAt(col: number, row: number): string | null {
     const key = this.roomTileKey(col, row);
     if (!this.roomShape.has(key)) return null; // clique num tile que já não é da sala -- nada a fazer, sem aviso
+    // tile-âncora da fachada (ver FACADE_MAIN_TILE/FACADE_CORNER2_TILE) --
+    // pedido do Douglas: "trave elas para que NINGUEM apague-as". A
+    // fachada já não se MOVE mais apagando/adicionando tile em outro
+    // lugar (ver positionFacade), mas apagar o próprio tile-âncora
+    // deixaria a peça "pendurada" sem piso embaixo dela -- bloqueado
+    // igual aos outros motivos de bloqueio abaixo (piso/móvel, alguém
+    // em pé, desconectaria a sala).
+    if (
+      (col === FACADE_MAIN_TILE.col && row === FACADE_MAIN_TILE.row) ||
+      (col === FACADE_CORNER2_TILE.col && row === FACADE_CORNER2_TILE.row)
+    ) {
+      return "Esse tile é a base da fachada do prédio -- não pode ser apagado.";
+    }
     if (this.roomShape.size <= 1) return "A sala não pode ficar sem nenhum quadrado.";
     if (this.tileHasContent(col, row)) {
       return "Tem piso, móvel, parede, porta ou área nesse tile -- apague o que tiver lá antes.";
