@@ -4083,31 +4083,50 @@ export default class MainScene extends Phaser.Scene {
         .setDepth(DEPTH_FACADE);
     }
 
-    // demais quinas -- mesma regra (congelada enquanto válida,
-    // destruída só quando deixa de ser quina externa).
+    // quina2 -- SÓ 1 (pedido do Douglas depois de ver uma segunda
+    // vidraça "aparecer sozinha" quando a sacada criou mais uma quina
+    // externa nova: ele só quer a quina que já foi calibrada a dedo,
+    // não quer mais criação automática pra quina nova nenhuma). Dos
+    // candidatos (toda quina que não é a principal), escolhe sempre a
+    // MAIS PERTO da principal (menor |Δcol|+|Δrow|) -- é exatamente a
+    // que a arte da quina2 foi desenhada pra encaixar (pedido antigo
+    // do Douglas: "essa parte vai encaixar no predio do lado
+    // esquerdo"), enquanto uma quina nova de uma sacada/crescimento
+    // mais distante fica de fora. Mesma regra de sempre: congelada
+    // enquanto continuar válida, destruída só se deixar de ser quina
+    // externa -- nunca mais de 1 sprite por vez.
     const mainKey = this.facadeMainTile ? this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row) : null;
+    let secondary: { col: number; row: number } | null = null;
+    if (this.facadeMainTile) {
+      for (const c of corners) {
+        if (this.roomTileKey(c.col, c.row) === mainKey) continue;
+        const dist = Math.abs(c.col - this.facadeMainTile.col) + Math.abs(c.row - this.facadeMainTile.row);
+        const bestDist = secondary
+          ? Math.abs(secondary.col - this.facadeMainTile.col) + Math.abs(secondary.row - this.facadeMainTile.row)
+          : Infinity;
+        if (dist < bestDist || (dist === bestDist && secondary && c.col + c.row > secondary.col + secondary.row)) {
+          secondary = c;
+        }
+      }
+    }
+    const secondaryKey = secondary ? this.roomTileKey(secondary.col, secondary.row) : null;
     for (const [key, sprite] of this.facadeCornerSprites) {
-      if (!cornerKeys.has(key) || key === mainKey) {
+      if (key !== secondaryKey) {
         sprite.destroy();
         this.facadeCornerSprites.delete(key);
       }
     }
-    if (this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
+    if (secondary && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY) && !this.facadeCornerSprites.has(secondaryKey!)) {
       const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
-      for (const c of corners) {
-        const key = this.roomTileKey(c.col, c.row);
-        if (key === mainKey) continue;
-        if (this.facadeCornerSprites.has(key)) continue;
-        const w = tileToWorld(c.col, c.row);
-        const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
-        const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
-        const sprite = this.add
-          .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
-          .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
-          .setScale(FACADE_SCALE)
-          .setDepth(DEPTH_FACADE);
-        this.facadeCornerSprites.set(key, sprite);
-      }
+      const w = tileToWorld(secondary.col, secondary.row);
+      const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
+      const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
+      const sprite = this.add
+        .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
+        .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
+        .setScale(FACADE_SCALE)
+        .setDepth(DEPTH_FACADE);
+      this.facadeCornerSprites.set(secondaryKey!, sprite);
     }
   }
 
