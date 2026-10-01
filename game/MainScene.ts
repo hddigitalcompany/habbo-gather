@@ -517,10 +517,10 @@ const FACADE_CORNER2_APEX_Y_PX = 285;
  * de ver renderizado, Douglas pediu uma sequência de ajustes finos
  * (tapa-olho sobre o anterior, não remedição do PNG): "diminui um
  * pouquinho" (-5%), "aumenta 2%", "diminui 1% dimensao" (-1%),
- * "diminui mais 1%" (-1% de novo) -- acumulado:
- * 0.95 * 1.02 * 0.99 * 0.99 = 0.9497 do valor medido original. Ainda
- * sujeito a mais ajuste se não bater exato -- ver print. */
-const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99 * 0.99;
+ * "diminui mais 1%" (-1% de novo), "aumenta 1%" (+1%) -- acumulado:
+ * 0.95 * 1.02 * 0.99 * 0.99 * 1.01 = 0.9592 do valor medido original.
+ * Ainda sujeito a mais ajuste se não bater exato -- ver print. */
+const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99 * 0.99 * 1.01;
 /** Offset manual em cima da posição calculada por tile (ver
  * tileToWorld) -- recalibrado do zero com prints depois da troca de
  * arte/posição. Douglas: "mova 2px pra esquerda" -- X negativo move
