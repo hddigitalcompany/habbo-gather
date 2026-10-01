@@ -1062,6 +1062,19 @@ export default class MainScene extends Phaser.Scene {
   private draftFloorSprites: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Graphics> = new Map();
   private isPaintingFloor = false;
   private lastPaintedFloorKey: string | null = null;
+  /** Tile onde o arrasto do piso começou/tile atual do arrasto (ver
+   * handleEditPointerDown/handleEditPointerMove/stopFloorPaint) --
+   * pedido do Douglas: "quero pintar o piso formando um quadrado
+   * arrastado, sem ser um de cada, arrasto o quadrado e ele pinta tudo
+   * que tem dentro". Enquanto o botão continua pressionado só desenha a
+   * PRÉVIA do retângulo (floorRectGraphics, ver drawRectPreview); a
+   * pintura de verdade (TODOS os tiles dentro do retângulo de uma vez,
+   * ver fillRectWithTool) só acontece no soltar do botão -- substitui o
+   * "pincel" antigo que só pintava o caminho percorrido pelo cursor
+   * (paintFloorLine, removido). */
+  private floorDragStartTile: { col: number; row: number } | null = null;
+  private floorDragCurrentTile: { col: number; row: number } | null = null;
+  private floorRectGraphics?: Phaser.GameObjects.Graphics;
 
   /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftChange, mas pro piso. */
   onDraftFloorChange?: (items: FloorTileDef[]) => void;
@@ -1202,6 +1215,12 @@ export default class MainScene extends Phaser.Scene {
   private draftAreaSprites: Map<string, Phaser.GameObjects.Graphics> = new Map();
   private isPaintingArea = false;
   private lastPaintedAreaKey: string | null = null;
+  /** MESMO esquema do piso acima (floorDragStartTile/floorDragCurrentTile/
+   * floorRectGraphics) -- pedido do Douglas pro piso, depois confirmado
+   * pra área também ("criar area tambem"). */
+  private areaDragStartTile: { col: number; row: number } | null = null;
+  private areaDragCurrentTile: { col: number; row: number } | null = null;
+  private areaRectGraphics?: Phaser.GameObjects.Graphics;
 
   /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftFloorChange, mas pra área. */
   onDraftAreaChange?: (items: AreaTileDef[]) => void;
@@ -1633,6 +1652,8 @@ export default class MainScene extends Phaser.Scene {
     this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
     this.roomHoverGraphics = this.add.graphics().setDepth(DEPTH_ROOM_TILE_HOVER).setVisible(false);
     this.wallHoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
+    this.floorRectGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
+    this.areaRectGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
 
     // câmera começa igual sempre foi (zoom 1, sala inteira visível,
     // scroll em 0,0 -- ver clampCameraScroll: SEM setBounds automático
@@ -3502,9 +3523,61 @@ export default class MainScene extends Phaser.Scene {
     this.cameras.main.setScroll(clamped.x, clamped.y);
   }
 
+  /** Itera cada tile (col,row) dentro do retângulo entre start e current
+   * (inclusive dos dois cantos), chamando fn só pros que são de fato da
+   * sala (ver isTileInRoom -- sala em L/escada: o retângulo encosta na
+   * "caixa" inteira, mas nem todo tile dentro dela é sala de verdade,
+   * então pula os de fora em vez de pintar onde não devia). Usado tanto
+   * pela prévia (drawRectPreview) quanto pela pintura de verdade
+   * (fillRectWithTool) do piso e da área -- ver floorDragStartTile/
+   * areaDragStartTile. */
+  private forEachRoomTileInRect(
+    start: { col: number; row: number },
+    current: { col: number; row: number },
+    fn: (col: number, row: number) => void
+  ) {
+    const minCol = Math.min(start.col, current.col);
+    const maxCol = Math.max(start.col, current.col);
+    const minRow = Math.min(start.row, current.row);
+    const maxRow = Math.max(start.row, current.row);
+    for (let col = minCol; col <= maxCol; col++) {
+      for (let row = minRow; row <= maxRow; row++) {
+        if (!this.isTileInRoom(col, row)) continue;
+        fn(col, row);
+      }
+    }
+  }
+
+  /** Desenha a prévia do retângulo de arrasto (losango preenchido por
+   * tile, igual ao hover de um tile só, ver tileDiamondCorners) --
+   * repetido pra cada tile do retângulo. A pintura de verdade só
+   * acontece no soltar do botão (ver stopFloorPaint/stopAreaPaint). */
+  private drawRectPreview(
+    graphics: Phaser.GameObjects.Graphics | undefined,
+    start: { col: number; row: number },
+    current: { col: number; row: number }
+  ) {
+    if (!graphics) return;
+    graphics.clear();
+    graphics.fillStyle(EDIT_HOVER_COLOR_FREE, 0.35);
+    this.forEachRoomTileInRect(start, current, (col, row) => {
+      const { x, y } = tileToWorld(col, row);
+      graphics.fillPoints(tileDiamondCorners(x, y), true);
+    });
+    graphics.setVisible(true);
+  }
+
   private stopFloorPaint() {
+    if (this.floorDragStartTile && this.floorDragCurrentTile) {
+      this.forEachRoomTileInRect(this.floorDragStartTile, this.floorDragCurrentTile, (col, row) =>
+        this.paintFloorAt(col, row)
+      );
+    }
     this.isPaintingFloor = false;
     this.lastPaintedFloorKey = null;
+    this.floorDragStartTile = null;
+    this.floorDragCurrentTile = null;
+    this.floorRectGraphics?.clear().setVisible(false);
   }
 
   private stopRoomShapePaint() {
@@ -3514,8 +3587,16 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private stopAreaPaint() {
+    if (this.areaDragStartTile && this.areaDragCurrentTile) {
+      this.forEachRoomTileInRect(this.areaDragStartTile, this.areaDragCurrentTile, (col, row) =>
+        this.paintAreaAt(col, row)
+      );
+    }
     this.isPaintingArea = false;
     this.lastPaintedAreaKey = null;
+    this.areaDragStartTile = null;
+    this.areaDragCurrentTile = null;
+    this.areaRectGraphics?.clear().setVisible(false);
   }
 
   private stopWallPaint() {
@@ -3816,6 +3897,18 @@ export default class MainScene extends Phaser.Scene {
     if (!active) {
       this.hoverGraphics?.setVisible(false);
       this.wallHoverGraphics?.setVisible(false);
+      // sair do editor no meio de um arrasto em retângulo (piso/área) é
+      // um CANCELAMENTO, não confirma a pintura pendente -- só esconde a
+      // prévia e limpa o estado (ver floorDragStartTile/stopFloorPaint,
+      // que são os únicos lugares que de fato pintam o retângulo).
+      this.floorRectGraphics?.clear().setVisible(false);
+      this.areaRectGraphics?.clear().setVisible(false);
+      this.floorDragStartTile = null;
+      this.floorDragCurrentTile = null;
+      this.areaDragStartTile = null;
+      this.areaDragCurrentTile = null;
+      this.isPaintingFloor = false;
+      this.isPaintingArea = false;
     }
     // entrar no modo de edição cancela um destino de clique-pra-andar
     // pendente e some com o destaque leve do tile (esse é só do uso
@@ -5938,40 +6031,6 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Pinta (via paintFloorAt) cada tile ao longo da linha reta entre o
-   * último tile pintado e o tile atual, não só o tile de chegada --
-   * durante um arrasto rápido o pointermove pode "pular" um tile inteiro
-   * sem nenhum evento disparando em cima dele (o quadrado tem 60px), o
-   * que deixava buracos na pintura. Bresenham simples em coordenadas de
-   * grade (col/row), não em pixels.
-   */
-  private paintFloorLine(fromCol: number, fromRow: number, toCol: number, toRow: number) {
-    let x0 = fromCol;
-    let y0 = fromRow;
-    const dx = Math.abs(toCol - x0);
-    const dy = -Math.abs(toRow - y0);
-    const sx = x0 < toCol ? 1 : -1;
-    const sy = y0 < toRow ? 1 : -1;
-    let err = dx + dy;
-    // limite de segurança -- a grade é pequena (12x7), nunca deveria
-    // precisar de mais passos que isso; só evita um loop infinito se
-    // algum bug futuro passar coordenadas malucas.
-    for (let i = 0; i < 200; i++) {
-      this.paintFloorAt(x0, y0);
-      if (x0 === toCol && y0 === toRow) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx) {
-        err += dx;
-        y0 += sy;
-      }
-    }
-  }
-
-  /**
    * Cria o losango de UM tile de área -- sem textura própria (diferente
    * do piso/mobília, ver comentário antigo abaixo). Tinta chapada na
    * cor do TIPO da área (ver areaTypeMeta/AREA_TYPES em game/areas.ts)
@@ -6079,30 +6138,6 @@ export default class MainScene extends Phaser.Scene {
     this.draftAreaSprites.set(key, rect);
     this.refreshAreas();
     this.onDraftAreaChange?.(this.getDraftAreaList());
-  }
-
-  /** Pinta (via paintAreaAt) cada tile ao longo da linha reta entre o último tile pintado e o atual -- mesmo Bresenham do paintFloorLine, pra não deixar buraco num arrasto rápido. */
-  private paintAreaLine(fromCol: number, fromRow: number, toCol: number, toRow: number) {
-    let x0 = fromCol;
-    let y0 = fromRow;
-    const dx = Math.abs(toCol - x0);
-    const dy = -Math.abs(toRow - y0);
-    const sx = x0 < toCol ? 1 : -1;
-    const sy = y0 < toRow ? 1 : -1;
-    let err = dx + dy;
-    for (let i = 0; i < 200; i++) {
-      this.paintAreaAt(x0, y0);
-      if (x0 === toCol && y0 === toRow) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx) {
-        err += dx;
-        y0 += sy;
-      }
-    }
   }
 
   /**
@@ -7131,12 +7166,15 @@ export default class MainScene extends Phaser.Scene {
     // caminho a pé até o resto).
     //
     // Arrasto (pedido do Douglas: "tem como adicionar arrastando?
-    // clicando de um em um leva mt tempo kkk") -- igual ao piso/área
-    // (paintFloorLine/paintAreaLine): enquanto o botão continuar
-    // pressionado e o cursor entrar num tile novo, aplica a ferramenta
-    // em CADA tile do caminho até lá (dragRoomShapeLine), não só onde o
-    // cursor tá agora -- sem isso um arrasto rápido "pularia" tiles
-    // entre um evento de pointermove e outro, deixando buracos.
+    // clicando de um em um leva mt tempo kkk") -- diferente do piso/área
+    // (que agora pintam em RETÂNGULO, ver floorDragStartTile/
+    // areaDragStartTile acima): aqui o botão continuar pressionado e o
+    // cursor entrar num tile novo aplica a ferramenta em CADA tile do
+    // CAMINHO até lá (dragRoomShapeLine), não um retângulo -- "Adicionar"
+    // só aceita um tile que encosta em algo que JÁ é da sala (ver
+    // roomNeighbors), então teria que ser sempre um caminho conectado
+    // mesmo, nunca uma área solta. Sem isso um arrasto rápido "pularia"
+    // tiles entre um evento de pointermove e outro, deixando buracos.
     if (this.selectedRoomShapeTool) {
       this.wallHoverGraphics?.setVisible(false);
       this.catalogGhostSprite?.setVisible(false);
@@ -7169,36 +7207,26 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
 
-    // arrastar com a ferramenta de piso armada pinta CADA tile novo que
-    // o cursor entra durante o arrasto (não só onde o botão foi
-    // pressionado) -- é o "arrastando" que o Douglas pediu, em vez de só
-    // o clique único ("unitário"). paintFloorLine (não só paintFloorAt no
-    // tile atual) preenche também os tiles PULADOS entre um evento de
-    // pointermove e o outro -- o quadrado (60px) é grande o suficiente
-    // pra um arrasto normal "pular" um inteiro sem disparar um evento
-    // bem em cima dele, o que deixava buracos na pintura.
-    if (this.isPaintingFloor && pointer.isDown && this.selectedFloorTool) {
-      const key = `${col},${row}`;
-      if (key !== this.lastPaintedFloorKey) {
-        const [lastCol, lastRow] = this.lastPaintedFloorKey
-          ? this.lastPaintedFloorKey.split(",").map(Number)
-          : [col, row];
-        this.lastPaintedFloorKey = key;
-        this.paintFloorLine(lastCol, lastRow, col, row);
-      }
+    // arrastar com a ferramenta de piso armada: pedido do Douglas
+    // ("quero pintar o piso formando um quadrado arrastado, sem ser um
+    // de cada, arrasto o quadrado e ele pinta tudo que tem dentro") --
+    // NÃO pinta mais durante o arrasto (era um "pincel" que só pintava o
+    // caminho percorrido pelo cursor, ver antigo paintFloorLine), só
+    // desenha a PRÉVIA do retângulo entre o tile onde o arrasto começou
+    // (floorDragStartTile) e o tile atual. A pintura de TODOS os tiles
+    // dentro do retângulo de uma vez só acontece no soltar do botão (ver
+    // stopFloorPaint).
+    if (this.isPaintingFloor && pointer.isDown && this.selectedFloorTool && this.floorDragStartTile) {
+      this.floorDragCurrentTile = { col, row };
+      this.drawRectPreview(this.floorRectGraphics, this.floorDragStartTile, this.floorDragCurrentTile);
     }
 
-    // mesmo esquema de arrasto acima, só que pra ferramenta de área (ver
-    // paintAreaLine).
-    if (this.isPaintingArea && pointer.isDown && this.selectedAreaTool) {
-      const key = `${col},${row}`;
-      if (key !== this.lastPaintedAreaKey) {
-        const [lastCol, lastRow] = this.lastPaintedAreaKey
-          ? this.lastPaintedAreaKey.split(",").map(Number)
-          : [col, row];
-        this.lastPaintedAreaKey = key;
-        this.paintAreaLine(lastCol, lastRow, col, row);
-      }
+    // mesmo esquema de arrasto em retângulo acima, só que pra ferramenta
+    // de área -- pedido do Douglas, confirmado também pra área ("criar
+    // area tambem").
+    if (this.isPaintingArea && pointer.isDown && this.selectedAreaTool && this.areaDragStartTile) {
+      this.areaDragCurrentTile = { col, row };
+      this.drawRectPreview(this.areaRectGraphics, this.areaDragStartTile, this.areaDragCurrentTile);
     }
 
     // mesmo modelId da entrada selecionada pro catálogo (ver
@@ -7415,26 +7443,31 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
 
-    // ferramenta de área armada: mesma ideia da ferramenta de piso logo
-    // abaixo (clique único já pinta e entra em modo de arrasto) -- checa
-    // ANTES do piso só por ordem de leitura, as duas são mutuamente
-    // exclusivas mesmo (ver selectAreaTool/selectFloorTool), nunca as
-    // duas armadas ao mesmo tempo.
+    // ferramenta de área armada: começa o ARRASTO EM RETÂNGULO (pedido
+    // do Douglas, ver floorDragStartTile acima) -- checa ANTES do piso
+    // só por ordem de leitura, as duas são mutuamente exclusivas mesmo
+    // (ver selectAreaTool/selectFloorTool), nunca as duas armadas ao
+    // mesmo tempo. NÃO pinta na hora: um clique único (sem arrastar) vira
+    // um retângulo de 1 tile só, pintado no soltar (ver stopAreaPaint),
+    // então continua funcionando igual a antes pro caso mais comum.
     if (this.selectedAreaTool) {
       this.isPaintingArea = true;
-      this.lastPaintedAreaKey = `${col},${row}`;
-      this.paintAreaAt(col, row);
+      this.areaDragStartTile = { col, row };
+      this.areaDragCurrentTile = { col, row };
+      this.drawRectPreview(this.areaRectGraphics, this.areaDragStartTile, this.areaDragCurrentTile);
       return;
     }
 
-    // ferramenta de piso armada: pinta/apaga esse tile (clique único --
-    // "unitário") e já entra em modo de arrasto (ver
-    // handleEditPointerMove) pra continuar pintando se o mouse continuar
-    // pressionado e se mover; NÃO cai no fluxo de móvel abaixo.
+    // ferramenta de piso armada: MESMA ideia do retângulo acima -- começa
+    // o arrasto (ver handleEditPointerMove/stopFloorPaint), a pintura
+    // de verdade (de TODOS os tiles dentro do retângulo arrastado, não
+    // só o caminho percorrido pelo cursor) só acontece ao soltar o botão.
+    // NÃO cai no fluxo de móvel abaixo.
     if (this.selectedFloorTool) {
       this.isPaintingFloor = true;
-      this.lastPaintedFloorKey = `${col},${row}`;
-      this.paintFloorAt(col, row);
+      this.floorDragStartTile = { col, row };
+      this.floorDragCurrentTile = { col, row };
+      this.drawRectPreview(this.floorRectGraphics, this.floorDragStartTile, this.floorDragCurrentTile);
       return;
     }
 
