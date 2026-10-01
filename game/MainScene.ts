@@ -489,37 +489,39 @@ const FACADE_SCALE = 128 / 53.6;
 // encaixar no predio do lado esquerdo" / "isso quina") -- peça MENOR,
 // só o "V" de vidro sem as paredes laterais da peça principal, pra
 // cobrir toda quina externa extra que a sala tiver além da principal
-// (ver roomFrontCorners/positionFacade). Tem uma aba sobrando no topo
-// esquerdo na própria arte (não calculada aqui) que cobre o trecho reto
-// até a peça vizinha, escondendo a costura. Medi o espaçamento das
-// vidraças nesse PNG (448x955) contra o da peça principal -- ~53px nos
-// 2, mesma escala exata -- então reusa FACADE_SCALE, sem recalibrar.
+// (ver roomFrontCorners/positionFacade).
+//
+// ARTE TROCADA (pedido do Douglas: "vamos precisar mudar a vidraca 2 de
+// lugar, e trocar a imagem tambem") -- PNG novo (1750x1000, zigue-zague
+// com 2 "V"s + faixa diagonal dourada), substitui o antigo (448x955, um
+// "V" só). Ápice usado é o V mais FUNDO dos dois (o mais profundo/
+// prominente -- achado igual sempre, perfil de alpha coluna a coluna,
+// pico em x≈911 -> y≈286 num total de 1000px de altura), não o primeiro
+// V (mais raso, x≈466 -> y≈231) nem o pico entre os dois (x≈634 ->
+// y≈148). Ainda NÃO testado ao vivo -- ápice é só a medição bruta do
+// PNG, sem nenhum ajuste fino por cima ainda (ver
+// FACADE_CORNER2_OFFSET_X_PX/Y_PX abaixo, zerados de propósito: o
+// histórico de offset anterior era calibrado pra arte/posição ANTIGAS,
+// não serve mais pra essa combinação nova).
 const FACADE_CORNER2_TEXTURE_KEY = "fachada-predio-quina-2";
-/** vértice do "V" dessa peça DENTRO do PNG (px) -- achado por perfil de
- * alpha coluna a coluna (topY(x), pico em x≈347 -> y≈276), mesma ideia
- * de FACADE_APEX_*. */
-const FACADE_CORNER2_APEX_X_PX = 347;
-const FACADE_CORNER2_APEX_Y_PX = 276;
-/** Ajuste manual pedido pelo Douglas -- a peça da quina 2 não tem
- * trecho reto/repetível de vidro pra cobrir sozinha o vão até a peça
- * principal (as duas artes são só um "V" de telhado, sem reta no
- * meio), então em vez de gerar arte nova o ajuste pedido foi deslocar
- * essa peça por cima da posição calculada por tile. Histórico (cada
- * item somado em cima do anterior, ver tileToWorld em grid.ts pra
- * cada direção; "direita"/"esquerda" sempre só no eixo X da tela, sem
- * mexer no Y): +3 tiles em X, depois +4 tiles direção +row
- * (dx=-ISO_TILE_WIDTH/2, dy=+ISO_TILE_HEIGHT/2 por tile), depois
- * desfeito um +0.5 tile em X que tinha aberto um vão GRANDE em vez de
- * fechar. Último ajuste: print com o grid do editor ligado (pedido do
- * Douglas "olha os tile e calcula") mostrou o vão escuro com EXATAMENTE
- * o tamanho de 1 tile, colado direto atrás (lado do piso) do tile
- * onde a peça ancora hoje -- ou seja falta andar 1 tile na direção
- * -col,-row (puro fundo, sem componente X: dx=0,
- * dy=-ISO_TILE_HEIGHT). Reajustar aqui e testar local (npm run dev)
- * se precisar de mais/menos -- não dá pra calibrar isso de fora sem
- * ver o resultado ao vivo. */
-const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2) + 10 + 10 + 30 - 5 - 4;
-const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2) - ISO_TILE_HEIGHT + 5 + 10 + 30 - 5;
+const FACADE_CORNER2_APEX_X_PX = 911;
+const FACADE_CORNER2_APEX_Y_PX = 286;
+/** Escala PRÓPRIA dessa peça (pedido do Douglas junto da troca de arte:
+ * "padrao, diminui ela" -- usar a mesma lógica de sempre [2 tiles por
+ * vão de janela, ver FACADE_SCALE], só que menor). Chute inicial: 60%
+ * do padrão -- não dá pra calibrar o quanto exato sem ver renderizado
+ * (mesma ressalva de sempre, ver FACADE_CORNER2_OFFSET_X_PX/Y_PX
+ * abaixo), ajustar aqui depois do primeiro print. */
+const FACADE_CORNER2_SCALE = FACADE_SCALE * 0.6;
+/** Offset manual em cima da posição calculada por tile (ver
+ * tileToWorld) -- ZERADO de propósito: a arte E a posição (tile) dessa
+ * peça mudaram junto (ver comentário grande acima), então todo o
+ * histórico de ajuste fino acumulado pra combinação ANTIGA não tem
+ * mais relação nenhuma com essa. Recalibrar do zero igual da primeira
+ * vez (prints com o grid do editor ligado, "move tal direção", etc --
+ * não dá pra acertar isso só olhando o PNG fora do jogo). */
+const FACADE_CORNER2_OFFSET_X_PX = 0;
+const FACADE_CORNER2_OFFSET_Y_PX = 0;
 
 /** TRAVA DEFINITIVA (pedido do Douglas: "trava elas de alguma outra
  * forma, preciso mexer em toda sacada encima delas") -- em vez de
@@ -533,7 +535,17 @@ const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2) - ISO_TILE_HEIGHT +
  * NENHUM calculo de sala entra na escolha -- só mudam se alterados
  * aqui manualmente. */
 const FACADE_MAIN_TILE = { col: 21, row: 16 };
-const FACADE_CORNER2_TILE = { col: 1, row: 27 };
+/** Movida (pedido do Douglas: "vamos precisar mudar a vidraca 2 de
+ * lugar") pra tile 9,26 -- a quina "que tem uma cadeira gamer
+ * vermelha": conferido direto no banco (Supabase, sala
+ * "mapa-publicado") que esse tile é hoje uma quina externa de verdade
+ * (roomFrontCorners) E tem uma poltrona modelo "Gamer" ancorada nele
+ * -- bate exatamente com a descrição, mesmo a cor salva no momento da
+ * checagem não sendo "Vermelho" (pode ter mudado depois/ainda não
+ * sincronizado). Tile antigo (1,27) NÃO fica mais protegido contra
+ * apagar (ver eraseRoomShapeAt) nem com peça nenhuma -- só muda se o
+ * Douglas pedir de novo. */
+const FACADE_CORNER2_TILE = { col: 9, row: 26 };
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
@@ -4243,7 +4255,7 @@ export default class MainScene extends Phaser.Scene {
       const sprite = this.add
         .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
         .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
-        .setScale(FACADE_SCALE)
+        .setScale(FACADE_CORNER2_SCALE)
         .setDepth(DEPTH_FACADE);
       this.facadeCornerSprites.set(this.roomTileKey(secondary.col, secondary.row), sprite);
     }
