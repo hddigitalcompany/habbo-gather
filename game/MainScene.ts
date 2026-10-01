@@ -4420,7 +4420,16 @@ export default class MainScene extends Phaser.Scene {
           .image(midX, midY + vOffset, key)
           .setOrigin(0.5, 0)
           .setFlipX(edge.side === "colPlus") // ACHADO -- ver comentário grande em addWallSprite acima
-          .setDepth(DEPTH_FLOOR - 1);
+          // ACHADO (Douglas testou ao vivo o overlap: "a sobreposicao
+          // e a invertida... a de cima fica encima a de baixo
+          // embaixo") -- repetição de CIMA (i menor, mais perto do
+          // piso de verdade) precisa desenhar NA FRENTE da de baixo (i
+          // maior) na faixa onde elas se sobrepõem (profundidade de
+          // verdade: a laje de cima sempre tapa um pouco a de baixo,
+          // nunca o contrário). `-i` garante isso sem depender da
+          // ORDEM de inserção (que já era i crescente, mas profundidade
+          // explícita é mais clara/robusta que confiar nisso).
+          .setDepth(DEPTH_FLOOR - 1 - i);
         this.floorEdgeGlassImages.push(img);
       }
     }
