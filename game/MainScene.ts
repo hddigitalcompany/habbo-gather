@@ -517,8 +517,8 @@ const FACADE_CORNER2_APEX_Y_PX = 276;
  * dy=-ISO_TILE_HEIGHT). Reajustar aqui e testar local (npm run dev)
  * se precisar de mais/menos -- não dá pra calibrar isso de fora sem
  * ver o resultado ao vivo. */
-const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2);
-const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2) - ISO_TILE_HEIGHT;
+const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2) + 10;
+const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2) - ISO_TILE_HEIGHT + 5;
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
