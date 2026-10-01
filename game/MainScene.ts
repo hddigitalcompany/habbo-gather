@@ -4034,42 +4034,31 @@ export default class MainScene extends Phaser.Scene {
    * assim na arte, nada calculado aqui pra isso). Chamado sempre que o
    * formato da sala muda. */
   private positionFacade() {
-    const corners = this.roomFrontCorners();
-    const cornerKeys = new Set(corners.map((c) => this.roomTileKey(c.col, c.row)));
-
-    // TRAVA (pedido do Douglas, "trava ela nessa posição, não vou mais
-    // mexer nela, vou desenhar uma sacada encima dela") -- 2 tentativas
-    // anteriores erradas: travar tudo pra sempre fez a sacada nova
-    // ficar sem fachada nenhuma ("vish bugou foi tudo"); só travar
-    // criação/reposição sem nunca destruir fez a peça antiga continuar
-    // aparecendo SOBREPOSTA em cima do que foi construído depois dela
-    // deixar de ser quina externa de verdade ("ta uma vidraca
-    // sobreposta"). A regra certa: enquanto uma peça (principal ou
-    // quina2) continua sendo uma quina externa válida (ver
-    // roomFrontCorners), ela fica EXATAMENTE onde foi colocada da
-    // primeira vez -- nunca mais chama setPosition nela. Só quando ela
-    // deixa de ser quina externa (sala cresceu por cima/engoliu ela) é
-    // que ela é destruída -- isso evita a sobreposição sem fazer a
-    // peça pular de posição enquanto ainda faz sentido ela estar ali.
-    if (this.facadeMainTile) {
-      const mainTileKey = this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row);
-      if (!cornerKeys.has(mainTileKey)) {
-        this.facadeImage?.destroy();
-        this.facadeImage = undefined;
-        this.facadeMainTile = undefined;
-      }
-    }
-    if (!this.facadeMainTile && corners.length > 0) {
-      let main = corners[0];
-      for (const c of corners) {
-        if (
-          c.col + c.row > main.col + main.row ||
-          (c.col + c.row === main.col + main.row && Math.abs(c.col - c.row) < Math.abs(main.col - main.row))
-        ) {
-          main = c;
+    // TRAVA ABSOLUTA (pedido do Douglas: "trava elas de alguma outra
+    // forma, preciso mexer em toda sacada encima delas" -- ele vai
+    // CONSTRUIR floor literalmente em cima dos tiles-âncora, o que
+    // antes fazia a peça deixar de contar como quina externa e ser
+    // destruída). A partir de agora as duas peças (principal e quina2)
+    // são escolhidas e posicionadas só na PRIMEIRA vez que aparecem
+    // nesta sessão da cena, e depois disso nunca mais são tocadas --
+    // nem reposicionadas, nem destruídas, nem recriadas, não importa
+    // o que aconteça com o formato da sala dali pra frente (coberta,
+    // cercada, etc). Só volta a escolher de novo se a cena inteira for
+    // recriada do zero (recarregar a página).
+    if (!this.facadeMainTile) {
+      const corners = this.roomFrontCorners();
+      if (corners.length > 0) {
+        let main = corners[0];
+        for (const c of corners) {
+          if (
+            c.col + c.row > main.col + main.row ||
+            (c.col + c.row === main.col + main.row && Math.abs(c.col - c.row) < Math.abs(main.col - main.row))
+          ) {
+            main = c;
+          }
         }
+        this.facadeMainTile = main;
       }
-      this.facadeMainTile = main;
     }
     if (this.facadeMainTile && this.textures.exists(FACADE_TEXTURE_KEY) && !this.facadeImage) {
       const w = tileToWorld(this.facadeMainTile.col, this.facadeMainTile.row);
@@ -4083,45 +4072,32 @@ export default class MainScene extends Phaser.Scene {
         .setDepth(DEPTH_FACADE);
     }
 
-    // quina2 -- SÓ 1 (pedido do Douglas depois de ver uma segunda
-    // vidraça "aparecer sozinha" quando a sacada criou mais uma quina
-    // externa nova: ele só quer a quina que já foi calibrada a dedo,
-    // não quer mais criação automática pra quina nova nenhuma). Dos
-    // candidatos (toda quina que não é a principal), escolhe a mais à
-    // ESQUERDA na tela (menor col-row, ver fórmula de x em
-    // tileToWorld) -- tentei "mais perto da principal" primeiro e
-    // apagou a errada (o Douglas confirmou que a sobrando/indesejada
-    // era a da DIREITA na tela), então o critério agora é
-    // explicitamente a posição na tela, não distância em tiles. Mesma
-    // regra de sempre: congelada enquanto continuar válida, destruída
-    // só se deixar de ser quina externa -- nunca mais de 1 sprite por
-    // vez.
-    const mainKey = this.facadeMainTile ? this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row) : null;
-    let secondary: { col: number; row: number } | null = null;
-    for (const c of corners) {
-      if (this.roomTileKey(c.col, c.row) === mainKey) continue;
-      if (!secondary || c.col - c.row < secondary.col - secondary.row) {
-        secondary = c;
+    // quina2 -- escolhida 1 vez só (a mais à esquerda na tela entre as
+    // quinas que não são a principal, ver histórico acima: "mais
+    // perto" tinha escolhido errado) e depois congelada pra sempre
+    // igual a principal.
+    if (this.facadeCornerSprites.size === 0 && this.facadeMainTile && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
+      const mainKey = this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row);
+      const corners = this.roomFrontCorners();
+      let secondary: { col: number; row: number } | null = null;
+      for (const c of corners) {
+        if (this.roomTileKey(c.col, c.row) === mainKey) continue;
+        if (!secondary || c.col - c.row < secondary.col - secondary.row) {
+          secondary = c;
+        }
       }
-    }
-    const secondaryKey = secondary ? this.roomTileKey(secondary.col, secondary.row) : null;
-    for (const [key, sprite] of this.facadeCornerSprites) {
-      if (key !== secondaryKey) {
-        sprite.destroy();
-        this.facadeCornerSprites.delete(key);
+      if (secondary) {
+        const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
+        const w = tileToWorld(secondary.col, secondary.row);
+        const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
+        const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
+        const sprite = this.add
+          .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
+          .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
+          .setScale(FACADE_SCALE)
+          .setDepth(DEPTH_FACADE);
+        this.facadeCornerSprites.set(this.roomTileKey(secondary.col, secondary.row), sprite);
       }
-    }
-    if (secondary && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY) && !this.facadeCornerSprites.has(secondaryKey!)) {
-      const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
-      const w = tileToWorld(secondary.col, secondary.row);
-      const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
-      const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
-      const sprite = this.add
-        .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
-        .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
-        .setScale(FACADE_SCALE)
-        .setDepth(DEPTH_FACADE);
-      this.facadeCornerSprites.set(secondaryKey!, sprite);
     }
   }
 
