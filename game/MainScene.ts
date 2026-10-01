@@ -520,6 +520,20 @@ const FACADE_CORNER2_APEX_Y_PX = 276;
 const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2) + 10 + 10 + 30 - 5 - 4;
 const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2) - ISO_TILE_HEIGHT + 5 + 10 + 30 - 5;
 
+/** TRAVA DEFINITIVA (pedido do Douglas: "trava elas de alguma outra
+ * forma, preciso mexer em toda sacada encima delas") -- em vez de
+ * escolher a quina pelo formato da sala (roomFrontCorners, que muda
+ * toda vez que ele adiciona/remove tile e já escolheu errado 2x nesta
+ * sessão de ajustes), as duas peças ficam fixas nestes tiles exatos,
+ * conferidos direto no banco (Supabase, sala "mapa-publicado") no
+ * momento em que o encaixe estava visualmente correto: principal no
+ * tile de maior col+row (quina externa de baixo), quina2 no outro
+ * tile de quina que sobrou mais à esquerda na tela. Daqui pra frente
+ * NENHUM calculo de sala entra na escolha -- só mudam se alterados
+ * aqui manualmente. */
+const FACADE_MAIN_TILE = { col: 21, row: 16 };
+const FACADE_CORNER2_TILE = { col: 1, row: 27 };
+
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
   return tileToWorld(col, row).y + ISO_TILE_HEIGHT / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
@@ -4042,31 +4056,15 @@ export default class MainScene extends Phaser.Scene {
    * assim na arte, nada calculado aqui pra isso). Chamado sempre que o
    * formato da sala muda. */
   private positionFacade() {
-    // TRAVA ABSOLUTA (pedido do Douglas: "trava elas de alguma outra
-    // forma, preciso mexer em toda sacada encima delas" -- ele vai
-    // CONSTRUIR floor literalmente em cima dos tiles-âncora, o que
-    // antes fazia a peça deixar de contar como quina externa e ser
-    // destruída). A partir de agora as duas peças (principal e quina2)
-    // são escolhidas e posicionadas só na PRIMEIRA vez que aparecem
-    // nesta sessão da cena, e depois disso nunca mais são tocadas --
-    // nem reposicionadas, nem destruídas, nem recriadas, não importa
-    // o que aconteça com o formato da sala dali pra frente (coberta,
-    // cercada, etc). Só volta a escolher de novo se a cena inteira for
-    // recriada do zero (recarregar a página).
+    // TRAVA DEFINITIVA: tiles fixos (FACADE_MAIN_TILE/FACADE_CORNER2_TILE,
+    // ver comentário ali) -- não depende mais do formato da sala
+    // (roomFrontCorners) de jeito nenhum, então nenhuma edição de piso/
+    // sacada dali pra frente pode mudar, duplicar ou apagar as peças.
+    // Cada peça ainda só é criada 1 vez (gate por this.facadeImage /
+    // this.facadeCornerSprites.size) -- só volta a criar se a cena
+    // inteira for recriada do zero (recarregar a página).
     if (!this.facadeMainTile) {
-      const corners = this.roomFrontCorners();
-      if (corners.length > 0) {
-        let main = corners[0];
-        for (const c of corners) {
-          if (
-            c.col + c.row > main.col + main.row ||
-            (c.col + c.row === main.col + main.row && Math.abs(c.col - c.row) < Math.abs(main.col - main.row))
-          ) {
-            main = c;
-          }
-        }
-        this.facadeMainTile = main;
-      }
+      this.facadeMainTile = FACADE_MAIN_TILE;
     }
     if (this.facadeMainTile && this.textures.exists(FACADE_TEXTURE_KEY) && !this.facadeImage) {
       const w = tileToWorld(this.facadeMainTile.col, this.facadeMainTile.row);
@@ -4080,32 +4078,18 @@ export default class MainScene extends Phaser.Scene {
         .setDepth(DEPTH_FACADE);
     }
 
-    // quina2 -- escolhida 1 vez só (a mais à esquerda na tela entre as
-    // quinas que não são a principal, ver histórico acima: "mais
-    // perto" tinha escolhido errado) e depois congelada pra sempre
-    // igual a principal.
-    if (this.facadeCornerSprites.size === 0 && this.facadeMainTile && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
-      const mainKey = this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row);
-      const corners = this.roomFrontCorners();
-      let secondary: { col: number; row: number } | null = null;
-      for (const c of corners) {
-        if (this.roomTileKey(c.col, c.row) === mainKey) continue;
-        if (!secondary || c.col - c.row < secondary.col - secondary.row) {
-          secondary = c;
-        }
-      }
-      if (secondary) {
-        const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
-        const w = tileToWorld(secondary.col, secondary.row);
-        const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
-        const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
-        const sprite = this.add
-          .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
-          .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
-          .setScale(FACADE_SCALE)
-          .setDepth(DEPTH_FACADE);
-        this.facadeCornerSprites.set(this.roomTileKey(secondary.col, secondary.row), sprite);
-      }
+    if (this.facadeCornerSprites.size === 0 && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
+      const secondary = FACADE_CORNER2_TILE;
+      const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
+      const w = tileToWorld(secondary.col, secondary.row);
+      const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
+      const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
+      const sprite = this.add
+        .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
+        .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
+        .setScale(FACADE_SCALE)
+        .setDepth(DEPTH_FACADE);
+      this.facadeCornerSprites.set(this.roomTileKey(secondary.col, secondary.row), sprite);
     }
   }
 
