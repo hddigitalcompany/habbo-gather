@@ -483,8 +483,22 @@ import { GENERATED_FURNITURE_MODELS } from "./furnitureModels.generated";
 
 export const FURNITURE_MODELS: FurnitureModelDef[] = [...GENERATED_FURNITURE_MODELS];
 
+/** Índice de FURNITURE_MODELS por id -- pedido do Douglas ("otimizada
+ * no carregamento/lagada com mais gente online"): furnitureModelById
+ * abaixo fazia Array.find() (busca LINEAR) nessa lista TODA VEZ que
+ * era chamada, inclusive de dentro de updateFurnitureProximityState()
+ * em MainScene.ts, que roda em TODO FRAME (60x/s) pra CADA móvel
+ * colocado na sala -- custo de O(móveis x tamanho do catálogo) por
+ * frame, pra sempre, e o catálogo só CRESCE (todo item custom
+ * cadastrado no Editor de Itens entra aqui, ver
+ * registerCustomFurnitureModels abaixo). Mantido em sincronia nos 2
+ * lugares que mexem em FURNITURE_MODELS depois do carregamento
+ * inicial (os 2 casos de registerCustomFurnitureModels) -- fora
+ * deles, FURNITURE_MODELS não muda mais. */
+const FURNITURE_MODEL_BY_ID = new Map<string, FurnitureModelDef>(FURNITURE_MODELS.map((m) => [m.id, m]));
+
 export function furnitureModelById(id: string): FurnitureModelDef | undefined {
-  return FURNITURE_MODELS.find((m) => m.id === id);
+  return FURNITURE_MODEL_BY_ID.get(id);
 }
 
 /** Modelos cadastrados pra um TIPO de móvel (ex: os 2 modelos de poltrona) -- lista vazia = tipo ainda usa o design único de FURNITURE_ART. */
@@ -823,8 +837,10 @@ export function registerCustomFurnitureModels(models: FurnitureModelDef[]): stri
     if (existingIndex !== -1) {
       updatedIds.push(model.id);
       FURNITURE_MODELS[existingIndex] = { ...model, custom: true };
+      FURNITURE_MODEL_BY_ID.set(model.id, FURNITURE_MODELS[existingIndex]);
     } else {
       FURNITURE_MODELS.push({ ...model, custom: true });
+      FURNITURE_MODEL_BY_ID.set(model.id, FURNITURE_MODELS[FURNITURE_MODELS.length - 1]);
     }
     // reconstrói as entradas de catálogo desse modelo do zero (cobre os
     // dois casos: item novo, sem entrada nenhuma ainda, e item editado,

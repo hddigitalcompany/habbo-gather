@@ -894,6 +894,16 @@ export default class MainScene extends Phaser.Scene {
   private remoteContainers: Map<string, Phaser.GameObjects.Container> = new Map();
 
   private lastSent = 0;
+  /** throttle de updateFurnitureProximityState() -- pedido do Douglas
+   * ("otimizada no carregamento/lagada com mais gente online"): essa
+   * função rodava em TODO FRAME (update(), 60x/s), sem throttle nenhum
+   * (diferente de reportPosition acima, que já tinha o seu de 50ms) --
+   * e o custo dela cresce com o número de avatares (local + remotos) E
+   * com o catálogo de móveis. Trocar imagem por proximidade é um efeito
+   * ambiente (não afeta bloqueio de movimento nenhum, ver comentário
+   * grande dentro da própria função) -- 120ms (~8x/s) é imperceptível
+   * pra esse uso e corta a maior parte do trabalho repetido. */
+  private lastFurnitureProximityCheck = 0;
 
   private localActivity: Activity = "idle";
   private sitCooldownUntil = 0;
@@ -1252,6 +1262,22 @@ export default class MainScene extends Phaser.Scene {
   // tile, pintar de novo em cima troca o tipo em vez de empilhar).
   private selectedAreaTool: AreaTool = null;
   private draftArea: Map<string, AreaTileDef> = new Map();
+  /** cache de getDraftAreaList() abaixo -- pedido do Douglas (sessão de
+   * "otimizada no carregamento/lagada com mais gente online"): achado
+   * que getDraftAreaList() fazia Array.from(this.draftArea.values())
+   * TODA VEZ que era chamada, e ela é chamada de dentro de areaZoneAt(),
+   * que por sua vez roda em checkProximity() (GameRoom.tsx) a cada
+   * "move" recebido de CADA jogador remoto -- ou seja, até 20x/s POR
+   * PESSOA na sala, cada chamada realocando e copiando a lista inteira
+   * de tiles de área (e ainda fazendo outro .find() linear em cima,
+   * ver areaIdAtTile em game/areas.ts). Com N pessoas na sala isso vira
+   * O(N²) alocações por segundo -- exatamente o tipo de coisa que
+   * pioraria "quando tem mais gente online". draftArea só muda em 5
+   * lugares (ver draftAreaListDirty abaixo, marcado em cada um) -- o
+   * normal é NADA mudar entre uma leitura e outra, então cachear supre
+   * praticamente todas as chamadas sem realocar nada. */
+  private draftAreaListCache: AreaTileDef[] = [];
+  private draftAreaListDirty = true;
   private draftAreaSprites: Map<string, Phaser.GameObjects.Graphics> = new Map();
   private isPaintingArea = false;
   private lastPaintedAreaKey: string | null = null;
@@ -3834,10 +3860,15 @@ export default class MainScene extends Phaser.Scene {
     // certo.
     this.updateDoorOpenState();
     // troca de imagem por proximidade (ver updateFurnitureProximityState/
-    // FurnitureModelDef.nearImageUrl) -- mesmo timing/motivo da porta
-    // acima, mas não afeta nenhum bloqueio de movimento, então a ordem
-    // exata aqui importa menos.
-    this.updateFurnitureProximityState();
+    // FurnitureModelDef.nearImageUrl) -- NÃO precisa mais rodar todo
+    // frame (não afeta bloqueio de movimento nenhum, só o visual do
+    // móvel) -- throttle de 120ms, mesma ideia do reportPosition logo
+    // abaixo (50ms), só que mais generoso já que isso aqui é puramente
+    // cosmético.
+    if (_time - this.lastFurnitureProximityCheck > 120) {
+      this.lastFurnitureProximityCheck = _time;
+      this.updateFurnitureProximityState();
+    }
     // véu de área (ver updateAreaDim/syncAreaDimRectToCamera) precisa
     // seguir a câmera TODO frame, mesmo sentado/parado -- arrasto/zoom
     // não dependem do boneco andar.
@@ -5954,13 +5985,18 @@ export default class MainScene extends Phaser.Scene {
   }
 
   getDraftAreaList(): AreaTileDef[] {
-    return Array.from(this.draftArea.values());
+    if (this.draftAreaListDirty) {
+      this.draftAreaListCache = Array.from(this.draftArea.values());
+      this.draftAreaListDirty = false;
+    }
+    return this.draftAreaListCache;
   }
 
   clearDraftArea() {
     for (const sprite of this.draftAreaSprites.values()) sprite.destroy();
     this.draftAreaSprites.clear();
     this.draftArea.clear();
+    this.draftAreaListDirty = true;
     this.refreshAreas();
     this.onDraftAreaChange?.(this.getDraftAreaList());
   }
@@ -5979,6 +6015,7 @@ export default class MainScene extends Phaser.Scene {
       if (!this.areaDefs.has(a.areaId)) continue; // órfão (área apagada entre salvar e carregar) -- não desenha lixo
       const rect = this.addAreaTileRect(a);
       this.draftArea.set(key, a);
+      this.draftAreaListDirty = true;
       this.draftAreaSprites.set(key, rect);
     }
     this.refreshAreas();
@@ -6003,6 +6040,7 @@ export default class MainScene extends Phaser.Scene {
       this.draftAreaSprites.get(key)?.destroy();
       this.draftAreaSprites.delete(key);
       this.draftArea.delete(key);
+      this.draftAreaListDirty = true;
       prunedAny = true;
     }
     this.refreshAreas();
@@ -6237,6 +6275,7 @@ export default class MainScene extends Phaser.Scene {
       this.draftAreaSprites.get(key)?.destroy();
       this.draftAreaSprites.delete(key);
       this.draftArea.delete(key);
+      this.draftAreaListDirty = true;
       this.refreshAreas();
       this.onDraftAreaChange?.(this.getDraftAreaList());
       return;
@@ -6250,6 +6289,7 @@ export default class MainScene extends Phaser.Scene {
     const def: AreaTileDef = { col, row, areaId: tool.areaId };
     const rect = this.addAreaTileRect(def);
     this.draftArea.set(key, def);
+    this.draftAreaListDirty = true;
     this.draftAreaSprites.set(key, rect);
     this.refreshAreas();
     this.onDraftAreaChange?.(this.getDraftAreaList());
