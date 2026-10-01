@@ -4040,20 +4040,22 @@ export default class MainScene extends Phaser.Scene {
         main = c;
       }
     }
-    if (this.textures.exists(FACADE_TEXTURE_KEY)) {
+    // TRAVADA junto com a quina 2 (mesmo pedido do Douglas, "trava
+    // ela nessa posição") -- sem isso, crescer a sala pra fazer a
+    // sacada muda qual tile tem o maior col+row e a peça PRINCIPAL
+    // pula de posição sozinha (foi isso que causou o "moveu" depois de
+    // eu só ter travado a quina 2). Só cria uma vez; depois disso
+    // nunca mais chama setPosition nela, não importa como a sala mude.
+    if (this.textures.exists(FACADE_TEXTURE_KEY) && !this.facadeImage) {
       const w = tileToWorld(main.col, main.row);
       const x = w.x;
       const y = w.y + ISO_TILE_HEIGHT / 2;
-      if (!this.facadeImage) {
-        const tex = this.textures.get(FACADE_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
-        this.facadeImage = this.add
-          .image(x, y, FACADE_TEXTURE_KEY)
-          .setOrigin(FACADE_APEX_X_PX / tex.width, FACADE_APEX_Y_PX / tex.height)
-          .setScale(FACADE_SCALE)
-          .setDepth(DEPTH_FACADE);
-      } else {
-        this.facadeImage.setPosition(x, y);
-      }
+      const tex = this.textures.get(FACADE_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
+      this.facadeImage = this.add
+        .image(x, y, FACADE_TEXTURE_KEY)
+        .setOrigin(FACADE_APEX_X_PX / tex.width, FACADE_APEX_Y_PX / tex.height)
+        .setScale(FACADE_SCALE)
+        .setDepth(DEPTH_FACADE);
     }
 
     // as demais quinas -- 1 sprite da peça pequena por quina, indexado
