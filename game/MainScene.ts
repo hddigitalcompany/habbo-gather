@@ -466,7 +466,7 @@ const AREA_DIM_ALPHA = 0.45;
 const DEPTH_ROOM_BACKGROUND = -3_000_000;
 
 // FACHADA DO PRÉDIO (pedido do Douglas: "coloca, faça a quina ali
-// coladinha no piso") -- 1 imagem só (public/assets/fachada-predio.webp),
+// coladinha no piso") -- 1 imagem só (public/assets/fachada-predio.avif),
 // a quina do prédio vista de fora, com o "V" de cima da fachada
 // encaixado nas 2 bordas da FRENTE do losango da sala. Fica entre o
 // fundo sólido e o piso: o piso sempre por cima, a fachada "pendurada"
@@ -1499,7 +1499,7 @@ export default class MainScene extends Phaser.Scene {
     for (const entry of WALL_CATALOG) {
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
     }
-    this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-predio.webp");
+    this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-predio.avif");
   }
 
   create() {
