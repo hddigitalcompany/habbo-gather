@@ -76,6 +76,7 @@ export function ChatDrawer({
   messages,
   unreadSinceTs,
   roomChatLog,
+  hasRoom,
   myUserId,
   onlinePlayers,
   roomCompanyName,
@@ -127,6 +128,7 @@ export function ChatDrawer({
   onClose,
   pinMode,
   onToggleSidePin,
+  sidebarClassName,
   onOpenProfile,
   pins,
   typingUsers,
@@ -159,6 +161,15 @@ export function ChatDrawer({
   // não chegou do servidor.
   unreadSinceTs: number | null;
   roomChatLog: ChatMessage[];
+  // 1/out (unificação Lobby/GameRoom, pedido do Douglas: "quero a
+  // mesma estrutura nao que seja separado") -- a Sala ("quem ta por
+  // perto") só existe DENTRO da sala de verdade (GameRoom.tsx); o
+  // Lobby reaproveita esse MESMO componente pro chat de fora, mas não
+  // tem Sala nenhuma -- false esconde o item "Sala" da lista (ver JSX
+  // logo abaixo) sem precisar de NENHUMA outra mudança de lógica
+  // (isRoom continua inatingível pro Lobby, que nunca chama
+  // onOpenConversation(null)).
+  hasRoom: boolean;
   myUserId: string;
   onlinePlayers: RemotePlayer[];
   roomCompanyName: string | null;
@@ -218,6 +229,14 @@ export function ChatDrawer({
   onClose: () => void;
   pinMode: "float" | "side";
   onToggleSidePin: () => void;
+  // 1/out (unificação Lobby/GameRoom) -- a gaveta fixada precisa de
+  // top/bottom DIFERENTES em CSS entre sala e Lobby (o Lobby não tem o
+  // layout flex com align-items:stretch que a sala tem, ver comentário
+  // grande de .lobby-chat-drawer-shell-sidebar em globals.css) mesmo os
+  // NÚMEROS sendo idênticos -- esse prop é só o nome da classe extra
+  // que troca por causa disso; undefined (GameRoom) continua usando
+  // "chat-drawer-shell-sidebar" de sempre.
+  sidebarClassName?: string;
   // 29/set (11): ver comentário grande de onOpenProfile em
   // chatDrawerProps (components/GameRoom.tsx).
   onOpenProfile: (playerId: string) => void;
@@ -541,7 +560,7 @@ export function ChatDrawer({
             </button>
           </div>
           <div className="chat-conv-list">
-            {laneFilter === "company" && (
+            {hasRoom && laneFilter === "company" && (
               <button className="chat-conv-item" onClick={() => onOpenConversation(null)}>
                 <span className="chat-conv-avatar chat-conv-avatar-room">
                   <RoomIcon />
@@ -1312,7 +1331,7 @@ export function ChatDrawer({
 
   return (
     <>
-      <div className={pinMode === "side" ? "chat-drawer-shell chat-drawer-shell-sidebar" : "chat-drawer-shell"}>
+      <div className={pinMode === "side" ? `chat-drawer-shell ${sidebarClassName ?? "chat-drawer-shell-sidebar"}` : "chat-drawer-shell"}>
         {companyRail}
         {drawerBody}
       </div>

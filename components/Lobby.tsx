@@ -1,5 +1,7 @@
 "use client";
 
+import dynamic from "next/dynamic";
+
 // Lobby -- tela de entrada mostrada ANTES da sala (pedido do Douglas,
 // 28/set: "nao deve abrir direto na sala, crie um lobby igual do
 // habbo" + depois "quero ali no centro a previa da sala da pessoa,
@@ -61,6 +63,44 @@ import SettingsPanel from "@/components/SettingsPanel";
 import FriendsPanel, { type ContactUser } from "@/components/FriendsPanel";
 import ProfileViewCard from "@/components/ProfileViewCard";
 import AccountCard from "@/components/AccountCard";
+// 1/out, pedido do Douglas ("eu quero a mesma estrutura nao que seja
+// separado", depois de "o layout do chat de fora tem que ser igual ao
+// de dentro, ja falei isso MIL VEZES") -- o chat de fora (LobbyChatPanel
+// mais abaixo) PAROU de ter sua própria gaveta/JSX duplicada e passou a
+// renderizar o MESMO ChatDrawer que a sala usa (components/GameRoom.tsx
+// chama ele igual, ver chatDrawerProps lá) -- só os DADOS vêm de
+// fontes diferentes (REST aqui, WebSocket lá, ver comentário grande no
+// topo do arquivo sobre esse painel ser REST-only), a tela/estrutura é
+// uma só agora. Os tipos (Conversation/ChatMsg/ChatMsgKind) só type-only
+// (apagados na compilação, não puxam o módulo de GameRoom.tsx pro bundle
+// -- quem puxa de verdade é o próprio ChatDrawer, mesma peça que a sala
+// já carrega hoje) -- usados só pra converter ConversationSummary/
+// ChatMessage (formato leve que o REST devolve) pro formato que o
+// ChatDrawer espera, ver toDrawerConversation/toDrawerMessage abaixo.
+// dynamic (ssr:false) de propósito, NÃO import estático: GameRoom.tsx
+// inteiro (Phaser/engine do jogo) só carrega hoje atrás do próprio
+// dynamic() dele em app/page.tsx (ver const GameRoom = dynamic(...)) --
+// como o ChatDrawer importa valores de verdade de lá (ícones/helpers,
+// ver topo de components/ChatDrawer.tsx), um import ESTÁTICO aqui
+// arrastaria esse módulo inteiro pro bundle do Lobby (que carrega ANTES
+// de entrar na sala) e, pior, pro RENDER NO SERVIDOR da "/" (Next tenta
+// pré-renderizar a Home) -- GameRoom.tsx nunca foi escrito pra rodar no
+// servidor (quebrava o build com "window is not defined" antes dessa
+// troca pra dynamic). Os TIPOS (Conversation/ChatMsg/ChatMsgKind) continuam
+// import normal -- type-only é apagado na compilação, não carrega nada
+// de verdade (ver comentário grande de sempre sobre isso).
+const ChatDrawer = dynamic(() => import("@/components/ChatDrawer").then((m) => m.ChatDrawer), {
+  // sem loading customizado de propósito: ao contrário de entrar na
+  // sala (GameRoom.tsx, troca de TELA inteira, por isso tem "Carregando
+  // sala..."), abrir o chat é um painел pequeno por cima do Lobby --
+  // um placeholder com posição própria ia precisar saber pinMode
+  // (flutuante vs fixado) pra não ficar torto por meio segundo, e o
+  // dynamic() não repassa isso pro componente de loading. Fica null
+  // (padrão) -- carrega rápido (chunk pequeno) e só acontece na
+  // PRIMEIRA vez que a pessoa abre o chat na sessão.
+  ssr: false,
+});
+import type { Conversation, ChatMsg, ChatMsgKind } from "@/components/GameRoom";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -1222,7 +1262,8 @@ function LobbyChatPanel({
   // quero que eles vejam a possibilidade, sempre ali" -- nome/logo da
   // empresa PRÓPRIA de quem tá com o painel aberto, pra entrar como
   // opção garantida em companyOptions mesmo sem nenhuma conversa ainda
-  // (ver companyOptions useMemo mais abaixo).
+  // (ver companyOptions useMemo em components/ChatDrawer.tsx, que recebe
+  // esse valor como roomCompanyName -- ver ChatDrawer mais abaixo).
   myRoomName: string | null;
   myRoomLogoUrl: string | null;
   conversations: ConversationSummary[] | null;
@@ -1245,156 +1286,123 @@ function LobbyChatPanel({
   onConversationsReplaced: (removedConversationId: string | null, conversation: ConversationSummary) => void;
   initialActiveId?: string | null;
 }) {
+  // ---------------------------------------------------------------
+  // 1/out -- unificação com o ChatDrawer da sala (ver import no topo
+  // do arquivo, pedido do Douglas: "eu quero a mesma estrutura nao
+  // que seja separado"). Esse painel passou de "desenha a própria
+  // gaveta" pra "busca/guarda os dados certos (REST) e desenha com o
+  // MESMO ChatDrawer que a sala usa" (components/GameRoom.tsx chama
+  // ele do mesmo jeito, ver chatDrawerProps lá) -- só os DADOS vêm de
+  // fontes diferentes (REST aqui, WebSocket lá, ver comentário grande
+  // no topo do arquivo sobre esse painel ser REST-only); a tela/
+  // estrutura/CSS é uma só agora. Composer com @menção, popover de
+  // reação/fixar, coluna de empresas, painel de arquivos e menu de
+  // mover-de-lane SAÍRAM daqui -- o ChatDrawer já faz tudo isso
+  // sozinho (ver comentário grande dele em components/ChatDrawer.tsx),
+  // só sobra aqui o que é genuinamente REST-only: buscar/mandar pro
+  // servidor e guardar a resposta em state.
+  // ---------------------------------------------------------------
+
+  const [view, setView] = useState<"list" | "thread" | "new">(initialActiveId ? "thread" : "list");
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
   // 30/set, bug reportado pelo Douglas: "quando eu vou em nova
   // conversa clico no contato, nada acontece, nao inicia uma
   // conversa" -- initialActiveId só é lido no useState acima, que só
   // roda no PRIMEIRO mount; como o painel já tava aberto (a pessoa
   // clicou "+" com o chat já na tela), ele nunca desmonta, então
-  // startNewCompanyConversation/startNewPrivateConversation criavam a
-  // conversa (handleStartConversation no Lobby chama
-  // setOpenChatConversationId, que vira initialActiveId de novo) mas
-  // nada reagia à mudança -- fechava a busca (closeNewConv) e voltava
-  // pra lista, sem abrir a conversa nova. Esse efeito sincroniza
-  // activeId toda vez que initialActiveId muda, não só na primeira
-  // vez.
+  // onStartConversation (handleStartConversation no Lobby) cria a
+  // conversa (vira initialActiveId de novo) mas nada reagia à
+  // mudança. Esse efeito sincroniza activeId/view toda vez que
+  // initialActiveId muda, não só na primeira vez -- MESMO par
+  // activeConversationId/chatView que GameRoom.tsx troca junto em
+  // openConversation.
   useEffect(() => {
-    if (initialActiveId) setActiveId(initialActiveId);
+    if (initialActiveId) {
+      setActiveId(initialActiveId);
+      setView("thread");
+    }
   }, [initialActiveId]);
-  // "3 pontinhos" -- id da conversa com o menu de mover-de-aba aberto
-  // agora (null = nenhum), mesmo padrão do ChatDrawer em GameRoom.tsx.
-  const [convMenuOpenId, setConvMenuOpenId] = useState<string | null>(null);
+
+  function openConversation(id: string | null) {
+    setActiveId(id);
+    setView(id === null ? "list" : "thread");
+  }
+
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   // corte "mensagens não vistas" (ver comentário grande no POST
   // /chat/open em server/index.js) -- só pra desenhar a linha divisória
-  // na conversa ABERTA agora; congela no momento que abre (não
-  // recalcula sozinho enquanto a pessoa lê, senão a linha ficaria
-  // pulando pra baixo a cada mensagem nova).
+  // na conversa ABERTA agora; congela no momento que abre.
   const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
-  // 1/out, pedido do Douglas (espelhar no chat de fora: "mensagem
-  // fixada"/"confirmação de leitura") -- MESMO par pins/lastRead que o
-  // ChatDrawer de dentro da sala já tem, só que aqui vem embutido na
-  // resposta do GET /chat/messages (ver fetchMessages mais abaixo e o
-  // comentário grande desse endpoint em server/index.js) em vez de um
-  // evento de WebSocket, porque esse painel não tem socket nenhum.
+  // "mensagem fixada"/"confirmação de leitura" (pedido do Douglas,
+  // 1/out) -- vem embutido na resposta do GET /chat/messages (ver
+  // fetchMessages mais abaixo), em vez de um evento de WebSocket,
+  // porque esse painel não tem socket nenhum.
   const [pins, setPins] = useState<ChatPin[]>([]);
   const [lastReadByUserId, setLastReadByUserId] = useState<Record<string, number>>({});
-  // reação com emoji / mensagem fixada (pedido do Douglas, 1/out) --
-  // MESMO padrão de popover único por vez (um id só, não por mensagem)
-  // do ChatMessageRow em GameRoom.tsx.
-  const [reactingMessageId, setReactingMessageId] = useState<string | null>(null);
-  const [pinningMessageId, setPinningMessageId] = useState<string | null>(null);
-  // @menção (pedido do Douglas, 1/out) -- MESMO mecanismo do composer
-  // de dentro da sala (ver handleComposerInputChange/insertMention em
-  // GameRoom.tsx): substring "@algo" sendo digitada agora (start/end =
-  // índice no texto, query = o que vem depois do @), null quando não
-  // tem autocomplete aberto.
-  const [mentionState, setMentionState] = useState<{ start: number; end: number; query: string } | null>(null);
-  const composerInputRef = useRef<HTMLInputElement>(null);
-  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out) --
-  // MESMO padrão de estado do ChatDrawer em GameRoom.tsx.
+  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out).
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
   const [filesPanelItems, setFilesPanelItems] = useState<ChatAttachmentItem[] | null>(null);
   const [filesPanelFilter, setFilesPanelFilter] = useState<"all" | "image" | "file" | "audio">("all");
   const [filesPanelQuery, setFilesPanelQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  // @menção (pedido do Douglas, 1/out) -- MESMO pendingMentionIds de
+  // GameRoom.tsx: quem eu já @mencionei na mensagem que tô escrevendo
+  // agora, zerado a cada envio. O resto do mecanismo (dropdown/
+  // detectar "@algo"/inserir o nome no texto) agora é TODO interno do
+  // ChatDrawer -- esse painel só guarda a lista final pra mandar
+  // junto no POST /chat/send (ver onAddPendingMentionId mais abaixo).
+  const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
   // anexo/áudio no chat de fora da sala (pedido do Douglas, 30/set:
-  // "fora da sala nao deixa anexar e mandar audio, adicione") -- MESMO
-  // padrão de estado/refs do ChatDrawer em GameRoom.tsx (copiado, não
-  // importado, ver comentário grande no topo do arquivo).
+  // "fora da sala nao deixa anexar e mandar audio, adicione").
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [sendingAttachment, setSendingAttachment] = useState(false);
   const [recordingAudio, setRecordingAudio] = useState(false);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
   const [recordedPreview, setRecordedPreview] = useState<{ url: string; durationSec: number } | null>(null);
-  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordedBlobRef = useRef<Blob | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartRef = useRef(0);
   const discardRecordingRef = useRef(false);
-  // "Convidar amigo" / "Visitar amigo" -- menu que expande do lado do
-  // nome (ver comentário grande em sendRoomCard mais abaixo).
-  const [inviteMenuOpen, setInviteMenuOpen] = useState(false);
-  const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
-  // 29/set (15), pedido do Douglas -- correção do que eu tinha
-  // entendido errado antes (selo pequeno em cada linha da lista, ver
-  // .chat-conv-company-logo): "eu quero uma aba aberta ao lado do
-  // chat" -- MESMA coluna de empresas que o ChatDrawer de dentro da
-  // sala ganhou (ver comentário grande lá em components/GameRoom.tsx),
-  // aqui reaproveitando literalmente a classe .chat-company-rail (a
-  // mesma filosofia de sempre desse painel, ver comentário grande no
-  // topo do arquivo).
-  const companyOptions = useMemo(() => {
-    const seen = new Map<string, { key: string; name: string; logoUrl: string }>();
-    // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
-    // chat, quero que eles vejam a possibilidade, sempre ali" -- a
-    // empresa PRÓPRIA de quem tá vendo entra SEMPRE (primeiro, mesmo
-    // sem nenhuma conversa ainda), pra coluna nunca sumir só porque
-    // ainda não rolou papo -- as outras empresas continuam vindo das
-    // conversas que já existem, dedupe pela mesma chave de sempre.
-    if (myRoomName) {
-      const key = `${myRoomName}::${myRoomLogoUrl || ""}`;
-      seen.set(key, { key, name: myRoomName, logoUrl: myRoomLogoUrl || "" });
-    }
-    for (const c of conversations ?? []) {
-      if (c.lane !== "company" || !c.companyName) continue;
-      const key = `${c.companyName}::${c.companyLogoUrl || ""}`;
-      if (!seen.has(key)) seen.set(key, { key, name: c.companyName, logoUrl: c.companyLogoUrl || "" });
-    }
-    return Array.from(seen.values());
-  }, [conversations, myRoomName, myRoomLogoUrl]);
-  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
-  // 29/set (17), correção do Douglas (depois de eu explicar errado que
-  // "com 1 empresa só a coluna nem aparece"): "tem que aparecer mesmo
-  // so com uma / e nao pode tirar o filtro, somente separado por
-  // empresa, nada junto" -- MESMA regra do ChatDrawer (ver comentário
-  // grande lá em components/GameRoom.tsx): sempre uma empresa válida
-  // selecionada (nunca null/"todas juntas") assim que existir pelo
-  // menos uma, escolhendo a primeira por padrão.
-  useEffect(() => {
-    if (companyOptions.length === 0) {
-      if (selectedCompanyKey !== null) setSelectedCompanyKey(null);
-      return;
-    }
-    if (!selectedCompanyKey || !companyOptions.some((opt) => opt.key === selectedCompanyKey)) {
-      setSelectedCompanyKey(companyOptions[0].key);
-    }
-  }, [companyOptions, selectedCompanyKey]);
-  // "Nova conversa" na aba Empresa (pedido do Douglas, 29/set: "nao ta
-  // igual ainda eu nao tenho opcao de criar nova conversa na aba da
-  // empresa") -- reaproveita GET /api/friends/search (mesma fonte da
-  // aba "Buscar pessoas" do FriendsPanel), já que a lane "company" não
-  // tem trava de amizade nenhuma (qualquer conta com qualquer conta,
-  // ver getOrCreateDirectConversation em server/chatStore.js) --
-  // diferente de "Conversas privadas", que só nasce pelo painel de
-  // Amigos mesmo.
-  const [newConvOpen, setNewConvOpen] = useState(false);
+  // chamada de voz/vídeo (pedido do Douglas, 1/out) -- o ChatDrawer já
+  // sabe desenhar tudo isso (botão verde "tipo discord", vídeo local/
+  // remoto), só que esse painel REST-only não tem WebRTC/mesh nenhum
+  // montado (isso é TODO WebSocket, ver callPeersRef/joinCall em
+  // GameRoom.tsx) -- gap conhecido por enquanto: nunca tem ninguém
+  // numa chamada, nunca entra numa (callParticipantsByConversation
+  // sempre vazio mais abaixo), o ChatDrawer simplesmente não desenha
+  // nada de chamada nesse caso. localStreamRef precisa de UM ref de
+  // verdade (ChatDrawer lê .current), mesmo nunca tendo stream nenhum
+  // aqui.
+  const dummyLocalStreamRef = useRef<MediaStream | null>(null);
+
+  // "Conversa" (1:1) vs "Criar grupo" (pedido do Douglas, 1/out) --
+  // MESMO modo explícito escolhido no topo da tela "Nova conversa" que
+  // o ChatDrawer ganhou (ver newConvMode/changeNewConvMode em
+  // GameRoom.tsx).
+  const [newConvMode, setNewConvMode] = useState<"direct" | "group">("direct");
+  const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
+  const [newConvName, setNewConvName] = useState("");
+  // filtro Amigos/Empresa em "Nova conversa" (pedido do Douglas,
+  // 30/set) -- "Amigos" busca só amigo mútuo (GET /api/friends/list) e
+  // sempre cria lane "private"; "Empresa" busca qualquer conta (GET
+  // /api/friends/search) e cria lane "company".
+  const [newConvFilter, setNewConvFilter] = useState<"company" | "friends">("company");
   const [newConvQuery, setNewConvQuery] = useState("");
   const [newConvResults, setNewConvResults] = useState<
     { userId: string; name: string; photoUrl: string }[] | null
   >(null);
-  const [newConvBusy, setNewConvBusy] = useState<string | null>(null);
-  // 30/set, pedido do Douglas: "quando clicar no chat em nova
-  // conversa buscar uma pessoa pra nova conversa, coloque filtro /
-  // Amigos / Empresa" -- "Amigos" busca só amigo mútuo (GET
-  // /api/friends/list, MESMA fonte do painel de Amigos) e sempre
-  // cria lane "private"; "Empresa" é o comportamento de sempre (busca
-  // QUALQUER conta, GET /api/friends/search) e cria lane "company" (já
-  // sai carimbada com a empresa de quem cria, ver roomSlug em
-  // handleStartConversation mais abaixo). Some com a logo por item
-  // aqui de propósito (Douglas, mesma mensagem de antes: "quero a
-  // logo apenas na aba empresas, porque ter ela nas conversas?").
-  const [newConvFilter, setNewConvFilter] = useState<"company" | "friends">("company");
   const [newConvFriends, setNewConvFriends] = useState<
     { userId: string; name: string; photoUrl: string }[] | null
   >(null);
-  const showCompanyRail = !activeId && !newConvOpen && laneFilter === "company" && companyOptions.length > 0;
+  const [renamingGroup, setRenamingGroup] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState("");
 
   useEffect(() => {
-    if (!newConvOpen || newConvFilter !== "company" || !accountAccessToken) return;
+    if (view !== "new" || newConvFilter !== "company" || !accountAccessToken) return;
     let cancelled = false;
     const t = setTimeout(() => {
       fetch(`/api/friends/search?q=${encodeURIComponent(newConvQuery.trim())}`, {
@@ -1412,15 +1420,12 @@ function LobbyChatPanel({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [newConvOpen, newConvFilter, newConvQuery, accountAccessToken]);
+  }, [view, newConvFilter, newConvQuery, accountAccessToken]);
 
   // "Amigos" -- busca a lista inteira uma vez (amigo mútuo raramente
-  // passa de umas dezenas, sem paginação/debounce igual /friends/search
-  // porque não é uma query no banco por texto, é filtro local em cima
-  // de uma lista já pequena, ver visibleNewConvFriends abaixo) sempre
-  // que abre "Nova conversa" nesse modo.
+  // passa de umas dezenas), o ChatDrawer filtra pelo texto sozinho.
   useEffect(() => {
-    if (!newConvOpen || newConvFilter !== "friends" || !accountAccessToken) return;
+    if (view !== "new" || newConvFilter !== "friends" || !accountAccessToken) return;
     let cancelled = false;
     fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
       .then((r) => (r.ok ? r.json() : null))
@@ -1433,56 +1438,119 @@ function LobbyChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [newConvOpen, newConvFilter, accountAccessToken]);
+  }, [view, newConvFilter, accountAccessToken]);
 
-  const visibleNewConvFriends = useMemo(() => {
-    const q = newConvQuery.trim().toLowerCase();
-    const list = newConvFriends ?? [];
-    return q ? list.filter((f) => f.name.toLowerCase().includes(q)) : list;
-  }, [newConvFriends, newConvQuery]);
+  // sai da tela "Nova conversa" -- limpa busca/filtro/seleção pra
+  // próxima vez que abrir começar do zero (MESMO efeito de "sai do
+  // chatView 'new'" em GameRoom.tsx).
+  useEffect(() => {
+    if (view !== "new") {
+      setNewConvQuery("");
+      setNewConvFilter("company");
+      setNewConvResults(null);
+      setNewConvFriends(null);
+      setNewConvMode("direct");
+      setNewConvSelection([]);
+      setNewConvName("");
+    }
+  }, [view]);
 
-  function closeNewConv() {
-    setNewConvOpen(false);
-    setNewConvQuery("");
-    setNewConvResults(null);
-    setNewConvFriends(null);
-    setNewConvFilter("company");
+  function changeNewConvMode(mode: "direct" | "group") {
+    setNewConvMode(mode);
+    setNewConvSelection([]);
+    setNewConvName("");
   }
 
-  async function startNewCompanyConversation(targetUserId: string, targetName: string) {
-    if (newConvBusy) return;
-    setNewConvBusy(targetUserId);
-    try {
-      onStartConversation(targetUserId, targetName, "company");
-      closeNewConv();
-    } finally {
-      setNewConvBusy(null);
-    }
+  function toggleNewConvSelection(userId: string) {
+    setNewConvSelection((prev) =>
+      newConvMode === "direct"
+        ? prev.includes(userId)
+          ? []
+          : [userId]
+        : prev.includes(userId)
+          ? prev.filter((x) => x !== userId)
+          : [...prev, userId]
+    );
   }
 
-  async function startNewPrivateConversation(targetUserId: string, targetName: string) {
-    if (newConvBusy) return;
-    setNewConvBusy(targetUserId);
-    try {
-      onStartConversation(targetUserId, targetName, "private");
-      closeNewConv();
-    } finally {
-      setNewConvBusy(null);
+  // POST /chat/create-group (ver server/index.js) pra grupo, ou
+  // onStartConversation (handleStartConversation no Lobby, mesmo POST
+  // /chat/direct de sempre) pra 1:1 -- MESMA ramificação de
+  // submitNewConversation em GameRoom.tsx, via REST (sem socket, ver
+  // comentário grande no topo do arquivo sobre esse painel ser
+  // REST-only).
+  async function submitNewConversation() {
+    if (newConvMode === "direct") {
+      if (newConvSelection.length !== 1) return;
+      // "Amigos" sempre inicia "private" (servidor confere amigo mútuo
+      // de novo), "Empresa" continua "company" -- MESMA regra de
+      // newConvFilter em GameRoom.tsx.
+      onStartConversation(newConvSelection[0], "", newConvFilter === "friends" ? "private" : "company");
+      setNewConvSelection([]);
+      setNewConvName("");
+      return;
     }
+    const name = newConvName.trim();
+    if (newConvSelection.length === 0 || !name) return;
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/create-group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: myUserId,
+          userName: myName,
+          participantIds: newConvSelection,
+          name,
+          roomSlug: myRoomSlug,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.conversation) {
+          onConversationsReplaced(null, data.conversation);
+          openConversation(data.conversation.id);
+        }
+      }
+    } catch {
+      // rede caiu -- pessoa continua na tela "Nova conversa" e tenta de novo
+    }
+    setNewConvSelection([]);
+    setNewConvName("");
+  }
+
+  function startRenameGroup(currentName: string) {
+    setGroupNameDraft(currentName);
+    setRenamingGroup(true);
+  }
+
+  // POST /chat/rename-group (ver server/index.js) -- MESMA ação do
+  // case "chat:rename_group" do WebSocket (ver submitRenameGroup em
+  // GameRoom.tsx).
+  async function submitRenameGroup() {
+    const name = groupNameDraft.trim();
+    if (!activeId || !name) return;
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/rename-group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: activeId, userId: myUserId, name }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.conversation) onConversationsReplaced(null, data.conversation);
+      }
+    } catch {
+      // rede caiu -- pessoa tenta de novo
+    }
+    setRenamingGroup(false);
   }
 
   useEffect(() => {
     if (!activeId) {
       setMessages(null);
       setUnreadSinceTs(null);
-      // 1/out: zera tudo que é POR CONVERSA junto (mesmo espírito de
-      // sempre desse efeito) -- senão a faixa de fixadas/"visto por"
-      // de uma conversa ficaria aparecendo por um instante ao abrir
-      // outra, antes do primeiro fetchMessages dela responder.
       setPins([]);
       setLastReadByUserId({});
-      setReactingMessageId(null);
-      setPinningMessageId(null);
       setFilesPanelOpen(false);
       setFilesPanelItems(null);
       return;
@@ -1492,8 +1560,6 @@ function LobbyChatPanel({
     setUnreadSinceTs(null);
     setPins([]);
     setLastReadByUserId({});
-    setReactingMessageId(null);
-    setPinningMessageId(null);
     setFilesPanelOpen(false);
     setFilesPanelItems(null);
     const conversationId = activeId;
@@ -1521,15 +1587,9 @@ function LobbyChatPanel({
     fetchMessages();
     const messagesPoll = setInterval(fetchMessages, 4000);
 
-    // 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
-    // mostra onde ta a mensagem nao vista, e quando eu vejo, ela nao
-    // some a marcacao" -- marca como lida SÓ UMA VEZ nessa abertura
-    // (não a cada poll de mensagem ali em cima, senão o corte
-    // unreadSinceTs ficaria avançando sozinho e a linha divisória
-    // pularia de lugar enquanto a pessoa ainda tá lendo). Mesmo POST
-    // /chat/open que o servidor expõe pro Lobby (sem WebSocket, ver
-    // comentário grande no topo do arquivo) -- devolve o lastRead de
-    // ANTES de marcar, pra desenhar a linha "mensagens não vistas".
+    // marca como lida SÓ UMA VEZ nessa abertura (ver comentário grande
+    // de sempre -- não recalcula sozinho enquanto a pessoa ainda tá
+    // lendo).
     fetch(`${REALTIME_HTTP_BASE}/chat/open`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1539,9 +1599,6 @@ function LobbyChatPanel({
       .then((data) => {
         if (cancelled) return;
         setUnreadSinceTs(typeof data?.unreadSinceTs === "number" ? data.unreadSinceTs : 0);
-        // 1/out: pins/lastRead já vêm nessa resposta também (ver
-        // comentário grande do POST /chat/open em server/index.js) --
-        // usa de primeira sem esperar o próximo poll de fetchMessages.
         if (data?.pins) setPins(data.pins);
         if (data?.lastRead) setLastReadByUserId(data.lastRead);
         onConversationRead(conversationId);
@@ -1559,59 +1616,6 @@ function LobbyChatPanel({
     // quando a conversa aberta muda de verdade.
   }, [activeId, myUserId]);
 
-  const activeConversation = conversations?.find((c) => c.id === activeId) ?? null;
-
-  // @menção (pedido do Douglas, 1/out) -- quem pode ser @mencionado
-  // aqui fora é só os participantes da conversa aberta (a Sala/
-  // "quem tá por perto" não existe no Lobby, ver comentário grande no
-  // topo do arquivo), MESMO formato de mentionCandidates em
-  // GameRoom.tsx.
-  const mentionCandidates: { id: string; name: string }[] = (activeConversation?.participants ?? [])
-    .filter((p) => p.id !== myUserId)
-    .map((p) => ({ id: p.id, name: p.name || "?" }));
-  const mentionMatches =
-    mentionState != null
-      ? mentionCandidates.filter((c) => (c.name || "").toLowerCase().includes(mentionState.query.toLowerCase())).slice(0, 6)
-      : [];
-  // quem eu já @mencionei na mensagem que tô escrevendo agora -- MESMO
-  // mecanismo de pendingMentionIds em GameRoom.tsx (um array à parte,
-  // zerado a cada envio), só que local a esse painel (não precisa
-  // subir pro Lobby, diferente do draft/activeId que o Lobby usa pra
-  // outras coisas).
-  const pendingMentionIdsRef = useRef<string[]>([]);
-
-  function handleComposerInputChange(e: ChangeEvent<HTMLInputElement>) {
-    const value = e.target.value;
-    setDraft(value);
-    const caret = e.target.selectionStart ?? value.length;
-    // mesmo regex de detecção de "@algo" do composer de dentro da sala
-    // (ver handleComposerInputChange em GameRoom.tsx).
-    const before = value.slice(0, caret);
-    const match = before.match(/(?:^|\s)@([^\s@]*)$/);
-    if (match) {
-      const start = before.length - match[0].length + (match[0].startsWith("@") ? 0 : 1);
-      setMentionState({ start, end: caret, query: match[1] });
-    } else {
-      setMentionState(null);
-    }
-  }
-
-  function insertMention(candidate: { id: string; name: string }) {
-    if (!mentionState) return;
-    const name = candidate.name || "?";
-    const newText = draft.slice(0, mentionState.start) + "@" + name + " " + draft.slice(mentionState.end);
-    setDraft(newText);
-    if (!pendingMentionIdsRef.current.includes(candidate.id)) pendingMentionIdsRef.current.push(candidate.id);
-    setMentionState(null);
-    composerInputRef.current?.focus();
-  }
-
-  // reação com emoji (pedido do Douglas, 1/out) -- MESMO toggle do
-  // case "chat:react" do WebSocket, só que via POST /chat/react direto
-  // (sem socket, ver comentário grande dele em server/index.js);
-  // atualiza a mensagem local na hora com a resposta do servidor (não
-  // espera o próximo poll de 4s de fetchMessages pra não parecer
-  // travado ao clicar).
   async function toggleReaction(messageId: string, emoji: string) {
     if (!activeId) return;
     try {
@@ -1626,14 +1630,10 @@ function LobbyChatPanel({
         setMessages((prev) => (prev ? prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions } : m)) : prev));
       }
     } catch {
-      // rede caiu -- sem feedback especial, o próximo poll corrige sozinho
+      // rede caiu -- o próximo poll corrige sozinho
     }
   }
 
-  // mensagem fixada (pedido do Douglas, 1/out: "mensagem fixada
-  // (definir tempo de fixacao)") -- MESMO par de ações dos cases
-  // "chat:pin"/"chat:unpin" do WebSocket, via POST /chat/pin e /chat/
-  // unpin (ver comentário grande deles em server/index.js).
   async function pinMessage(messageId: string, durationMs: number | null) {
     if (!activeId) return;
     try {
@@ -1648,7 +1648,6 @@ function LobbyChatPanel({
     } catch {
       // rede caiu -- próximo poll corrige sozinho
     }
-    setPinningMessageId(null);
   }
 
   async function unpinMessage(messageId: string) {
@@ -1667,11 +1666,30 @@ function LobbyChatPanel({
     }
   }
 
-  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out) --
-  // MESMA ação do case "chat:attachments" do WebSocket, via GET /chat/
-  // attachments (ver comentário grande dele em server/index.js), só
-  // busca ao ABRIR o painel (não fica fazendo polling -- a conversa já
-  // tá sendo repolida de qualquer jeito, e anexo novo aparece ao reabrir).
+  // apagar mensagem (pedido do Douglas, 1/out, comparando com o
+  // Slack) -- POST /chat/delete (ver server/index.js), MESMA ação do
+  // case "chat:delete" do WebSocket (ver deleteMessage/GameRoom.tsx).
+  async function deleteMessage(conversationId: string | null, messageId: string) {
+    if (!conversationId) return;
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, userId: myUserId, messageId }),
+      });
+      if (!res.ok) return;
+      // o texto/anexo original já vem vazio do servidor nesse caso
+      // (ver chatStore.deleteMessage) -- espelha isso localmente sem
+      // esperar o próximo poll de 4s (mesma ideia de toggleReaction/
+      // pinMessage acima).
+      setMessages((prev) =>
+        prev ? prev.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null, roomCard: null } : m)) : prev
+      );
+    } catch {
+      // rede caiu -- pessoa tenta de novo
+    }
+  }
+
   async function openFilesPanel() {
     setFilesPanelOpen(true);
     if (!activeId) return;
@@ -1690,24 +1708,6 @@ function LobbyChatPanel({
     setFilesPanelOpen(false);
   }
 
-  // "mencionar na conversa" (botão do painel de arquivos, pedido do
-  // Douglas, 1/out) -- reenvia esse anexo como mensagem nova no fim da
-  // conversa (mesma ideia simples do botão igual em GameRoom.tsx: não
-  // tem como "linkar" pra mensagem original no meio do histórico sem
-  // scroll-to-message, então só manda de novo).
-  async function mentionAttachmentInChat(item: ChatAttachmentItem) {
-    await sendChatPayload({ attachment: item.attachment, kind: item.kind });
-    setFilesPanelOpen(false);
-  }
-
-  // "3 pontinhos" -- MESMA ação do case "chat:set_lane" do WebSocket
-  // (ver ChatDrawer/moveConversationLane em GameRoom.tsx), só que sem
-  // socket (POST /chat/set-lane, ver comentário grande no topo do
-  // arquivo sobre esse painel ser REST-only). 30/set, bug reportado
-  // pelo Douglas ("adicionei logo a empresa e no chat nao carregou"):
-  // mandava sempre companyInfo null aqui (o Lobby não tem roomId de
-  // conexão) -- agora manda a sala PRÓPRIA de quem está movendo
-  // (myRoomSlug), o server só usa quando lane === "company".
   async function moveConversationLane(conversationId: string, lane: "company" | "private") {
     try {
       const res = await fetch(`${REALTIME_HTTP_BASE}/chat/set-lane`, {
@@ -1718,9 +1718,6 @@ function LobbyChatPanel({
       if (!res.ok) return;
       const data = await res.json();
       if (data?.conversation) onConversationsReplaced(data.removedConversationId ?? null, data.conversation);
-      // se a conversa REMOVIDA (mesclada na sobrevivente) era a que
-      // tava aberta aqui, troca pra sobrevivente em vez de deixar o
-      // painel apontando pra um id que não existe mais.
       if (data?.removedConversationId && activeId === data.removedConversationId) {
         setActiveId(data.conversation?.id ?? null);
       }
@@ -1730,12 +1727,7 @@ function LobbyChatPanel({
   }
 
   // POST /chat/send genérico -- text (chat de sempre), attachment+kind
-  // (foto/arquivo/áudio, pedido do Douglas 30/set: "fora da sala nao
-  // deixa anexar e mandar audio") ou roomCard (cardzinho de convite/
-  // visita, mesmo pedido: "os contatos, se convidarem direto com envio
-  // de convite"). MESMO endpoint que sendMessage já usava, só que
-  // extraído pra ser reaproveitado pelas três formas de mandar
-  // mensagem (texto/anexo/cardzinho) sem repetir o fetch três vezes.
+  // (foto/arquivo/áudio) ou roomCard (cardzinho de convite/visita).
   async function sendChatPayload(payload: {
     text?: string;
     attachment?: ChatAttachment;
@@ -1763,13 +1755,10 @@ function LobbyChatPanel({
     if (!text || !activeId || sending) return;
     setSending(true);
     try {
-      // @menção (pedido do Douglas, 1/out) -- manda junto quem foi
-      // @mencionado nessa mensagem (ver insertMention/pendingMentionIdsRef
-      // acima), mesmo espírito de pendingMentionIds em GameRoom.tsx.
-      const msg = await sendChatPayload({ text, mentionedUserIds: pendingMentionIdsRef.current });
+      const msg = await sendChatPayload({ text, mentionedUserIds: pendingMentionIds });
       if (msg) {
         setDraft("");
-        pendingMentionIdsRef.current = [];
+        setPendingMentionIds([]);
       }
     } catch {
       // rede caiu no meio -- deixa o texto no campo pra pessoa tentar de novo
@@ -1798,7 +1787,7 @@ function LobbyChatPanel({
     sendChatAttachment(file, file.name, file.type.startsWith("image/") ? "image" : "file");
   }
 
-  // --- gravação de áudio, mesmo fluxo "estilo WhatsApp" do chat de
+  // --- gravação de áudio, MESMO fluxo "estilo WhatsApp" do chat de
   // dentro da sala (grava -> PARA -> preview -> só manda quando
   // confirma, ver ChatDrawer/GameRoom.tsx) -- aqui o Lobby não tem
   // câmera/mic da sala já capturados (localStreamRef não existe fora
@@ -1871,12 +1860,8 @@ function LobbyChatPanel({
   }
 
   // "Convidar amigo" / "Visitar amigo" (pedido do Douglas, 30/set) --
-  // "Convidar amigo" manda um cardzinho com a MINHA sala (myRoomSlug/
-  // myRoomName/myRoomLogoUrl, únicas informações de "minha sala" que
-  // esse painel tem, ver props no topo do arquivo); "Visitar amigo"
-  // manda só o pedido, sem sala nenhuma -- MESMO mecanismo/mesmos
-  // nomes de campo que ChatDrawer usa dentro da sala (ver comentário
-  // grande em sendRoomCard/GameRoom.tsx).
+  // MESMO mecanismo/mesmos nomes de campo que o ChatDrawer usa dentro
+  // da sala (ver sendRoomCard/GameRoom.tsx).
   async function sendRoomCard(action: "invite" | "visit") {
     const roomCard: RoomCard =
       action === "invite"
@@ -1885,780 +1870,161 @@ function LobbyChatPanel({
     await sendChatPayload({ roomCard });
   }
 
-  const companyRail = showCompanyRail && (
-    <div className="chat-company-rail">
-      <span className="chat-company-rail-title">Empresas</span>
-      <div className="chat-company-rail-list">
-        {companyOptions.map((opt) => (
-          <button
-            key={opt.key}
-            type="button"
-            className={selectedCompanyKey === opt.key ? "chat-company-rail-item active" : "chat-company-rail-item"}
-            title={opt.name || "Empresa"}
-            onClick={() => setSelectedCompanyKey(opt.key)}
-          >
-            {opt.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={opt.logoUrl} alt="" />
-            ) : (
-              <CompanyIcon />
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  // --- painel lateral "arquivos da conversa" (pedido do Douglas, 1/out:
-  // "um botao do lado do chat centralizado na borda, igual a seta de
-  // editar card empresa, porem com icone de ficheiro, expande do
-  // lado"). MESMO mecanismo (position:fixed + rightEdge calculado em
-  // JS) do ChatDrawer de dentro da sala (ver comentário grande dele em
-  // GameRoom.tsx) -- aqui mais simples porque o Lobby só tem o layout
-  // flutuante (nunca fixa na lateral, não existe pinMode aqui), então
-  // rightEdge só varia com companyRail (coluna de empresas) ou não.
-  // posição do botão/painel de arquivos (ver comentário grande
-  // logo acima) -- precisa branch por pinMode agora: fixo na
-  // lateral começa em left:0 (não 16) e a gaveta fica mais
-  // estreita (320px, não 380px -- mesma redução que
-  // .chat-drawer-sidebar faz na sala), ver .lobby-chat-drawer-sidebar
-  // em globals.css.
-  const rightEdge =
-    pinMode === "side" ? (companyRail ? 92 : 0) + 320 : 16 + (companyRail ? 92 : 0) + 380;
-  const filesTrigger = !newConvOpen && activeId && (
-    <button
-      type="button"
-      className={pinMode === "side" ? "chat-files-trigger chat-files-trigger-sidebar" : "chat-files-trigger"}
-      style={{ left: rightEdge }}
-      onClick={() => (filesPanelOpen ? closeFilesPanel() : openFilesPanel())}
-      aria-expanded={filesPanelOpen}
-      title={filesPanelOpen ? "Fechar arquivos" : "Arquivos da conversa"}
-      data-tooltip={filesPanelOpen ? "Fechar arquivos" : "Arquivos da conversa"}
-    >
-      {filesPanelOpen ? <ChevronLeftIcon /> : <FileIcon />}
-    </button>
-  );
-  const FILES_PANEL_TABS: { key: "all" | "image" | "file" | "audio"; label: string }[] = [
-    { key: "all", label: "Tudo" },
-    { key: "image", label: "Imagens" },
-    { key: "file", label: "Arquivos" },
-    { key: "audio", label: "Áudios" },
-  ];
-  const filesPanel = !newConvOpen && activeId && filesPanelOpen && (
-    <>
-      <div className="chat-files-panel-click-catcher" onClick={closeFilesPanel} />
-      <div
-        className={pinMode === "side" ? "chat-files-panel chat-files-panel-sidebar" : "chat-files-panel"}
-        style={{ left: rightEdge + 6 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="chat-files-panel-header">
-          <h3>Arquivos da conversa</h3>
-          <button type="button" className="items-panel-close" onClick={closeFilesPanel} title="Fechar">
-            ✕
-          </button>
-        </div>
-        <div className="chat-files-panel-tabs">
-          {FILES_PANEL_TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              className={filesPanelFilter === t.key ? "chat-files-panel-tab active" : "chat-files-panel-tab"}
-              onClick={() => setFilesPanelFilter(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div className="chat-files-panel-search">
-          <SearchIcon />
-          <input
-            value={filesPanelQuery}
-            onChange={(e) => setFilesPanelQuery(e.target.value)}
-            placeholder="Buscar por nome..."
-          />
-        </div>
-        <div className="chat-files-panel-list">
-          {filesPanelItems === null ? (
-            <p className="chat-files-panel-hint">Carregando...</p>
-          ) : (
-            (() => {
-              const q = filesPanelQuery.trim().toLowerCase();
-              const list = filesPanelItems.filter(
-                (it) =>
-                  (filesPanelFilter === "all" || it.kind === filesPanelFilter) &&
-                  (!q || it.attachment.name.toLowerCase().includes(q))
-              );
-              if (list.length === 0) return <p className="chat-files-panel-hint">Nenhum arquivo encontrado.</p>;
-              return list.map((it) => (
-                <div key={it.messageId} className="chat-files-panel-item">
-                  {it.kind === "image" ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img className="chat-files-panel-thumb" src={attachmentUrl(it.attachment.url)} alt="" />
-                  ) : (
-                    <span className="chat-files-panel-icon">
-                      {it.kind === "audio" ? <MicIcon off={false} /> : <FileIcon />}
-                    </span>
-                  )}
-                  <span className="chat-files-panel-item-info">
-                    <span className="chat-files-panel-item-name">{it.attachment.name}</span>
-                    <span className="chat-files-panel-item-meta">
-                      {it.senderName || "Alguém"} · {formatFileSize(it.attachment.size)}
-                    </span>
-                  </span>
-                  <a
-                    className="chat-files-panel-btn"
-                    href={attachmentUrl(it.attachment.url)}
-                    download={it.attachment.name}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="Baixar"
-                  >
-                    <DownloadIcon />
-                  </a>
-                  <button
-                    type="button"
-                    className="chat-files-panel-btn"
-                    title="Mencionar na conversa"
-                    onClick={() => mentionAttachmentInChat(it)}
-                  >
-                    <AtIcon />
-                  </button>
-                </div>
-              ));
-            })()
-          )}
-        </div>
-      </div>
-    </>
-  );
-
-  const drawerBody = (
-    <div className={pinMode === "side" ? "chat-drawer lobby-chat-drawer-sidebar" : "chat-drawer"}>
-      <div className="chat-drawer-header">
-        {(activeId || newConvOpen) && (
-          <button
-            type="button"
-            className="chat-icon-btn"
-            title="Voltar"
-            onClick={() => (newConvOpen ? closeNewConv() : setActiveId(null))}
-          >
-            <BackIcon />
-          </button>
-        )}
-        {newConvOpen ? (
-          <h3>Nova conversa</h3>
-        ) : activeId && activeConversation?.kind === "direct" && activeConversation.participants[0] ? (
-          <span className="chat-drawer-header-identity-wrap">
-            <button
-              type="button"
-              className="chat-drawer-header-identity"
-              onClick={() => accountAccessToken && setViewingProfileUserId(activeConversation.participants[0].id)}
-              title="Ver perfil"
-            >
-              <span
-                className="chat-drawer-header-avatar"
-                style={{ background: activeConversation.participants[0].color || "#5c9bff" }}
-              >
-                {activeConversation.participants[0].photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={activeConversation.participants[0].photoUrl} alt="" />
-                ) : (
-                  (activeConversation.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
-                )}
-              </span>
-              <h3>{conversationTitle(activeConversation)}</h3>
-            </button>
-            {/* "Convidar amigo" / "Visitar amigo" -- pedido do Douglas,
-                30/set: "ao lado do nome, um botao com seta clicou
-                expande, Convidar amigo / Visitar amigo" (mesmo padrão
-                do ChatDrawer dentro da sala, ver comentário grande lá em
-                components/GameRoom.tsx). "Convidar amigo" só aparece
-                habilitado quando a pessoa já tem sala própria
-                (myRoomSlug) -- sem sala não tem o que convidar. */}
-            <button
-              type="button"
-              className={inviteMenuOpen ? "chat-invite-toggle-btn open" : "chat-invite-toggle-btn"}
-              title="Convidar ou visitar"
-              onClick={() => setInviteMenuOpen((v) => !v)}
-            >
-              <ChevronIcon />
-            </button>
-            {inviteMenuOpen && (
-              <>
-                <div className="chat-conv-menu-backdrop" onClick={() => setInviteMenuOpen(false)} />
-                <div className="chat-invite-menu">
-                  <button
-                    type="button"
-                    className="chat-invite-menu-item"
-                    disabled={!myRoomSlug}
-                    title={myRoomSlug ? undefined : "Você ainda não tem uma sala"}
-                    onClick={() => {
-                      sendRoomCard("invite");
-                      setInviteMenuOpen(false);
-                    }}
-                  >
-                    Convidar amigo
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-invite-menu-item"
-                    onClick={() => {
-                      sendRoomCard("visit");
-                      setInviteMenuOpen(false);
-                    }}
-                  >
-                    Visitar amigo
-                  </button>
-                </div>
-              </>
-            )}
-          </span>
-        ) : (
-          <h3>{activeId ? conversationTitle(activeConversation) : "Conversas"}</h3>
-        )}
-        <div className="chat-drawer-header-actions">
-          {!activeId && !newConvOpen && laneFilter === "company" && (
-            <button type="button" className="chat-icon-btn" title="Nova conversa" onClick={() => setNewConvOpen(true)}>
-              <PlusIcon />
-            </button>
-          )}
-          {/* "fixar" (pedido do Douglas, 1/out: "fixar fora da sala
-              também") -- mesmo botão/ícone do ChatDrawer de dentro da
-              sala (ver comentário grande de pinBtn em
-              components/ChatDrawer.tsx), clicar de novo solta (volta a
-              flutuar). */}
-          <button
-            type="button"
-            className={pinMode === "side" ? "chat-icon-btn active" : "chat-icon-btn"}
-            title={pinMode === "side" ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
-            onClick={onToggleSidePin}
-          >
-            <PinIcon filled={pinMode === "side"} />
-          </button>
-          <button type="button" className="chat-icon-btn" title="Fechar" onClick={onClose}>
-            <CloseIcon />
-          </button>
-        </div>
-      </div>
-
-      {newConvOpen ? (
-        <div className="chat-new-conv-body">
-          {/* 30/set, pedido do Douglas: "buscar uma pessoa pra nova
-              conversa, coloque filtro / Amigos / Empresa" -- mesmo
-              visual de aba que .chat-lane-tabs, reaproveitado aqui.
-              "Amigos" = só amigo mútuo, cria conversa "private";
-              "Empresa" = qualquer conta (comportamento de sempre),
-              cria "company". */}
-          <div className="chat-lane-tabs">
-            <button
-              type="button"
-              className={`chat-lane-tab${newConvFilter === "friends" ? " chat-lane-tab-active" : ""}`}
-              onClick={() => setNewConvFilter("friends")}
-            >
-              Amigos
-            </button>
-            <button
-              type="button"
-              className={`chat-lane-tab${newConvFilter === "company" ? " chat-lane-tab-active" : ""}`}
-              onClick={() => setNewConvFilter("company")}
-            >
-              Empresa
-            </button>
-          </div>
-          <input
-            type="text"
-            className="contacts-panel-search"
-            placeholder="Buscar pelo nome..."
-            value={newConvQuery}
-            onChange={(e) => setNewConvQuery(e.target.value)}
-            autoFocus
-          />
-          {newConvFilter === "friends" ? (
-            newConvFriends === null ? (
-              <p className="chat-empty-hint">Buscando…</p>
-            ) : visibleNewConvFriends.length === 0 ? (
-              <p className="chat-empty-hint">
-                {newConvQuery
-                  ? "Nenhum amigo com esse nome."
-                  : "Você ainda não tem amigo mútuo. Vire amigo de alguém no painel de Amigos primeiro."}
-              </p>
-            ) : (
-              <div className="chat-picker-list">
-                {visibleNewConvFriends.map((u) => (
-                  <button
-                    key={u.userId}
-                    type="button"
-                    className={newConvBusy === u.userId ? "chat-picker-item busy" : "chat-picker-item"}
-                    disabled={!!newConvBusy}
-                    onClick={() => startNewPrivateConversation(u.userId, u.name)}
-                  >
-                    <span className="chat-conv-avatar" style={{ background: "#5a4b7c" }}>
-                      {u.photoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={u.photoUrl} alt="" />
-                      ) : (
-                        (u.name || "?").trim().charAt(0).toUpperCase() || "?"
-                      )}
-                    </span>
-                    <span>{u.name || "(sem nome)"}</span>
-                  </button>
-                ))}
-              </div>
-            )
-          ) : newConvResults === null ? (
-            <p className="chat-empty-hint">Buscando…</p>
-          ) : newConvResults.length === 0 ? (
-            <p className="chat-empty-hint">{newConvQuery ? "Ninguém encontrado." : "Ninguém cadastrado ainda."}</p>
-          ) : (
-            <div className="chat-picker-list">
-              {newConvResults.map((u) => (
-                <button
-                  key={u.userId}
-                  type="button"
-                  className={newConvBusy === u.userId ? "chat-picker-item busy" : "chat-picker-item"}
-                  disabled={!!newConvBusy}
-                  onClick={() => startNewCompanyConversation(u.userId, u.name)}
-                >
-                  <span className="chat-conv-avatar" style={{ background: "#5a4b7c" }}>
-                    {u.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={u.photoUrl} alt="" />
-                    ) : (
-                      (u.name || "?").trim().charAt(0).toUpperCase() || "?"
-                    )}
-                  </span>
-                  <span>{u.name || "(sem nome)"}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : !activeId ? (
-        <>
-          <div className="chat-lane-tabs">
-            <button
-              type="button"
-              className={`chat-lane-tab${laneFilter === "company" ? " chat-lane-tab-active" : ""}`}
-              onClick={() => setLaneFilter("company")}
-            >
-              Empresa
-            </button>
-            <button
-              type="button"
-              className={`chat-lane-tab${laneFilter === "private" ? " chat-lane-tab-active" : ""}`}
-              onClick={() => setLaneFilter("private")}
-            >
-              Conversas privadas
-            </button>
-          </div>
-          {(() => {
-            const laneConversations = (conversations ?? []).filter((c) => c.lane === laneFilter);
-            const visibleLaneConversations =
-              laneFilter === "company" && selectedCompanyKey
-                ? laneConversations.filter((c) => `${c.companyName}::${c.companyLogoUrl || ""}` === selectedCompanyKey)
-                : laneConversations;
-            if (visibleLaneConversations.length === 0) {
-              return (
-                <p className="chat-empty-hint">
-                  {laneFilter === "private"
-                    ? "Nenhuma conversa privada ainda. Vire amigo de alguém no painel de Amigos pra conversar aqui."
-                    : "Nenhuma conversa ainda. Entre na sala pra começar uma."}
-                </p>
-              );
+  // --- adapta o formato leve que o REST devolve (ConversationSummary/
+  // ChatMessage, ver comentário grande deles no topo do arquivo) pro
+  // formato que o ChatDrawer espera (Conversation/ChatMsg, importados
+  // de GameRoom.tsx) -- a ÚNICA diferença de verdade entre os dois é
+  // participantIds/updatedAt (que o resumo do REST não carrega) e
+  // conversationId (que mensagem de Sala não tem, mas aqui SEMPRE tem
+  // uma conversa aberta); todo o resto (pins/anexo/reação/cardzinho)
+  // já é o MESMO formato (ver comentário "copiado, não importado" nos
+  // tipos acima), sem precisar de conversão nenhuma.
+  const drawerConversations: Conversation[] = useMemo(
+    () =>
+      (conversations ?? []).map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        lane: c.lane,
+        name: c.name,
+        companyName: c.companyName,
+        companyLogoUrl: c.companyLogoUrl,
+        participantIds: c.participants.map((p) => p.id),
+        participants: c.participants.map((p) => ({
+          id: p.id,
+          name: p.name || "",
+          color: p.color || "",
+          photoUrl: p.photoUrl || "",
+        })),
+        updatedAt: c.lastMessage?.ts ?? 0,
+        unreadCount: c.unreadCount,
+        lastMessage: c.lastMessage
+          ? {
+              senderId: c.lastMessage.senderId,
+              senderName: c.lastMessage.senderName,
+              kind: c.lastMessage.kind as ChatMsgKind,
+              text: c.lastMessage.text,
+              ts: c.lastMessage.ts,
             }
-            return (
-              <div className="chat-conv-list">
-                {visibleLaneConversations.map((c) => (
-                  <button key={c.id} type="button" className="chat-conv-item" onClick={() => setActiveId(c.id)}>
-                    {/* 30/set, pedido do Douglas: "quero a logo apenas
-                        na aba empresas, porque ter ela nas conversas?"
-                        -- selo por linha removido (a coluna
-                        .chat-company-rail já mostra/filtra por logo,
-                        repetir aqui era redundante). */}
-                    <span
-                      className="chat-conv-avatar"
-                      style={{ background: c.kind === "direct" ? c.participants[0]?.color || "#5c9bff" : "#7c5cff" }}
-                    >
-                      {c.kind === "group" ? <GroupIcon /> : conversationTitle(c).slice(0, 1).toUpperCase()}
-                    </span>
-                    <span className="chat-conv-info">
-                      <span className="chat-conv-name">{conversationTitle(c)}</span>
-                      {c.lastMessage && (
-                        <span className="chat-conv-preview">
-                          {c.lastMessage.senderId === myUserId ? "Você: " : ""}
-                          {c.lastMessage.kind === "text"
-                            ? c.lastMessage.text
-                            : c.lastMessage.kind === "room_card"
-                              ? "🔑 Convite de sala"
-                              : "anexo enviado"}
-                        </span>
-                      )}
-                    </span>
-                    {/* "3 pontinhos" -- mesmo padrão/mesmo motivo do
-                        ChatDrawer (dentro da sala, ver comentário
-                        grande em components/GameRoom.tsx): só conversa
-                        DIRETA, <span> com stopPropagation em vez de
-                        <button> (linha inteira já é um botão). */}
-                    {c.kind === "direct" && (
-                      <span className="chat-conv-menu-wrap" onClick={(e) => e.stopPropagation()}>
-                        <span
-                          className="chat-conv-menu-btn"
-                          title="Mais opções"
-                          onClick={() => setConvMenuOpenId((prev) => (prev === c.id ? null : c.id))}
-                        >
-                          ⋮
-                        </span>
-                        {convMenuOpenId === c.id && (
-                          <>
-                            <div className="chat-conv-menu-backdrop" onClick={() => setConvMenuOpenId(null)} />
-                            <div className="chat-conv-menu">
-                              <button
-                                type="button"
-                                className="chat-conv-menu-item"
-                                onClick={() => {
-                                  moveConversationLane(c.id, c.lane === "company" ? "private" : "company");
-                                  setConvMenuOpenId(null);
-                                }}
-                              >
-                                {c.lane === "company" ? "Mover para Conversas privadas" : "Mover para Empresa"}
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
-        </>
-      ) : (
-        <>
-          {/* mensagem fixada (pedido do Douglas, 1/out: "mensagem fixada
-              (definir tempo de fixacao)") -- MESMA faixa do ChatDrawer de
-              dentro da sala, mais recente primeiro. */}
-          {pins.length > 0 && (
-            <div className="chat-pins-bar">
-              {pins.map((p) => {
-                const pinnedMsg = messages?.find((m) => m.id === p.messageId);
-                return (
-                  <div key={p.messageId} className="chat-pin-row">
-                    <PinIcon filled />
-                    <span className="chat-pin-text">
-                      {pinnedMsg && !pinnedMsg.deleted ? pinnedMsg.text || "Anexo" : "Mensagem apagada"}
-                    </span>
-                    <button type="button" className="chat-pin-unpin-btn" onClick={() => unpinMessage(p.messageId)}>
-                      Tirar
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="chat-messages">
-            {messages === null ? (
-              <p className="chat-empty-hint">Carregando…</p>
-            ) : messages.length === 0 ? (
-              <p className="chat-empty-hint">Nenhuma mensagem ainda.</p>
-            ) : (
-              (() => {
-                // 29/set (14), pedido do Douglas: "quando eu abro a
-                // conversa nao mostra onde ta a mensagem nao vista" --
-                // linha divisória antes da PRIMEIRA mensagem de outro
-                // participante depois do corte unreadSinceTs (ver
-                // comentário grande no efeito de cima). unreadSinceTs
-                // null (ainda buscando) não desenha nada.
-                const dividerIndex =
-                  unreadSinceTs != null
-                    ? messages.findIndex((m) => m.senderId !== myUserId && m.ts > unreadSinceTs)
-                    : -1;
-                return messages.map((m, i) => {
-                  // reações/@menção/"visto por" (pedido do Douglas, 1/out)
-                  // -- MESMO cálculo por mensagem do ChatMessageRow em
-                  // GameRoom.tsx, só que aqui direto no corpo do .map
-                  // (esse painel não tem um componente de linha à parte).
-                  const reactionEntries = Object.entries(m.reactions ?? {}).filter(([, ids]) => ids.length > 0);
-                  const iWasMentioned = m.senderId !== myUserId && (m.mentionedUserIds ?? []).includes(myUserId);
-                  const isPinned = pins.some((p) => p.messageId === m.id);
-                  const isLastOwn =
-                    m.senderId === myUserId && m.id === [...messages].reverse().find((x) => x.senderId === myUserId)?.id;
-                  const seenBy = isLastOwn
-                    ? Object.entries(lastReadByUserId)
-                        .filter(([uid, ts]) => uid !== myUserId && ts >= m.ts)
-                        .map(([uid]) => activeConversation?.participants.find((p) => p.id === uid)?.name || "Alguém")
-                    : undefined;
-                  return (
-                  <div key={m.id}>
-                    {i === dividerIndex && (
-                      <div className="chat-unread-divider">
-                        <span>Mensagens não vistas</span>
-                      </div>
-                    )}
-                    <div className={m.senderId === myUserId ? "chat-message own" : "chat-message"}>
-                      {m.senderId !== myUserId && <span className="chat-message-sender">{m.senderName}</span>}
-                      <div className="chat-message-row">
-                        {/* reagir + fixar (pedido do Douglas, 1/out) --
-                            MESMOS botões/popover do ChatMessageRow de
-                            dentro da sala (ver comentário grande lá). */}
-                        {!m.deleted && (
-                          <div className="chat-message-actions">
-                            <div className="chat-message-action-wrap">
-                              <button
-                                type="button"
-                                className={reactingMessageId === m.id ? "chat-message-action-btn active" : "chat-message-action-btn"}
-                                title="Reagir"
-                                onClick={() => setReactingMessageId((cur) => (cur === m.id ? null : m.id))}
-                              >
-                                <SmileIcon />
-                              </button>
-                              {reactingMessageId === m.id && (
-                                <div className="chat-quick-react-popover">
-                                  {QUICK_REACTION_EMOJIS.map((emoji) => (
-                                    <button
-                                      key={emoji}
-                                      type="button"
-                                      className="chat-quick-react-option"
-                                      onClick={() => toggleReaction(m.id, emoji)}
-                                    >
-                                      {emoji}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className="chat-message-action-wrap">
-                              <button
-                                type="button"
-                                className={
-                                  isPinned || pinningMessageId === m.id
-                                    ? "chat-message-action-btn active"
-                                    : "chat-message-action-btn"
-                                }
-                                title={isPinned ? "Mensagem fixada" : "Fixar mensagem"}
-                                onClick={() => setPinningMessageId((cur) => (cur === m.id ? null : m.id))}
-                              >
-                                <PinIcon filled={isPinned} />
-                              </button>
-                              {pinningMessageId === m.id && (
-                                <div className="chat-pin-duration-popover">
-                                  {isPinned ? (
-                                    <button
-                                      type="button"
-                                      className="chat-pin-duration-option chat-pin-duration-unpin"
-                                      onClick={() => {
-                                        unpinMessage(m.id);
-                                        setPinningMessageId(null);
-                                      }}
-                                    >
-                                      Tirar fixação
-                                    </button>
-                                  ) : (
-                                    PIN_DURATION_OPTIONS.map((opt) => (
-                                      <button
-                                        key={opt.label}
-                                        type="button"
-                                        className="chat-pin-duration-option"
-                                        onClick={() => pinMessage(m.id, opt.durationMs)}
-                                      >
-                                        Fixar por {opt.label}
-                                      </button>
-                                    ))
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      <div className={iWasMentioned ? "chat-bubble chat-bubble-mentioned" : "chat-bubble"}>
-                        {m.deleted ? (
-                          <em>Mensagem apagada</em>
-                        ) : (
-                          <>
-                            {m.kind === "text" && <span>{renderMentionText(m.text)}</span>}
-                            {m.kind === "image" && m.attachment && (
-                              <a href={attachmentUrl(m.attachment.url)} target="_blank" rel="noreferrer">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img className="chat-attachment-image" src={attachmentUrl(m.attachment.url)} alt={m.attachment.name} />
-                              </a>
-                            )}
-                            {m.kind === "audio" && m.attachment && (
-                              // eslint-disable-next-line jsx-a11y/media-has-caption
-                              <audio className="chat-attachment-audio" controls src={attachmentUrl(m.attachment.url)} />
-                            )}
-                            {m.kind === "file" && m.attachment && (
-                              <a className="chat-attachment-file" href={attachmentUrl(m.attachment.url)} target="_blank" rel="noreferrer">
-                                <FileIcon />
-                                <span className="chat-attachment-file-info">
-                                  <span className="chat-attachment-file-name">{m.attachment.name}</span>
-                                  <span className="chat-attachment-file-size">{formatFileSize(m.attachment.size)}</span>
-                                </span>
-                              </a>
-                            )}
-                            {/* cardzinho de convite/visita (ver sendRoomCard mais acima e
-                                comentário grande em chatStore.addMessage) -- mesmo visual/
-                                mesmo texto do ChatDrawer dentro da sala. */}
-                            {m.kind === "room_card" && m.roomCard && m.roomCard.action === "invite" && (
-                              <div className="chat-room-card">
-                                <span className="chat-room-card-icon">
-                                  {m.roomCard.roomLogoUrl ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={m.roomCard.roomLogoUrl} alt="" />
-                                  ) : (
-                                    <CompanyIcon />
-                                  )}
-                                </span>
-                                <span className="chat-room-card-text">
-                                  {m.senderId === myUserId ? (
-                                    <>Você convidou pra sua sala <strong>{m.roomCard.roomName || "sua sala"}</strong></>
-                                  ) : (
-                                    <>
-                                      {m.senderName || "Alguém"} está te convidando pra sala{" "}
-                                      <strong>{m.roomCard.roomName || "dele(a)"}</strong>
-                                    </>
-                                  )}
-                                </span>
-                                {m.senderId !== myUserId && (
-                                  <a className="chat-room-card-btn" href={visitRoomLink(m.roomCard.roomSlug)}>
-                                    Entrar
-                                  </a>
-                                )}
-                              </div>
-                            )}
-                            {m.kind === "room_card" && m.roomCard && m.roomCard.action === "visit" && (
-                              <div className="chat-room-card">
-                                <span className="chat-room-card-icon">
-                                  <CompanyIcon />
-                                </span>
-                                <span className="chat-room-card-text">
-                                  {m.senderId === myUserId
-                                    ? "Você pediu pra visitar a sala dele(a)"
-                                    : `${m.senderName || "Alguém"} está querendo ir até você`}
-                                </span>
-                                {m.senderId !== myUserId && myRoomSlug && (
-                                  <button type="button" className="chat-room-card-btn" onClick={() => sendRoomCard("invite")}>
-                                    Convidar
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                            {m.text && m.kind !== "text" && m.kind !== "room_card" && (
-                              <div className="chat-attachment-caption">{m.text}</div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                      </div>
-                      {/* reações já dadas (pedido do Douglas, 1/out) --
-                          MESMOS pills do ChatMessageRow de dentro da sala. */}
-                      {reactionEntries.length > 0 && (
-                        <div className={m.senderId === myUserId ? "chat-reactions-row own" : "chat-reactions-row"}>
-                          {reactionEntries.map(([emoji, ids]) => (
-                            <button
-                              key={emoji}
-                              type="button"
-                              className={ids.includes(myUserId) ? "chat-reaction-pill active" : "chat-reaction-pill"}
-                              title={ids.length === 1 ? "1 reação" : `${ids.length} reações`}
-                              onClick={() => toggleReaction(m.id, emoji)}
-                            >
-                              <span>{emoji}</span>
-                              <span className="chat-reaction-count">{ids.length}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      <span className="chat-message-time">{formatChatTime(m.ts)}</span>
-                      {/* "visto por" (pedido do Douglas, 1/out) -- só na
-                          última mensagem MINHA (ver isLastOwn acima). */}
-                      {seenBy && seenBy.length > 0 && (
-                        <span className="chat-message-seenby">Visto por {seenBy.join(", ")}</span>
-                      )}
-                    </div>
-                  </div>
-                  );
-                });
-              })()
-            )}
-          </div>
-          {recordingAudio ? (
-            <div className="chat-composer chat-recording-bar">
-              <button className="chat-composer-btn" title="Cancelar gravação" onClick={cancelVoiceRecording}>
-                <TrashIcon />
-              </button>
-              <span className="chat-recording-indicator">
-                <span className="chat-recording-dot" />
-                Gravando... {formatRecordingTime(recordingElapsedSec)}
-              </span>
-              <button className="chat-composer-btn primary" title="Parar gravação" onClick={stopVoiceRecording}>
-                <StopIcon />
-              </button>
-            </div>
-          ) : recordedPreview ? (
-            <div className="chat-composer chat-audio-preview-bar">
-              <button className="chat-composer-btn" title="Descartar" onClick={discardRecordedAudio}>
-                <TrashIcon />
-              </button>
-              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-              <audio className="chat-audio-preview-player" controls src={recordedPreview.url} />
-              <span className="chat-recording-time">{formatRecordingTime(recordedPreview.durationSec)}</span>
-              <button className="chat-composer-btn primary" title="Enviar áudio" onClick={sendRecordedAudio}>
-                <SendIcon />
-              </button>
-            </div>
-          ) : (
-            <div className="chat-composer chat-composer-with-mentions">
-              {/* @menção (pedido do Douglas, 1/out) -- MESMO dropdown do
-                  composer de dentro da sala (ver ChatDrawer em
-                  GameRoom.tsx), só com os participantes da conversa. */}
-              {mentionState && mentionMatches.length > 0 && (
-                <div className="chat-mention-dropdown">
-                  {mentionMatches.map((c) => (
-                    <button key={c.id} type="button" className="chat-mention-option" onClick={() => insertMention(c)}>
-                      {c.name || "?"}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <button
-                className="chat-composer-btn"
-                title="Anexar foto/arquivo"
-                onClick={() => chatFileInputRef.current?.click()}
-                disabled={sendingAttachment}
-              >
-                <AttachIcon />
-              </button>
-              <button className="chat-composer-btn" title="Gravar áudio" onClick={startVoiceRecording}>
-                <MicIcon off={false} />
-              </button>
-              <input
-                ref={composerInputRef}
-                className="chat-composer-input"
-                type="text"
-                value={draft}
-                onChange={handleComposerInputChange}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !mentionState) sendMessage();
-                  if (e.key === "Escape") setMentionState(null);
-                }}
-                placeholder="Escreva uma mensagem... (@ pra mencionar)"
-                maxLength={2000}
-              />
-              <button
-                type="button"
-                className="chat-composer-btn primary"
-                onClick={sendMessage}
-                disabled={!draft.trim() || sending}
-                title="Enviar"
-              >
-                <SendIcon />
-              </button>
-            </div>
-          )}
-          <input ref={chatFileInputRef} type="file" style={{ display: "none" }} onChange={handleChatFileChange} />
-        </>
-      )}
+          : null,
+      })),
+    [conversations]
+  );
 
+  const drawerMessages: ChatMsg[] = useMemo(() => {
+    if (!activeId || !messages) return [];
+    return messages.map((m) => ({
+      ...m,
+      kind: m.kind as ChatMsgKind,
+      attachment: m.attachment ?? null,
+      roomCard: m.roomCard ?? null,
+      conversationId: activeId,
+    }));
+  }, [activeId, messages]);
+
+  return (
+    <>
+      <ChatDrawer
+        view={view}
+        onChangeView={setView}
+        conversations={drawerConversations}
+        activeConversationId={activeId}
+        onOpenConversation={openConversation}
+        messages={drawerMessages}
+        unreadSinceTs={unreadSinceTs}
+        // o Lobby não tem Sala/"quem ta por perto" nenhuma (ver hasRoom
+        // abaixo) -- roomChatLog fica sempre vazio, nunca é lido de
+        // verdade.
+        roomChatLog={[]}
+        hasRoom={false}
+        myUserId={myUserId}
+        onlinePlayers={[]}
+        roomCompanyName={myRoomName}
+        roomCompanyLogoUrl={myRoomLogoUrl}
+        accountAccessToken={accountAccessToken}
+        callVolume={1}
+        newConvMode={newConvMode}
+        onChangeNewConvMode={changeNewConvMode}
+        newConvSelection={newConvSelection}
+        onToggleNewConvSelection={toggleNewConvSelection}
+        newConvName={newConvName}
+        onChangeNewConvName={setNewConvName}
+        onSubmitNewConversation={submitNewConversation}
+        newConvFilter={newConvFilter}
+        onChangeNewConvFilter={setNewConvFilter}
+        newConvQuery={newConvQuery}
+        onChangeNewConvQuery={setNewConvQuery}
+        newConvSearchResults={newConvResults}
+        newConvFriends={newConvFriends}
+        renamingGroup={renamingGroup}
+        onStartRenameGroup={startRenameGroup}
+        onCancelRenameGroup={() => setRenamingGroup(false)}
+        groupNameDraft={groupNameDraft}
+        onChangeGroupNameDraft={setGroupNameDraft}
+        onSubmitRenameGroup={submitRenameGroup}
+        composerText={draft}
+        onChangeComposerText={setDraft}
+        onSendComposer={sendMessage}
+        onPickFile={() => chatFileInputRef.current?.click()}
+        sendingAttachment={sendingAttachment}
+        recordingAudio={recordingAudio}
+        recordingElapsedSec={recordingElapsedSec}
+        recordedPreview={recordedPreview}
+        onStartRecording={startVoiceRecording}
+        onStopRecording={stopVoiceRecording}
+        onCancelRecording={cancelVoiceRecording}
+        onDiscardRecordedAudio={discardRecordedAudio}
+        onSendRecordedAudio={sendRecordedAudio}
+        onDeleteMessage={deleteMessage}
+        onSendRoomCard={sendRoomCard}
+        onMoveConversationLane={moveConversationLane}
+        // chamada de voz/vídeo -- gap conhecido, ver comentário grande
+        // de dummyLocalStreamRef lá em cima.
+        callParticipantsByConversation={{}}
+        myCallConversationId={null}
+        callRemoteStreams={{}}
+        onJoinCall={() => {}}
+        onLeaveCall={() => {}}
+        localStreamRef={dummyLocalStreamRef}
+        camOn={false}
+        onClose={onClose}
+        pinMode={pinMode}
+        onToggleSidePin={onToggleSidePin}
+        // "fixar" (pedido do Douglas, 1/out: "o layout do chat de fora
+        // tem que ser igual ao de dentro") -- MESMOS números de
+        // top/bottom do .chat-drawer-shell-sidebar da sala, só muda o
+        // NOME da classe porque o Lobby não tem o layout flex com
+        // align-items:stretch que a sala tem (ver comentário grande de
+        // .lobby-chat-drawer-shell-sidebar em globals.css).
+        sidebarClassName="lobby-chat-drawer-shell-sidebar"
+        onOpenProfile={(playerId) => setViewingProfileUserId(playerId)}
+        pins={pins}
+        // REST não tem como empurrar "digitando..." em tempo real sem
+        // WebSocket -- gap conhecido (não é regressão: o Lobby nunca
+        // teve isso antes da unificação também).
+        typingUsers={[]}
+        lastRead={lastReadByUserId}
+        onToggleReaction={toggleReaction}
+        onPinMessage={pinMessage}
+        onUnpinMessage={unpinMessage}
+        onTypingNotify={() => {}}
+        filesPanelOpen={filesPanelOpen}
+        filesPanelItems={filesPanelItems}
+        filesPanelFilter={filesPanelFilter}
+        onChangeFilesPanelFilter={setFilesPanelFilter}
+        filesPanelQuery={filesPanelQuery}
+        onChangeFilesPanelQuery={setFilesPanelQuery}
+        onOpenFilesPanel={openFilesPanel}
+        onCloseFilesPanel={closeFilesPanel}
+        onMentionAttachmentInChat={(item) => {
+          sendChatPayload({ attachment: item.attachment, kind: item.kind });
+          setFilesPanelOpen(false);
+        }}
+        pendingMentionIds={pendingMentionIds}
+        onAddPendingMentionId={(userId) =>
+          setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]))
+        }
+      />
+      <input ref={chatFileInputRef} type="file" style={{ display: "none" }} onChange={handleChatFileChange} />
       {viewingProfileUserId && accountAccessToken && (
         <ProfileViewCard
           userId={viewingProfileUserId}
@@ -2670,51 +2036,6 @@ function LobbyChatPanel({
           }}
         />
       )}
-    </div>
-  );
-
-  // "fixar" (pedido do Douglas, 1/out) -- diferente da sala
-  // (GameRoom.tsx), o Lobby não tem um layout flex com
-  // align-items:stretch pra gaveta esticar dentro (ver comentário
-  // grande de chatPinMode no Lobby() mais abaixo) -- por isso aqui
-  // SEMPRE embrulha num container próprio quando fixo (mesmo sem
-  // coluna de empresas), que vira o position:fixed com o
-  // top/bottom/altura de verdade (.lobby-chat-drawer-shell-sidebar em
-  // globals.css); a gaveta em si (drawerBody, classe
-  // .lobby-chat-drawer-sidebar) fica position:static e só recebe a
-  // altura esticada do container via align-items:stretch (mesmo
-  // mecanismo de .chat-drawer-shell-sidebar na sala).
-  if (pinMode === "side") {
-    return (
-      <>
-        <div className="chat-drawer-shell lobby-chat-drawer-shell-sidebar">
-          {companyRail}
-          {drawerBody}
-        </div>
-        {filesTrigger}
-        {filesPanel}
-      </>
-    );
-  }
-
-  if (!companyRail) {
-    return (
-      <>
-        {drawerBody}
-        {filesTrigger}
-        {filesPanel}
-      </>
-    );
-  }
-
-  return (
-    <>
-      <div className="chat-drawer-shell">
-        {companyRail}
-        {drawerBody}
-      </div>
-      {filesTrigger}
-      {filesPanel}
     </>
   );
 }
@@ -4105,7 +3426,8 @@ export default function Lobby({
   // chat, quero que eles vejam a possibilidade, sempre ali" -- logo da
   // empresa PRÓPRIA (myRealRoom.name já tem o nome, mas não a logo --
   // MyRoom não carrega esse campo, ver tipo acima) pra alimentar
-  // companyOptions no LobbyChatPanel mesmo sem nenhuma conversa ainda.
+  // companyOptions no ChatDrawer (roomCompanyLogoUrl, ver mais abaixo)
+  // mesmo sem nenhuma conversa ainda.
   // Busca separada da do companyProfile/selectedRoomSlug mais acima
   // (aquela é do espaço SELECIONADO/visitado agora, que pode ser o de
   // outra pessoa -- essa aqui é sempre a MINHA, pro chat).

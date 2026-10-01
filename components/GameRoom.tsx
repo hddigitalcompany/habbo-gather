@@ -5541,6 +5541,11 @@ export default function GameRoom({
     // (ou é a Sala, que não tem esse conceito).
     unreadSinceTs: activeConversationId === null ? null : unreadSinceTsByConv[activeConversationId] ?? null,
     roomChatLog: chatLog,
+    // 1/out (unificação Lobby/GameRoom) -- ver comentário grande de
+    // hasRoom em components/ChatDrawer.tsx; a sala de verdade sempre tem
+    // "Sala" na lista, só o Lobby (sem WebSocket/sem "por perto") passa
+    // false.
+    hasRoom: true,
     myUserId,
     onlinePlayers: Array.from(remotePlayersRef.current.values()),
     roomCompanyName,

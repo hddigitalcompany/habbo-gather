@@ -1478,6 +1478,117 @@ function handlePostChatDirect(req, res) {
   });
 }
 
+/** POST /chat/delete -- apaga uma mensagem numa conversa direta/grupo
+ * sem precisar abrir WebSocket (pedido do Douglas, 1/out: "quero a
+ * mesma estrutura nao que seja separado" -- o Lobby ganhou essa ação
+ * só agora porque até aqui ele desenhava o próprio JSX sem esse
+ * botão; MESMA trava do case "chat:delete" acima -- só quem mandou
+ * apaga, apaga PRA TODOS, ver chatStore.deleteMessage). */
+async function handlePostChatDelete(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId, messageId } = body;
+  if (
+    typeof conversationId !== "string" || !conversationId ||
+    typeof userId !== "string" || !userId ||
+    typeof messageId !== "string" || !messageId
+  ) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"/"messageId"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  const deleted = chatStore.deleteMessage(conversationId, messageId, userId);
+  if (!deleted) {
+    res.writeHead(400, corsHeaders());
+    res.end("Não deu pra apagar (mensagem não encontrada, já apagada, ou não é sua).");
+    return;
+  }
+  const conv = chatStore.getConversation(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:message_deleted", conversationId, messageId: deleted.id });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, messageId: deleted.id }));
+}
+
+/** POST /chat/create-group -- cria uma conversa em grupo sem precisar
+ * abrir WebSocket, MESMA ação do case "chat:create_group" acima
+ * (pedido do Douglas, 1/out: "criar grupo" tem que existir fora da
+ * sala também, igual estrutura de dentro -- ver newConvMode em
+ * components/ChatDrawer.tsx). companyInfo vem do roomSlug explícito
+ * (a sala PRÓPRIA de quem tá criando), mesmo padrão de
+ * handlePostChatDirect logo abaixo -- o Lobby não tem roomId de
+ * conexão pra inferir sozinho. */
+async function handlePostChatCreateGroup(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { userId, userName, participantIds, name, roomSlug } = body;
+  if (typeof userId !== "string" || !userId || !Array.isArray(participantIds)) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "userId" e "participantIds" (array)');
+    return;
+  }
+  const cleanParticipantIds = participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
+  if (cleanParticipantIds.length === 0) {
+    res.writeHead(400, corsHeaders());
+    res.end('"participantIds" precisa ter pelo menos uma pessoa');
+    return;
+  }
+  const senderName = typeof userName === "string" ? userName.slice(0, 80) : "";
+  if (senderName) chatStore.upsertUser(userId, { name: senderName });
+  const cleanRoomSlug = typeof roomSlug === "string" ? roomSlug.trim() : "";
+  const companyInfo = cleanRoomSlug ? await getRoomCompanyInfo(cleanRoomSlug) : null;
+  const conv = chatStore.createGroupConversation({
+    name: typeof name === "string" ? name : undefined,
+    participantIds: cleanParticipantIds,
+    createdBy: userId,
+    companyInfo,
+  });
+  for (const uid of conv.participantIds) {
+    if (uid === userId) continue;
+    sendConversationTo(uid, conv.id);
+  }
+  const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conv.id);
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, conversation: enriched }));
+}
+
+/** POST /chat/rename-group -- MESMA ação do case "chat:rename_group"
+ * acima, sem socket (ver comentário grande de handlePostChatCreateGroup
+ * logo acima sobre o porquê). */
+async function handlePostChatRenameGroup(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId, name } = body;
+  if (typeof conversationId !== "string" || !conversationId || typeof userId !== "string" || !userId || typeof name !== "string") {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"/"name"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  const conv = chatStore.renameGroupConversation(conversationId, name);
+  if (!conv) {
+    res.writeHead(400, corsHeaders());
+    res.end("Conversa não encontrada (ou não é grupo).");
+    return;
+  }
+  for (const uid of conv.participantIds) {
+    sendConversationTo(uid, conv.id);
+  }
+  const enriched = chatStore.listConversationsForUser(userId).find((c) => c.id === conv.id);
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, conversation: enriched }));
+}
+
 /** POST /agenda/respond -- aceita/recusa um compromisso sem precisar
  * abrir WebSocket, mesma ideia de handlePostChatSend acima (pedido do
  * Douglas: botões do Lobby "igual de dentro da sala"). MESMA
@@ -2035,6 +2146,26 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/chat/direct") {
     handlePostChatDirect(req, res);
+    return;
+  }
+
+  // 1/out, pedido do Douglas: "quero a mesma estrutura nao que seja
+  // separado" -- apagar mensagem/criar grupo/renomear grupo também
+  // pelo Lobby (REST, sem WebSocket), MESMA ação dos cases
+  // equivalentes do WebSocket (ver handlePostChatDelete/
+  // handlePostChatCreateGroup/handlePostChatRenameGroup lá em cima).
+  if (req.method === "POST" && url.pathname === "/chat/delete") {
+    handlePostChatDelete(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/chat/create-group") {
+    handlePostChatCreateGroup(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/chat/rename-group") {
+    handlePostChatRenameGroup(req, res);
     return;
   }
 
