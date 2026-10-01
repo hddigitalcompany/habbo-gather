@@ -4035,22 +4035,30 @@ export default class MainScene extends Phaser.Scene {
    * formato da sala muda. */
   private positionFacade() {
     const corners = this.roomFrontCorners();
+    const cornerKeys = new Set(corners.map((c) => this.roomTileKey(c.col, c.row)));
 
-    // TRAVA (pedido do Douglas depois de calibrar a dedo, print por
-    // print: "trava ela nessa posição, não vou mais mexer nela, vou
-    // desenhar uma sacada encima dela") -- mas travar TUDO (como a
-    // primeira tentativa fez) quebrou quando ele cresceu a sala de
-    // verdade: a sacada nova virou uma quina externa nova e ficou sem
-    // NENHUMA peça de fachada, porque o bloco de criação inteiro
-    // estava pulando ("vish bugou foi tudo"). O que ele queria era só
-    // congelar a peça que ELE JÁ calibrou -- não impedir quina nova de
-    // ganhar a dela. Por isso agora: a peça PRINCIPAL (facadeImage) é
-    // ancorada só na primeira vez (this.facadeMainTile guarda o tile
-    // escolhido então) e nunca mais se move; já a quina2 cria uma
-    // peça nova pra cada quina detectada que AINDA não tem sprite
-    // (this.facadeCornerSprites), mas nunca mexe nem apaga uma quina2
-    // que já existe, mesmo que ela pare de ser detectada como quina
-    // (sala cresceu por cima dela, por exemplo).
+    // TRAVA (pedido do Douglas, "trava ela nessa posição, não vou mais
+    // mexer nela, vou desenhar uma sacada encima dela") -- 2 tentativas
+    // anteriores erradas: travar tudo pra sempre fez a sacada nova
+    // ficar sem fachada nenhuma ("vish bugou foi tudo"); só travar
+    // criação/reposição sem nunca destruir fez a peça antiga continuar
+    // aparecendo SOBREPOSTA em cima do que foi construído depois dela
+    // deixar de ser quina externa de verdade ("ta uma vidraca
+    // sobreposta"). A regra certa: enquanto uma peça (principal ou
+    // quina2) continua sendo uma quina externa válida (ver
+    // roomFrontCorners), ela fica EXATAMENTE onde foi colocada da
+    // primeira vez -- nunca mais chama setPosition nela. Só quando ela
+    // deixa de ser quina externa (sala cresceu por cima/engoliu ela) é
+    // que ela é destruída -- isso evita a sobreposição sem fazer a
+    // peça pular de posição enquanto ainda faz sentido ela estar ali.
+    if (this.facadeMainTile) {
+      const mainTileKey = this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row);
+      if (!cornerKeys.has(mainTileKey)) {
+        this.facadeImage?.destroy();
+        this.facadeImage = undefined;
+        this.facadeMainTile = undefined;
+      }
+    }
     if (!this.facadeMainTile && corners.length > 0) {
       let main = corners[0];
       for (const c of corners) {
@@ -4063,7 +4071,6 @@ export default class MainScene extends Phaser.Scene {
       }
       this.facadeMainTile = main;
     }
-
     if (this.facadeMainTile && this.textures.exists(FACADE_TEXTURE_KEY) && !this.facadeImage) {
       const w = tileToWorld(this.facadeMainTile.col, this.facadeMainTile.row);
       const x = w.x;
@@ -4076,13 +4083,15 @@ export default class MainScene extends Phaser.Scene {
         .setDepth(DEPTH_FACADE);
     }
 
-    // demais quinas -- 1 sprite da peça pequena por quina nova
-    // detectada (ver roomFrontCorners), indexado por tile (mesmo
-    // padrão de draftFloor/draftWall/etc no resto do arquivo). Uma vez
-    // criada, uma quina2 nunca mais é movida nem apagada por aqui
-    // (congelada, igual a principal) -- só uma quina que AINDA não
-    // tem sprite ganha uma nova.
+    // demais quinas -- mesma regra (congelada enquanto válida,
+    // destruída só quando deixa de ser quina externa).
     const mainKey = this.facadeMainTile ? this.roomTileKey(this.facadeMainTile.col, this.facadeMainTile.row) : null;
+    for (const [key, sprite] of this.facadeCornerSprites) {
+      if (!cornerKeys.has(key) || key === mainKey) {
+        sprite.destroy();
+        this.facadeCornerSprites.delete(key);
+      }
+    }
     if (this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
       const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
       for (const c of corners) {
