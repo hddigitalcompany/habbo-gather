@@ -1949,8 +1949,38 @@ function LobbyChatPanel({
     }));
   }, [activeId, messages]);
 
-  return (
-    <>
+  // 1/out, bug reportado pelo Douglas depois da unificação: "continuam
+  // nao sendo a mesma coisa, tem diferencas entre eles, estetica,
+  // posicao, abertura" -- causa: o shell fixo que ancora o chat PRESO
+  // na lateral (.lobby-chat-drawer-shell-sidebar, ver globals.css) só
+  // nasce quando o ChatDrawer mostra a coluna de empresas por DENTRO
+  // (showCompanyRail em ChatDrawer.tsx -- só true com view==="list" E
+  // lane "Empresa"). Em QUALQUER outra tela com o chat preso --
+  // abrir uma conversa ("abertura", vira view "thread"), "Nova
+  // conversa", lane "Amigos" -- o ChatDrawer devolve só a gaveta NUA
+  // (ver `if (!companyRail) return drawerBody` lá), que na SALA
+  // funciona pq o pai permanente dela é .room-and-editor (flex
+  // esticado, sempre existe, ver GameRoom.tsx); o Lobby não tem um
+  // pai permanente desses (.lobby-backdrop só tem .lobby-card no
+  // fluxo normal, ver comentário grande dela) -- sem o shell, a
+  // gaveta nua perdia TODO posicionamento fixo (vira um bloco solto
+  // no canto, sem o top/bottom/left de sempre). Isso explicava as
+  // "diferenças de posição/estética" (um painel fora do lugar não
+  // parece "a mesma coisa" mesmo usando o mesmíssimo CSS do card) E
+  // a diferença de "abertura" (acontecia bem na hora de abrir uma
+  // conversa, que é exatamente quando showCompanyRail vira false).
+  //
+  // Fix: .lobby-chat-pin-anchor (globals.css) dá à gaveta NUA o MESMO
+  // ancoradouro fixo que o shell já dava (MESMOS números: top:80/
+  // bottom:0/left:0) -- sempre presente quando preso na lateral,
+  // independente do ChatDrawer mostrar a coluna por dentro ou não.
+  // Quando o shell TAMBÉM aparece (lane Empresa, lista), fica um
+  // dentro do outro com os MESMOS números fixos -- position:fixed
+  // sempre resolve contra a VIEWPORT (não contra o ancestral mais
+  // próximo, a não ser que ele tenha transform/filter, que esse não
+  // tem), então aninhar os dois não desloca nada, só duplica a
+  // mesma caixa (sem efeito visual).
+  const chatDrawerEl = (
       <ChatDrawer
         view={view}
         onChangeView={setView}
@@ -2055,6 +2085,11 @@ function LobbyChatPanel({
           setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]))
         }
       />
+  );
+
+  return (
+    <>
+      {pinMode === "side" ? <div className="lobby-chat-pin-anchor">{chatDrawerEl}</div> : chatDrawerEl}
       <input ref={chatFileInputRef} type="file" style={{ display: "none" }} onChange={handleChatFileChange} />
       {viewingProfileUserId && accountAccessToken && (
         <ProfileViewCard
