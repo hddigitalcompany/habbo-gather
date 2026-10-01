@@ -533,10 +533,11 @@ const FACADE_CORNER2_APEX_Y_PX = 285;
 const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99 * 0.99 * 1.01;
 /** Offset manual em cima da posição calculada por tile (ver
  * tileToWorld) -- recalibrado do zero com prints depois da troca de
- * arte/posição. Douglas: "mova 2px pra esquerda" -- X negativo move
- * a peça pra esquerda na tela. */
-const FACADE_CORNER2_OFFSET_X_PX = -2;
-const FACADE_CORNER2_OFFSET_Y_PX = 0;
+ * arte/posição. Douglas: "mova 2px pra esquerda" (-2), depois "mova
+ * 2 px pra direita" (+2, volta pro 0) "e 3 pra cima" (-3 em Y -- Y
+ * negativo move pra cima na tela). */
+const FACADE_CORNER2_OFFSET_X_PX = 0;
+const FACADE_CORNER2_OFFSET_Y_PX = -3;
 
 /** TRAVA DEFINITIVA (pedido do Douglas: "trava elas de alguma outra
  * forma, preciso mexer em toda sacada encima delas") -- em vez de
