@@ -446,24 +446,26 @@ const FLOOR_GLASS_REPEATS = 6;
 const FACADE_GLASS_FLOOR_REPEAT_STEP_PX = 122;
 /** Empurra TODA a pilha de repetições de drawFloorEdgeGlass pra baixo
  * (em px), sem mexer no espaçamento ENTRE elas (FACADE_GLASS_FLOOR_
- * REPEAT_STEP_PX acima continua intacto). ACHADO (Douglas, depois de
- * subir a arte lisa nova: "aumentei os pisos pra tras e apareceu uma
- * linha inteiro encima do piso... olha as janelas encima do piso") --
- * a art nova (flat, sem perfil) quase não tem margem transparente no
- * TOPO (conteúdo visível já começa a poucos px de y=0 do PNG, numa
- * rampa contínua que cresce rápido -- ver ACHADO 3 em
- * FACADE_GLASS_TILE_WIDTH_PX em game/wall.ts), então a 1ª repetição
- * (i=0), ancorada EXATAMENTE na borda do piso (origem 0.5,0 -- ver
- * comentário grande abaixo), começa a aparecer um pouco ACIMA dessa
- * borda em vez de só abaixo/por fora dela -- como não tem nada
- * desenhado em cima pra cobrir esse pedacinho (ao contrário das
- * repetições i>=1, que ficam atrás uma da outra), esse "vazamento"
- * fica visível por cima do piso de verdade, repetindo a cada vidraça
- * ao longo da borda (daí parecer uma linha inteira). Empurrando a
- * pilha inteira pra baixo por esse tanto, a parte que vazava fica
- * escondida atrás do piso de verdade (que tem depth MAIOR, DEPTH_FLOOR,
- * e cobre o que tiver atrás dele onde os dois se sobrepõem). */
-const FACADE_GLASS_FLOOR_REPEAT_TOP_OFFSET_PX = 16;
+ * REPEAT_STEP_PX acima continua intacto).
+ *
+ * HISTÓRICO (Douglas, depois de subir a arte lisa nova pela 1a vez:
+ * "aumentei os pisos pra tras e apareceu uma linha inteiro encima do
+ * piso") -- a arte tinha o topo bem assimétrico (lado esquerdo de cada
+ * vidraça chegava quase até y=0 do PNG, lado direito só começava lá
+ * por y=65 -- perspectiva 3D de verdade da arte original, não um
+ * artefato de recorte), isso tentei compensar só EMPURRANDO a pilha
+ * pra baixo (tentei 16px, depois 36px) -- ajudou a esconder o lado
+ * ESQUERDO vazando no piso, mas não resolvia a causa de verdade e
+ * ainda deixava um "dente" desnivelado bem na quina (Douglas: "alinhe
+ * na altura" -- ver ACHADO 4 em FACADE_GLASS_TILE_WIDTH_PX, game/wall.ts,
+ * onde a arte em si foi NIVELADA/corrigida, não só escondida). Com a
+ * arte já nivelada na fonte (margem transparente de verdade e igual
+ * nos 2 lados, ~65px), esse offset extra não é mais necessário -- 0
+ * mesmo já basta, a 1a repetição não vaza mais em lugar nenhum.
+ * Deixado como constante (em vez de remover o `i===0` especial) só
+ * pra não precisar mexer no loop de novo se isso voltar a acontecer
+ * com alguma arte futura. */
+const FACADE_GLASS_FLOOR_REPEAT_TOP_OFFSET_PX = 0;
 
 // tinta de área (ver game/areas.ts) fica ENTRE o piso e a mobília "flat" --
 // é um "verniz" por cima do chão marcando a zona (mesa privada/sala),

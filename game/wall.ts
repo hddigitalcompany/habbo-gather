@@ -333,7 +333,36 @@ const FACADE_GLASS_ENTRY: WallCatalogEntry = {
  * fecha certinho) e simulando localmente antes de subir. Esse
  * comentário e o ACHADO 2 acima descrevem a arte ANTERIOR (com perfil)
  * -- mantidos só como histórico de como o processo de calibração
- * funciona, não descrevem mais o facade-glass-tile.png atual. */
+ * funciona, não descrevem mais o facade-glass-tile.png atual.
+ *
+ * ACHADO 4 (Douglas testou ao vivo: "alinhe as janelas com as de
+ * canto" e depois "alinhe na altura", além do vazamento no piso já
+ * coberto no ACHADO de FACADE_GLASS_FLOOR_REPEAT_TOP_OFFSET_PX em
+ * MainScene.ts) -- 2 problemas na arte "lisa" (ACHADO 3), raiz comum:
+ * (a) facade-glass-tile-single.png tava recortado bem na METADE
+ * GEOMÉTRICA da arte dupla (144/2=72px), mas a costura de verdade
+ * entre as 2 vidraças não é simétrica (fica em ~68px) -- sobrava ~4px
+ * da 2a vidraça vazando na peça single, descasando o ritmo dela com
+ * as peças duplas vizinhas bem na quina (onde a peça single é
+ * obrigatória -- ver touchesCorner abaixo). (b) a arte em si (dupla E
+ * single) tinha o TOPO bem assimétrico -- perspectiva 3D de verdade do
+ * render original, lado esquerdo de cada vidraça chegando quase até
+ * y=0 do PNG, lado direito só começando por y=65 -- isso criava um
+ * "dente" desnivelado sempre que 2 peças vizinhas mostravam lados
+ * opostos uma da outra (muito comum bem na quina, onde 2 paredes
+ * diferentes se encontram). Fix pra (a): recorte da single usando a
+ * costura de verdade (68px) em vez da metade geométrica, esticado de
+ * volta pra 72px (largura física continua certa). Fix pra (b):
+ * NIVELADA a arte na fonte -- cada coluna da imagem (dupla E single)
+ * foi deslocada verticalmente pra baixo até o topo visível de TODAS as
+ * colunas bater na mesma linha (a coluna que já começava mais tarde,
+ * ~y=65, virou a referência; as que começavam antes foram empurradas
+ * pra baixo até lá) -- perde um pouco do efeito 3D de perspectiva no
+ * topo (teto reto em vez de levemente inclinado), mas garante que
+ * QUALQUER peça ao lado de QUALQUER outra (dupla-dupla, dupla-single,
+ * flipada ou não) bate certinho na mesma altura. Tamanho do PNG
+ * (144x191 / 72x191) não mudou, só o conteúdo dentro dele -- nenhuma
+ * constante aqui precisou mexer. */
 export const FACADE_GLASS_TILE_WIDTH_PX = 144;
 export const FACADE_GLASS_TILE_HEIGHT_PX = 191;
 /** Largura/altura do fallback de 1 vidraça só (facade-glass-tile-single.png)
