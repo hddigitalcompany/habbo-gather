@@ -499,16 +499,20 @@ const FACADE_CORNER2_TEXTURE_KEY = "fachada-predio-quina-2";
  * de FACADE_APEX_*. */
 const FACADE_CORNER2_APEX_X_PX = 347;
 const FACADE_CORNER2_APEX_Y_PX = 276;
-/** Ajuste manual pedido pelo Douglas ("move ela tres tile pra
- * direita") -- a peça da quina 2 não tem trecho reto/repetível de
- * vidro pra cobrir sozinha o vão até a peça principal (as duas artes
- * são só um "V" de telhado, sem reta no meio), então em vez de gerar
- * arte nova o ajuste pedido foi deslocar essa peça por cima da posição
- * calculada por tile. Positivo = direita na tela. 3 tiles de
- * ISO_TILE_WIDTH (não escalado por FACADE_SCALE -- é um deslocamento
- * na tela/world, não no espaço da textura de origem). Reajustar aqui e
- * testar local (npm run dev) se precisar de mais/menos. */
-const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH;
+/** Ajuste manual pedido pelo Douglas -- a peça da quina 2 não tem
+ * trecho reto/repetível de vidro pra cobrir sozinha o vão até a peça
+ * principal (as duas artes são só um "V" de telhado, sem reta no
+ * meio), então em vez de gerar arte nova o ajuste pedido foi deslocar
+ * essa peça por cima da posição calculada por tile. Histórico dos
+ * pedidos (cada um somado em cima do anterior, ver tileToWorld em
+ * grid.ts pra cada direção): "move ela tres tile pra direita" (+3
+ * tiles no eixo X da tela, sem mexer no Y) e depois "4 tiles pra
+ * frente esquerda" (direção +row: dx=-ISO_TILE_WIDTH/2,
+ * dy=+ISO_TILE_HEIGHT/2 por tile). Reajustar aqui e testar local (npm
+ * run dev) se precisar de mais/menos -- não dá pra calibrar isso de
+ * fora sem ver o resultado ao vivo. */
+const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2);
+const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2);
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
@@ -4061,7 +4065,7 @@ export default class MainScene extends Phaser.Scene {
         liveKeys.add(key);
         const w = tileToWorld(c.col, c.row);
         const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
-        const y = w.y + ISO_TILE_HEIGHT / 2;
+        const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
         let sprite = this.facadeCornerSprites.get(key);
         if (!sprite) {
           sprite = this.add
