@@ -505,13 +505,14 @@ const FACADE_CORNER2_APEX_Y_PX = 276;
  * meio), então em vez de gerar arte nova o ajuste pedido foi deslocar
  * essa peça por cima da posição calculada por tile. Histórico dos
  * pedidos (cada um somado em cima do anterior, ver tileToWorld em
- * grid.ts pra cada direção): "move ela tres tile pra direita" (+3
- * tiles no eixo X da tela, sem mexer no Y) e depois "4 tiles pra
- * frente esquerda" (direção +row: dx=-ISO_TILE_WIDTH/2,
- * dy=+ISO_TILE_HEIGHT/2 por tile). Reajustar aqui e testar local (npm
- * run dev) se precisar de mais/menos -- não dá pra calibrar isso de
- * fora sem ver o resultado ao vivo. */
-const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2);
+ * grid.ts pra cada direção; "direita"/"esquerda" sempre só no eixo X
+ * da tela, sem mexer no Y): "move ela tres tile pra direita" (+3
+ * tiles em X), depois "4 tiles pra frente esquerda" (direção +row:
+ * dx=-ISO_TILE_WIDTH/2, dy=+ISO_TILE_HEIGHT/2 por tile), depois "meio
+ * tile pra direita" (+0.5 tile em X). Reajustar aqui e testar local
+ * (npm run dev) se precisar de mais/menos -- não dá pra calibrar isso
+ * de fora sem ver o resultado ao vivo. */
+const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2) + 0.5 * ISO_TILE_WIDTH;
 const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2);
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
