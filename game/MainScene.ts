@@ -97,7 +97,6 @@ import {
   wallBrickRects,
   nearestWallEdge,
   FACADE_GLASS_STYLE_ID,
-  FACADE_GLASS_TILE_HEIGHT_PX,
   pairFacadeGlassEdges,
   FacadeGlassPairing,
 } from "./wall";
@@ -429,6 +428,24 @@ const DEPTH_FLOOR = -2_000_000;
  * heightPx dá uma queda bem longa (sensação de vários andares) sem
  * desenhar graphics demais à toa. */
 const FLOOR_GLASS_REPEATS = 6;
+/** Distância vertical (px) entre uma repetição e a próxima de
+ * drawFloorEdgeGlass -- PROPOSITALMENTE menor que a altura de verdade
+ * do arquivo (FACADE_GLASS_TILE_HEIGHT_PX), pra dar OVERLAP entre elas
+ * em vez de só encostar. ACHADO (Douglas mandou referência com 3
+ * andares emendados, testou ao vivo e apontou: "olha na vertical o
+ * espaco que tem entre elas... na imagem que mandei elas ainda passam
+ * um pouco embaixo sobrepoe um pouco") -- a arte tem laje/perfil com
+ * profundidade 3D no topo E na base (ver comentário grande de
+ * drawFloorEdgeGlass), então empilhar exatamente pela altura cheia do
+ * arquivo (encostando bbox a bbox, mesma ideia que já tinha dado
+ * problema na horizontal -- ver ACHADO 2 em FACADE_GLASS_TILE_WIDTH_PX
+ * em game/wall.ts) sobra um vão vazio bem no meio, porque nem o topo
+ * nem a base da arte preenchem a largura toda até a última linha.
+ * Valor calibrado testando alguns overlaps numa simulação local (130px
+ * ~= 62% da altura de 208px) até bater com a referência do Douglas: a
+ * base de uma repetição cobre o topo da próxima, sobrando só 1 linha de
+ * "laje" contínua entre andares, sem vão E sem cortar vidro demais. */
+const FACADE_GLASS_FLOOR_REPEAT_STEP_PX = 130;
 
 // tinta de área (ver game/areas.ts) fica ENTRE o piso e a mobília "flat" --
 // é um "verniz" por cima do chão marcando a zona (mesa privada/sala),
@@ -4359,13 +4376,18 @@ export default class MainScene extends Phaser.Scene {
     // larga ancorada no meio do PAR, "secondary" não desenha nada (já
     // coberta pela larga do parceiro), "single" (sobra ímpar) cai no
     // fallback de 1 vidraça só.
-    const heightPx = FACADE_GLASS_TILE_HEIGHT_PX;
+    // repeatStepPx (não a altura cheia do arquivo) é o espaçamento
+    // vertical de verdade -- ver ACHADO grande de
+    // FACADE_GLASS_FLOOR_REPEAT_STEP_PX acima (overlap proposital,
+    // senão sobra vão vazio entre andares).
+    const repeatStepPx = FACADE_GLASS_FLOOR_REPEAT_STEP_PX;
     const pairings = pairFacadeGlassEdges(this.computeFacadeEdges());
     // pedido do Douglas: "repita o piso abaixo, a cada frame de altura
     // de parede" -- em vez de 1 painel só, repete a MESMA imagem
-    // empilhada FLOOR_GLASS_REPEATS vezes, cada uma exatamente heightPx
-    // mais abaixo que a anterior -- dá a sensação de vários andares do
-    // prédio se repetindo lá embaixo, não só 1 tira.
+    // empilhada FLOOR_GLASS_REPEATS vezes, cada uma repeatStepPx mais
+    // abaixo que a anterior (com overlap -- ver acima) -- dá a
+    // sensação de vários andares do prédio se repetindo lá embaixo,
+    // não só 1 tira.
     for (const p of pairings) {
       if (p.role === "secondary") continue; // já coberta pela imagem larga do "primary" parceiro
       const edge = p.edge;
@@ -4390,7 +4412,7 @@ export default class MainScene extends Phaser.Scene {
       const normalKey = wide ? wallTextureKey(FACADE_GLASS_STYLE_ID) : FACADE_GLASS_SINGLE_TEXTURE_KEY;
       const litKey = wide ? FACADE_GLASS_LIT_TEXTURE_KEY : FACADE_GLASS_SINGLE_LIT_TEXTURE_KEY;
       for (let i = 0; i < FLOOR_GLASS_REPEATS; i++) {
-        const vOffset = i * heightPx;
+        const vOffset = i * repeatStepPx;
         const lit = this.glassPaneIsLit(edge.col * 928371 + edge.row * 17431 + i * 5197 + sideSeed);
         const key = lit ? litKey : normalKey;
         if (!this.textures.exists(key)) continue; // mesma cautela de addWallSprite -- textura ainda não carregada
