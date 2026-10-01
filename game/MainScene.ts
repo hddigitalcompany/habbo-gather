@@ -4092,16 +4092,20 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /** Pinta (adiciona) um tile novo na sala -- só aceita se ele AINDA
-   * não for da sala e encostar num tile que já é, SÓ pelo lado de
-   * trás/cima (ver roomBackNeighbors acima -- antes eram as 4 direções
-   * livres; a borda de baixo fica fixa). Mantém a sala sempre conectada, crescendo só
-   * pela borda de cima, nunca uma ilha solta nem empurrando a fachada
-   * de baixo pra frente. Silencioso quando inválido (mesmo padrão de
-   * clicar num tile já ocupado com outra ferramenta -- não faz nada). */
+   * não for da sala e encostar em algo que já é (roomNeighbors, as 4
+   * direções livres -- pedido do Douglas: desbloqueado de novo pela
+   * borda de baixo "enquanto isso", pra poder testar tile ali embaixo
+   * sem mexer no posicionamento da fachada fixa (positionFacade/
+   * FACADE_* continuam exatamente como estavam -- ela só reacompanha
+   * sozinha a nova quina de baixo). roomBackNeighbors acima fica
+   * guardada caso a restrição de só crescer por cima volte depois).
+   * Mantém a sala sempre conectada, nunca uma ilha solta. Silencioso
+   * quando inválido (mesmo padrão de clicar num tile já ocupado com
+   * outra ferramenta -- não faz nada). */
   private paintRoomShapeAt(col: number, row: number) {
     const key = this.roomTileKey(col, row);
     if (this.roomShape.has(key)) return;
-    if (this.roomBackNeighbors(col, row).length === 0) return;
+    if (this.roomNeighbors(col, row).length === 0) return;
     this.roomShape.add(key);
     this.drawEditGrid();
     this.positionFacade();
@@ -7030,7 +7034,7 @@ export default class MainScene extends Phaser.Scene {
       this.wallHoverGraphics?.setVisible(false);
       this.catalogGhostSprite?.setVisible(false);
       const already = this.isTileInRoom(col, row);
-      const valid = this.selectedRoomShapeTool === "add" ? !already && this.roomBackNeighbors(col, row).length > 0 : already;
+      const valid = this.selectedRoomShapeTool === "add" ? !already && this.roomNeighbors(col, row).length > 0 : already;
       const { x, y } = tileToWorld(col, row);
       this.hoverGraphics
         .clear()
