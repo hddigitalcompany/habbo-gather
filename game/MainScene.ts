@@ -465,6 +465,25 @@ const AREA_DIM_ALPHA = 0.45;
 // aparecia nada pintado, por mais que o clique/arrasto funcionasse.
 const DEPTH_ROOM_BACKGROUND = -3_000_000;
 
+// FACHADA DO PRÉDIO (pedido do Douglas: "coloca, faça a quina ali
+// coladinha no piso") -- 1 imagem só (public/assets/fachada-predio.webp),
+// a quina do prédio vista de fora, com o "V" de cima da fachada
+// encaixado nas 2 bordas da FRENTE do losango da sala. Fica entre o
+// fundo sólido e o piso: o piso sempre por cima, a fachada "pendurada"
+// pra baixo a partir da quina de baixo da sala.
+const FACADE_TEXTURE_KEY = "fachada-predio";
+const DEPTH_FACADE = -2_500_000;
+/** vértice do "V" de cima da fachada DENTRO do PNG (px) -- é esse ponto
+ * que cola no vértice de baixo do piso. A quina já está centralizada na
+ * largura da arte (1613px), então x = metade. */
+const FACADE_APEX_X_PX = 806.4;
+const FACADE_APEX_Y_PX = 336.8;
+/** escala da arte: cada vão de janela da fachada mede ~53,6px no PNG --
+ * pedido do Douglas: "quero cada vidraça abraçando 2 tiles" -- então
+ * escalado pra 128px (= 2 x 64px, o comprimento horizontal de 2 arestas
+ * do losango), cada janela cobre exatamente 2 tiles do piso. */
+const FACADE_SCALE = 128 / 53.6;
+
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
   return tileToWorld(col, row).y + ISO_TILE_HEIGHT / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
@@ -843,6 +862,8 @@ export default class MainScene extends Phaser.Scene {
   private draftFurniture: Map<string, FurnitureDef> = new Map();
   private draftSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private gridGraphics?: Phaser.GameObjects.Graphics;
+  /** fachada do prédio colada na quina de baixo da sala (ver FACADE_TEXTURE_KEY / positionFacade). */
+  private facadeImage?: Phaser.GameObjects.Image;
   private hoverGraphics?: Phaser.GameObjects.Graphics;
   // "fantasma" (ver refreshCatalogGhost) do item selecionado na paleta,
   // seguindo o cursor -- null quando nenhum item de móvel está selecionado.
@@ -1478,6 +1499,7 @@ export default class MainScene extends Phaser.Scene {
     for (const entry of WALL_CATALOG) {
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
     }
+    this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-predio.webp");
   }
 
   create() {
@@ -1504,6 +1526,7 @@ export default class MainScene extends Phaser.Scene {
         this.roomShape.add(this.roomTileKey(col, row));
       }
     }
+    this.positionFacade(); // reposicionada de novo em loadSavedRoomShape/paint/erase
 
     // piso pintado vai ATRÁS de tudo o resto, cobrindo só os quadrados
     // escolhidos -- por isso desenha antes até dos móveis fixos (ver
@@ -3928,6 +3951,41 @@ export default class MainScene extends Phaser.Scene {
     ].filter((t) => this.isTileInRoom(t.col, t.row));
   }
 
+  /** Cola o vértice do "V" da fachada (FACADE_APEX_*) no vértice de
+   * BAIXO da sala -- o tile com maior col+row (o mais "pra frente" na
+   * tela, ver furnitureDepthForTile), canto de baixo do losango dele.
+   * Empate (sala irregular com mais de 1 tile na frente) fica com o
+   * mais central (menor |col-row|). Chamado sempre que o formato da
+   * sala muda. */
+  private positionFacade() {
+    if (!this.textures.exists(FACADE_TEXTURE_KEY)) return;
+    let best: { col: number; row: number } | null = null;
+    for (const key of this.roomShape) {
+      const [col, row] = key.split(",").map(Number);
+      if (
+        !best ||
+        col + row > best.col + best.row ||
+        (col + row === best.col + best.row && Math.abs(col - row) < Math.abs(best.col - best.row))
+      ) {
+        best = { col, row };
+      }
+    }
+    if (!best) return;
+    const c = tileToWorld(best.col, best.row);
+    const x = c.x;
+    const y = c.y + ISO_TILE_HEIGHT / 2;
+    if (!this.facadeImage) {
+      const tex = this.textures.get(FACADE_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
+      this.facadeImage = this.add
+        .image(x, y, FACADE_TEXTURE_KEY)
+        .setOrigin(FACADE_APEX_X_PX / tex.width, FACADE_APEX_Y_PX / tex.height)
+        .setScale(FACADE_SCALE)
+        .setDepth(DEPTH_FACADE);
+    } else {
+      this.facadeImage.setPosition(x, y);
+    }
+  }
+
   /** Carrega o formato salvo da sala (ver GET /room/shape em
    * server/index.js) -- chamado pelo React assim que a cena fica pronta
    * (mesmo timing de loadSavedFloor/loadSavedFurniture). SUBSTITUI o
@@ -3943,6 +4001,7 @@ export default class MainScene extends Phaser.Scene {
     if (list.length === 0) return;
     this.roomShape = new Set(list.map((t) => this.roomTileKey(t.col, t.row)));
     this.drawEditGrid();
+    this.positionFacade();
   }
 
   getDraftRoomShapeList(): { col: number; row: number }[] {
@@ -4045,6 +4104,7 @@ export default class MainScene extends Phaser.Scene {
     if (this.roomBackNeighbors(col, row).length === 0) return;
     this.roomShape.add(key);
     this.drawEditGrid();
+    this.positionFacade();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
   }
 
@@ -4069,6 +4129,7 @@ export default class MainScene extends Phaser.Scene {
     }
     this.roomShape.delete(key);
     this.drawEditGrid();
+    this.positionFacade();
     this.onDraftRoomShapeChange?.(this.getDraftRoomShapeList());
     return null;
   }
