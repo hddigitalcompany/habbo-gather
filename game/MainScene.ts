@@ -506,13 +506,19 @@ const FACADE_SCALE = 128 / 53.6;
 const FACADE_CORNER2_TEXTURE_KEY = "fachada-predio-quina-2";
 const FACADE_CORNER2_APEX_X_PX = 911;
 const FACADE_CORNER2_APEX_Y_PX = 286;
-/** Escala PRÓPRIA dessa peça (pedido do Douglas junto da troca de arte:
- * "padrao, diminui ela" -- usar a mesma lógica de sempre [2 tiles por
- * vão de janela, ver FACADE_SCALE], só que menor). Chute inicial: 60%
- * do padrão -- não dá pra calibrar o quanto exato sem ver renderizado
- * (mesma ressalva de sempre, ver FACADE_CORNER2_OFFSET_X_PX/Y_PX
- * abaixo), ajustar aqui depois do primeiro print. */
-const FACADE_CORNER2_SCALE = FACADE_SCALE * 0.6;
+/** Escala PRÓPRIA dessa peça -- Douglas confirmou a regra depois de ver
+ * o primeiro resultado ("ta do mesmo tamanho que a fachada 01" / "a
+ * vidraca deve cobrir dois tiles"): é a MESMA regra de sempre
+ * (FACADE_SCALE), não uma peça menor -- cada vão de janela precisa
+ * cobrir 2 tiles igual a peça principal. O chute de 60% do primeiro
+ * commit estava errado (não era "diminuir o tamanho final", era só
+ * acertar a escala certa). Medido o espaçamento das janelas dessa arte
+ * nova por detecção de borda vertical (gx por coluna, pico a cada
+ * mulição) em 4 faixas horizontais diferentes do PNG, todas bateram
+ * exatamente 54px -- quase idêntico ao da peça principal (53.6px),
+ * então a escala sai da MESMA fórmula (128 / vão-em-px), só que com o
+ * valor medido dessa arte. */
+const FACADE_CORNER2_SCALE = 128 / 54;
 /** Offset manual em cima da posição calculada por tile (ver
  * tileToWorld) -- ZERADO de propósito: a arte E a posição (tile) dessa
  * peça mudaram junto (ver comentário grande acima), então todo o
