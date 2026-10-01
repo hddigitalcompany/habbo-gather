@@ -322,9 +322,20 @@ const FACADE_GLASS_ENTRY: WallCatalogEntry = {
  * mesmo com as peças grudadas. Cortei essa margem morta (a arte já vem
  * com esse recorte pronto agora), então a largura/altura aqui são só o
  * tamanho de verdade do PNG já cortado -- não precisa mexer em mais
- * nada além de gerar a arte certa se isso mudar de novo. */
+ * nada além de gerar a arte certa se isso mudar de novo.
+ *
+ * ACHADO 3 (Douglas: "quero os vidros lisos agora, sem o perfil
+ * encima" -- trocou a arte de novo, de "vidraça com perfil/laje em
+ * relevo no topo" pra "vidraça lisa", mandando uma referência nova,
+ * mais uma composição de canto/3-andares, legenda "assim") -- arte
+ * trocada de novo (altura mudou de 208 pra 191px; largura continua
+ * 144), recalibrado o mesmo jeito: medindo a referência nova (canto
+ * fecha certinho) e simulando localmente antes de subir. Esse
+ * comentário e o ACHADO 2 acima descrevem a arte ANTERIOR (com perfil)
+ * -- mantidos só como histórico de como o processo de calibração
+ * funciona, não descrevem mais o facade-glass-tile.png atual. */
 export const FACADE_GLASS_TILE_WIDTH_PX = 144;
-export const FACADE_GLASS_TILE_HEIGHT_PX = 208;
+export const FACADE_GLASS_TILE_HEIGHT_PX = 191;
 /** Largura/altura do fallback de 1 vidraça só (facade-glass-tile-single.png)
  * -- ver comentário grande acima. Também usado pelo caminho genérico
  * addWallSprite (MainScene.ts, chamado por refreshWallNeighbors/
@@ -336,7 +347,7 @@ export const FACADE_GLASS_TILE_HEIGHT_PX = 208;
  * (syncFacadeGlassWalls) reconstrói a fachada inteira do zero,
  * reparando o pareamento certo de novo. */
 export const FACADE_GLASS_SINGLE_TILE_WIDTH_PX = 72;
-export const FACADE_GLASS_SINGLE_TILE_HEIGHT_PX = 208;
+export const FACADE_GLASS_SINGLE_TILE_HEIGHT_PX = 191;
 
 export const WALL_CATALOG: WallCatalogEntry[] = [...GENERATED_WALL_CATALOG, FACADE_GLASS_ENTRY];
 

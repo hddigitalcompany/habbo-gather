@@ -431,21 +431,19 @@ const FLOOR_GLASS_REPEATS = 6;
 /** Distância vertical (px) entre uma repetição e a próxima de
  * drawFloorEdgeGlass -- PROPOSITALMENTE menor que a altura de verdade
  * do arquivo (FACADE_GLASS_TILE_HEIGHT_PX), pra dar OVERLAP entre elas
- * em vez de só encostar. ACHADO (Douglas mandou referência com 3
- * andares emendados, testou ao vivo e apontou: "olha na vertical o
- * espaco que tem entre elas... na imagem que mandei elas ainda passam
- * um pouco embaixo sobrepoe um pouco") -- a arte tem laje/perfil com
- * profundidade 3D no topo E na base (ver comentário grande de
- * drawFloorEdgeGlass), então empilhar exatamente pela altura cheia do
- * arquivo (encostando bbox a bbox, mesma ideia que já tinha dado
- * problema na horizontal -- ver ACHADO 2 em FACADE_GLASS_TILE_WIDTH_PX
- * em game/wall.ts) sobra um vão vazio bem no meio, porque nem o topo
- * nem a base da arte preenchem a largura toda até a última linha.
- * Valor calibrado testando alguns overlaps numa simulação local (130px
- * ~= 62% da altura de 208px) até bater com a referência do Douglas: a
- * base de uma repetição cobre o topo da próxima, sobrando só 1 linha de
- * "laje" contínua entre andares, sem vão E sem cortar vidro demais. */
-const FACADE_GLASS_FLOOR_REPEAT_STEP_PX = 130;
+ * em vez de só encostar. ACHADO original (arte antiga, com perfil/laje
+ * no topo): Douglas mandou referência com 3 andares emendados, testou
+ * ao vivo e apontou que empilhar pela altura cheia do arquivo deixava
+ * vão vazio no meio -- calibrado 130px (~62% de 208px) pra sobrepor.
+ * ATUALIZADO pra arte nova "lisa, sem perfil encima" (Douglas: "quero
+ * os vidros lisos agora, sem o perfil encima"), que é mais baixa
+ * (FACADE_GLASS_TILE_HEIGHT_PX = 191px). Valor recalibrado medindo a
+ * referência nova do Douglas (composição de canto com 3 andares, arte
+ * lisa, legenda "assim"): período vertical entre andares na referência
+ * escalado pra o tamanho do asset daqui deu ~122px (~64% de 191px),
+ * conferido numa simulação local de empilhamento (vstack) antes de
+ * subir -- sem vão visível entre andares. */
+const FACADE_GLASS_FLOOR_REPEAT_STEP_PX = 122;
 
 // tinta de área (ver game/areas.ts) fica ENTRE o piso e a mobília "flat" --
 // é um "verniz" por cima do chão marcando a zona (mesa privada/sala),
