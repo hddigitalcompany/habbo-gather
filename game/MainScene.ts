@@ -471,7 +471,11 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 // a quina do prédio vista de fora, com o "V" de cima da fachada
 // encaixado nas 2 bordas da FRENTE do losango da sala. Fica entre o
 // fundo sólido e o piso: o piso sempre por cima, a fachada "pendurada"
-// pra baixo a partir da quina de baixo da sala.
+// pra baixo a partir da quina de baixo da sala. Douglas trocou a arte
+// de novo ("troque o vidro da frente agora") -- mesmo arquivo
+// (fachada-predio.avif), reencodado em qualidade alta (libavif,
+// quality=90, ~143KB -- bem menor que o arquivo antigo de 469KB, sem
+// quantizar cor dessa vez, lição da vidraça 2 que manchou o gradiente).
 const FACADE_TEXTURE_KEY = "fachada-predio";
 const DEPTH_FACADE = -2_500_000;
 /** Profundidade SÓ da vidraça 2 (quina2, fachada-predio-quina-2) --
@@ -484,15 +488,22 @@ const DEPTH_FACADE = -2_500_000;
  * desenho muda -- por isso "+ 1", logo acima do piso, sem entrar na
  * faixa de tinta de área/móvel/boneco (DEPTH_AREA pra cima). */
 const DEPTH_FACADE_CORNER2_GLASS = DEPTH_FLOOR + 1;
-/** vértice do "V" de cima da fachada DENTRO do PNG (px) -- é esse ponto
- * que cola no vértice de baixo do piso. A quina já está centralizada na
- * largura da arte (1613px), então x = metade. */
-const FACADE_APEX_X_PX = 806.4;
-const FACADE_APEX_Y_PX = 336.8;
+/** vértice do "V" de cima da fachada DENTRO da arte (px) -- é esse
+ * ponto que cola no vértice de baixo do piso. NÃO está mais
+ * centralizado na largura (era x=806.4=metade de 1613px na arte
+ * antiga) -- a arte nova (1750x1000) tem o V assimétrico, medido
+ * coluna a coluna (perfil de alpha, ponto mais fundo) em x≈706,
+ * y≈306. */
+const FACADE_APEX_X_PX = 706;
+const FACADE_APEX_Y_PX = 306;
 /** escala da arte: cada vão de janela da fachada mede ~53,6px no PNG --
  * pedido do Douglas: "quero cada vidraça abraçando 2 tiles" -- então
  * escalado pra 128px (= 2 x 64px, o comprimento horizontal de 2 arestas
- * do losango), cada janela cobre exatamente 2 tiles do piso. */
+ * do losango), cada janela cobre exatamente 2 tiles do piso. Arte nova
+ * ("troque o vidro da frente agora") remedida por detecção de borda
+ * vertical (mesma técnica da vidraça 2): ~53-53.5px em 5 faixas
+ * diferentes, praticamente idêntico ao valor antigo (53.6px) -- dentro
+ * da margem de erro da medição, então a fórmula/constante não muda. */
 const FACADE_SCALE = 128 / 53.6;
 
 // QUINA ADICIONAL (pedido do Douglas, sala em L/escada: "essa parte vai
