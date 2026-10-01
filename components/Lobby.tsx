@@ -1928,7 +1928,7 @@ function LobbyChatPanel({
   const filesTrigger = !newConvOpen && activeId && (
     <button
       type="button"
-      className={pinMode === "side" ? "chat-files-trigger lobby-chat-files-trigger-sidebar" : "chat-files-trigger"}
+      className={pinMode === "side" ? "chat-files-trigger chat-files-trigger-sidebar" : "chat-files-trigger"}
       style={{ left: rightEdge }}
       onClick={() => (filesPanelOpen ? closeFilesPanel() : openFilesPanel())}
       aria-expanded={filesPanelOpen}
@@ -1948,7 +1948,7 @@ function LobbyChatPanel({
     <>
       <div className="chat-files-panel-click-catcher" onClick={closeFilesPanel} />
       <div
-        className={pinMode === "side" ? "chat-files-panel lobby-chat-files-panel-sidebar" : "chat-files-panel"}
+        className={pinMode === "side" ? "chat-files-panel chat-files-panel-sidebar" : "chat-files-panel"}
         style={{ left: rightEdge + 6 }}
         onClick={(e) => e.stopPropagation()}
       >

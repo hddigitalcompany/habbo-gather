@@ -671,14 +671,22 @@ body {
    .lobby-backdrop-chat-pinned mais abaixo). */
 .lobby-chat-drawer-shell-sidebar {
   position: fixed;
-  /* 1/out, bug reportado pelo Douglas: "diminui ta chegando la no
-     balao de cima" -- com top:116px (84px de altura da .lobby-topbar
-     + 16 de cima + só 16 de respiro) ficava perto demais dela.
-     Trocado pro MESMO top que .lobby-company-card-pin já usa (outro
-     card fixo na mesma borda esquerda, já aprovado por ele) --
-     128px, 12px a mais de respiro. */
-  top: 128px;
-  bottom: 16px;
+  /* 1/out, bug reportado pelo Douglas (repetindo pedido antigo dele,
+     "O LAYOUT DO CHAT DE FORA TEM QUE SER IGUAL AO DE DENTRO, ATE NA
+     POSICAO, IGUAL" -- mesmo pedido que já tinha resolvido pro chat
+     FLUTUANTE, ver comentário grande de .chat-drawer/.lobby-panel
+     acima): os números aqui TÊM que ser os MESMOS do
+     .chat-drawer-shell-sidebar da sala (top:80px, bottom:0) -- nada
+     de recalcular um respiro "mais correto" pra bater com a
+     .lobby-topbar daqui, por mais que ela seja mais alta que o
+     logo da sala (ver tentativas anteriores com 116px/128px, as
+     DUAS erradas pelo mesmo motivo: inventavam um número novo em vez
+     de copiar o da sala). Mecanismo por baixo continua diferente
+     (position:fixed aqui vs. position:static+stretch na sala, ver
+     comentário grande acima), só o RESULTADO visual (onde a borda
+     de cima/baixo cai na tela) precisa ser idêntico. */
+  top: 80px;
+  bottom: 0;
   left: 0;
   max-width: none;
 }
@@ -708,17 +716,7 @@ body {
    bottom:16) em vez dos da sala (top:80/bottom:0) -- reaproveitar as
    classes da sala aqui desalinharia o botão/painel verticalmente,
    porque foram calibradas pra outra altura de container. */
-.lobby-chat-files-trigger-sidebar {
-  /* centro vertical de um box fixo com top:128/bottom:16 é
-     50vh + (128-16)/2 = 50vh + 56px (mesma fórmula do comentário
-     grande em .chat-files-trigger-sidebar). */
-  top: calc(50vh + 56px);
-}
 
-.lobby-chat-files-panel-sidebar {
-  top: 128px;
-  bottom: 16px;
-}
 
 /* empurra pro lado os poucos elementos do Lobby que também vivem
    encostados na borda ESQUERDA (mesmo lado do chat fixo) -- sem isso
