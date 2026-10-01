@@ -4061,34 +4061,33 @@ export default class MainScene extends Phaser.Scene {
     // arquivo) pra sobreviver entre chamadas e sumir sozinho se a
     // quina deixar de existir (sala encolheu de novo, ver
     // eraseRoomShapeAt).
+    //
+    // TRAVADA (pedido do Douglas depois de calibrar a posição a dedo,
+    // print por print: "trava ela nessa posição, não vou mais mexer
+    // nela, vou desenhar uma sacada encima dela") -- ele vai continuar
+    // crescendo a sala (uma sacada por cima/na frente dessa quina), o
+    // que mudaria qual tile é "quina da frente" e reposicionaria/
+    // destruiria essa peça sozinha via roomFrontCorners. Pra isso não
+    // acontecer mais, uma vez que já existe pelo menos 1 sprite de
+    // quina2 nesta sessão da cena, esse bloco inteiro é pulado -- a
+    // posição fica congelada no que já foi calculado, não importa como
+    // a sala mude dali pra frente. Só volta a recalcular se a cena for
+    // recriada do zero (recarregar a página).
     const mainKey = this.roomTileKey(main.col, main.row);
-    const liveKeys = new Set<string>();
-    if (this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
+    if (this.facadeCornerSprites.size === 0 && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
       const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
       for (const c of corners) {
         const key = this.roomTileKey(c.col, c.row);
         if (key === mainKey) continue;
-        liveKeys.add(key);
         const w = tileToWorld(c.col, c.row);
         const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
         const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
-        let sprite = this.facadeCornerSprites.get(key);
-        if (!sprite) {
-          sprite = this.add
-            .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
-            .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
-            .setScale(FACADE_SCALE)
-            .setDepth(DEPTH_FACADE);
-          this.facadeCornerSprites.set(key, sprite);
-        } else {
-          sprite.setPosition(x, y);
-        }
-      }
-    }
-    for (const [key, sprite] of this.facadeCornerSprites) {
-      if (!liveKeys.has(key)) {
-        sprite.destroy();
-        this.facadeCornerSprites.delete(key);
+        const sprite = this.add
+          .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
+          .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
+          .setScale(FACADE_SCALE)
+          .setDepth(DEPTH_FACADE);
+        this.facadeCornerSprites.set(key, sprite);
       }
     }
   }
