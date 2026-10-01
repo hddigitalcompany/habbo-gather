@@ -515,11 +515,18 @@ body {
 
 .chat-drawer {
   position: absolute;
+  /* 1/out, pedido do Douglas: "quero que o card do chat alcance até
+     perto da logo la encima, mantenha a borda de distancia da logo"
+     -- era altura FIXA (480px), sobrando um vão enorme até o selo
+     .room-logo-home-btn (top:16px + 48px + 16px de respiro = 80px).
+     Trocado por top+bottom (mesmo esquema dos outros painéis fixos do
+     app, ver .lobby-company-card-pin) -- estica dinamicamente até
+     quase embaixo do selo, guardando o mesmo respiro de 16px que ele
+     já tem da borda da tela. */
+  top: 80px;
   bottom: 82px;
   left: 16px;
   z-index: 7;
-  height: 480px;
-  max-height: calc(100vh - 150px);
 }
 
 /* "Fixar": em vez de flutuar por cima do jogo, a gaveta vira uma barra
@@ -533,7 +540,16 @@ body {
   flex-shrink: 0;
   width: 320px;
   max-width: 100%;
-  height: 100%;
+  /* 1/out, pedido do Douglas: "no fixo, que respeite o espaco da
+     logo, ta ficando sobre ela" -- height:100% esticava a gaveta até
+     o TOPO da tela, bem atrás do selo fixo .room-logo-home-btn
+     (position:fixed, sempre por cima visualmente, mas sem respiro
+     nenhum reservado pra ele -- ficava "colada"). Trocado height:100%
+     por margin-top:80px (mesmo respiro do .chat-drawer flutuante
+     acima, 16+48+16px) + altura automática: o próprio
+     align-items:stretch do flex pai (.room-and-editor) calcula 100%
+     MENOS essa margem sozinho, sem precisar de calc(). */
+  margin-top: 80px;
   max-height: none;
   border-radius: 0;
   border-top: none;
@@ -572,6 +588,17 @@ body {
    15px/700), alinhado à ESQUERDA, não mais pequeno/maiúsculo/apagado. */
 .chat-drawer-shell {
   position: absolute;
+  /* 1/out, bug reportado pelo Douglas: "chat ta pequeno no sem fixar" +
+     "trava o tamanho do card, nao gosto de coisas exponsivas" -- essa
+     regra só tinha bottom:82px (sem top), e position:absolute SEM top
+     definido vira tamanho de CONTEÚDO (shrink-to-fit) em vez de esticar
+     -- com 1 conversa só na lista, o card desabava pra caber só nela,
+     bem pequeno, em vez de manter o tamanho FIXO de sempre (mesmo
+     tamanho do .chat-drawer sozinho, que sempre teve top:80px +
+     bottom:82px -- ver regra dele acima). Faltava só isso: com os dois
+     definidos, o card (rail + gaveta) fica travado nessa altura
+     sempre, não encolhe nem cresce com a quantidade de conteúdo. */
+  top: 80px;
   bottom: 82px;
   left: 16px;
   z-index: 7;
@@ -588,9 +615,122 @@ body {
    .chat-drawer-sidebar também tá ativo. */
 .chat-drawer-shell-sidebar {
   position: static;
-  height: 100%;
+  /* mesmo motivo/mesmo valor do .chat-drawer-sidebar logo acima --
+     esse aqui é o par coluna de empresas + gaveta JUNTOS (ver
+     companyRail em ChatDrawer/GameRoom.tsx), precisa do mesmo respiro
+     pro selo .room-logo-home-btn não ficar atrás dele também. */
+  margin-top: 80px;
   flex-shrink: 0;
   max-width: none;
+}
+
+/* 1/out, bug reportado pelo Douglas: "continua o chat bugado em duas
+   alturas" -- quando a coluna de empresas tá visível (companyRail,
+   showCompanyRail true), a gaveta (.chat-drawer-sidebar) nasce
+   ANINHADA dentro de .chat-drawer-shell-sidebar (ver regra logo
+   acima), que JÁ aplica margin-top:80px no PAR inteiro (coluna +
+   gaveta). Como .chat-drawer-sidebar carrega seu PRÓPRIO
+   margin-top:80px (pensado pro caso dela ficar SOZINHA, sem coluna,
+   direto filha de .room-and-editor -- ver comentário grande na
+   regra dela acima), os dois respiros SOMAVAM dentro do shell
+   (160px) só na gaveta, enquanto a coluna ao lado (.chat-company-rail,
+   sem margin-top próprio) ficava só com os 80px do shell -- gaveta
+   nascendo mais embaixo E, pelo align-items:stretch do shell
+   (flex-direction:row), mais BAIXA (altura menor) que a coluna irmã.
+   Essa diferença de altura entre as duas colunas do shell era
+   exatamente o "duas alturas" visto no print (painel de chat
+   terminando no meio da tela, vão vazio embaixo até o dock, enquanto
+   a coluna de empresas ia até mais embaixo). Zera aqui o margin-top
+   PRÓPRIO da gaveta só nesse caso aninhado (seletor mais específico,
+   2 classes, ganha de .chat-drawer-sidebar sozinho) -- o respiro do
+   shell já basta, a gaveta volta a nascer colada no topo dele e com
+   a MESMA altura esticada da coluna ao lado. */
+.chat-drawer-shell-sidebar .chat-drawer-sidebar {
+  margin-top: 0;
+}
+
+/* 1/out, pedido do Douglas: "fixar fora da sala também" -- mesma ideia
+   de "fixar" do .chat-drawer-sidebar/.chat-drawer-shell-sidebar
+   (sala, ver comentários grandes acima), só que pro chat de FORA da
+   sala (LobbyChatPanel em Lobby.tsx). Não dá pra reaproveitar as
+   classes de cima tal e qual: elas contam com align-items:stretch de
+   um pai flex em FLUXO normal (.room-and-editor, na sala) pra
+   esticar a altura sozinho -- o Lobby não tem esse pai (.lobby-backdrop
+   só tem um filho de verdade no fluxo, .lobby-card; todo o resto --
+   topbar/av-bar/cards -- é position:fixed|absolute solto, ver
+   comentário grande em .lobby-backdrop). Por isso aqui o container
+   vira position:FIXED com top/bottom DIRETO (em vez de margin-top +
+   esticar via pai) -- mesmo efeito visual (altura travada, sempre a
+   mesma), mecanismo diferente por baixo. top:116px respeita a
+   .lobby-topbar (16px de cima + 84px de altura + 16px de respiro,
+   mesma conta que .lobby-company-card-pin já usa -- ver top:128 lá,
+   só 12px a mais porque aquele card tem uma sombra maior); bottom:16px
+   é o respiro padrão da tela (mesmo valor do .av-bar), MENOR que o
+   bottom:82px do chat flutuante porque aqui não tem av-bar por baixo
+   pra evitar (o av-bar fica deslocado pra direita quando fixo, ver
+   .lobby-backdrop-chat-pinned mais abaixo). */
+.lobby-chat-drawer-shell-sidebar {
+  position: fixed;
+  /* 1/out, bug reportado pelo Douglas: "diminui ta chegando la no
+     balao de cima" -- com top:116px (84px de altura da .lobby-topbar
+     + 16 de cima + só 16 de respiro) ficava perto demais dela.
+     Trocado pro MESMO top que .lobby-company-card-pin já usa (outro
+     card fixo na mesma borda esquerda, já aprovado por ele) --
+     128px, 12px a mais de respiro. */
+  top: 128px;
+  bottom: 16px;
+  left: 0;
+  max-width: none;
+}
+
+.lobby-chat-drawer-sidebar {
+  /* mesmo papel de .chat-drawer-sidebar (sala): dentro do shell
+     fixo acima, essa aqui é position:static + flex-shrink:0, só
+     recebe a altura esticada do PAI (align-items:stretch já vem de
+     .chat-drawer-shell, reaproveitada) -- ela mesma não tem
+     position:fixed nem top/bottom próprios, senão escaparia do
+     fluxo flex do shell e sobraria por cima da coluna de empresas
+     em vez de ficar do lado. */
+  position: static;
+  flex-shrink: 0;
+  width: 320px;
+  max-width: 100%;
+  border-radius: 0;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  box-shadow: 2px 0 30px rgba(0, 0, 0, 0.35);
+}
+
+/* botão/painel de arquivos -- mesmo motivo de .chat-files-trigger-sidebar/
+   .chat-files-panel-sidebar (ver comentário grande deles acima), mas
+   com os NÚMEROS do .lobby-chat-drawer-shell-sidebar (top:116/
+   bottom:16) em vez dos da sala (top:80/bottom:0) -- reaproveitar as
+   classes da sala aqui desalinharia o botão/painel verticalmente,
+   porque foram calibradas pra outra altura de container. */
+.lobby-chat-files-trigger-sidebar {
+  /* centro vertical de um box fixo com top:128/bottom:16 é
+     50vh + (128-16)/2 = 50vh + 56px (mesma fórmula do comentário
+     grande em .chat-files-trigger-sidebar). */
+  top: calc(50vh + 56px);
+}
+
+.lobby-chat-files-panel-sidebar {
+  top: 128px;
+  bottom: 16px;
+}
+
+/* empurra pro lado os poucos elementos do Lobby que também vivem
+   encostados na borda ESQUERDA (mesmo lado do chat fixo) -- sem isso
+   o chat fixo (412px de largura no máximo, rail+gaveta) cobriria por
+   cima. .lobby-topbar não precisa entrar aqui: ela fica inteira
+   acima do top:116px do chat fixo, nunca se cruzam. Valor único
+   (428px = 412px do chat mais largo possível + 16px de respiro)
+   cobre o caso com coluna de empresas; sem ela sobra um respiro
+   extra à toa, inofensivo. */
+.lobby-backdrop-chat-pinned .av-bar,
+.lobby-backdrop-chat-pinned .lobby-company-card-pin {
+  left: 428px;
 }
 
 /* encostada na coluna (gap:0 acima) -- perde o arredondado E a borda
@@ -2142,6 +2282,536 @@ button.chat-picker-item:disabled {
 
 .chat-message-delete-btn:hover {
   color: #ff5c7a;
+}
+
+/* =====================================================================
+   Chat: reação com emoji, @menção, "digitando...", confirmação de
+   leitura, mensagem fixada (com prazo) e painel de arquivos da
+   conversa -- pedido do Douglas, 1/out, comparando com o Slack:
+   "Histórico persistido por conversa... Reação com emoji nas
+   mensagens / @menção / Indicador de "fulano está digitando..." /
+   Confirmação de leitura (visto por quem) / Mensagem fixada (definir
+   tempo de fixacao)... quero um botao do lado do chat centralizado na
+   borda, igual a seta de editar card empresa, porem com icone de
+   ficheiro, expande do lado". Ver ChatMessageRow/ChatDrawer em
+   components/GameRoom.tsx pro JSX que usa essas classes.
+   ===================================================================== */
+
+/* reagir + fixar (dois botõezinhos redondos do lado do balão) -- mesmo
+   espírito do .chat-message-delete-btn logo acima (escondido até
+   passar o mouse por perto), só que em grupo e com popover embutido.
+   O popover em si fica DENTRO do wrap (ver .chat-message-action-wrap),
+   então passar o mouse nele continua contando como hover de
+   .chat-message-row (hover propaga pela árvore do DOM, não pela
+   posição visual) -- é por isso que dá pra abrir o popover, soltar o
+   mouse do botão e ainda clicar numa opção sem ele sumir. */
+.chat-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.chat-message-row:hover .chat-message-actions {
+  opacity: 1;
+}
+
+.chat-message-action-wrap {
+  position: relative;
+}
+
+.chat-message-action-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #7c7290;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-message-action-btn:hover,
+.chat-message-action-btn.active {
+  color: #fff;
+  background: rgba(124, 92, 255, 0.35);
+}
+
+/* popover de emoji rápido (reagir) e de "tempo de fixação" (fixar) --
+   abrem pra CIMA (bottom:100%) pra não ficar embaixo do composer, e
+   centralizados no botão (translateX(-50%)) pra sobrar o mesmo espaço
+   dos dois lados -- limitação aceita: numa gaveta bem estreita (320px,
+   ver .chat-drawer-sidebar) com a mensagem colada bem na borda, a
+   ponta pode cortar um pouco (.chat-messages tem overflow-y:auto, que
+   por regra do CSS também vira overflow-x:auto -- só visual, não
+   atrapalha o clique). */
+.chat-quick-react-popover,
+.chat-pin-duration-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 6px;
+  border-radius: 12px;
+  background: #1c1530;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.chat-quick-react-popover {
+  display: flex;
+  gap: 2px;
+}
+
+.chat-quick-react-option {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-quick-react-option:hover {
+  background: rgba(124, 92, 255, 0.3);
+}
+
+.chat-pin-duration-popover {
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+}
+
+.chat-pin-duration-option {
+  border: none;
+  background: transparent;
+  color: #f5f0ff;
+  font-size: 12px;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-pin-duration-option:hover {
+  background: rgba(124, 92, 255, 0.3);
+}
+
+.chat-pin-duration-unpin {
+  color: #ff8080;
+}
+
+/* reações já dadas na mensagem (pills abaixo do balão) -- clicar de
+   novo num pill alterna a MINHA reação (toggle, ver onToggleReaction).
+   `.active` = eu já reagi com esse emoji. */
+.chat-reactions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 4px;
+  max-width: 100%;
+}
+
+.chat-reactions-row.own {
+  justify-content: flex-end;
+}
+
+.chat-reaction-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f5f0ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-reaction-pill:hover {
+  border-color: rgba(124, 92, 255, 0.6);
+}
+
+.chat-reaction-pill.active {
+  background: rgba(124, 92, 255, 0.35);
+  border-color: #7c5cff;
+}
+
+.chat-reaction-count {
+  font-size: 10px;
+  color: #cfc6e8;
+}
+
+/* @menção destacada dentro do texto -- ver renderMentionText em
+   GameRoom.tsx sobre a limitação de nomes com espaço (só destaca a
+   primeira palavra depois do @ nesse caso). */
+.chat-mention-tag {
+  color: #b9a6ff;
+  font-weight: 600;
+}
+
+/* balão de uma mensagem que ME menciona -- mesmo espírito do highlight
+   de menção do Slack, só nessa mensagem (ver iWasMentioned). */
+.chat-bubble-mentioned {
+  background: rgba(124, 92, 255, 0.22) !important;
+  border: 1px solid rgba(124, 92, 255, 0.5);
+}
+
+/* "visto por" -- linha discreta embaixo do horário, só na última
+   mensagem MINHA de uma conversa de verdade (ver comentário grande no
+   chamador, em ChatDrawer/GameRoom.tsx). */
+.chat-message-seenby {
+  display: block;
+  font-size: 10px;
+  color: #7c7290;
+  padding: 0 4px;
+}
+
+/* mensagem(ns) fixada(s) -- faixa compacta entre o cabeçalho da gaveta
+   e a lista de mensagens, mais recente primeiro (ver ChatDrawer). */
+.chat-pins-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  max-height: 110px;
+  overflow-y: auto;
+  background: rgba(124, 92, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.chat-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #f5f0ff;
+}
+
+.chat-pin-row svg {
+  flex-shrink: 0;
+  color: #b9a6ff;
+}
+
+.chat-pin-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-pin-unpin-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #cfc6e8;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.chat-pin-unpin-btn:hover {
+  color: #ff8080;
+  background: rgba(255, 92, 122, 0.12);
+}
+
+/* "fulano está digitando..." -- linha fina acima do composer, some
+   sozinha (ver TYPING_EXPIRE_MS) quando ninguém mais digita. */
+.chat-typing-indicator {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-style: italic;
+  color: #b9a6ff;
+}
+
+/* composer com @menção -- só adiciona o position:relative que o
+   dropdown (.chat-mention-dropdown) precisa pra se ancorar; resto do
+   visual é herdado de .chat-composer mesmo. */
+.chat-composer-with-mentions {
+  position: relative;
+}
+
+.chat-mention-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 8px;
+  right: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #1c1530;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  z-index: 9;
+}
+
+.chat-mention-option {
+  border: none;
+  background: transparent;
+  color: #f5f0ff;
+  font-size: 13px;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.chat-mention-option:hover {
+  background: rgba(124, 92, 255, 0.3);
+}
+
+/* --- painel lateral "arquivos da conversa" ---------------------------
+   pedido do Douglas, 1/out: "um botao do lado do chat centralizado na
+   borda, igual a seta de editar card empresa, porem com icone de
+   ficheiro, expande do lado, uma busca dos itens, por categoria,
+   imagem, arquivo, e barra de pesquisa, botao de baixar e de mencionar
+   na conversa". MESMO mecanismo visual do .company-card-edit-trigger/
+   .company-edit-panel (ver comentário grande deles mais acima) -- só
+   que position:fixed (ver comentário grande de filesTrigger/filesPanel
+   em ChatDrawer/GameRoom.tsx sobre o motivo) com left calculado em JS
+   (rightEdge) e passado via `style`, aqui só o resto do visual + o
+   top/transform verticais (floating vs. lateral têm alturas
+   ligeiramente diferentes, ver .chat-drawer vs. .chat-drawer-sidebar --
+   os valores abaixo centralizam o botão exatamente na mesma área
+   vertical que cada um deles ocupa). */
+.chat-files-trigger,
+.chat-files-trigger-sidebar {
+  position: fixed;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 8;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(20, 14, 32, 0.85);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.chat-files-trigger-sidebar {
+  /* .chat-drawer-sidebar vai até o fundo da tela (bottom:0, ver
+     margin-top:80px + align-items:stretch), diferente do flutuante
+     (.chat-drawer, bottom:82px) -- por isso o centro vertical dela fica
+     ~40px mais embaixo (metade da diferença dos dois "bottom"). */
+  top: calc(50vh + 40px);
+}
+
+.chat-files-trigger:hover,
+.chat-files-trigger-sidebar:hover {
+  background: #7c5cff;
+}
+
+.chat-files-panel,
+.chat-files-panel-sidebar {
+  position: fixed;
+  top: 80px;
+  bottom: 82px;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 10px;
+  border-radius: 16px;
+  background: linear-gradient(165deg, rgba(24, 24, 26, 0.96), rgba(6, 6, 7, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  color: #f5f0ff;
+}
+
+.chat-files-panel-sidebar {
+  /* mesmo raciocínio do .chat-files-trigger-sidebar acima -- lateral
+     vai até o fundo mesmo (bottom:0), floating guarda 82px pro
+     composer/respiro de baixo. */
+  bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .chat-files-trigger,
+  .chat-files-trigger-sidebar,
+  .chat-files-panel,
+  .chat-files-panel-sidebar {
+    display: none;
+  }
+}
+
+/* clique fora do painel fecha, sem escurecer o resto da tela -- mesmo
+   espírito/zindex do .company-edit-click-catcher. */
+.chat-files-panel-click-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  background: transparent;
+}
+
+.chat-files-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-files-panel-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.chat-files-panel-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.chat-files-panel-tab {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: #cfc6e8;
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chat-files-panel-tab:hover {
+  border-color: rgba(124, 92, 255, 0.6);
+}
+
+.chat-files-panel-tab.active {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #fff;
+}
+
+.chat-files-panel-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #7c7290;
+}
+
+.chat-files-panel-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #f5f0ff;
+  font-size: 13px;
+  outline: none;
+}
+
+.chat-files-panel-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-files-panel-hint {
+  font-size: 12px;
+  color: #7c7290;
+  text-align: center;
+  margin-top: 20px;
+}
+
+.chat-files-panel-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chat-files-panel-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.chat-files-panel-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfc6e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-files-panel-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-files-panel-item-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-files-panel-item-meta {
+  font-size: 10px;
+  color: #7c7290;
+}
+
+.chat-files-panel-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #cfc6e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-files-panel-btn:hover {
+  color: #fff;
+  background: rgba(124, 92, 255, 0.35);
 }
 
 .hint {

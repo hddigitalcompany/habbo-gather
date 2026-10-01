@@ -45,7 +45,7 @@
 // sala (dependem de WebRTC/WebSocket de verdade, ver ChatDrawer em
 // GameRoom.tsx).
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
 import { resolveUserId } from "@/lib/identity";
 import {
@@ -86,6 +86,8 @@ const REALTIME_HTTP_BASE =
 // uploadChatFile/attachmentUrl em GameRoom.tsx -- copiado, não
 // importado, mesmo motivo de sempre). MESMO endpoint POST /upload de
 // sempre (bytes crus, sem multipart), não depende de sala nenhuma.
+const LOBBY_CHAT_PINNED_STORAGE_KEY = "habbo-gather-lobby-chat-pinned";
+
 function attachmentUrl(path: string): string {
   return path.startsWith("http") ? path : `${REALTIME_HTTP_BASE}${path}`;
 }
@@ -109,6 +111,24 @@ function formatFileSize(bytes: number): string {
 
 function formatChatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// @menção (pedido do Douglas, 1/out) -- MESMA função de GameRoom.tsx
+// (copiada, não importada): destaca "@Palavra" dentro do texto. Mesma
+// limitação aceita lá -- nomes com espaço só destacam a primeira
+// palavra depois do @ (não tem como casar o nome inteiro sem a lista
+// de candidatos aqui).
+function renderMentionText(text: string) {
+  const parts = text.split(/(@[^\s@]+)/g);
+  return parts.map((part, i) =>
+    part.startsWith("@") ? (
+      <span key={i} className="chat-mention-tag">
+        {part}
+      </span>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    )
+  );
 }
 
 // "0:07", "1:23" etc -- usado no contador de gravação de áudio.
@@ -189,6 +209,10 @@ type ChatAttachment = { url: string; name: string; size: number; mime: string };
 // chatStore.addMessage (server/chatStore.js) e sendRoomCard mais
 // abaixo.
 type RoomCard = { action: "invite" | "visit"; roomSlug: string; roomName: string; roomLogoUrl: string };
+// reação com emoji (pedido do Douglas, 1/out, comparando com o Slack)
+// -- emoji -> lista de userId que reagiram com ele, mesmo formato de
+// ChatReactions em GameRoom.tsx (copiado, não importado).
+type ChatReactions = Record<string, string[]>;
 type ChatMessage = {
   id: string;
   senderId: string;
@@ -199,6 +223,23 @@ type ChatMessage = {
   roomCard?: RoomCard | null;
   ts: number;
   deleted?: boolean;
+  // 1/out, pedido do Douglas (comparando com o Slack) -- reação/
+  // @menção, mesmo par opcional de GameRoom.tsx (ver ChatMsgBase lá).
+  reactions?: ChatReactions;
+  mentionedUserIds?: string[];
+};
+// mensagem fixada (pedido do Douglas, 1/out: "mensagem fixada (definir
+// tempo de fixacao)") -- MESMO formato de ChatPin em GameRoom.tsx.
+type ChatPin = { messageId: string; pinnedBy: string; pinnedByName: string; pinnedAt: number; expiresAt: number | null };
+// item do painel lateral "arquivos da conversa" -- MESMO formato de
+// ChatAttachmentItem em GameRoom.tsx.
+type ChatAttachmentItem = {
+  messageId: string;
+  senderId: string;
+  senderName: string;
+  ts: number;
+  kind: "image" | "file" | "audio";
+  attachment: ChatAttachment;
 };
 
 type CallParticipant = { id: string; name: string; status: string };
@@ -457,6 +498,81 @@ function FileIcon() {
     </svg>
   );
 }
+
+// 1/out, pedido do Douglas (espelhar no chat de fora os mesmos ícones
+// novos do chat de dentro da sala, ver ChatMessageRow/ChatDrawer em
+// components/GameRoom.tsx) -- reação/fixar/painel de arquivos/
+// @menção. Copiados (não importados, mesmo motivo de sempre nesse
+// arquivo), MESMO traçado/tamanho dos de lá.
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
+      <path
+        d="M14.5 3.5 20.5 9.5 17 13l.5 5-3-2.5-4 4-1-1 4-4L11 12l3.5-3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M9 15 4 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SmileIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8.3 14c.9 1.3 2.1 2 3.7 2s2.8-.7 3.7-2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M9 10.2h.01M15 10.2h.01" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M12 3.5v12.5M7 11l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 19.5h15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AtIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="4.2" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M16.2 12v1.3a2.3 2.3 0 0 0 4.6 0V12a8.8 8.8 0 1 0-3.5 7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M20 20l-4.3-4.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// mesmo conjunto fixo de emoji rápidos do chat de dentro da sala (ver
+// QUICK_REACTION_EMOJIS em GameRoom.tsx).
+const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🎉", "👏"];
+// mesmas opções de "tempo de fixação" do chat de dentro da sala (ver
+// PIN_DURATION_OPTIONS em GameRoom.tsx) -- durationMs null = sem
+// prazo.
+const PIN_DURATION_OPTIONS: { label: string; durationMs: number | null }[] = [
+  { label: "1 hora", durationMs: 60 * 60 * 1000 },
+  { label: "6 horas", durationMs: 6 * 60 * 60 * 1000 },
+  { label: "24 horas", durationMs: 24 * 60 * 60 * 1000 },
+  { label: "7 dias", durationMs: 7 * 24 * 60 * 60 * 1000 },
+  { label: "Sem prazo", durationMs: null },
+];
 
 // "card" da Empresa selecionada -- pedido do Douglas: "nesse canto
 // quero o card da Empresa selecionada" (print de referência: card
@@ -1075,6 +1191,8 @@ function formatAgendaEventTime(startTs: number, durationMinutes: number): string
  * arquivo pra entender o porquê de tudo aqui ser REST (sem WebSocket,
  * sem virar presença fantasma na sala). */
 function LobbyChatPanel({
+  pinMode,
+  onToggleSidePin,
   myUserId,
   myName,
   myRoomSlug,
@@ -1089,6 +1207,8 @@ function LobbyChatPanel({
   onConversationsReplaced,
   initialActiveId,
 }: {
+  pinMode: "float" | "side";
+  onToggleSidePin: () => void;
   myUserId: string;
   myName: string;
   // 30/set, bug reportado pelo Douglas: "adicionei logo a empresa e no
@@ -1151,6 +1271,32 @@ function LobbyChatPanel({
   // recalcula sozinho enquanto a pessoa lê, senão a linha ficaria
   // pulando pra baixo a cada mensagem nova).
   const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
+  // 1/out, pedido do Douglas (espelhar no chat de fora: "mensagem
+  // fixada"/"confirmação de leitura") -- MESMO par pins/lastRead que o
+  // ChatDrawer de dentro da sala já tem, só que aqui vem embutido na
+  // resposta do GET /chat/messages (ver fetchMessages mais abaixo e o
+  // comentário grande desse endpoint em server/index.js) em vez de um
+  // evento de WebSocket, porque esse painel não tem socket nenhum.
+  const [pins, setPins] = useState<ChatPin[]>([]);
+  const [lastReadByUserId, setLastReadByUserId] = useState<Record<string, number>>({});
+  // reação com emoji / mensagem fixada (pedido do Douglas, 1/out) --
+  // MESMO padrão de popover único por vez (um id só, não por mensagem)
+  // do ChatMessageRow em GameRoom.tsx.
+  const [reactingMessageId, setReactingMessageId] = useState<string | null>(null);
+  const [pinningMessageId, setPinningMessageId] = useState<string | null>(null);
+  // @menção (pedido do Douglas, 1/out) -- MESMO mecanismo do composer
+  // de dentro da sala (ver handleComposerInputChange/insertMention em
+  // GameRoom.tsx): substring "@algo" sendo digitada agora (start/end =
+  // índice no texto, query = o que vem depois do @), null quando não
+  // tem autocomplete aberto.
+  const [mentionState, setMentionState] = useState<{ start: number; end: number; query: string } | null>(null);
+  const composerInputRef = useRef<HTMLInputElement>(null);
+  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out) --
+  // MESMO padrão de estado do ChatDrawer em GameRoom.tsx.
+  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
+  const [filesPanelItems, setFilesPanelItems] = useState<ChatAttachmentItem[] | null>(null);
+  const [filesPanelFilter, setFilesPanelFilter] = useState<"all" | "image" | "file" | "audio">("all");
+  const [filesPanelQuery, setFilesPanelQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   // anexo/áudio no chat de fora da sala (pedido do Douglas, 30/set:
@@ -1329,11 +1475,27 @@ function LobbyChatPanel({
     if (!activeId) {
       setMessages(null);
       setUnreadSinceTs(null);
+      // 1/out: zera tudo que é POR CONVERSA junto (mesmo espírito de
+      // sempre desse efeito) -- senão a faixa de fixadas/"visto por"
+      // de uma conversa ficaria aparecendo por um instante ao abrir
+      // outra, antes do primeiro fetchMessages dela responder.
+      setPins([]);
+      setLastReadByUserId({});
+      setReactingMessageId(null);
+      setPinningMessageId(null);
+      setFilesPanelOpen(false);
+      setFilesPanelItems(null);
       return;
     }
     let cancelled = false;
     setMessages(null);
     setUnreadSinceTs(null);
+    setPins([]);
+    setLastReadByUserId({});
+    setReactingMessageId(null);
+    setPinningMessageId(null);
+    setFilesPanelOpen(false);
+    setFilesPanelItems(null);
     const conversationId = activeId;
 
     function fetchMessages() {
@@ -1342,7 +1504,14 @@ function LobbyChatPanel({
       )
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (!cancelled) setMessages(Array.isArray(data?.messages) ? data.messages : []);
+          if (cancelled) return;
+          setMessages(Array.isArray(data?.messages) ? data.messages : []);
+          // 1/out: esse GET agora manda pins/lastRead junto (ver
+          // comentário grande dele em server/index.js) -- é por isso
+          // que a faixa de fixadas e o "visto por" atualizam sozinhos
+          // a cada 4s, sem precisar de WebSocket.
+          if (data?.pins) setPins(data.pins);
+          if (data?.lastRead) setLastReadByUserId(data.lastRead);
         })
         .catch(() => {
           if (!cancelled) setMessages([]);
@@ -1370,6 +1539,11 @@ function LobbyChatPanel({
       .then((data) => {
         if (cancelled) return;
         setUnreadSinceTs(typeof data?.unreadSinceTs === "number" ? data.unreadSinceTs : 0);
+        // 1/out: pins/lastRead já vêm nessa resposta também (ver
+        // comentário grande do POST /chat/open em server/index.js) --
+        // usa de primeira sem esperar o próximo poll de fetchMessages.
+        if (data?.pins) setPins(data.pins);
+        if (data?.lastRead) setLastReadByUserId(data.lastRead);
         onConversationRead(conversationId);
       })
       .catch(() => {});
@@ -1386,6 +1560,145 @@ function LobbyChatPanel({
   }, [activeId, myUserId]);
 
   const activeConversation = conversations?.find((c) => c.id === activeId) ?? null;
+
+  // @menção (pedido do Douglas, 1/out) -- quem pode ser @mencionado
+  // aqui fora é só os participantes da conversa aberta (a Sala/
+  // "quem tá por perto" não existe no Lobby, ver comentário grande no
+  // topo do arquivo), MESMO formato de mentionCandidates em
+  // GameRoom.tsx.
+  const mentionCandidates: { id: string; name: string }[] = (activeConversation?.participants ?? [])
+    .filter((p) => p.id !== myUserId)
+    .map((p) => ({ id: p.id, name: p.name || "?" }));
+  const mentionMatches =
+    mentionState != null
+      ? mentionCandidates.filter((c) => (c.name || "").toLowerCase().includes(mentionState.query.toLowerCase())).slice(0, 6)
+      : [];
+  // quem eu já @mencionei na mensagem que tô escrevendo agora -- MESMO
+  // mecanismo de pendingMentionIds em GameRoom.tsx (um array à parte,
+  // zerado a cada envio), só que local a esse painel (não precisa
+  // subir pro Lobby, diferente do draft/activeId que o Lobby usa pra
+  // outras coisas).
+  const pendingMentionIdsRef = useRef<string[]>([]);
+
+  function handleComposerInputChange(e: ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value;
+    setDraft(value);
+    const caret = e.target.selectionStart ?? value.length;
+    // mesmo regex de detecção de "@algo" do composer de dentro da sala
+    // (ver handleComposerInputChange em GameRoom.tsx).
+    const before = value.slice(0, caret);
+    const match = before.match(/(?:^|\s)@([^\s@]*)$/);
+    if (match) {
+      const start = before.length - match[0].length + (match[0].startsWith("@") ? 0 : 1);
+      setMentionState({ start, end: caret, query: match[1] });
+    } else {
+      setMentionState(null);
+    }
+  }
+
+  function insertMention(candidate: { id: string; name: string }) {
+    if (!mentionState) return;
+    const name = candidate.name || "?";
+    const newText = draft.slice(0, mentionState.start) + "@" + name + " " + draft.slice(mentionState.end);
+    setDraft(newText);
+    if (!pendingMentionIdsRef.current.includes(candidate.id)) pendingMentionIdsRef.current.push(candidate.id);
+    setMentionState(null);
+    composerInputRef.current?.focus();
+  }
+
+  // reação com emoji (pedido do Douglas, 1/out) -- MESMO toggle do
+  // case "chat:react" do WebSocket, só que via POST /chat/react direto
+  // (sem socket, ver comentário grande dele em server/index.js);
+  // atualiza a mensagem local na hora com a resposta do servidor (não
+  // espera o próximo poll de 4s de fetchMessages pra não parecer
+  // travado ao clicar).
+  async function toggleReaction(messageId: string, emoji: string) {
+    if (!activeId) return;
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/react`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: activeId, userId: myUserId, messageId, emoji }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.reactions) {
+        setMessages((prev) => (prev ? prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions } : m)) : prev));
+      }
+    } catch {
+      // rede caiu -- sem feedback especial, o próximo poll corrige sozinho
+    }
+  }
+
+  // mensagem fixada (pedido do Douglas, 1/out: "mensagem fixada
+  // (definir tempo de fixacao)") -- MESMO par de ações dos cases
+  // "chat:pin"/"chat:unpin" do WebSocket, via POST /chat/pin e /chat/
+  // unpin (ver comentário grande deles em server/index.js).
+  async function pinMessage(messageId: string, durationMs: number | null) {
+    if (!activeId) return;
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: activeId, userId: myUserId, userName: myName, messageId, durationMs }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.pins) setPins(data.pins);
+    } catch {
+      // rede caiu -- próximo poll corrige sozinho
+    }
+    setPinningMessageId(null);
+  }
+
+  async function unpinMessage(messageId: string) {
+    if (!activeId) return;
+    try {
+      const res = await fetch(`${REALTIME_HTTP_BASE}/chat/unpin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: activeId, userId: myUserId, messageId }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.pins) setPins(data.pins);
+    } catch {
+      // rede caiu -- próximo poll corrige sozinho
+    }
+  }
+
+  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out) --
+  // MESMA ação do case "chat:attachments" do WebSocket, via GET /chat/
+  // attachments (ver comentário grande dele em server/index.js), só
+  // busca ao ABRIR o painel (não fica fazendo polling -- a conversa já
+  // tá sendo repolida de qualquer jeito, e anexo novo aparece ao reabrir).
+  async function openFilesPanel() {
+    setFilesPanelOpen(true);
+    if (!activeId) return;
+    try {
+      const res = await fetch(
+        `${REALTIME_HTTP_BASE}/chat/attachments?conversationId=${encodeURIComponent(activeId)}&userId=${encodeURIComponent(myUserId)}`
+      );
+      const data = res.ok ? await res.json() : null;
+      setFilesPanelItems(Array.isArray(data?.attachments) ? data.attachments : []);
+    } catch {
+      setFilesPanelItems([]);
+    }
+  }
+
+  function closeFilesPanel() {
+    setFilesPanelOpen(false);
+  }
+
+  // "mencionar na conversa" (botão do painel de arquivos, pedido do
+  // Douglas, 1/out) -- reenvia esse anexo como mensagem nova no fim da
+  // conversa (mesma ideia simples do botão igual em GameRoom.tsx: não
+  // tem como "linkar" pra mensagem original no meio do histórico sem
+  // scroll-to-message, então só manda de novo).
+  async function mentionAttachmentInChat(item: ChatAttachmentItem) {
+    await sendChatPayload({ attachment: item.attachment, kind: item.kind });
+    setFilesPanelOpen(false);
+  }
 
   // "3 pontinhos" -- MESMA ação do case "chat:set_lane" do WebSocket
   // (ver ChatDrawer/moveConversationLane em GameRoom.tsx), só que sem
@@ -1423,7 +1736,13 @@ function LobbyChatPanel({
   // de convite"). MESMO endpoint que sendMessage já usava, só que
   // extraído pra ser reaproveitado pelas três formas de mandar
   // mensagem (texto/anexo/cardzinho) sem repetir o fetch três vezes.
-  async function sendChatPayload(payload: { text?: string; attachment?: ChatAttachment; kind?: string; roomCard?: RoomCard }) {
+  async function sendChatPayload(payload: {
+    text?: string;
+    attachment?: ChatAttachment;
+    kind?: string;
+    roomCard?: RoomCard;
+    mentionedUserIds?: string[];
+  }) {
     if (!activeId) return null;
     const res = await fetch(`${REALTIME_HTTP_BASE}/chat/send`, {
       method: "POST",
@@ -1444,8 +1763,14 @@ function LobbyChatPanel({
     if (!text || !activeId || sending) return;
     setSending(true);
     try {
-      const msg = await sendChatPayload({ text });
-      if (msg) setDraft("");
+      // @menção (pedido do Douglas, 1/out) -- manda junto quem foi
+      // @mencionado nessa mensagem (ver insertMention/pendingMentionIdsRef
+      // acima), mesmo espírito de pendingMentionIds em GameRoom.tsx.
+      const msg = await sendChatPayload({ text, mentionedUserIds: pendingMentionIdsRef.current });
+      if (msg) {
+        setDraft("");
+        pendingMentionIdsRef.current = [];
+      }
     } catch {
       // rede caiu no meio -- deixa o texto no campo pra pessoa tentar de novo
     } finally {
@@ -1584,8 +1909,132 @@ function LobbyChatPanel({
     </div>
   );
 
+  // --- painel lateral "arquivos da conversa" (pedido do Douglas, 1/out:
+  // "um botao do lado do chat centralizado na borda, igual a seta de
+  // editar card empresa, porem com icone de ficheiro, expande do
+  // lado"). MESMO mecanismo (position:fixed + rightEdge calculado em
+  // JS) do ChatDrawer de dentro da sala (ver comentário grande dele em
+  // GameRoom.tsx) -- aqui mais simples porque o Lobby só tem o layout
+  // flutuante (nunca fixa na lateral, não existe pinMode aqui), então
+  // rightEdge só varia com companyRail (coluna de empresas) ou não.
+  // posição do botão/painel de arquivos (ver comentário grande
+  // logo acima) -- precisa branch por pinMode agora: fixo na
+  // lateral começa em left:0 (não 16) e a gaveta fica mais
+  // estreita (320px, não 380px -- mesma redução que
+  // .chat-drawer-sidebar faz na sala), ver .lobby-chat-drawer-sidebar
+  // em globals.css.
+  const rightEdge =
+    pinMode === "side" ? (companyRail ? 92 : 0) + 320 : 16 + (companyRail ? 92 : 0) + 380;
+  const filesTrigger = !newConvOpen && activeId && (
+    <button
+      type="button"
+      className={pinMode === "side" ? "chat-files-trigger lobby-chat-files-trigger-sidebar" : "chat-files-trigger"}
+      style={{ left: rightEdge }}
+      onClick={() => (filesPanelOpen ? closeFilesPanel() : openFilesPanel())}
+      aria-expanded={filesPanelOpen}
+      title={filesPanelOpen ? "Fechar arquivos" : "Arquivos da conversa"}
+      data-tooltip={filesPanelOpen ? "Fechar arquivos" : "Arquivos da conversa"}
+    >
+      {filesPanelOpen ? <ChevronLeftIcon /> : <FileIcon />}
+    </button>
+  );
+  const FILES_PANEL_TABS: { key: "all" | "image" | "file" | "audio"; label: string }[] = [
+    { key: "all", label: "Tudo" },
+    { key: "image", label: "Imagens" },
+    { key: "file", label: "Arquivos" },
+    { key: "audio", label: "Áudios" },
+  ];
+  const filesPanel = !newConvOpen && activeId && filesPanelOpen && (
+    <>
+      <div className="chat-files-panel-click-catcher" onClick={closeFilesPanel} />
+      <div
+        className={pinMode === "side" ? "chat-files-panel lobby-chat-files-panel-sidebar" : "chat-files-panel"}
+        style={{ left: rightEdge + 6 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="chat-files-panel-header">
+          <h3>Arquivos da conversa</h3>
+          <button type="button" className="items-panel-close" onClick={closeFilesPanel} title="Fechar">
+            ✕
+          </button>
+        </div>
+        <div className="chat-files-panel-tabs">
+          {FILES_PANEL_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={filesPanelFilter === t.key ? "chat-files-panel-tab active" : "chat-files-panel-tab"}
+              onClick={() => setFilesPanelFilter(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="chat-files-panel-search">
+          <SearchIcon />
+          <input
+            value={filesPanelQuery}
+            onChange={(e) => setFilesPanelQuery(e.target.value)}
+            placeholder="Buscar por nome..."
+          />
+        </div>
+        <div className="chat-files-panel-list">
+          {filesPanelItems === null ? (
+            <p className="chat-files-panel-hint">Carregando...</p>
+          ) : (
+            (() => {
+              const q = filesPanelQuery.trim().toLowerCase();
+              const list = filesPanelItems.filter(
+                (it) =>
+                  (filesPanelFilter === "all" || it.kind === filesPanelFilter) &&
+                  (!q || it.attachment.name.toLowerCase().includes(q))
+              );
+              if (list.length === 0) return <p className="chat-files-panel-hint">Nenhum arquivo encontrado.</p>;
+              return list.map((it) => (
+                <div key={it.messageId} className="chat-files-panel-item">
+                  {it.kind === "image" ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="chat-files-panel-thumb" src={attachmentUrl(it.attachment.url)} alt="" />
+                  ) : (
+                    <span className="chat-files-panel-icon">
+                      {it.kind === "audio" ? <MicIcon off={false} /> : <FileIcon />}
+                    </span>
+                  )}
+                  <span className="chat-files-panel-item-info">
+                    <span className="chat-files-panel-item-name">{it.attachment.name}</span>
+                    <span className="chat-files-panel-item-meta">
+                      {it.senderName || "Alguém"} · {formatFileSize(it.attachment.size)}
+                    </span>
+                  </span>
+                  <a
+                    className="chat-files-panel-btn"
+                    href={attachmentUrl(it.attachment.url)}
+                    download={it.attachment.name}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Baixar"
+                  >
+                    <DownloadIcon />
+                  </a>
+                  <button
+                    type="button"
+                    className="chat-files-panel-btn"
+                    title="Mencionar na conversa"
+                    onClick={() => mentionAttachmentInChat(it)}
+                  >
+                    <AtIcon />
+                  </button>
+                </div>
+              ));
+            })()
+          )}
+        </div>
+      </div>
+    </>
+  );
+
   const drawerBody = (
-    <div className="chat-drawer">
+    <div className={pinMode === "side" ? "chat-drawer lobby-chat-drawer-sidebar" : "chat-drawer"}>
       <div className="chat-drawer-header">
         {(activeId || newConvOpen) && (
           <button
@@ -1674,6 +2123,19 @@ function LobbyChatPanel({
               <PlusIcon />
             </button>
           )}
+          {/* "fixar" (pedido do Douglas, 1/out: "fixar fora da sala
+              também") -- mesmo botão/ícone do ChatDrawer de dentro da
+              sala (ver comentário grande de pinBtn em
+              components/ChatDrawer.tsx), clicar de novo solta (volta a
+              flutuar). */}
+          <button
+            type="button"
+            className={pinMode === "side" ? "chat-icon-btn active" : "chat-icon-btn"}
+            title={pinMode === "side" ? "Soltar (voltar a flutuar)" : "Fixar na lateral"}
+            onClick={onToggleSidePin}
+          >
+            <PinIcon filled={pinMode === "side"} />
+          </button>
           <button type="button" className="chat-icon-btn" title="Fechar" onClick={onClose}>
             <CloseIcon />
           </button>
@@ -1874,6 +2336,27 @@ function LobbyChatPanel({
         </>
       ) : (
         <>
+          {/* mensagem fixada (pedido do Douglas, 1/out: "mensagem fixada
+              (definir tempo de fixacao)") -- MESMA faixa do ChatDrawer de
+              dentro da sala, mais recente primeiro. */}
+          {pins.length > 0 && (
+            <div className="chat-pins-bar">
+              {pins.map((p) => {
+                const pinnedMsg = messages?.find((m) => m.id === p.messageId);
+                return (
+                  <div key={p.messageId} className="chat-pin-row">
+                    <PinIcon filled />
+                    <span className="chat-pin-text">
+                      {pinnedMsg && !pinnedMsg.deleted ? pinnedMsg.text || "Anexo" : "Mensagem apagada"}
+                    </span>
+                    <button type="button" className="chat-pin-unpin-btn" onClick={() => unpinMessage(p.messageId)}>
+                      Tirar
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="chat-messages">
             {messages === null ? (
               <p className="chat-empty-hint">Carregando…</p>
@@ -1891,7 +2374,22 @@ function LobbyChatPanel({
                   unreadSinceTs != null
                     ? messages.findIndex((m) => m.senderId !== myUserId && m.ts > unreadSinceTs)
                     : -1;
-                return messages.map((m, i) => (
+                return messages.map((m, i) => {
+                  // reações/@menção/"visto por" (pedido do Douglas, 1/out)
+                  // -- MESMO cálculo por mensagem do ChatMessageRow em
+                  // GameRoom.tsx, só que aqui direto no corpo do .map
+                  // (esse painel não tem um componente de linha à parte).
+                  const reactionEntries = Object.entries(m.reactions ?? {}).filter(([, ids]) => ids.length > 0);
+                  const iWasMentioned = m.senderId !== myUserId && (m.mentionedUserIds ?? []).includes(myUserId);
+                  const isPinned = pins.some((p) => p.messageId === m.id);
+                  const isLastOwn =
+                    m.senderId === myUserId && m.id === [...messages].reverse().find((x) => x.senderId === myUserId)?.id;
+                  const seenBy = isLastOwn
+                    ? Object.entries(lastReadByUserId)
+                        .filter(([uid, ts]) => uid !== myUserId && ts >= m.ts)
+                        .map(([uid]) => activeConversation?.participants.find((p) => p.id === uid)?.name || "Alguém")
+                    : undefined;
+                  return (
                   <div key={m.id}>
                     {i === dividerIndex && (
                       <div className="chat-unread-divider">
@@ -1900,12 +2398,85 @@ function LobbyChatPanel({
                     )}
                     <div className={m.senderId === myUserId ? "chat-message own" : "chat-message"}>
                       {m.senderId !== myUserId && <span className="chat-message-sender">{m.senderName}</span>}
-                      <div className="chat-bubble">
+                      <div className="chat-message-row">
+                        {/* reagir + fixar (pedido do Douglas, 1/out) --
+                            MESMOS botões/popover do ChatMessageRow de
+                            dentro da sala (ver comentário grande lá). */}
+                        {!m.deleted && (
+                          <div className="chat-message-actions">
+                            <div className="chat-message-action-wrap">
+                              <button
+                                type="button"
+                                className={reactingMessageId === m.id ? "chat-message-action-btn active" : "chat-message-action-btn"}
+                                title="Reagir"
+                                onClick={() => setReactingMessageId((cur) => (cur === m.id ? null : m.id))}
+                              >
+                                <SmileIcon />
+                              </button>
+                              {reactingMessageId === m.id && (
+                                <div className="chat-quick-react-popover">
+                                  {QUICK_REACTION_EMOJIS.map((emoji) => (
+                                    <button
+                                      key={emoji}
+                                      type="button"
+                                      className="chat-quick-react-option"
+                                      onClick={() => toggleReaction(m.id, emoji)}
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div className="chat-message-action-wrap">
+                              <button
+                                type="button"
+                                className={
+                                  isPinned || pinningMessageId === m.id
+                                    ? "chat-message-action-btn active"
+                                    : "chat-message-action-btn"
+                                }
+                                title={isPinned ? "Mensagem fixada" : "Fixar mensagem"}
+                                onClick={() => setPinningMessageId((cur) => (cur === m.id ? null : m.id))}
+                              >
+                                <PinIcon filled={isPinned} />
+                              </button>
+                              {pinningMessageId === m.id && (
+                                <div className="chat-pin-duration-popover">
+                                  {isPinned ? (
+                                    <button
+                                      type="button"
+                                      className="chat-pin-duration-option chat-pin-duration-unpin"
+                                      onClick={() => {
+                                        unpinMessage(m.id);
+                                        setPinningMessageId(null);
+                                      }}
+                                    >
+                                      Tirar fixação
+                                    </button>
+                                  ) : (
+                                    PIN_DURATION_OPTIONS.map((opt) => (
+                                      <button
+                                        key={opt.label}
+                                        type="button"
+                                        className="chat-pin-duration-option"
+                                        onClick={() => pinMessage(m.id, opt.durationMs)}
+                                      >
+                                        Fixar por {opt.label}
+                                      </button>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      <div className={iWasMentioned ? "chat-bubble chat-bubble-mentioned" : "chat-bubble"}>
                         {m.deleted ? (
                           <em>Mensagem apagada</em>
                         ) : (
                           <>
-                            {m.kind === "text" && <span>{m.text}</span>}
+                            {m.kind === "text" && <span>{renderMentionText(m.text)}</span>}
                             {m.kind === "image" && m.attachment && (
                               <a href={attachmentUrl(m.attachment.url)} target="_blank" rel="noreferrer">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1978,10 +2549,35 @@ function LobbyChatPanel({
                           </>
                         )}
                       </div>
+                      </div>
+                      {/* reações já dadas (pedido do Douglas, 1/out) --
+                          MESMOS pills do ChatMessageRow de dentro da sala. */}
+                      {reactionEntries.length > 0 && (
+                        <div className={m.senderId === myUserId ? "chat-reactions-row own" : "chat-reactions-row"}>
+                          {reactionEntries.map(([emoji, ids]) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              className={ids.includes(myUserId) ? "chat-reaction-pill active" : "chat-reaction-pill"}
+                              title={ids.length === 1 ? "1 reação" : `${ids.length} reações`}
+                              onClick={() => toggleReaction(m.id, emoji)}
+                            >
+                              <span>{emoji}</span>
+                              <span className="chat-reaction-count">{ids.length}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <span className="chat-message-time">{formatChatTime(m.ts)}</span>
+                      {/* "visto por" (pedido do Douglas, 1/out) -- só na
+                          última mensagem MINHA (ver isLastOwn acima). */}
+                      {seenBy && seenBy.length > 0 && (
+                        <span className="chat-message-seenby">Visto por {seenBy.join(", ")}</span>
+                      )}
                     </div>
                   </div>
-                ));
+                  );
+                });
               })()
             )}
           </div>
@@ -2011,7 +2607,19 @@ function LobbyChatPanel({
               </button>
             </div>
           ) : (
-            <div className="chat-composer">
+            <div className="chat-composer chat-composer-with-mentions">
+              {/* @menção (pedido do Douglas, 1/out) -- MESMO dropdown do
+                  composer de dentro da sala (ver ChatDrawer em
+                  GameRoom.tsx), só com os participantes da conversa. */}
+              {mentionState && mentionMatches.length > 0 && (
+                <div className="chat-mention-dropdown">
+                  {mentionMatches.map((c) => (
+                    <button key={c.id} type="button" className="chat-mention-option" onClick={() => insertMention(c)}>
+                      {c.name || "?"}
+                    </button>
+                  ))}
+                </div>
+              )}
               <button
                 className="chat-composer-btn"
                 title="Anexar foto/arquivo"
@@ -2024,14 +2632,16 @@ function LobbyChatPanel({
                 <MicIcon off={false} />
               </button>
               <input
+                ref={composerInputRef}
                 className="chat-composer-input"
                 type="text"
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={handleComposerInputChange}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") sendMessage();
+                  if (e.key === "Enter" && !mentionState) sendMessage();
+                  if (e.key === "Escape") setMentionState(null);
                 }}
-                placeholder="Escreva uma mensagem…"
+                placeholder="Escreva uma mensagem... (@ pra mencionar)"
                 maxLength={2000}
               />
               <button
@@ -2063,13 +2673,49 @@ function LobbyChatPanel({
     </div>
   );
 
-  if (!companyRail) return drawerBody;
+  // "fixar" (pedido do Douglas, 1/out) -- diferente da sala
+  // (GameRoom.tsx), o Lobby não tem um layout flex com
+  // align-items:stretch pra gaveta esticar dentro (ver comentário
+  // grande de chatPinMode no Lobby() mais abaixo) -- por isso aqui
+  // SEMPRE embrulha num container próprio quando fixo (mesmo sem
+  // coluna de empresas), que vira o position:fixed com o
+  // top/bottom/altura de verdade (.lobby-chat-drawer-shell-sidebar em
+  // globals.css); a gaveta em si (drawerBody, classe
+  // .lobby-chat-drawer-sidebar) fica position:static e só recebe a
+  // altura esticada do container via align-items:stretch (mesmo
+  // mecanismo de .chat-drawer-shell-sidebar na sala).
+  if (pinMode === "side") {
+    return (
+      <>
+        <div className="chat-drawer-shell lobby-chat-drawer-shell-sidebar">
+          {companyRail}
+          {drawerBody}
+        </div>
+        {filesTrigger}
+        {filesPanel}
+      </>
+    );
+  }
+
+  if (!companyRail) {
+    return (
+      <>
+        {drawerBody}
+        {filesTrigger}
+        {filesPanel}
+      </>
+    );
+  }
 
   return (
-    <div className="chat-drawer-shell">
-      {companyRail}
-      {drawerBody}
-    </div>
+    <>
+      <div className="chat-drawer-shell">
+        {companyRail}
+        {drawerBody}
+      </div>
+      {filesTrigger}
+      {filesPanel}
+    </>
   );
 }
 
@@ -2624,6 +3270,35 @@ export default function Lobby({
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [calls, setCalls] = useState<CallSummary[] | null>(null);
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  // "fixar" o chat de fora da sala também na lateral (pedido do
+  // Douglas, 1/out: "fixar fora da sala também") -- mesma ideia do
+  // chatPinMode em GameRoom.tsx (ver comentário grande dele lá), mas
+  // com chave de localStorage PRÓPRIA (o Lobby e a sala são telas
+  // diferentes, a pessoa pode querer fixado numa e flutuando na
+  // outra) e sem depender de layout flex com align-items:stretch
+  // (que o Lobby não tem, ver .lobby-backdrop -- quase tudo aqui é
+  // position:fixed solto, não um canvas+painel lado a lado como na
+  // sala) -- por isso aqui vira position:fixed com top/bottom
+  // próprios em vez de esticar via flex, ver .lobby-chat-drawer-shell-sidebar
+  // em globals.css.
+  const [chatPinMode, setChatPinMode] = useState<"float" | "side">(() => {
+    if (typeof window === "undefined") return "float";
+    try {
+      return window.localStorage.getItem(LOBBY_CHAT_PINNED_STORAGE_KEY) === "side" ? "side" : "float";
+    } catch {
+      return "float";
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOBBY_CHAT_PINNED_STORAGE_KEY, chatPinMode);
+    } catch {
+      // sem localStorage (modo privado etc.) -- só não lembra da próxima vez
+    }
+  }, [chatPinMode]);
+  function toggleLobbyChatPinSide() {
+    setChatPinMode((m) => (m === "side" ? "float" : "side"));
+  }
   // Contatos (28/set, pedido do Douglas: "quero agora, mais um icone
   // de contatos") -- diretório platform-wide via GET /users/directory
   // (mesma fonte de chatStore.listAllUsers que o WS manda como
@@ -3751,7 +4426,7 @@ export default function Lobby({
   }, [showCreateRoomFlow]);
 
   return (
-    <div className="lobby-backdrop">
+    <div className={chatPanelOpen && chatPinMode === "side" ? "lobby-backdrop lobby-backdrop-chat-pinned" : "lobby-backdrop"}>
       {/* barra de topo -- pedido do Douglas (28/set, com print de
           referência do layout da Pepsi): logo no canto esquerdo
           superior + abas na mesma linha, começando por "Meus
@@ -5056,6 +5731,8 @@ export default function Lobby({
 
       {chatPanelOpen && (
         <LobbyChatPanel
+          pinMode={chatPinMode}
+          onToggleSidePin={toggleLobbyChatPinSide}
           myUserId={myUserId}
           myName={myName}
           myRoomSlug={myRealRoom?.room_slug ?? null}

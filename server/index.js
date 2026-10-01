@@ -28,12 +28,12 @@
 //              de arbitragem que já existia pra cadeira única antes disso)
 //   leave   -> { type: "leave", id }
 //   signal  -> { type: "signal", from, data }   (relay de WebRTC)
-//   chat    -> cliente->servidor: { type: "chat", text?, attachment?, kind? }
+//   chat    -> cliente->servidor: { type: "chat", text?, attachment?, kind?, mentionedUserIds? }
 //              servidor->sala:    { type: "chat", id, message }
-//              (chat da SALA, todo mundo vê -- NÃO fica salvo em disco,
-//              diferente do chat direto/grupo abaixo; "message" tem o
-//              mesmo formato de "chat:message" lá embaixo, pra dar pra
-//              desenhar com o mesmo componente dos dois lados)
+//              (chat da SALA, todo mundo vê -- "message" tem o mesmo formato de
+//              "chat:message" lá embaixo, pra dar pra desenhar com o mesmo componente
+//              dos dois lados. 1/out: AGORA fica salvo -- ver roomChats em
+//              chatStore.js/comentário grande mais abaixo, chat:room_history)
 //   profile -> { type: "profile", id, name, status, instagram, bio, photoUrl }
 //              (card de perfil -- ver ProfileCard em GameRoom.tsx; "role"
 //              NÃO entra aqui, é só o servidor que atribui, ver PROFILE_FIELDS)
@@ -74,28 +74,60 @@
 //                        { type: "identify", userId }
 //   chat:list        -> cliente->servidor: { type: "chat:list" }
 //                        servidor->cliente: { type: "chat:conversations", conversations }
+//   chat:room_history -> servidor->cliente, mandado sozinho logo depois de "identify"
+//                        resolver (1/out, ver comentário grande ali): { type: "chat:room_history",
+//                        messages, pins } -- a "semente" do histórico da Sala dessa conexão
+//                        (ver chatStore.getRoomMessages/getRoomPins); daí em diante os "chat"/
+//                        "chat:pins"/"chat:reaction" ao vivo já mantêm sozinhos.
 //   chat:open        -> cliente->servidor: { type: "chat:open", conversationId }
-//                        servidor->cliente: { type: "chat:history", conversationId, messages, unreadSinceTs }
+//                        servidor->cliente: { type: "chat:history", conversationId, messages, unreadSinceTs, pins }
 //                        (marca a conversa como lida na hora -- unreadSinceTs é o lastRead
 //                        de ANTES de marcar, pro cliente desenhar a linha "mensagens não
 //                        vistas"; ver chatStore.markConversationRead. POST /chat/open faz o
-//                        mesmo sem socket, usado pelo Lobby.)
+//                        mesmo sem socket, usado pelo Lobby. 1/out: também avisa o RESTO da
+//                        conversa em tempo real -- servidor->outros participantes:
+//                        { type: "chat:read", conversationId, userId, ts } -- "visto por".)
 //   chat:create_direct -> cliente->servidor: { type: "chat:create_direct", targetUserId }
 //   chat:create_group  -> cliente->servidor: { type: "chat:create_group", name, participantIds }
 //   chat:rename_group  -> cliente->servidor: { type: "chat:rename_group", conversationId, name }
 //   (create_direct/create_group/rename_group respondem, pra CADA participante
 //   online, com) -> { type: "chat:conversation", conversation }
-//   chat:send        -> cliente->servidor: { type: "chat:send", conversationId, text?, attachment?, kind? }
+//   chat:send        -> cliente->servidor: { type: "chat:send", conversationId, text?, attachment?, kind?, mentionedUserIds? }
 //                        servidor->participantes online: { type: "chat:message", conversationId, message }
 //   chat:delete      -> cliente->servidor: { type: "chat:delete", conversationId, messageId }
 //                        (só quem MANDOU a mensagem pode apagar -- apaga PRA TODOS, ver
 //                        deleteMessage em chatStore.js)
 //                        servidor->participantes: { type: "chat:message_deleted", conversationId, messageId }
 //   chat:delete_room -> cliente->servidor: { type: "chat:delete_room", messageId }
-//                        (chat da SALA não tem histórico salvo, então isso só repassa pra
-//                        quem tá conectado AGORA tarjar a mensagem no próprio log local --
-//                        ver comentário no case)
+//                        (1/out: chat da SALA agora tem histórico salvo (ver chatStore.
+//                        deleteRoomMessage) -- MESMA trava de chat:delete, só quem mandou apaga)
 //                        servidor->sala: { type: "chat_room_deleted", messageId }
+//   chat:react       -> cliente->servidor: { type: "chat:react", conversationId?, messageId, emoji }
+//                        (1/out, reação com emoji -- conversationId ausente/null = reagindo
+//                        na Sala. "Toggle": mandar o MESMO emoji de novo desliga a própria
+//                        reação. Só participante da conversa pode reagir nela.)
+//                        servidor->participantes/sala: { type: "chat:reaction", conversationId, messageId, reactions }
+//                        (reactions = { "👍": [userId, ...], ... } JÁ ATUALIZADO, pronto pra
+//                        substituir o que o cliente tinha)
+//   chat:typing      -> cliente->servidor: { type: "chat:typing", conversationId? }
+//                        (1/out, indicador "fulano está digitando..." -- efêmero, NUNCA
+//                        persiste; conversationId ausente/null = digitando na Sala. Cliente
+//                        manda isso throttled enquanto o campo de texto tem foco+conteúdo, e
+//                        o lado que recebe expira sozinho depois de alguns segundos sem
+//                        receber de novo -- sem "parei de digitar" explícito, mais simples.)
+//                        servidor->outros participantes/sala: { type: "chat:typing", conversationId, userId, name }
+//   chat:pin/chat:unpin -> cliente->servidor: { type: "chat:pin", conversationId?, messageId, durationMs? }
+//                        / { type: "chat:unpin", conversationId?, messageId }
+//                        (1/out, "mensagem fixada (definir tempo de fixação)" -- durationMs
+//                        ausente/null = sem prazo, fixa até alguém tirar à mão; um número =
+//                        expira sozinha (ver chatStore.livePins). conversationId ausente/null
+//                        = fixando na Sala.)
+//                        servidor->participantes/sala: { type: "chat:pins", conversationId, pins }
+//                        (pins = lista INTEIRA já atualizada, mais recente primeiro)
+//   chat:attachments -> cliente->servidor: { type: "chat:attachments", conversationId? }
+//                        (1/out, painel lateral de arquivos/imagens da conversa -- varre o
+//                        histórico INTEIRO, não só as últimas 200 mensagens de chat:open)
+//                        servidor->cliente: { type: "chat:attachments", conversationId, items }
 //   call:join         -> cliente->servidor: { type: "call:join", conversationId }
 //                        (chamada de voz/vídeo de uma conversa direta/grupo -- "opt-in", só
 //                        entra quem clicar; só quem PARTICIPA da conversa pode entrar)
@@ -527,6 +559,13 @@ function sendConversationRemovedTo(userId, conversationId) {
 // --- lembrete de call agendada (ver server/agendaStore.js) ---
 const REMINDER_LEAD_MS = 5 * 60 * 1000; // avisa 5min antes do horário marcado
 const MAX_SETTIMEOUT_MS = 2_147_000_000; // margem abaixo do limite de 32 bits do setTimeout (~24.8 dias)
+// mensagem fixada (ver case "chat:pin"/"chat:unpin" e handlePostChatPin
+// abaixo) -- teto de segurança pro "tempo de fixação" que o cliente
+// manda (nunca confia num número cru vindo de fora): 30 dias, bem acima
+// da maior opção que o composer oferece (7 dias, ver PIN_DURATION_OPTIONS
+// em GameRoom.tsx), só pra nunca deixar alguém fixar "pra sempre" por um
+// valor gigante disfarçado de "com prazo".
+const MAX_PIN_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function scheduleReminder(call) {
   const fireAt = call.startTs - REMINDER_LEAD_MS;
@@ -1062,7 +1101,23 @@ function handleGetChatMessages(req, res, url) {
     return;
   }
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ messages: chatStore.getMessages(conversationId) }));
+  // 1/out, pedido do Douglas (espelhar no Lobby o que o chat de dentro
+  // da sala ganhou: reação/@menção/"visto por"/fixar/painel de
+  // arquivos) -- esse GET já é chamado em POLLING (ver fetchMessages
+  // a cada 4s em LobbyChatPanel/components/Lobby.tsx), então junto com
+  // `pins`/`lastRead` aqui o Lobby ganha "visto por" e a faixa de
+  // fixadas ATUALIZANDO SOZINHOS a cada poll, sem precisar de um
+  // endpoint novo nem de mais um round-trip (ao contrário do POST
+  // /chat/open, que só roda UMA VEZ ao abrir a conversa -- ver
+  // comentário grande dele logo abaixo -- esse aqui não marca como
+  // lida, só LÊ, então pode repetir à vontade sem efeito colateral).
+  res.end(
+    JSON.stringify({
+      messages: chatStore.getMessages(conversationId),
+      pins: chatStore.getConversationPins(conversationId),
+      lastRead: chatStore.getConversationLastRead(conversationId),
+    })
+  );
 }
 
 /** POST /chat/open -- marca uma conversa como lida pro Lobby, MESMA
@@ -1086,8 +1141,133 @@ async function handlePostChatOpen(req, res) {
     return;
   }
   const unreadSinceTs = chatStore.markConversationRead(conversationId, userId) ?? 0;
+  // 1/out: mesmo par pins/"visto por" que o case "chat:open" do
+  // WebSocket ganhou (ver comentário grande lá) -- manda a faixa de
+  // fixadas junto (sem round-trip extra) e avisa o resto da conversa em
+  // tempo real (só alcança quem JÁ tiver socket aberto, ver comentário
+  // grande no topo dessa função -- quem só tem o Lobby também vê ao
+  // reabrir, por causa do lastRead que já fica salvo de qualquer jeito).
+  const conv = chatStore.getConversation(conversationId);
+  if (conv) {
+    for (const uid of conv.participantIds) {
+      if (uid === userId) continue;
+      sendToUser(uid, { type: "chat:read", conversationId, userId, ts: Date.now() });
+    }
+  }
   res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ ok: true, unreadSinceTs }));
+  res.end(
+    JSON.stringify({
+      ok: true,
+      unreadSinceTs,
+      pins: chatStore.getConversationPins(conversationId),
+      lastRead: chatStore.getConversationLastRead(conversationId),
+    })
+  );
+}
+
+/** POST /chat/react -- MESMA ação do case "chat:react" do WebSocket
+ * (reação com emoji, "toggle"), sem socket -- ver comentário grande no
+ * topo do arquivo. Só serve conversa de verdade (o Lobby nunca tá
+ * "dentro" de uma Sala, sem roomId nenhum aqui -- reagir no chat da
+ * Sala continua exclusivo de dentro dela, ver ChatDrawer). */
+async function handlePostChatReact(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId, messageId, emoji } = body;
+  if (
+    typeof conversationId !== "string" || !conversationId ||
+    typeof userId !== "string" || !userId ||
+    typeof messageId !== "string" || !messageId ||
+    typeof emoji !== "string" || !emoji
+  ) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"/"messageId"/"emoji"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  const result = chatStore.toggleConversationReaction(conversationId, messageId, userId, emoji);
+  if (!result) {
+    res.writeHead(400, corsHeaders());
+    res.end("Mensagem não encontrada (ou já apagada).");
+    return;
+  }
+  const conv = chatStore.getConversation(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:reaction", conversationId, messageId, reactions: result.reactions });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, reactions: result.reactions }));
+}
+
+/** POST /chat/pin e POST /chat/unpin -- MESMA ação dos cases
+ * "chat:pin"/"chat:unpin" do WebSocket, sem socket (ver comentário
+ * grande no topo do arquivo). `unpin` reaproveita essa função com
+ * `body.unpin === true` em vez de duplicar o corpo inteiro. */
+async function handlePostChatPin(req, res, { unpin } = {}) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { conversationId, userId, messageId } = body;
+  if (
+    typeof conversationId !== "string" || !conversationId ||
+    typeof userId !== "string" || !userId ||
+    typeof messageId !== "string" || !messageId
+  ) {
+    res.writeHead(400, corsHeaders());
+    res.end('Corpo precisa ter "conversationId"/"userId"/"messageId"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  let ok;
+  if (unpin) {
+    ok = chatStore.unpinConversationMessage(conversationId, messageId);
+  } else {
+    const durationMs =
+      Number.isFinite(body.durationMs) && body.durationMs > 0
+        ? Math.min(Number(body.durationMs), MAX_PIN_DURATION_MS)
+        : null;
+    const senderName = typeof body.userName === "string" ? body.userName.slice(0, 80) : "";
+    ok = !!chatStore.pinConversationMessage(conversationId, messageId, userId, senderName, durationMs);
+  }
+  if (!ok) {
+    res.writeHead(400, corsHeaders());
+    res.end("Não deu pra fixar/desafixar (mensagem não encontrada ou já apagada).");
+    return;
+  }
+  const conv = chatStore.getConversation(conversationId);
+  const pins = chatStore.getConversationPins(conversationId);
+  for (const uid of conv.participantIds) {
+    sendToUser(uid, { type: "chat:pins", conversationId, pins });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, pins }));
+}
+
+/** GET /chat/attachments?conversationId=X&userId=Y -- MESMA ação do
+ * case "chat:attachments" do WebSocket, sem socket (painel lateral de
+ * arquivos/imagens, ver comentário grande no topo do arquivo). */
+function handleGetChatAttachments(req, res, url) {
+  const userId = url.searchParams.get("userId");
+  const conversationId = url.searchParams.get("conversationId");
+  if (!userId || !conversationId) {
+    res.writeHead(400, corsHeaders());
+    res.end('Falta "userId"/"conversationId"');
+    return;
+  }
+  if (!chatStore.isParticipant(conversationId, userId)) {
+    res.writeHead(403, corsHeaders());
+    res.end("Não é participante dessa conversa.");
+    return;
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ items: chatStore.getConversationAttachments(conversationId) }));
 }
 
 /** POST /chat/set-lane -- MESMA ação do case "chat:set_lane" do
@@ -1224,6 +1404,7 @@ async function handlePostChatSend(req, res) {
     text,
     attachment,
     roomCard,
+    mentionedUserIds: body.mentionedUserIds,
   });
   const conv = chatStore.getConversation(conversationId);
   for (const uid of conv.participantIds) {
@@ -1803,6 +1984,30 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  // 1/out, pedido do Douglas (comparando com o Slack) -- reação/fixar/
+  // arquivos da conversa também pelo Lobby (REST, sem WebSocket), MESMA
+  // ação dos cases equivalentes do WebSocket (ver handlePostChatReact/
+  // handlePostChatPin/handleGetChatAttachments lá em cima).
+  if (req.method === "POST" && url.pathname === "/chat/react") {
+    handlePostChatReact(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/chat/pin") {
+    handlePostChatPin(req, res, { unpin: false });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/chat/unpin") {
+    handlePostChatPin(req, res, { unpin: true });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/chat/attachments") {
+    handleGetChatAttachments(req, res, url);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/agenda/respond") {
     handlePostAgendaRespond(req, res);
     return;
@@ -2047,6 +2252,20 @@ wss.on("connection", async (ws, req) => {
               conversations: chatStore.listConversationsForUser(player.userId),
             })
           );
+          // 1/out, pedido do Douglas: "histórico tem que salvar" (chat
+          // da Sala) -- a "semente" do histórico dessa sala pra essa
+          // conexão, mandada uma vez só aqui (daí em diante os "chat"/
+          // "chat:pins"/"chat:reaction" ao vivo já mantêm o estado local
+          // sozinhos, ver handler de mensagens em GameRoom.tsx). Mesmo
+          // roomId da conexão (não é por usuário, é por SALA -- ver
+          // comentário grande em chatStore.getRoomChat).
+          ws.send(
+            JSON.stringify({
+              type: "chat:room_history",
+              messages: chatStore.getRoomMessages(roomId),
+              pins: chatStore.getRoomPins(roomId),
+            })
+          );
         })();
         break;
       }
@@ -2187,10 +2406,13 @@ wss.on("connection", async (ws, req) => {
         break;
       }
       case "chat": {
-        // chat da SALA -- não fica salvo (ver comentário grande no topo),
-        // mas agora aceita anexo (foto/arquivo/áudio) igual ao chat
-        // direto/grupo, no mesmo formato de mensagem (ver chat:send
-        // embaixo) pra dar pra desenhar com o mesmo componente.
+        // chat da SALA -- 1/out: AGORA fica salvo de verdade (pedido do
+        // Douglas, comparando com o Slack: "histórico tem que salvar";
+        // ANTES só era repassado ao vivo, sem persistência nenhuma, ver
+        // chatStore.addRoomMessage/getRoomMessages/chat:room_history).
+        // Aceita anexo (foto/arquivo/áudio) igual ao chat direto/grupo,
+        // no mesmo formato de mensagem (ver chat:send embaixo) pra dar
+        // pra desenhar com o mesmo componente.
         const text = typeof data.text === "string" ? data.text.slice(0, 2000) : "";
         const attachment =
           data.attachment && typeof data.attachment === "object"
@@ -2224,16 +2446,15 @@ wss.on("connection", async (ws, req) => {
               : data.kind === "image"
                 ? "image"
                 : "file";
-        const message = {
-          id: randomUUID(),
+        const message = chatStore.addRoomMessage(roomId, {
           senderId: player.userId,
           senderName: player.name,
           kind,
           text,
           attachment,
           roomCard,
-          ts: Date.now(),
-        };
+          mentionedUserIds: data.mentionedUserIds,
+        });
         broadcast(room, { type: "chat", id, message });
         break;
       }
@@ -2329,8 +2550,39 @@ wss.on("connection", async (ws, req) => {
         // "ver" continuar marcando como lido em tempo real).
         const unreadSinceTs = chatStore.markConversationRead(data.conversationId, player.userId) ?? 0;
         ws.send(
-          JSON.stringify({ type: "chat:history", conversationId: data.conversationId, messages, unreadSinceTs })
+          JSON.stringify({
+            type: "chat:history",
+            conversationId: data.conversationId,
+            messages,
+            unreadSinceTs,
+            // 1/out: manda junto a faixa de fixadas (pedido do Douglas,
+            // "mensagem fixada") -- sem round-trip extra pra desenhar a
+            // faixa assim que a conversa abre.
+            pins: chatStore.getConversationPins(data.conversationId),
+            // 1/out: "semente" de quem já leu até onde (ver
+            // chatStore.getConversationLastRead) -- sem isso o "visto
+            // por"/"✓✓" só apareceria depois do PRÓXIMO chat:read ao
+            // vivo, nunca pra um estado que já existia de antes dessa
+            // sessão abrir a conversa.
+            lastRead: chatStore.getConversationLastRead(data.conversationId),
+          })
         );
+        // 1/out, pedido do Douglas: "confirmação de leitura (visto por
+        // quem)" -- avisa o RESTO da conversa em tempo real que esse
+        // userId leu até agora (ts aproximado do lastRead que acabou de
+        // ser gravado acima) -- antes só o próprio leitor sabia disso
+        // (lastRead sempre existiu, ver markConversationRead, só nunca
+        // tinha sido EXPOSTO pro resto da conversa). Não manda pra mim
+        // mesmo -- não preciso saber que eu li minha própria conversa.
+        {
+          const conv = chatStore.getConversation(data.conversationId);
+          if (conv) {
+            for (const uid of conv.participantIds) {
+              if (uid === player.userId) continue;
+              sendToUser(uid, { type: "chat:read", conversationId: data.conversationId, userId: player.userId, ts: Date.now() });
+            }
+          }
+        }
         break;
       }
       case "chat:create_direct": {
@@ -2469,6 +2721,7 @@ wss.on("connection", async (ws, req) => {
           text,
           attachment,
           roomCard,
+          mentionedUserIds: data.mentionedUserIds,
         });
         if (!msg) break;
         const conv = chatStore.getConversation(data.conversationId);
@@ -2492,17 +2745,123 @@ wss.on("connection", async (ws, req) => {
         break;
       }
       case "chat:delete_room": {
-        // "apagar mensagem" na SALA -- diferente do de cima, a Sala não
-        // guarda histórico nenhum (ver o case "chat" logo ali em cima),
-        // então não tem como o servidor conferir aqui quem mandou a
-        // mensagem original; só repassa pra quem tá conectado AGORA
-        // tarjar no próprio log local. O cliente só mostra o botão de
-        // apagar nas mensagens do PRÓPRIO usuário (ver ChatMessageRow em
-        // GameRoom.tsx) -- risco aceitável pro tamanho desse projeto
-        // (mesmo modelo de confiança do resto da Sala, que já deixa
-        // qualquer um mandar o nome que quiser no "profile").
+        // "apagar mensagem" na SALA -- 1/out: agora que o chat da Sala
+        // tem histórico salvo (ver chatStore.deleteRoomMessage), dá pra
+        // conferir de verdade quem mandou a mensagem original, MESMA
+        // trava de "chat:delete" acima (só quem mandou apaga, apaga PRA
+        // TODOS). ANTES disso (sem persistência nenhuma) não tinha como
+        // confirmar nada aqui, só repassava pra quem tava conectado
+        // AGORA tarjar no próprio log local.
         if (typeof data.messageId !== "string") break;
+        const deletedRoomMsg = chatStore.deleteRoomMessage(roomId, data.messageId, player.userId);
+        if (!deletedRoomMsg) break;
         broadcast(room, { type: "chat_room_deleted", messageId: data.messageId });
+        break;
+      }
+      // --- reação com emoji (pedido do Douglas, 1/out, comparando com o
+      // Slack) -- MESMA ação pra conversa de verdade e pra Sala, só muda
+      // de onde a mensagem vem (ver chatStore.toggleConversationReaction/
+      // toggleRoomReaction). conversationId ausente/vazio = Sala. ---
+      case "chat:react": {
+        const messageId = typeof data.messageId === "string" ? data.messageId : "";
+        const emoji = typeof data.emoji === "string" ? data.emoji : "";
+        if (!messageId || !emoji) break;
+        if (typeof data.conversationId === "string" && data.conversationId) {
+          const conversationId = data.conversationId;
+          if (!chatStore.isParticipant(conversationId, player.userId)) break;
+          const result = chatStore.toggleConversationReaction(conversationId, messageId, player.userId, emoji);
+          if (!result) break;
+          const conv = chatStore.getConversation(conversationId);
+          for (const uid of conv.participantIds) {
+            sendToUser(uid, { type: "chat:reaction", conversationId, messageId, reactions: result.reactions });
+          }
+        } else {
+          const result = chatStore.toggleRoomReaction(roomId, messageId, player.userId, emoji);
+          if (!result) break;
+          broadcast(room, { type: "chat:reaction", conversationId: null, messageId, reactions: result.reactions });
+        }
+        break;
+      }
+      // --- "fulano está digitando..." (pedido do Douglas, 1/out) --
+      // EFÊMERO, nunca persiste (nem em chatStore nem em lugar nenhum) --
+      // só um relay pro resto ver em tempo real. Cliente decide o
+      // throttle/quando parar de mandar (ver comentário grande no topo
+      // do arquivo); aqui só repassa, sem guardar estado nenhum do lado
+      // do servidor. ---
+      case "chat:typing": {
+        if (typeof data.conversationId === "string" && data.conversationId) {
+          const conversationId = data.conversationId;
+          if (!chatStore.isParticipant(conversationId, player.userId)) break;
+          const conv = chatStore.getConversation(conversationId);
+          for (const uid of conv.participantIds) {
+            if (uid === player.userId) continue;
+            sendToUser(uid, { type: "chat:typing", conversationId, userId: player.userId, name: player.name });
+          }
+        } else {
+          broadcast(room, { type: "chat:typing", conversationId: null, userId: player.userId, name: player.name }, id);
+        }
+        break;
+      }
+      // --- mensagem fixada, com tempo de expiração opcional (pedido do
+      // Douglas, 1/out: "mensagem fixada (definir tempo de fixacao)") --
+      // durationMs ausente/<=0 = sem prazo (fica até alguém tirar à
+      // mão); clampado num teto generoso só por segurança (nunca confia
+      // num número cru vindo do cliente). ---
+      case "chat:pin": {
+        const messageId = typeof data.messageId === "string" ? data.messageId : "";
+        if (!messageId) break;
+        const durationMs =
+          Number.isFinite(data.durationMs) && data.durationMs > 0
+            ? Math.min(Number(data.durationMs), MAX_PIN_DURATION_MS)
+            : null;
+        if (typeof data.conversationId === "string" && data.conversationId) {
+          const conversationId = data.conversationId;
+          if (!chatStore.isParticipant(conversationId, player.userId)) break;
+          const pin = chatStore.pinConversationMessage(conversationId, messageId, player.userId, player.name, durationMs);
+          if (!pin) break;
+          const conv = chatStore.getConversation(conversationId);
+          const pins = chatStore.getConversationPins(conversationId);
+          for (const uid of conv.participantIds) {
+            sendToUser(uid, { type: "chat:pins", conversationId, pins });
+          }
+        } else {
+          const pin = chatStore.pinRoomMessage(roomId, messageId, player.userId, player.name, durationMs);
+          if (!pin) break;
+          broadcast(room, { type: "chat:pins", conversationId: null, pins: chatStore.getRoomPins(roomId) });
+        }
+        break;
+      }
+      case "chat:unpin": {
+        const messageId = typeof data.messageId === "string" ? data.messageId : "";
+        if (!messageId) break;
+        if (typeof data.conversationId === "string" && data.conversationId) {
+          const conversationId = data.conversationId;
+          if (!chatStore.isParticipant(conversationId, player.userId)) break;
+          if (!chatStore.unpinConversationMessage(conversationId, messageId)) break;
+          const conv = chatStore.getConversation(conversationId);
+          const pins = chatStore.getConversationPins(conversationId);
+          for (const uid of conv.participantIds) {
+            sendToUser(uid, { type: "chat:pins", conversationId, pins });
+          }
+        } else {
+          if (!chatStore.unpinRoomMessage(roomId, messageId)) break;
+          broadcast(room, { type: "chat:pins", conversationId: null, pins: chatStore.getRoomPins(roomId) });
+        }
+        break;
+      }
+      // --- painel lateral "arquivos da conversa" (pedido do Douglas,
+      // 1/out) -- varre o histórico INTEIRO (não só as últimas 200
+      // mensagens de chat:open/chat:room_history), só os itens com
+      // anexo. Sob demanda (o cliente pede ao abrir o painel), não
+      // mandado sozinho em nenhum outro momento. ---
+      case "chat:attachments": {
+        if (typeof data.conversationId === "string" && data.conversationId) {
+          const conversationId = data.conversationId;
+          if (!chatStore.isParticipant(conversationId, player.userId)) break;
+          ws.send(JSON.stringify({ type: "chat:attachments", conversationId, items: chatStore.getConversationAttachments(conversationId) }));
+        } else {
+          ws.send(JSON.stringify({ type: "chat:attachments", conversationId: null, items: chatStore.getRoomAttachments(roomId) }));
+        }
         break;
       }
 
