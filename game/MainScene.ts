@@ -484,6 +484,22 @@ const FACADE_APEX_Y_PX = 336.8;
  * do losango), cada janela cobre exatamente 2 tiles do piso. */
 const FACADE_SCALE = 128 / 53.6;
 
+// QUINA ADICIONAL (pedido do Douglas, sala em L/escada: "essa parte vai
+// encaixar no predio do lado esquerdo" / "isso quina") -- peça MENOR,
+// só o "V" de vidro sem as paredes laterais da peça principal, pra
+// cobrir toda quina externa extra que a sala tiver além da principal
+// (ver roomFrontCorners/positionFacade). Tem uma aba sobrando no topo
+// esquerdo na própria arte (não calculada aqui) que cobre o trecho reto
+// até a peça vizinha, escondendo a costura. Medi o espaçamento das
+// vidraças nesse PNG (448x955) contra o da peça principal -- ~53px nos
+// 2, mesma escala exata -- então reusa FACADE_SCALE, sem recalibrar.
+const FACADE_CORNER2_TEXTURE_KEY = "fachada-predio-quina-2";
+/** vértice do "V" dessa peça DENTRO do PNG (px) -- achado por perfil de
+ * alpha coluna a coluna (topY(x), pico em x≈347 -> y≈276), mesma ideia
+ * de FACADE_APEX_*. */
+const FACADE_CORNER2_APEX_X_PX = 347;
+const FACADE_CORNER2_APEX_Y_PX = 276;
+
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
   return tileToWorld(col, row).y + ISO_TILE_HEIGHT / 2 - DEPTH_FURNITURE_ROW_HEIGHT;
@@ -864,6 +880,12 @@ export default class MainScene extends Phaser.Scene {
   private gridGraphics?: Phaser.GameObjects.Graphics;
   /** fachada do prédio colada na quina de baixo da sala (ver FACADE_TEXTURE_KEY / positionFacade). */
   private facadeImage?: Phaser.GameObjects.Image;
+  /** quinas EXTRAS da fachada, 1 sprite por quina (sala em L/escada com
+   * mais de 1 quina externa -- ver roomFrontCorners/positionFacade),
+   * indexado por "col,row" do tile-quina (mesmo padrão de
+   * draftFloor/draftWall no resto do arquivo), pra sobreviver entre
+   * chamadas e sumir sozinho se a quina deixar de existir. */
+  private facadeCornerSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private hoverGraphics?: Phaser.GameObjects.Graphics;
   // "fantasma" (ver refreshCatalogGhost) do item selecionado na paleta,
   // seguindo o cursor -- null quando nenhum item de móvel está selecionado.
@@ -1500,6 +1522,7 @@ export default class MainScene extends Phaser.Scene {
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
     }
     this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-predio.avif");
+    this.load.image(FACADE_CORNER2_TEXTURE_KEY, "/assets/fachada-predio-quina-2.png");
   }
 
   create() {
@@ -3951,38 +3974,102 @@ export default class MainScene extends Phaser.Scene {
     ].filter((t) => this.isTileInRoom(t.col, t.row));
   }
 
-  /** Cola o vértice do "V" da fachada (FACADE_APEX_*) no vértice de
-   * BAIXO da sala -- o tile com maior col+row (o mais "pra frente" na
-   * tela, ver furnitureDepthForTile), canto de baixo do losango dele.
-   * Empate (sala irregular com mais de 1 tile na frente) fica com o
-   * mais central (menor |col-row|). Chamado sempre que o formato da
-   * sala muda. */
-  private positionFacade() {
-    if (!this.textures.exists(FACADE_TEXTURE_KEY)) return;
-    let best: { col: number; row: number } | null = null;
+  /** Toda quina EXTERNA da fachada -- tile da sala sem vizinho em
+   * NENHUMA das 2 direções "pra frente" (col+1,row e col,row+1, mesmo
+   * critério de roomBackNeighbors/isTileInRoom). Numa sala
+   * retangular/losango simples só existe 1 (o tile mais "pra frente"
+   * da tela, o único candidato de sempre). Numa sala em L ou escada
+   * (ver teste do Douglas com a sala em escada) o contorno pode ter
+   * vários "dentes" pra frente, cada um sua própria quina -- cada uma
+   * precisa da própria peça de fachada (ver positionFacade). */
+  private roomFrontCorners(): { col: number; row: number }[] {
+    const corners: { col: number; row: number }[] = [];
     for (const key of this.roomShape) {
       const [col, row] = key.split(",").map(Number);
-      if (
-        !best ||
-        col + row > best.col + best.row ||
-        (col + row === best.col + best.row && Math.abs(col - row) < Math.abs(best.col - best.row))
-      ) {
-        best = { col, row };
+      if (!this.isTileInRoom(col + 1, row) && !this.isTileInRoom(col, row + 1)) {
+        corners.push({ col, row });
       }
     }
-    if (!best) return;
-    const c = tileToWorld(best.col, best.row);
-    const x = c.x;
-    const y = c.y + ISO_TILE_HEIGHT / 2;
-    if (!this.facadeImage) {
-      const tex = this.textures.get(FACADE_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
-      this.facadeImage = this.add
-        .image(x, y, FACADE_TEXTURE_KEY)
-        .setOrigin(FACADE_APEX_X_PX / tex.width, FACADE_APEX_Y_PX / tex.height)
-        .setScale(FACADE_SCALE)
-        .setDepth(DEPTH_FACADE);
-    } else {
-      this.facadeImage.setPosition(x, y);
+    return corners;
+  }
+
+  /** Cola o vértice do "V" da fachada PRINCIPAL (FACADE_APEX_*) na
+   * quina de baixo da sala -- o tile com maior col+row (o mais "pra
+   * frente" na tela, ver furnitureDepthForTile), canto de baixo do
+   * losango dele. Empate (sala irregular com mais de 1 tile na frente)
+   * fica com o mais central (menor |col-row|) -- mesmo critério de
+   * sempre. As DEMAIS quinas externas da sala (ver roomFrontCorners --
+   * sala em L/escada tem mais de uma) ganham cada uma sua própria peça
+   * MENOR (FACADE_CORNER2_TEXTURE_KEY, só o "V" de vidro, sem as
+   * paredes laterais da peça principal -- pedido do Douglas: "essa
+   * parte vai encaixar no predio do lado esquerdo" / "isso quina". A
+   * aba que sobra no topo esquerdo dessa arte é o respiro que cobre o
+   * trecho reto até a peça vizinha, escondendo a costura -- já vem
+   * assim na arte, nada calculado aqui pra isso). Chamado sempre que o
+   * formato da sala muda. */
+  private positionFacade() {
+    const corners = this.roomFrontCorners();
+    if (corners.length === 0) return;
+
+    let main = corners[0];
+    for (const c of corners) {
+      if (
+        c.col + c.row > main.col + main.row ||
+        (c.col + c.row === main.col + main.row && Math.abs(c.col - c.row) < Math.abs(main.col - main.row))
+      ) {
+        main = c;
+      }
+    }
+    if (this.textures.exists(FACADE_TEXTURE_KEY)) {
+      const w = tileToWorld(main.col, main.row);
+      const x = w.x;
+      const y = w.y + ISO_TILE_HEIGHT / 2;
+      if (!this.facadeImage) {
+        const tex = this.textures.get(FACADE_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
+        this.facadeImage = this.add
+          .image(x, y, FACADE_TEXTURE_KEY)
+          .setOrigin(FACADE_APEX_X_PX / tex.width, FACADE_APEX_Y_PX / tex.height)
+          .setScale(FACADE_SCALE)
+          .setDepth(DEPTH_FACADE);
+      } else {
+        this.facadeImage.setPosition(x, y);
+      }
+    }
+
+    // as demais quinas -- 1 sprite da peça pequena por quina, indexado
+    // por tile (mesmo padrão de draftFloor/draftWall/etc no resto do
+    // arquivo) pra sobreviver entre chamadas e sumir sozinho se a
+    // quina deixar de existir (sala encolheu de novo, ver
+    // eraseRoomShapeAt).
+    const mainKey = this.roomTileKey(main.col, main.row);
+    const liveKeys = new Set<string>();
+    if (this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
+      const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
+      for (const c of corners) {
+        const key = this.roomTileKey(c.col, c.row);
+        if (key === mainKey) continue;
+        liveKeys.add(key);
+        const w = tileToWorld(c.col, c.row);
+        const x = w.x;
+        const y = w.y + ISO_TILE_HEIGHT / 2;
+        let sprite = this.facadeCornerSprites.get(key);
+        if (!sprite) {
+          sprite = this.add
+            .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
+            .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
+            .setScale(FACADE_SCALE)
+            .setDepth(DEPTH_FACADE);
+          this.facadeCornerSprites.set(key, sprite);
+        } else {
+          sprite.setPosition(x, y);
+        }
+      }
+    }
+    for (const [key, sprite] of this.facadeCornerSprites) {
+      if (!liveKeys.has(key)) {
+        sprite.destroy();
+        this.facadeCornerSprites.delete(key);
+      }
     }
   }
 
