@@ -503,20 +503,22 @@ const FACADE_CORNER2_APEX_Y_PX = 276;
  * trecho reto/repetível de vidro pra cobrir sozinha o vão até a peça
  * principal (as duas artes são só um "V" de telhado, sem reta no
  * meio), então em vez de gerar arte nova o ajuste pedido foi deslocar
- * essa peça por cima da posição calculada por tile. Histórico dos
- * pedidos (cada um somado em cima do anterior, ver tileToWorld em
- * grid.ts pra cada direção; "direita"/"esquerda" sempre só no eixo X
- * da tela, sem mexer no Y): "move ela tres tile pra direita" (+3
- * tiles em X), depois "4 tiles pra frente esquerda" (direção +row:
- * dx=-ISO_TILE_WIDTH/2, dy=+ISO_TILE_HEIGHT/2 por tile). Tentei somar
- * mais "meio tile pra direita" em cima disso e foi isso que abriu um
- * vão GRANDE (print "esse espaço preto precisa fechar") -- ou seja
- * empurrar mais pra direita daqui pra frente só afasta, não ajuda;
- * voltei pro valor de antes desse passo (sem o +0.5 tile). Reajustar
- * aqui e testar local (npm run dev) se precisar de mais/menos -- não
- * dá pra calibrar isso de fora sem ver o resultado ao vivo. */
+ * essa peça por cima da posição calculada por tile. Histórico (cada
+ * item somado em cima do anterior, ver tileToWorld em grid.ts pra
+ * cada direção; "direita"/"esquerda" sempre só no eixo X da tela, sem
+ * mexer no Y): +3 tiles em X, depois +4 tiles direção +row
+ * (dx=-ISO_TILE_WIDTH/2, dy=+ISO_TILE_HEIGHT/2 por tile), depois
+ * desfeito um +0.5 tile em X que tinha aberto um vão GRANDE em vez de
+ * fechar. Último ajuste: print com o grid do editor ligado (pedido do
+ * Douglas "olha os tile e calcula") mostrou o vão escuro com EXATAMENTE
+ * o tamanho de 1 tile, colado direto atrás (lado do piso) do tile
+ * onde a peça ancora hoje -- ou seja falta andar 1 tile na direção
+ * -col,-row (puro fundo, sem componente X: dx=0,
+ * dy=-ISO_TILE_HEIGHT). Reajustar aqui e testar local (npm run dev)
+ * se precisar de mais/menos -- não dá pra calibrar isso de fora sem
+ * ver o resultado ao vivo. */
 const FACADE_CORNER2_OFFSET_X_PX = 3 * ISO_TILE_WIDTH - 4 * (ISO_TILE_WIDTH / 2);
-const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2);
+const FACADE_CORNER2_OFFSET_Y_PX = 4 * (ISO_TILE_HEIGHT / 2) - ISO_TILE_HEIGHT;
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
