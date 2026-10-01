@@ -70,6 +70,7 @@ import {
   furnitureColorArtFile,
   furnitureModelById,
   furnitureVariantTextureKey,
+  furnitureNearTextureKey,
   registerCustomFurnitureModels,
   FurnitureCategoryId,
   FurnitureCatalogEntry,
@@ -1376,7 +1377,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_items")
         .select(
-          "id, label, category, art, display_width, icon_url, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
+          "id, label, category, art, display_width, icon_url, near_image_url, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
         );
       if (error || !data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
@@ -1387,6 +1388,7 @@ export default function GameRoom({
           art: Partial<Record<FurnitureFacing, string>>;
           display_width: number | null;
           icon_url: string | null;
+          near_image_url: string | null;
           offset_x: number | null;
           offset_y: number | null;
           direction_offsets: Partial<Record<FurnitureFacing, { x: number; y: number }>> | null;
@@ -1420,6 +1422,12 @@ export default function GameRoom({
           // addFurnitureSprite, MainScene.ts).
           displayWidth: typeof row.display_width === "number" ? row.display_width : undefined,
           iconUrl: row.icon_url ?? undefined,
+          // imagem "de perto" (pedido do Douglas: "por proximidade, a
+          // um tile de distancia, o objeto muda") -- ver
+          // FurnitureModelDef.nearImageUrl/furnitureNearTextureKey em
+          // game/furniture.ts e updateFurnitureProximityState em
+          // game/MainScene.ts.
+          nearImageUrl: row.near_image_url ?? undefined,
           offsetX: row.offset_x ?? 0,
           offsetY: row.offset_y ?? 0,
           // "editar todos os lados" + "tem interação/posição sentado"
@@ -1493,6 +1501,16 @@ export default function GameRoom({
             if (updatedIds.includes(model.id)) sceneRef.current?.removeFurnitureTextures([key]);
             textureEntries.push({ key, url });
           }
+        }
+        // imagem "de perto" (pedido do Douglas: "por proximidade, a um
+        // tile de distancia, o objeto muda") -- UMA textura só por
+        // modelo, sem cor/direção (ver furnitureNearTextureKey,
+        // game/furniture.ts), carregada do mesmo jeito que as variantes
+        // de cor/direção acima.
+        if (model.nearImageUrl) {
+          const nearKey = furnitureNearTextureKey(model.id);
+          if (updatedIds.includes(model.id)) sceneRef.current?.removeFurnitureTextures([nearKey]);
+          textureEntries.push({ key: nearKey, url: model.nearImageUrl });
         }
       }
       await new Promise<void>((resolve) => {

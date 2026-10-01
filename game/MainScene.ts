@@ -18,6 +18,7 @@ import {
   furnitureWorldPosAt,
   furnitureTextureKey,
   furnitureVariantTextureKey,
+  furnitureNearTextureKey,
   furnitureTextureKeyFor,
   furnitureBlocksMovement,
   furnitureModelById,
@@ -1317,6 +1318,15 @@ export default class MainScene extends Phaser.Scene {
   // A mobília colocada pelo editor já tem isso em draftSprites.
   private roomFurnitureSprites: Map<string, Phaser.GameObjects.Image> = new Map();
 
+  /** Estado ao vivo ("perto"/"longe", ver FurnitureModelDef.nearImageUrl
+   * em game/furniture.ts) de cada item com efeito de proximidade,
+   * chave = FurnitureDef.id (serve tanto pra ROOM_FURNITURE fixo quanto
+   * pra draftFurniture) -- MESMO esquema de doorOpenState: só troca a
+   * textura de verdade quando o valor realmente MUDA de frame pra
+   * frame (ver updateFurnitureProximityState, chamado todo frame em
+   * update()), nada a fazer pra item sem avatar nenhum por perto. */
+  private furnitureNearState: Map<string, boolean> = new Map();
+
   /** Definido de fora (GameRoom.tsx) -- chamado ao clicar em "Assumir mesa" numa mesa privada sem dono. */
   onClaimArea?: (areaId: string) => void;
 
@@ -1950,25 +1960,7 @@ export default class MainScene extends Phaser.Scene {
     // desenha no tamanho nativo de sempre.
     const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
     if (model?.custom) {
-      const source = this.textures.get(key).getSourceImage() as { width?: number; height?: number };
-      const nativeW = source.width || image.width;
-      const nativeH = source.height || image.height;
-      // preferência: tamanho ajustado à mão no preview do Editor de Itens
-      // (model.displayWidth, ver FurnitureModelDef em furniture.ts) --
-      // só cai no alvo genérico por categoria pra item cadastrado ANTES
-      // dessa opção existir (display_width null no banco). "down"
-      // (frente) sempre usa displayWidth direto -- as outras 3 direções
-      // caem no PRÓPRIO tamanho se tiver (ver
-      // FurnitureModelDef.directionDisplayWidth, pedido do Douglas: "se
-      // eu mudar de um ele muda de todas as vistas? nao tem como
-      // isolar?"), senão reaproveitam o mesmo valor de "down" (mesma
-      // regra de directionOffsets logo abaixo, comportamento de sempre
-      // sem override).
-      const widthOverride = f.facing !== "down" ? model.directionDisplayWidth?.[f.facing] : undefined;
-      const targetWidth = widthOverride ?? model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 225;
-      if (nativeW > 0 && nativeH > 0) {
-        image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
-      }
+      this.applyCustomFurnitureSize(image, f, model, key);
       // posição ajustada à mão (arrastando o item em cima do
       // boneco/quadrado de referência no preview do Editor de Itens, ver
       // FurnitureModelDef.offsetX/offsetY em game/furniture.ts) -- só
@@ -1993,6 +1985,72 @@ export default class MainScene extends Phaser.Scene {
     }
 
     return image;
+  }
+
+  /**
+   * Reaplica o tamanho de EXIBIÇÃO (setDisplaySize) de um item CUSTOM a
+   * partir da textura ATUAL (`key`) -- extraído de addFurnitureSprite
+   * (criação) pra também ser chamado de updateFurnitureProximityState
+   * (troca de textura por proximidade, ver FurnitureModelDef.nearImageUrl)
+   * depois de um setTexture: a imagem "de perto" pode ter resolução/
+   * proporção BEM diferente da normal (não tem por que o Douglas subir
+   * do mesmo tamanho de propósito), então sem reaplicar isso o item
+   * trocaria de imagem só na textura nativa, mudando de tamanho na tela
+   * de supetão em vez de continuar no targetWidth configurado no
+   * modelo. Preferência de tamanho: model.directionDisplayWidth (por
+   * direção) > model.displayWidth > alvo genérico por categoria (mesma
+   * regra de sempre, ver comentário grande que isso substituiu).
+   */
+  private applyCustomFurnitureSize(image: Phaser.GameObjects.Image, f: FurnitureDef, model: FurnitureModelDef, key: string) {
+    const source = this.textures.get(key).getSourceImage() as { width?: number; height?: number };
+    const nativeW = source.width || image.width;
+    const nativeH = source.height || image.height;
+    const widthOverride = f.facing !== "down" ? model.directionDisplayWidth?.[f.facing] : undefined;
+    const targetWidth = widthOverride ?? model.displayWidth ?? CUSTOM_ITEM_TARGET_WIDTH[FURNITURE_TYPE_CATEGORY[f.type]] ?? 225;
+    if (nativeW > 0 && nativeH > 0) {
+      image.setDisplaySize(targetWidth, targetWidth * (nativeH / nativeW));
+    }
+  }
+
+  /**
+   * Recalcula o estado ao vivo ("perto"/"longe") de cada item com
+   * imagem de proximidade configurada (ver FurnitureModelDef.nearImageUrl
+   * em game/furniture.ts) -- chamado TODO FRAME em update(), mesmo
+   * esquema de updateDoorOpenState (só usa localContainer/
+   * remoteContainers, já atualizados a cada "move"). Pedido do Douglas:
+   * "por proximidade, a um tile de distancia, o objeto muda, muda pra
+   * outra imagem" -- QUALQUER avatar (local ou remoto, mesma regra da
+   * porta automática) a até 1 TILE de distância (Chebyshev -- inclui
+   * diagonal) do tile-âncora do móvel já conta como "perto". Só troca a
+   * textura de verdade (setTexture) quando o estado realmente MUDA --
+   * nada a fazer todo frame pros itens sem ninguém por perto, e cobre
+   * tanto ROOM_FURNITURE fixo quanto draftFurniture (editor de espaço).
+   */
+  private updateFurnitureProximityState() {
+    const containers = [this.localContainer, ...this.remoteContainers.values()].filter(
+      (c): c is Phaser.GameObjects.Container => Boolean(c)
+    );
+    if (containers.length === 0) return;
+    const avatarTiles = containers.map((c) => worldToTile(c.x, c.y));
+
+    const applyOne = (f: FurnitureDef, sprite: Phaser.GameObjects.Image | undefined) => {
+      if (!sprite) return;
+      const model = f.modelId ? furnitureModelById(f.modelId) : undefined;
+      if (!model?.nearImageUrl) return;
+      const nearKey = furnitureNearTextureKey(model.id);
+      if (!this.textures.exists(nearKey)) return; // ainda carregando (ver loadCustomFurnitureTextures) -- ignora esse frame
+      const isNear = avatarTiles.some((t) => Math.max(Math.abs(t.col - f.col), Math.abs(t.row - f.row)) <= 1);
+      const wasNear = this.furnitureNearState.get(f.id) === true;
+      if (isNear === wasNear) return;
+      this.furnitureNearState.set(f.id, isNear);
+      const key = isNear ? nearKey : furnitureTextureKeyFor(f);
+      if (!this.textures.exists(key)) return;
+      sprite.setTexture(key);
+      if (model.custom) this.applyCustomFurnitureSize(sprite, f, model, key);
+    };
+
+    for (const f of ROOM_FURNITURE) applyOne(f, this.roomFurnitureSprites.get(f.id));
+    for (const f of this.draftFurniture.values()) applyOne(f, this.draftSprites.get(f.id));
   }
 
   /**
@@ -3736,6 +3794,11 @@ export default class MainScene extends Phaser.Scene {
     // do estado JÁ ATUALIZADO deste frame pra travar/liberar o passo
     // certo.
     this.updateDoorOpenState();
+    // troca de imagem por proximidade (ver updateFurnitureProximityState/
+    // FurnitureModelDef.nearImageUrl) -- mesmo timing/motivo da porta
+    // acima, mas não afeta nenhum bloqueio de movimento, então a ordem
+    // exata aqui importa menos.
+    this.updateFurnitureProximityState();
     // véu de área (ver updateAreaDim/syncAreaDimRectToCamera) precisa
     // seguir a câmera TODO frame, mesmo sentado/parado -- arrasto/zoom
     // não dependem do boneco andar.

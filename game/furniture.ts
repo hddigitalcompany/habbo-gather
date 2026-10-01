@@ -237,6 +237,19 @@ export interface FurnitureModelDef {
    * de sempre (foto de frente, ver catalogEntryIconFile em
    * GameRoom.tsx). Só existe em item CUSTOM, igual displayWidth. */
   iconUrl?: string;
+  /** Imagem (URL do Storage) que SUBSTITUI a arte normal do item
+   * enquanto algum avatar (local ou remoto) estiver a 1 tile de
+   * distância dele -- pedido do Douglas: "por proximidade, a um tile de
+   * distancia, o objeto muda, muda pra outra imagem". UMA imagem só
+   * (não por direção/cor -- diferente de `art`/`colors`), aplicada por
+   * cima de QUALQUER direção/cor que o item esteja mostrando no
+   * momento. undefined = sem efeito de proximidade, comportamento de
+   * sempre. Só existe em item CUSTOM, igual iconUrl (upload próprio no
+   * Editor de Itens). Resolvida pra uma textura do Phaser via
+   * furnitureNearTextureKey (ver updateFurnitureProximityState,
+   * MainScene.ts, chamado todo frame em update() mesmo esquema de
+   * updateDoorOpenState). */
+  nearImageUrl?: string;
   /** Deslocamento (px) da posição-âncora do móvel a partir do padrão
    * (borda de baixo do tile, ver furnitureWorldPos) -- ajustado À MÃO
    * arrastando o item em cima do quadrado/boneco de referência no
@@ -525,6 +538,13 @@ export function furnitureTextureKeyFor(f: FurnitureDef): string {
 /** Chave da textura no Phaser pra um modelo+cor+direção (ex: "gamer"+"rosa"+"left" -> "furniture-variant-gamer-rosa-left"). */
 export function furnitureVariantTextureKey(modelId: string, colorId: string, facing: FurnitureFacing): string {
   return `furniture-variant-${modelId}-${colorId}-${facing}`;
+}
+
+/** Chave da textura no Phaser pra imagem "de perto" de um modelo (ver
+ * FurnitureModelDef.nearImageUrl) -- UMA só por modelo, sem cor/direção
+ * (diferente de furnitureVariantTextureKey). */
+export function furnitureNearTextureKey(modelId: string): string {
+  return `furniture-near-${modelId}`;
 }
 
 /**

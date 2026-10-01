@@ -69,6 +69,11 @@ export async function POST(req: NextRequest) {
   // 0 (sem deslocamento, comportamento de sempre) -- mesma faixa -300..300
   // da constraint no banco.
   const iconUrl = typeof body?.icon_url === "string" && body.icon_url ? body.icon_url : null;
+  // imagem "de perto" (pedido do Douglas: "por proximidade, a um tile
+  // de distancia, o objeto muda") -- mesmo esquema do ícone acima,
+  // opcional, ver near_image_url em supabase/migrations/
+  // 0049_room_items_near_image.sql.
+  const nearImageUrl = typeof body?.near_image_url === "string" && body.near_image_url ? body.near_image_url : null;
   const offsetX = clampItemOffset(body?.offset_x);
   const offsetY = clampItemOffset(body?.offset_y);
   // ajuste por direção (pedido do Douglas: "editar todos os lados do
@@ -146,6 +151,7 @@ export async function POST(req: NextRequest) {
       art: cleanArt,
       display_width: displayWidth,
       icon_url: iconUrl,
+      near_image_url: nearImageUrl,
       offset_x: offsetX,
       offset_y: offsetY,
       direction_offsets: directionOffsets,

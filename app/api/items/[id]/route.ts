@@ -53,7 +53,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const { data: existing, error: fetchError } = await admin
     .from("room_items")
-    .select("art, icon_url")
+    .select("art, icon_url, near_image_url")
     .eq("id", params.id)
     .maybeSingle();
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -122,6 +122,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (oldIconPath) await admin.storage.from("room-items").remove([oldIconPath]).catch(() => null);
     }
     update.icon_url = nextIcon;
+  }
+
+  // imagem "de perto" -- mesmo esquema do ícone acima (checa presença
+  // da CHAVE, não truthiness: null explícito = removeu o efeito de
+  // proximidade, ausente = não mexeu).
+  if ("near_image_url" in body) {
+    const rawNearImage = body.near_image_url;
+    const nextNearImage = typeof rawNearImage === "string" && rawNearImage ? rawNearImage : null;
+    const oldNearImage = (existing.near_image_url as string | null) ?? null;
+    if (oldNearImage && oldNearImage !== nextNearImage) {
+      const oldNearImagePath = storagePathFromPublicUrl(oldNearImage, "room-items");
+      if (oldNearImagePath) await admin.storage.from("room-items").remove([oldNearImagePath]).catch(() => null);
+    }
+    update.near_image_url = nextNearImage;
   }
 
   if ("offset_x" in body) update.offset_x = clampItemOffset(body.offset_x);
@@ -219,7 +233,11 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const admin = getSupabaseAdminClient();
   if (!admin) return NextResponse.json({ error: "Supabase não configurado" }, { status: 500 });
 
-  const { data: item } = await admin.from("room_items").select("art, icon_url").eq("id", params.id).maybeSingle();
+  const { data: item } = await admin
+    .from("room_items")
+    .select("art, icon_url, near_image_url")
+    .eq("id", params.id)
+    .maybeSingle();
   const paths: string[] = [];
   if (item?.art && typeof item.art === "object") {
     paths.push(
@@ -231,6 +249,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (item?.icon_url) {
     const iconPath = storagePathFromPublicUrl(item.icon_url as string, "room-items");
     if (iconPath) paths.push(iconPath);
+  }
+  if (item?.near_image_url) {
+    const nearImagePath = storagePathFromPublicUrl(item.near_image_url as string, "room-items");
+    if (nearImagePath) paths.push(nearImagePath);
   }
   if (paths.length > 0) {
     await admin.storage.from("room-items").remove(paths).catch(() => null);

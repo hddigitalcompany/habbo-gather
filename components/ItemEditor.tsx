@@ -418,6 +418,7 @@ type CustomItemRow = {
   category: CategoryId;
   art: Partial<Record<MobiFacing, string>>;
   icon_url: string | null;
+  near_image_url: string | null;
   display_width: number | null;
   offset_x: number | null;
   offset_y: number | null;
@@ -3843,6 +3844,7 @@ export default function ItemEditor({
   const [furnitureColorToolItemId, setFurnitureColorToolItemId] = useState<string | null>(null);
   const fileInputRefs = useRef<Partial<Record<string, HTMLInputElement | null>>>({});
   const iconInputRef = useRef<HTMLInputElement | null>(null);
+  const nearImageInputRef = useRef<HTMLInputElement | null>(null);
   // mesma indireção de AvatarCreatorPanel acima -- ver ImageCropModal e
   // pendingCrop lá pro comentário completo. "" como inputKey é o ícone
   // (usa iconInputRef, não fileInputRefs).
@@ -4001,6 +4003,18 @@ export default function ItemEditor({
   const iconPreviewUrlRef = useRef<string | null>(null);
   iconPreviewUrlRef.current = iconPreviewUrl;
 
+  // imagem "de perto" (pedido do Douglas: "por proximidade, a um tile
+  // de distancia, o objeto muda, muda pra outra imagem") -- MESMO
+  // esquema do ícone acima (opcional, upload separado, nearImageCleared
+  // = tirou o efeito que já existia -> manda near_image_url:null ao
+  // salvar; ausente = não mexeu, PATCH nem manda o campo).
+  const [existingNearImageUrl, setExistingNearImageUrl] = useState<string | null>(null);
+  const [nearImageFile, setNearImageFile] = useState<File | null>(null);
+  const [nearImageCleared, setNearImageCleared] = useState(false);
+  const [nearImagePreviewUrl, setNearImagePreviewUrl] = useState<string | null>(null);
+  const nearImagePreviewUrlRef = useRef<string | null>(null);
+  nearImagePreviewUrlRef.current = nearImagePreviewUrl;
+
   function handleCategoryChange(next: CategoryId) {
     setCategory(next);
     if (!editingId) {
@@ -4034,6 +4048,25 @@ export default function ItemEditor({
       return null;
     });
     if (iconInputRef.current) iconInputRef.current.value = "";
+  }
+
+  function handleNearImageFileChange(file: File | undefined) {
+    setNearImageFile(file ?? null);
+    setNearImageCleared(false);
+    setNearImagePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  function removeNearImage() {
+    setNearImageFile(null);
+    setNearImageCleared(true);
+    setNearImagePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
+    if (nearImageInputRef.current) nearImageInputRef.current.value = "";
   }
 
   // --- "Criar Piso" (pedido do Douglas: "eu quero uma aba so pra piso
@@ -4420,6 +4453,7 @@ export default function ItemEditor({
     return () => {
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
       if (iconPreviewUrlRef.current) URL.revokeObjectURL(iconPreviewUrlRef.current);
+      if (nearImagePreviewUrlRef.current) URL.revokeObjectURL(nearImagePreviewUrlRef.current);
       if (floorPreviewUrlRef.current) URL.revokeObjectURL(floorPreviewUrlRef.current);
     };
   }, []);
@@ -4440,7 +4474,7 @@ export default function ItemEditor({
         // item pra editar nunca mostrava "Sobrepor"/altura/footprint
         // customizado que já tinha sido salvo. Corrigido junto do
         // footprint por direção (mesmo bug, mesma causa).
-        "id, label, category, art, icon_url, display_width, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
+        "id, label, category, art, icon_url, near_image_url, display_width, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
       );
     if (fetchError) {
       setError(fetchError.message);
@@ -4544,6 +4578,13 @@ export default function ItemEditor({
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       return null;
     });
+    setExistingNearImageUrl(item.near_image_url ?? null);
+    setNearImageFile(null);
+    setNearImageCleared(false);
+    setNearImagePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
     setError(null);
     for (const key of Object.keys(fileInputRefs.current)) {
       const input = fileInputRefs.current[key];
@@ -4583,6 +4624,7 @@ export default function ItemEditor({
       ? previewUrl ?? existingArt.down ?? null
       : activeMobiBlobUrl ?? existingArt[activeMobiDirection] ?? null;
   const stageIconSrc = iconPreviewUrl ?? (!iconCleared ? existingIconUrl : null);
+  const stageNearImageSrc = nearImagePreviewUrl ?? (!nearImageCleared ? existingNearImageUrl : null);
 
   // boneco de referência (ver comentário grande no topo do módulo, perto
   // de onde essas 3 eram `const` fixas) -- recalculado a cada render pra
@@ -4979,6 +5021,28 @@ export default function ItemEditor({
       // explícito (removeu), pra não pisar num ícone que já existia sem
       // querer num PATCH que nem tocou nesse campo.
 
+      // imagem "de perto" (pedido do Douglas: "por proximidade, a um
+      // tile de distancia, o objeto muda, muda pra outra imagem") --
+      // MESMO esquema de upload do ícone acima, teto de tamanho igual
+      // ao das fotos de direção (maxUploadWidth: mostra no tamanho real
+      // do item na sala, não um botão pequeno feito o ícone).
+      let nearImageUrl: string | null | undefined;
+      if (nearImageFile) {
+        const resized = await resizeImageForUpload(nearImageFile, maxUploadWidth);
+        const ext = resized.name.split(".").pop() || "png";
+        const path = `${category}/${slug}-${Date.now()}-near.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("room-items").upload(path, resized, {
+          upsert: false,
+          contentType: resized.type || "image/png",
+        });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+        const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
+        nearImageUrl = publicUrlData.publicUrl;
+      } else if (nearImageCleared) {
+        nearImageUrl = null;
+      }
+
       const payload: Record<string, unknown> = {
         label: label.trim(),
         category,
@@ -5037,6 +5101,7 @@ export default function ItemEditor({
         extra_seats: extraSeats,
       };
       if (iconUrl !== undefined) payload.icon_url = iconUrl;
+      if (nearImageUrl !== undefined) payload.near_image_url = nearImageUrl;
 
       const res = await fetch(editingId ? `/api/items/${editingId}` : "/api/items", {
         method: editingId ? "PATCH" : "POST",
@@ -5663,6 +5728,35 @@ export default function ItemEditor({
           {stageIconSrc && (
             <button type="button" className="clear-btn" onClick={removeIcon}>
               Remover ícone (usar a foto de frente)
+            </button>
+          )}
+
+          {/* Imagem "de perto" (pedido do Douglas: "por proximidade, a
+              um tile de distancia, o objeto muda, muda pra outra
+              imagem") -- opcional: sem ela, o item nunca troca de
+              imagem sozinho. Com ela, QUALQUER avatar (local ou
+              remoto) a até 1 tile de distância troca a arte normal por
+              essa, voltando ao normal quando se afasta (ver
+              updateFurnitureProximityState, game/MainScene.ts). */}
+          <label className="items-panel-upload-field">
+            <span>Imagem de perto (opcional, troca por proximidade a 1 tile)</span>
+            {stageNearImageSrc && (
+              <img className="items-panel-upload-existing" src={stageNearImageSrc} alt="Imagem de perto atual" />
+            )}
+            <input
+              ref={nearImageInputRef}
+              type="file"
+              accept="image/png,image/webp,image/jpeg"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setPendingCrop({ file, inputKey: "__nearImage__", apply: (result) => handleNearImageFileChange(result) });
+              }}
+            />
+          </label>
+          {stageNearImageSrc && (
+            <button type="button" className="clear-btn" onClick={removeNearImage}>
+              Remover imagem de perto (desliga o efeito de proximidade)
             </button>
           )}
 
@@ -6341,7 +6435,11 @@ export default function ItemEditor({
           }}
           onCancel={() => {
             const input =
-              pendingCrop.inputKey === "__icon__" ? iconInputRef.current : fileInputRefs.current[pendingCrop.inputKey];
+              pendingCrop.inputKey === "__icon__"
+                ? iconInputRef.current
+                : pendingCrop.inputKey === "__nearImage__"
+                  ? nearImageInputRef.current
+                  : fileInputRefs.current[pendingCrop.inputKey];
             if (input) input.value = "";
             setPendingCrop(null);
           }}
