@@ -645,7 +645,23 @@ body {
    2 classes, ganha de .chat-drawer-sidebar sozinho) -- o respiro do
    shell já basta, a gaveta volta a nascer colada no topo dele e com
    a MESMA altura esticada da coluna ao lado. */
-.chat-drawer-shell-sidebar .chat-drawer-sidebar {
+/* 1/out, Douglas (print comparando Lobby x Sala): "layout, posicao" --
+   essa regra tinha sido escrita só pra .chat-drawer-shell-sidebar
+   (classe do shell DENTRO da sala), mas .lobby-chat-drawer-shell-sidebar
+   (ver regra dela embaixo) é o MESMO shell pro Lobby, só com um nome de
+   classe diferente porque o mecanismo por baixo muda (position:fixed
+   vs margin-top+stretch) -- a gaveta nele dentro continua sendo
+   literalmente a mesma .chat-drawer-sidebar (classe fixa, ver
+   drawerBody em ChatDrawer.tsx, não muda com o contexto), com o MESMO
+   margin-top:80px próprio precisando ser zerado aqui. Sem essa segunda
+   classe no seletor, só a Sala zerava -- no Lobby a gaveta ficava com
+   os 80px do shell fixo (.lobby-chat-drawer-shell-sidebar, top:80px)
+   MAIS os 80px próprios dela (não zerados) = 160px, nascendo bem mais
+   embaixo que a coluna "Empresas" ao lado (essa sim só com os 80px do
+   shell, sem margin-top próprio nenhum) -- exatamente o desalinhamento
+   do print. */
+.chat-drawer-shell-sidebar .chat-drawer-sidebar,
+.lobby-chat-drawer-shell-sidebar .chat-drawer-sidebar {
   margin-top: 0;
 }
 
@@ -721,24 +737,13 @@ body {
   max-width: none;
 }
 
-.lobby-chat-drawer-sidebar {
-  /* mesmo papel de .chat-drawer-sidebar (sala): dentro do shell
-     fixo acima, essa aqui é position:static + flex-shrink:0, só
-     recebe a altura esticada do PAI (align-items:stretch já vem de
-     .chat-drawer-shell, reaproveitada) -- ela mesma não tem
-     position:fixed nem top/bottom próprios, senão escaparia do
-     fluxo flex do shell e sobraria por cima da coluna de empresas
-     em vez de ficar do lado. */
-  position: static;
-  flex-shrink: 0;
-  width: 320px;
-  max-width: 100%;
-  border-radius: 0;
-  border-top: none;
-  border-bottom: none;
-  border-left: none;
-  box-shadow: 2px 0 30px rgba(0, 0, 0, 0.35);
-}
+/* .lobby-chat-drawer-sidebar existiu aqui numa versão antiga -- a
+   gaveta dentro do shell fixo do Lobby NUNCA usou essa classe de
+   verdade (drawerBody em ChatDrawer.tsx sempre aplica a MESMA
+   .chat-drawer-sidebar da Sala, veja o seletor duplo logo acima,
+   .chat-drawer-shell-sidebar .chat-drawer-sidebar). Removida (1/out)
+   por ser CSS morto que nunca foi aplicado -- só confundia quem lesse
+   achando que era essa a classe de verdade. */
 
 /* botão/painel de arquivos -- mesmo motivo de .chat-files-trigger-sidebar/
    .chat-files-panel-sidebar (ver comentário grande deles acima), mas
