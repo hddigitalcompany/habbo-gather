@@ -704,22 +704,6 @@ export function formatRecordingTime(totalSec: number): string {
   return `${m}:${pad2(s)}`;
 }
 
-// tenta mimeTypes em ordem de preferência -- nem todo navegador aceita
-// "audio/webm;codecs=opus" (ex: Safari), então cai pro próximo que o
-// MediaRecorder confirmar que suporta; undefined = deixa o navegador
-// escolher sozinho (fallback do próprio construtor).
-function pickSupportedAudioMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return undefined;
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
-  return candidates.find((t) => {
-    try {
-      return MediaRecorder.isTypeSupported(t);
-    } catch {
-      return false;
-    }
-  });
-}
-
 // "25/set", "26/set" -- ver o "strip" de dias da Minha Agenda.
 const MESES_ABREV = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 function dayChipLabel(dateKey: string, todayKey: string, tomorrowKey: string): string {
@@ -771,6 +755,17 @@ export default function GameRoom({
     mentionAttachmentInChat,
     joinCall,
     leaveCall,
+    // 1/out (unificação Lobby/GameRoom) -- gravação de áudio também
+    // era duas implementações separadas (ver comentário grande em
+    // usePlatformChat.ts); agora é 100% dela, aqui só de passagem.
+    recordingAudio,
+    recordingElapsedSec,
+    recordedPreview,
+    startVoiceRecording,
+    stopVoiceRecording,
+    cancelVoiceRecording,
+    discardRecordedAudio,
+    sendRecordedAudio,
   } = chat;
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -1068,13 +1063,11 @@ export default function GameRoom({
     chat.setRoomContext({ slug: roomSlug, name: roomCompanyName, logoUrl: roomCompanyLogoUrl });
   }, [chat, roomSlug, roomCompanyName, roomCompanyLogoUrl]);
 
-  const [recordingAudio, setRecordingAudio] = useState(false);
-  // contador ao vivo (segundos) enquanto tá gravando, e o áudio já
-  // parado esperando confirmação de envio (igual WhatsApp: grava, mostra
-  // o tempo, PARA, e só manda quando a pessoa confirma) -- ver
-  // startVoiceRecording/stopVoiceRecording/sendRecordedAudio.
-  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
-  const [recordedPreview, setRecordedPreview] = useState<{ url: string; durationSec: number } | null>(null);
+  // recordingAudio/recordingElapsedSec/recordedPreview/
+  // startVoiceRecording/stopVoiceRecording/cancelVoiceRecording/
+  // discardRecordedAudio/sendRecordedAudio agora são 100% de
+  // usePlatformChat.ts (ver destructure de "chat" lá em cima) -- não
+  // existem mais aqui.
   const [sendingAttachment, setSendingAttachment] = useState(false);
   // "fixar" a gaveta de chat como barra lateral fixa (esquerda), em vez
   // de flutuar sobre o jogo -- lembrado entre visitas (localStorage),
@@ -1092,16 +1085,6 @@ export default function GameRoom({
   // autoOpenNextConversationRef (abrir sozinho a conversa que EU acabei
   // de criar) agora é interno de usePlatformChat.ts -- não existe mais
   // aqui.
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recordedBlobRef = useRef<Blob | null>(null);
-  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recordingStartRef = useRef(0);
-  // true só quando a pessoa CANCELOU a gravação em andamento (lixeira
-  // durante a gravação) -- o onstop do MediaRecorder dispara do mesmo
-  // jeito nesse caso, essa ref é o jeito dele saber que é pra descartar
-  // em vez de virar preview (ver cancelVoiceRecording).
-  const discardRecordingRef = useRef(false);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
   const agendaFileInputRef = useRef<HTMLInputElement>(null);
   const agendaDetailFileInputRef = useRef<HTMLInputElement>(null);
@@ -1197,6 +1180,17 @@ export default function GameRoom({
     setToasts((prev) => [...prev.slice(-3), { id: toastId, text }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
   }
+
+  // registra showErrorToast como o aviso visual de "não deu pra
+  // acessar o microfone" da gravação de áudio (ver
+  // setRecordingErrorHandler/recordingErrorHandlerRef em
+  // usePlatformChat.ts) -- só a Sala tem esse toast; o Lobby não
+  // registra nada, continua só logando no console (nunca teve esse
+  // aviso visual).
+  useEffect(() => {
+    chat.setRecordingErrorHandler(showErrorToast);
+    return () => chat.setRecordingErrorHandler(null);
+  }, [chat]);
 
   // manda pelo socket SÓ se ele realmente tiver aberto -- antes um
   // socketRef.current?.send(...) com a conexão caída/reconectando (ex:
@@ -3792,106 +3786,10 @@ export default function GameRoom({
     }
   }
 
-  // --- gravação de áudio, estilo WhatsApp: grava (mostra o tempo já
-  // gravado ao vivo) -> PARA (sem mandar sozinho) -> mostra um preview
-  // pra ouvir de novo -> só manda quando a pessoa confirma. Antes disso
-  // o áudio era enviado sozinho assim que parava de gravar, sem
-  // confirmação nem progresso visível -- "o audio liga, mas nao funciona
-  // nao envia" (o clique funcionava, só não dava nenhum feedback do que
-  // tava acontecendo até o envio silencioso no fim). ---
-  async function startVoiceRecording() {
-    try {
-      // reaproveita a track de áudio que JÁ tá capturada pra chamada da
-      // sala (localStreamRef) em vez de abrir uma SEGUNDA captura do
-      // mesmo microfone com getUserMedia -- pedir dois getUserMedia de
-      // áudio ao mesmo tempo do mesmo dispositivo faz alguns navegadores
-      // aplicarem cancelamento de eco entre as duas capturas e silenciam
-      // uma delas: a gravação "funciona" (o tempo conta certinho, o
-      // arquivo sai do tamanho esperado) mas sai muda ao reproduzir.
-      // Clona a track (não mexe na original, que continua servindo a
-      // chamada) e força enabled=true -- gravar um áudio não deveria
-      // depender de o mic da sala estar ligado ou desligado (ver micOn).
-      const roomAudioTrack = localStreamRef.current?.getAudioTracks()[0];
-      let stream: MediaStream;
-      if (roomAudioTrack && roomAudioTrack.readyState === "live") {
-        const cloned = roomAudioTrack.clone();
-        cloned.enabled = true;
-        stream = new MediaStream([cloned]);
-      } else {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
-      const mimeType = pickSupportedAudioMimeType();
-      const mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      discardRecordingRef.current = false;
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      mr.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        if (recordingIntervalRef.current) {
-          clearInterval(recordingIntervalRef.current);
-          recordingIntervalRef.current = null;
-        }
-        setRecordingAudio(false);
-        if (discardRecordingRef.current) {
-          discardRecordingRef.current = false;
-          audioChunksRef.current = [];
-          return;
-        }
-        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
-        if (blob.size > 0) {
-          recordedBlobRef.current = blob;
-          const durationSec = Math.max(0, Math.round((Date.now() - recordingStartRef.current) / 1000));
-          setRecordedPreview({ url: URL.createObjectURL(blob), durationSec });
-        }
-      };
-      mediaRecorderRef.current = mr;
-      // timeslice de 250ms -- garante pedaços acumulando ao longo da
-      // gravação em vez de depender só do chunk final no stop (alguns
-      // navegadores demoram ou falham nisso sem um timeslice).
-      mr.start(250);
-      recordingStartRef.current = Date.now();
-      setRecordingElapsedSec(0);
-      recordingIntervalRef.current = setInterval(() => {
-        setRecordingElapsedSec(Math.floor((Date.now() - recordingStartRef.current) / 1000));
-      }, 250);
-      setRecordedPreview(null);
-      setRecordingAudio(true);
-    } catch (e) {
-      console.warn("Sem acesso ao microfone pra gravar áudio", e);
-      showErrorToast("Não deu pra acessar o microfone -- verifique a permissão do navegador.");
-    }
-  }
-
-  // só PARA a gravação -- vira preview (ver onstop acima), não manda.
-  function stopVoiceRecording() {
-    mediaRecorderRef.current?.stop();
-  }
-
-  // cancela a gravação EM ANDAMENTO (lixeira enquanto ainda tá gravando)
-  // -- descarta tudo, não vira preview.
-  function cancelVoiceRecording() {
-    discardRecordingRef.current = true;
-    mediaRecorderRef.current?.stop();
-  }
-
-  // descarta o preview já gravado (depois de já ter parado) sem enviar.
-  function discardRecordedAudio() {
-    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
-    recordedBlobRef.current = null;
-    setRecordedPreview(null);
-  }
-
-  // confirma o envio do preview -- só AQUI o áudio de fato sai pro chat.
-  async function sendRecordedAudio() {
-    const blob = recordedBlobRef.current;
-    if (!blob) return;
-    if (recordedPreview) URL.revokeObjectURL(recordedPreview.url);
-    recordedBlobRef.current = null;
-    setRecordedPreview(null);
-    await sendChatAttachment(blob, `gravacao-${Date.now()}.webm`, "audio");
-  }
+  // gravação de áudio: startVoiceRecording/stopVoiceRecording/
+  // cancelVoiceRecording/discardRecordedAudio/sendRecordedAudio agora
+  // são 100% de usePlatformChat.ts (ver destructure de "chat" lá em
+  // cima) -- não existem mais aqui.
 
   // "apagar mensagem" -- apaga PRA TODOS (ver server/chatStore.js
   // deleteMessage e o case chat:delete/chat:delete_room em

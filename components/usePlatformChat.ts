@@ -417,10 +417,19 @@ export function usePlatformChat(params: PlatformChatParams) {
   }
 
   // --- gravação de áudio (estilo WhatsApp -- grava, mostra o tempo,
-  // PARA, preview, só manda quando confirma -- ver comentário grande
-  // de sempre em GameRoom.tsx). Sem stream ambiente pra clonar aqui
-  // (isso é SÓ da sala, ver startVoiceRecording lá) -- pede
-  // getUserMedia próprio sempre. ---
+  // PARA, preview, só manda quando confirma). 1/out (unificação
+  // Lobby/GameRoom) -- isso ERA duas implementações separadas (uma
+  // aqui, mais simples, usada só pelo Lobby; outra em GameRoom.tsx,
+  // que reaproveitava a track de áudio da sala pra evitar pedir um
+  // SEGUNDO getUserMedia do mesmo microfone -- dois getUserMedia de
+  // áudio ao mesmo tempo do mesmo aparelho fazem alguns navegadores
+  // aplicarem cancelamento de eco entre as duas capturas e silenciam
+  // uma delas). Douglas, 1/out: "nao tem que ter chat de fora chat de
+  // dentro, tem que ter CHAT" -- gravar áudio é parte do chat, então
+  // vira UMA implementação só, aqui: usa ambientStreamRef (ver
+  // PlatformChatParams) quando tiver uma track de áudio viva (dentro
+  // da sala), ou pede getUserMedia próprio quando não tiver (Lobby,
+  // que não tem sala nenhuma rodando).
   const [recordingAudio, setRecordingAudio] = useState(false);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
   const [recordedPreview, setRecordedPreview] = useState<{ url: string; durationSec: number } | null>(null);
@@ -430,10 +439,35 @@ export function usePlatformChat(params: PlatformChatParams) {
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartRef = useRef(0);
   const discardRecordingRef = useRef(false);
+  // quem usa o hook pode querer mostrar um aviso visual (toast) se o
+  // microfone falhar (ver catch de startVoiceRecording) -- o hook em
+  // si não tem UI nenhuma pra isso, então só guarda um callback
+  // opcional que o chamador registra (ver setRecordingErrorHandler no
+  // retorno e o useEffect em GameRoom.tsx que registra showErrorToast;
+  // o Lobby não registra nada, continua só logando no console como
+  // sempre foi).
+  const recordingErrorHandlerRef = useRef<((message: string) => void) | null>(null);
+  function setRecordingErrorHandler(fn: ((message: string) => void) | null) {
+    recordingErrorHandlerRef.current = fn;
+  }
 
   async function startVoiceRecording() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // clona a track de áudio ambiente (câmera/mic já capturados pela
+      // sala, ver ambientStreamRef) em vez de abrir uma segunda captura
+      // -- ver comentário grande acima. Clona (não mexe na original,
+      // que continua servindo a sala/chamada) e força enabled=true --
+      // gravar não deveria depender do mic da sala estar ligado/
+      // desligado.
+      const ambientAudioTrack = ambientStreamRef?.current?.getAudioTracks()[0];
+      let stream: MediaStream;
+      if (ambientAudioTrack && ambientAudioTrack.readyState === "live") {
+        const cloned = ambientAudioTrack.clone();
+        cloned.enabled = true;
+        stream = new MediaStream([cloned]);
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
       const mimeType = pickSupportedAudioMimeType();
       const mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       audioChunksRef.current = [];
@@ -471,6 +505,7 @@ export function usePlatformChat(params: PlatformChatParams) {
       setRecordingAudio(true);
     } catch (e) {
       console.warn("Sem acesso ao microfone pra gravar áudio", e);
+      recordingErrorHandlerRef.current?.("Não deu pra acessar o microfone -- verifique a permissão do navegador.");
     }
   }
 
@@ -980,6 +1015,7 @@ export function usePlatformChat(params: PlatformChatParams) {
     stopVoiceRecording,
     cancelVoiceRecording,
     discardRecordedAudio,
+    setRecordingErrorHandler,
     sendRecordedAudio,
     // painel de arquivos
     filesPanelOpen,
