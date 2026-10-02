@@ -34,11 +34,6 @@ import MainScene, {
   MAX_ZOOM_LEVEL,
   FRAME_W,
   FRAME_H,
-  skinTextureKey,
-  hairTextureKey,
-  accessoryTextureKey,
-  beardTextureKey,
-  outfitTextureKey,
 } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -1982,19 +1977,15 @@ export default function GameRoom({
       const allSkins = [...skins, ...colorSkins];
       registerCustomSkins(allSkins);
       setCustomSkinsVersion((v) => v + 1);
-      const textureEntries = allSkins.map((skin) => ({ key: skinTextureKey(skin.id), url: skin.file }));
-      await new Promise<void>((resolve) => {
-        if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
-        else resolve();
-      });
-      // SKIN_CATALOG agora começa vazio (pedido do Douglas: "tira as
-      // cabeças da pasta") -- a primeira chamada de setLocalSkinId (ver
-      // init() no useEffect do Phaser.Game) pode ter rodado ANTES da
-      // textura de verdade terminar de carregar aqui em cima, e nesse
-      // caso o boneco ficou escondido (ver checagem em setLocalSkinId,
-      // MainScene.ts). Chama de novo agora que a textura já existe, pra
-      // reaparecer sem precisar de F5 -- reaplicar com o mesmo id de
-      // sempre é inofensivo quando já estava tudo certo.
+      // Perf (pedido do Douglas 02/out: "meu pc ta travando demais
+      // quando mexo no gather") -- ANTES carregava aqui, de uma vez só,
+      // a textura de TODO tom de pele cadastrado no Supabase, mesmo os
+      // que ninguém na sala usa. Agora setLocalSkinId sabe carregar a
+      // SUA PRÓPRIA textura sob demanda quando falta (ver
+      // ensureAvatarLayerTexture em MainScene.ts) -- só chamar de novo
+      // aqui (catálogo já populado pelo registerCustomSkins acima) já
+      // basta pra reaparecer sem precisar de F5, igual antes, mas sem
+      // baixar/decodificar o resto que não vai ser usado.
       sceneRef.current?.setLocalSkinId(selectedSkinId);
     } catch {
       // Supabase fora do ar/não configurado -- segue sem tom custom, sala funciona igual
@@ -2071,7 +2062,6 @@ export default function GameRoom({
         colors: ColorOption[] | null;
       };
       const rows = data as AvatarItemRow[];
-      const textureEntries: { key: string; url: string }[] = [];
 
       const hairRows = rows.filter((r) => r.category === "cabelo");
       if (hairRows.length > 0) {
@@ -2087,15 +2077,6 @@ export default function GameRoom({
           colors: r.colors ?? undefined,
         }));
         registerCustomHair(items);
-        for (const item of items) {
-          textureEntries.push({ key: hairTextureKey(item.id), url: item.file });
-          // cada cor gerada É UMA FOLHA PRÓPRIA (ver ColorZoneTool.tsx) --
-          // precisa da sua própria textura registrada, igual ao item
-          // "base": selecionar uma cor troca pro id DELA (ver
-          // selectedHairColorId/setLocalHairId em GameRoom.tsx), não do
-          // item pai.
-          for (const c of item.colors ?? []) textureEntries.push({ key: hairTextureKey(c.id), url: c.file });
-        }
       }
 
       const accessoryRows = rows.filter((r) => r.category === "acessorio");
@@ -2108,10 +2089,6 @@ export default function GameRoom({
           colors: r.colors ?? undefined,
         }));
         registerCustomAccessories(items);
-        for (const item of items) {
-          textureEntries.push({ key: accessoryTextureKey(item.id), url: item.file });
-          for (const c of item.colors ?? []) textureEntries.push({ key: accessoryTextureKey(c.id), url: c.file });
-        }
       }
 
       const beardRows = rows.filter((r) => r.category === "barba");
@@ -2122,11 +2099,6 @@ export default function GameRoom({
           bySkin: Object.fromEntries((r.skin_ids ?? []).map((skinId) => [skinId, r.sheet_url])),
         }));
         registerCustomBeards(items);
-        for (const item of items) {
-          for (const skinId of Object.keys(item.bySkin)) {
-            textureEntries.push({ key: beardTextureKey(item.id, skinId), url: item.bySkin[skinId]! });
-          }
-        }
       }
 
       const outfitRows = rows.filter((r) => r.category === "traje");
@@ -2156,35 +2128,22 @@ export default function GameRoom({
           }
         }
         registerCustomOutfits([...items, ...colorItems]);
-        for (const item of items) {
-          for (const skinId of Object.keys(item.bySkin)) {
-            textureEntries.push({ key: outfitTextureKey(item.id, skinId), url: item.bySkin[skinId]! });
-          }
-        }
-        for (const colorItem of colorItems) {
-          for (const skinId of Object.keys(colorItem.bySkin)) {
-            textureEntries.push({ key: outfitTextureKey(colorItem.id, skinId), url: colorItem.bySkin[skinId]! });
-          }
-        }
       }
 
       setCustomSkinsVersion((v) => v + 1);
-      await new Promise<void>((resolve) => {
-        if (sceneRef.current) sceneRef.current.loadCustomAvatarLayerTextures(textureEntries, resolve);
-        else resolve();
-      });
-      // MESMA corrida de fetchAndRegisterCustomSkins acima (ver comentário
-      // grande lá, perto de setLocalSkinId) -- só que essa reaplicação
-      // tava faltando AQUI: a primeira chamada de setLocalHairId/
-      // setLocalBeardId/setLocalAccessoryId/setLocalOutfitId (init() no
-      // useEffect do Phaser.Game) roda antes da textura custom (cabelo/
-      // acessório/barba/traje) terminar de chegar do Supabase, e sem
-      // reaplicar depois, a camada fica escondida pro resto da sessão
-      // (createAvatar só desenha camada com textura já carregada). Bug
-      // reportado pelo Douglas: "editar traje e nao puxa as fotos" / "nem
-      // editar avatar tb nao puxa" -- tom de pele (setLocalSkinId) já
-      // tinha esse reforço, cabelo/traje/etc nunca tiveram. Reaplicar com
-      // o mesmo id de sempre é inofensivo quando já estava tudo certo.
+      // Perf (pedido do Douglas 02/out: "meu pc ta travando demais quando
+      // mexo no gather") -- ANTES carregava aqui, de uma vez só, a
+      // textura de TODO item (cabelo/acessório/barba/traje, incl. toda
+      // variação de cor) cadastrado no Supabase, mesmo o que ninguém na
+      // sala usa -- é o item CUSTOM mais provável de empilhar (traje
+      // principalmente, ver Editor de Itens). Agora setLocalHairId/
+      // setLocalBeardId/setLocalAccessoryId/applyOutfitToContainer sabem
+      // carregar a SUA PRÓPRIA textura sob demanda quando falta (ver
+      // ensureAvatarLayerTexture em MainScene.ts) -- só chamar de novo
+      // aqui (catálogo já populado pelos registerCustom* acima) já basta
+      // pra reaparecer sem precisar de F5, igual antes, mas sem baixar/
+      // decodificar o resto que não vai ser usado. Reaplicar com o mesmo
+      // id de sempre é inofensivo quando já estava tudo certo.
       sceneRef.current?.setLocalHairId(selectedHairColorId ?? selectedHairId);
       sceneRef.current?.setLocalBeardId(selectedBeardId);
       sceneRef.current?.setLocalAccessoryId(selectedAccessoryColorId ?? selectedAccessoryId);

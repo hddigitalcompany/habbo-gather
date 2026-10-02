@@ -27,12 +27,34 @@ import {
 } from "./avatarAssetsConfig.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// DESLIGADOS (achado investigando "ta lentao"/travamento, Douglas
+// testando a sala): cabelo/tom de pele/barba/acessório/traje geram
+// GENERATED_HAIR_CATALOG/GENERATED_SKIN_CATALOG/GENERATED_BEARD_CATALOG/
+// GENERATED_ACCESSORY_CATALOG/GENERATED_OUTFIT_CATALOG (ver
+// game/*Catalog.generated.ts), mas NENHUM desses é importado em
+// HAIR_CATALOG/SKIN_CATALOG/BEARD_CATALOG/ACCESSORY_CATALOG/
+// OUTFIT_CATALOG (game/customization.ts) desde que o Douglas decidiu
+// "rapa tudo que tem de item, vou subir tudo pela plataforma" (tudo via
+// Editor de Itens > Criar Avatar, registerCustomXxx em tempo de
+// execução, não mais pasta local) -- ou seja, essa metade do vigia
+// processava (sharp: recorte/trim/resize) DEZENAS de imagens grandes
+// pra escrever um arquivo que nada no jogo lê, SEMPRE que algo mexia em
+// qualquer uma dessas 5 pastas de origem (incluindo o iCloud mexendo
+// sozinho por baixo dos panos, ver histórico do chat) -- CPU torrada à
+// toa, sem nenhum efeito no jogo. piso/poltrona/parede continuam
+// ligados porque esses SÃO importados de verdade (FLOOR_CATALOG/
+// FURNITURE_MODELS/WALL_CATALOG, ver game/floor.ts, game/furniture.ts,
+// game/wall.ts). Pra religar um dos 5 de volta (se o Douglas voltar a
+// usar a pasta local pra avatar), é só: (1) descomentar a linha dele
+// aqui embaixo, e (2) reimportar o GENERATED_X_CATALOG correspondente
+// dentro de game/customization.ts (comentário grande explicando onde,
+// em cada catálogo).
 const TARGETS = [
-  { label: "cabelo", srcRoot: CABELO_SRC_ROOT, script: path.join(__dirname, "syncAvatarAssets.mjs") },
-  { label: "tom de pele", srcRoot: AVATAR_SKIN_SRC_ROOT, script: path.join(__dirname, "syncSkinAssets.mjs") },
-  { label: "barba", srcRoot: BARBA_SRC_ROOT, script: path.join(__dirname, "syncBeardAssets.mjs") },
-  { label: "acessório", srcRoot: ACESSORIO_SRC_ROOT, script: path.join(__dirname, "syncAccessoryAssets.mjs") },
-  { label: "traje", srcRoot: TRAJE_SRC_ROOT, script: path.join(__dirname, "syncOutfitAssets.mjs") },
+  // { label: "cabelo", srcRoot: CABELO_SRC_ROOT, script: path.join(__dirname, "syncAvatarAssets.mjs") },
+  // { label: "tom de pele", srcRoot: AVATAR_SKIN_SRC_ROOT, script: path.join(__dirname, "syncSkinAssets.mjs") },
+  // { label: "barba", srcRoot: BARBA_SRC_ROOT, script: path.join(__dirname, "syncBeardAssets.mjs") },
+  // { label: "acessório", srcRoot: ACESSORIO_SRC_ROOT, script: path.join(__dirname, "syncAccessoryAssets.mjs") },
+  // { label: "traje", srcRoot: TRAJE_SRC_ROOT, script: path.join(__dirname, "syncOutfitAssets.mjs") },
   { label: "piso", srcRoot: PISO_SRC_ROOT, script: path.join(__dirname, "syncFloorAssets.mjs") },
   { label: "poltrona", srcRoot: POLTRONAS_SRC_ROOT, script: path.join(__dirname, "syncFurnitureAssets.mjs") },
   { label: "parede", srcRoot: PAREDES_SRC_ROOT, script: path.join(__dirname, "syncWallAssets.mjs") },

@@ -3172,6 +3172,65 @@ export default class MainScene extends Phaser.Scene {
    * aparecia com o boneco padrão pra todo mundo, em QUALQUER sala, ver
    * comentário que existia em createAvatar/"traje"). Mesma lógica de
    * sempre, só trocando qual container ela mexe. */
+  /**
+   * Acha o ARQUIVO/URL de uma entrada de catálogo de avatar pelo id --
+   * usado só por ensureAvatarLayerTexture (logo abaixo) pra saber O QUE
+   * carregar sob demanda. Acha tanto o item "pai" quanto uma variação de
+   * COR dele (ver ColorOption/HairOption.colors, AccessoryOption.colors
+   * em game/customization.ts) -- uma cor gerada é só mais uma entrada
+   * "achável" pelo PRÓPRIO id, não precisa saber separar os dois casos
+   * aqui.
+   */
+  private hairFileForId(hairId: string): string | undefined {
+    for (const opt of HAIR_CATALOG) {
+      if (opt.id === hairId) return opt.file;
+      const color = opt.colors?.find((c) => c.id === hairId);
+      if (color) return color.file;
+    }
+    return undefined;
+  }
+
+  private accessoryFileForId(accessoryId: string): string | undefined {
+    for (const opt of ACCESSORY_CATALOG) {
+      if (opt.id === accessoryId) return opt.file;
+      const color = opt.colors?.find((c) => c.id === accessoryId);
+      if (color) return color.file;
+    }
+    return undefined;
+  }
+
+  /**
+   * Garante que a textura de UMA entrada de catálogo de avatar (cabelo/
+   * pele/barba/acessório/traje) já está carregada no Phaser, carregando
+   * sob demanda (reusa loadCustomAvatarLayerTextures acima, mesmo
+   * mecanismo de sempre -- só muda QUANDO ele é chamado) se ainda não
+   * estiver, e reaplicando (`onLoaded`) quando (e se) terminar.
+   *
+   * Por quê isso existe: até aqui, SOMENTE os itens de avatar CUSTOM
+   * (Editor de Itens, tabela avatar_items/avatar_skins) tinham textura
+   * "sob demanda" de verdade -- mas fetchAndRegisterCustomAvatarItems/
+   * fetchAndRegisterCustomSkins (GameRoom.tsx) carregavam a textura de
+   * TODO item cadastrado de uma vez, pra TODO mundo, na entrada da sala
+   * -- sem olhar se aquele cabelo/barba/traje específico tava sendo
+   * usado por alguém presente. Pedido do Douglas ("rapa tudo que tem de
+   * item, vou subir tudo pela plataforma") fez esse catálogo crescer
+   * bastante (dezenas de folhas, cada uma ~3MB de textura decodificada
+   * na GPU) -- medido ao vivo native: "ta lentao" mesmo numa sala vazia,
+   * processo de GPU do Chrome em 1,2GB. Esta função move o carregamento
+   * pra dentro de setLocalHairId/setLocalSkinId/setLocalBeardId/
+   * setLocalAccessoryId/applyOutfitToContainer (chamadas tanto pro
+   * boneco LOCAL quanto pelo REMOTO via setRemoteLook) -- ou seja, só
+   * carrega o cabelo/pele/barba/acessório/traje de quem está REALMENTE
+   * no boneco que está sendo desenhado agora, nunca o catálogo inteiro.
+   * GameRoom.tsx continua registrando o CATÁLOGO (metadados -- id/label/
+   * cor, pro seletor do editor mostrar as opções) de cara; só a
+   * TEXTURA de cada opção que virou sob demanda.
+   */
+  private ensureAvatarLayerTexture(key: string, url: string | undefined, onLoaded: () => void) {
+    if (!url || this.textures.exists(key)) return;
+    this.loadCustomAvatarLayerTextures([{ key, url }], onLoaded);
+  }
+
   setLocalHairId(hairId: string, container: Phaser.GameObjects.Container | null = this.localContainer) {
     if (!container) return;
     const sprite = container.getData("hairSprite") as Phaser.GameObjects.Sprite | null;
@@ -3196,6 +3255,11 @@ export default class MainScene extends Phaser.Scene {
     if (exists) {
       const currentFrame = sprite.frame.name;
       sprite.setTexture(key, currentFrame);
+    } else {
+      // textura ainda não carregada -- carrega sob demanda e chama esta
+      // função de novo quando terminar (ver comentário grande de
+      // ensureAvatarLayerTexture acima).
+      this.ensureAvatarLayerTexture(key, this.hairFileForId(hairId), () => this.setLocalHairId(hairId, container));
     }
     sprite.setVisible(exists);
     container.setData("hairId", hairId);
@@ -3222,6 +3286,10 @@ export default class MainScene extends Phaser.Scene {
       if (exists) {
         const currentFrame = sprite.frame.name;
         sprite.setTexture(textureKey, currentFrame);
+      } else {
+        // ver comentário grande de ensureAvatarLayerTexture acima.
+        const skinFile = SKIN_CATALOG.find((s) => s.id === skinId)?.file;
+        this.ensureAvatarLayerTexture(textureKey, skinFile, () => this.setLocalSkinId(skinId, container));
       }
       sprite.setVisible(exists);
     }
@@ -3243,6 +3311,10 @@ export default class MainScene extends Phaser.Scene {
           if (exists) {
             const currentFrame = outfitSprite.frame.name;
             outfitSprite.setTexture(key, currentFrame);
+          } else {
+            // ver comentário grande de ensureAvatarLayerTexture acima.
+            const file = outfit.bySkin[resolvedSkinId];
+            this.ensureAvatarLayerTexture(key, file, () => this.setLocalSkinId(skinId, container));
           }
           outfitSprite.setVisible(exists);
         } else {
@@ -3266,6 +3338,10 @@ export default class MainScene extends Phaser.Scene {
           if (exists) {
             const currentFrame = beardSprite.frame.name;
             beardSprite.setTexture(key, currentFrame);
+          } else {
+            // ver comentário grande de ensureAvatarLayerTexture acima.
+            const file = beard.bySkin[resolvedBeardSkinId];
+            this.ensureAvatarLayerTexture(key, file, () => this.setLocalSkinId(skinId, container));
           }
           beardSprite.setVisible(exists);
         } else {
@@ -3301,6 +3377,10 @@ export default class MainScene extends Phaser.Scene {
     if (exists) {
       const currentFrame = sprite.frame.name;
       sprite.setTexture(key, currentFrame);
+    } else {
+      // ver comentário grande de ensureAvatarLayerTexture acima.
+      const file = beard.bySkin[resolvedSkinId];
+      this.ensureAvatarLayerTexture(key, file, () => this.setLocalBeardId(beardId, container));
     }
     sprite.setVisible(exists);
     container.setData("beardId", beardId);
@@ -3318,6 +3398,9 @@ export default class MainScene extends Phaser.Scene {
     if (exists) {
       const currentFrame = sprite.frame.name;
       sprite.setTexture(key, currentFrame);
+    } else {
+      // ver comentário grande de ensureAvatarLayerTexture acima.
+      this.ensureAvatarLayerTexture(key, this.accessoryFileForId(accessoryId), () => this.setLocalAccessoryId(accessoryId, container));
     }
     sprite.setVisible(exists);
     container.setData("accessoryId", accessoryId);
@@ -3369,6 +3452,10 @@ export default class MainScene extends Phaser.Scene {
     if (exists) {
       const currentFrame = sprite.frame.name;
       sprite.setTexture(key, currentFrame);
+    } else {
+      // ver comentário grande de ensureAvatarLayerTexture acima.
+      const file = outfit.bySkin[resolvedSkinId];
+      this.ensureAvatarLayerTexture(key, file, () => this.applyOutfitToContainer(container, outfitId));
     }
     sprite.setVisible(exists);
     container.setData("outfitId", outfitId);
