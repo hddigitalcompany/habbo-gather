@@ -702,6 +702,14 @@ const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
 // de uma emenda vizinha de verdade numa parede bem segmentada).
 const LED_LINE_WIDTH_PX = 3;
 const LED_SNAP_RADIUS_PX = 26;
+// Largura do HALO (perpendicular à fita) e opacidade do brilho --
+// técnica trocada 02/out (pedido do Douglas: "ta lentao" + "3 fitas" de
+// LED, ver comentário grande de addLedSprite abaixo). Afinável sem
+// mexer no resto: sobe/desce o halo igual quem mexia em outerStrength/
+// distance do Glow FX antes.
+const LED_GLOW_WIDTH_PX = 28;
+const LED_GLOW_ALPHA = 0.55;
+const LED_GLOW_TEXTURE_KEY = "led-glow-halo";
 
 const WALL_BASEBOARD_HEIGHT_PX = 16;
 const WALL_BASEBOARD_COLOR = 0xf0ebe0;
@@ -1254,7 +1262,7 @@ export default class MainScene extends Phaser.Scene {
   // LED não tem arte nenhuma, é desenhado, ver addLedSprite).
   private selectedLedTool: LedTool = null;
   private draftLed: Map<string, LedSegmentDef> = new Map();
-  private draftLedGfx: Map<string, { gfx: Phaser.GameObjects.Graphics; glow: Phaser.FX.Glow[] }> = new Map();
+  private draftLedGfx: Map<string, { gfx: Phaser.GameObjects.Graphics; glowImage: Phaser.GameObjects.Image | null }> = new Map();
   // destaque da emenda mais próxima do cursor com a ferramenta de LED
   // armada -- mesma ideia/estilo visual de wallHoverGraphics acima (uma
   // LINHA, só que vertical ao longo da emenda em vez de deitada ao
@@ -4835,6 +4843,7 @@ export default class MainScene extends Phaser.Scene {
   clearDraftLed() {
     for (const handle of this.draftLedGfx.values()) {
       handle.gfx.destroy();
+      handle.glowImage?.destroy();
     }
     this.draftLedGfx.clear();
     this.draftLed.clear();
@@ -4929,7 +4938,50 @@ export default class MainScene extends Phaser.Scene {
     const handle = this.draftLedGfx.get(key);
     if (!handle) return;
     handle.gfx.destroy();
+    handle.glowImage?.destroy();
     this.draftLedGfx.delete(key);
+  }
+
+  /**
+   * Textura COMPARTILHADA do halo do LED -- gerada 1x (cacheada por
+   * chave fixa, ver this.textures.exists abaixo, mesmo esquema de
+   * buildWallTextureFaceImage/canvasKey, só que aqui a MESMA textura
+   * serve TODOS os LEDs, nunca uma por segmento) -- uma faixa vertical
+   * fina com um degradê HORIZONTAL (claro no meio, sumindo nas bordas,
+   * UNIFORME na vertical) -- pedido do Douglas 02/out, "ta lentao"
+   * depois de plantar 3 fitas de LED: o Glow FX (ver addLedSprite
+   * antigo, antes dessa troca) abre uma passada de renderização PRÓPRIA
+   * na GPU pra CADA segmento (framebuffer dele sozinho, nunca em lote
+   * com o resto da cena) -- 3 fitas inteiras = dezenas de passadas
+   * extras TODO frame, pra sempre (não só editando). Como o degradê
+   * aqui é uniforme na vertical, dá pra desenhar essa textura BEM
+   * pequena (altura mínima) e esticar na hora de usar
+   * (setDisplaySize) sem distorcer nada visualmente -- então vira só
+   * mais uma Image comum no lote de sprites de sempre (setBlendMode
+   * ADD pra "clarear" por cima em vez de cobrir, setTint pra cor do
+   * LED), sem framebuffer extra nenhum, não importa quantos LEDs
+   * existam na sala. Troca-se a aproximação (halo "nuvem" uniforme em
+   * vez do recorte exato ao redor da forma que o shader calculava) por
+   * performance O(1) em vez de O(nº de LEDs) -- aprovado pelo Douglas
+   * ("pode").
+   */
+  private ensureLedGlowTexture(): string {
+    if (this.textures.exists(LED_GLOW_TEXTURE_KEY)) return LED_GLOW_TEXTURE_KEY;
+    const w = 32;
+    const h = 8;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    const cx = (w - 1) / 2;
+    for (let x = 0; x < w; x++) {
+      const t = (x - cx) / cx; // -1 (borda) .. 0 (centro) .. 1 (borda)
+      const alpha = Math.max(0, 1 - t * t); // queda suave tipo parábola, sem corte duro
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.fillRect(x, 0, 1, h);
+    }
+    this.textures.addCanvas(LED_GLOW_TEXTURE_KEY, canvas);
+    return LED_GLOW_TEXTURE_KEY;
   }
 
   /** Desenha (ou redesenha) UM LED -- uma fita vertical (Graphics, sem
@@ -4960,9 +5012,23 @@ export default class MainScene extends Phaser.Scene {
     // verdade, em vez de um objeto colorido desenhado ali.
     gfx.fillStyle(colorNum, 0.5).fillRect(point.x - width / 2, point.y - heightPx, width, heightPx);
     gfx.setDepth(depth);
-    const supportsGlowFX = this.game.renderer.type === Phaser.WEBGL;
-    const glow: Phaser.FX.Glow[] = supportsGlowFX ? [gfx.postFX.addGlow(colorNum, 0, 4.5, false, 0.5, 16)] : [];
-    this.draftLedGfx.set(key, { gfx, glow });
+    // Halo -- ver comentário grande de ensureLedGlowTexture/
+    // LED_GLOW_WIDTH_PX acima (troca 02/out do Glow FX por Image +
+    // blend ADD, pedido do Douglas depois de "3 fitas" deixarem a sala
+    // lenta de novo). Mesma textura pra TODOS os LEDs (ensureLedGlowTexture
+    // já cacheia), só centralizada/esticada/tingida/profundidade
+    // diferente por segmento -- sem FX nenhum ligado no `gfx` em si,
+    // funciona em canvas E webgl (postFX antigo só rodava em webgl, ver
+    // supportsGlowFX que existia aqui -- essa checagem não faz falta
+    // mais).
+    const glowTextureKey = this.ensureLedGlowTexture();
+    const glowImage = this.add.image(point.x, point.y - heightPx / 2, glowTextureKey);
+    glowImage.setDisplaySize(LED_GLOW_WIDTH_PX, heightPx);
+    glowImage.setTint(colorNum);
+    glowImage.setBlendMode(Phaser.BlendModes.ADD);
+    glowImage.setAlpha(LED_GLOW_ALPHA);
+    glowImage.setDepth(depth);
+    this.draftLedGfx.set(key, { gfx, glowImage });
   }
 
   /** Acha a emenda "straight" mais perto do cursor (ponta A ou B de
