@@ -6129,8 +6129,21 @@ function EditPanel({
   // GameRoom) -- limpa sozinho ao trocar de categoria, senão um termo
   // digitado numa aba "vaza" pra outra e parece que sumiu tudo.
   const [searchQuery, setSearchQuery] = useState("");
+  // aba "Clássico" (tijolo/painel liso ou com veio) vs "Painéis MDF"
+  // (pattern.textureImageUrl setado, ver WallPatternConfig em
+  // game/wall.ts) -- pedido do Douglas 02/out, vendo as texturas de
+  // verdade na parede pela 1ª vez: "quero essas texturas em uma nova
+  // aba ali no catalogo, dentro de parede, Paineis MDF". Sem coluna
+  // nova no banco: a aba é só um FILTRO sobre o mesmo WALL_CATALOG de
+  // sempre (tem textura de imagem = MDF, não tem = Clássico) -- um
+  // item cadastrado na aba "Criar Parede" com textura cai sozinho em
+  // "Painéis MDF", sem precisar escolher categoria nenhuma no
+  // formulário. Mesmo estado só LOCAL de searchQuery acima, limpa
+  // sozinho ao trocar de categoria.
+  const [activeWallSubTab, setActiveWallSubTab] = useState<"classico" | "mdf">("classico");
   useEffect(() => {
     setSearchQuery("");
+    setActiveWallSubTab("classico");
   }, [activeCategory]);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredFloorCatalog = normalizedQuery
@@ -6139,6 +6152,12 @@ function EditPanel({
   const filteredWallCatalog = normalizedQuery
     ? WALL_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
     : WALL_CATALOG;
+  // partição Clássico/Painéis MDF (ver activeWallSubTab acima) --
+  // aplicada DEPOIS do filtro de busca por texto, então pesquisar
+  // dentro de uma aba só busca nela mesma.
+  const classicWallCatalog = filteredWallCatalog.filter((entry) => !entry.pattern?.textureImageUrl);
+  const mdfWallCatalog = filteredWallCatalog.filter((entry) => entry.pattern?.textureImageUrl);
+  const activeWallCatalogList = activeWallSubTab === "mdf" ? mdfWallCatalog : classicWallCatalog;
   const filteredDoorCatalog = normalizedQuery
     ? DOOR_CATALOG.filter((entry) => entry.label.toLowerCase().includes(normalizedQuery))
     : DOOR_CATALOG;
@@ -6455,6 +6474,29 @@ function EditPanel({
             Apagar parede
           </button>
 
+          {/* aba Clássico/Painéis MDF (ver activeWallSubTab acima) --
+              MESMO componente visual de wall-placement-mode-toggle
+              (Borda/Centro do tile) logo acima, só reaproveitado aqui
+              pra consistência visual. */}
+          <div className="wall-placement-mode-toggle">
+            <button
+              type="button"
+              className={activeWallSubTab === "classico" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={() => setActiveWallSubTab("classico")}
+              title="Tijolo e painel liso/com veio (sem textura de imagem)"
+            >
+              Clássico
+            </button>
+            <button
+              type="button"
+              className={activeWallSubTab === "mdf" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={() => setActiveWallSubTab("mdf")}
+              title="Painéis com textura de imagem de verdade (ver aba Criar Parede)"
+            >
+              Painéis MDF
+            </button>
+          </div>
+
           <input
             type="search"
             className="catalog-search-input"
@@ -6464,7 +6506,7 @@ function EditPanel({
           />
 
           <div className="floor-palette">
-            {filteredWallCatalog.map((entry) => (
+            {activeWallCatalogList.map((entry) => (
               <button
                 key={entry.id}
                 className={selectedWallToolId === entry.id ? "floor-swatch selected" : "floor-swatch"}
@@ -6477,20 +6519,38 @@ function EditPanel({
                 // isso, o estilo cadastrado pela aba "Criar Parede"
                 // entrava no catálogo mas ficava com o botão em branco --
                 // sem imagem nenhuma pro background-image de sempre
-                // mostrar -- então "sumia" da paleta na prática).
-                style={entry.pattern ? undefined : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }}
+                // mostrar -- então "sumia" da paleta na prática). Painel
+                // MDF (textureImageUrl, ver activeWallSubTab acima) é
+                // diferente dos 2 outros casos: pedido do Douglas "muda
+                // esse formato de tile que mostra na apresentacao, deixa
+                // a foto da parede de frente" -- em vez do schematic
+                // (tijolo/faixa de cima em ângulo) do WallPatternSwatch,
+                // mostra a FOTO da textura crua, de frente, cobrindo o
+                // botão inteiro (mesmo esquema de background-image do
+                // caso "imagem" ao lado).
+                style={
+                  entry.pattern?.textureImageUrl
+                    ? { backgroundImage: `url(${entry.pattern.textureImageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+                    : entry.pattern
+                      ? undefined
+                      : { backgroundImage: `url(${furnitureAssetUrl(entry.file)})` }
+                }
                 onClick={() => onSelectWallPaint(entry)}
                 title={entry.label}
               >
-                {entry.pattern && <WallPatternSwatch pattern={entry.pattern} edgeLengthPx={wallPreviewEdgeLengthPx} />}
+                {entry.pattern && !entry.pattern.textureImageUrl && (
+                  <WallPatternSwatch pattern={entry.pattern} edgeLengthPx={wallPreviewEdgeLengthPx} />
+                )}
               </button>
             ))}
           </div>
-          {filteredWallCatalog.length === 0 && (
+          {activeWallCatalogList.length === 0 && (
             <p className="edit-hint">
               {normalizedQuery
                 ? `Nada encontrado pra "${searchQuery.trim()}".`
-                : "Nenhum modelo de parede ainda -- suba as imagens na pasta de origem."}
+                : activeWallSubTab === "mdf"
+                  ? "Nenhum painel MDF cadastrado ainda -- cadastre um com textura na aba \"Criar Parede\"."
+                  : "Nenhum modelo de parede ainda -- suba as imagens na pasta de origem."}
             </p>
           )}
 
