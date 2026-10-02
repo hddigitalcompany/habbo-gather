@@ -812,6 +812,41 @@ function unregisterUserConnection(userId, ws) {
   if (set.size === 0) connectionsByUserId.delete(userId);
 }
 
+// 2/out, pedido do Douglas ("ta errado, a conta so pode logar em uma
+// aba so, um dispositivo so" -- resposta direta ao bug "conta uma
+// pessoa a mais na sala sendo que so tem dois": duas conexões vivas
+// da MESMA conta ao mesmo tempo desenhavam DOIS bonecos na sala, ver
+// handleGetPresence/byUserId logo abaixo, que já deduplica por
+// userId -- só o boneco em si (um por CONEXÃO, não por conta) não
+// deduplicava). Desliga qualquer conexão ANTERIOR dessa mesma conta
+// (lobby OU sala, os dois usam o mesmo connectionsByUserId) assim que
+// uma conexão NOVA se identifica com sucesso -- código 4409 (conflito,
+// no mesmo espírito do 409 HTTP) pro cliente reconhecer e NÃO tentar
+// reconectar sozinho (ver shouldReconnectOnClose no PartySocket em
+// GameRoom.tsx/usePlatformChat.ts -- sem isso a aba antiga reconectaria
+// na hora, reidentificaria, e derrubaria a NOVA de volta, num looping
+// infinito). O close() de cada conexão antiga já dispara o "close"
+// handler dela sozinho (sala/lobby, cada um com o seu, ver mais
+// abaixo), reaproveitando toda a limpeza que já existe ali (sair da
+// sala, avisar "leave", soltar chamada, etc.) -- mesmo espírito de
+// reaproveitar o close() já existente que o heartbeat usa.
+//
+// Só pra CONTA de verdade (userId vem de verifiedUserId, nunca de
+// visitante anônimo) -- visitante sempre foi livre pra abrir quantas
+// abas quiser, isso nunca foi o que o Douglas reclamou.
+function kickOtherConnectionsForUser(userId, exceptWs) {
+  const set = connectionsByUserId.get(userId);
+  if (!set) return;
+  for (const otherWs of Array.from(set)) {
+    if (otherWs === exceptWs) continue;
+    try {
+      otherWs.close(4409, "Conta conectada em outro dispositivo/aba");
+    } catch {
+      // conexão já em processo de fechar sozinha -- ignora
+    }
+  }
+}
+
 function sendToUser(userId, data) {
   const set = connectionsByUserId.get(userId);
   if (!set) return;
@@ -2776,6 +2811,10 @@ async function handleLobbySocketConnection(ws) {
           verifiedUserId ??
           (typeof data.userId === "string" && data.userId.trim() ? data.userId.trim().slice(0, 80) : id);
         player.accountVerified = Boolean(verifiedUserId);
+        // pedido do Douglas, 2/out: "a conta so pode logar em uma aba
+        // so, um dispositivo so" -- ver comentário grande de
+        // kickOtherConnectionsForUser lá em cima.
+        if (verifiedUserId) kickOtherConnectionsForUser(verifiedUserId, ws);
         if (newUserId !== player.userId) {
           unregisterUserConnection(player.userId, ws);
           player.userId = newUserId;
@@ -3079,6 +3118,14 @@ wss.on("connection", async (ws, req) => {
             verifiedUserId ??
             (typeof data.userId === "string" && data.userId.trim() ? data.userId.trim().slice(0, 80) : id);
           player.accountVerified = Boolean(verifiedUserId);
+          // pedido do Douglas, 2/out: "a conta so pode logar em uma
+          // aba so, um dispositivo so" -- ver comentário grande de
+          // kickOtherConnectionsForUser lá em cima (registerUserConnection).
+          // Derruba QUALQUER conexão anterior dessa conta -- de sala OU
+          // de lobby, os dois dividem o mesmo connectionsByUserId -- antes
+          // de registrar essa aqui, pra nunca existir boneco duplicado
+          // na sala por causa de duas abas da mesma conta.
+          if (verifiedUserId) kickOtherConnectionsForUser(verifiedUserId, ws);
           if (newUserId !== player.userId) {
             unregisterUserConnection(player.userId, ws);
             player.userId = newUserId;

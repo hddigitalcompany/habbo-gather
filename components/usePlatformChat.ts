@@ -961,7 +961,18 @@ export function usePlatformChat(params: PlatformChatParams) {
   // componente que montou esse hook (Home(), ver comentário grande no
   // topo) desmontar -- o que só acontece fechando a aba de verdade. ---
   useEffect(() => {
-    const socket = new PartySocket({ host: REALTIME_HOST, room: PLATFORM_SOCKET_ROOM });
+    const socket = new PartySocket({
+      host: REALTIME_HOST,
+      room: PLATFORM_SOCKET_ROOM,
+      // pedido do Douglas, 2/out: "ta errado, a conta so pode logar em
+      // uma aba so, um dispositivo so" -- ver comentário grande de
+      // kickOtherConnectionsForUser em server/index.js (código 4409).
+      // Mesmo motivo do shouldReconnectOnClose em GameRoom.tsx: sem
+      // isso essa aba (a que acabou de ser derrubada) reconectaria
+      // sozinha e reidentificaria, derrubando de volta a aba nova --
+      // looping infinito.
+      shouldReconnectOnClose: (event: { code: number }) => event.code !== 4409,
+    });
     socketRef.current = socket;
 
     socket.addEventListener("open", () => {
@@ -980,7 +991,16 @@ export function usePlatformChat(params: PlatformChatParams) {
       }
     });
 
-    socket.addEventListener("close", () => setConnected(false));
+    socket.addEventListener("close", (event) => {
+      setConnected(false);
+      // código 4409 (ver comentário grande na criação do socket acima)
+      // -- essa aba foi derrubada porque a MESMA conta logou em outra
+      // aba/dispositivo, avisa a pessoa (sem isso ela só veria "chat
+      // desconectado" sem entender o motivo).
+      if (event.code === 4409) {
+        toastHandlerRef.current?.("Sua conta foi conectada em outra aba/dispositivo -- essa aba desconectou.");
+      }
+    });
 
     socket.addEventListener("message", (evt) => {
       let data: any;
@@ -1259,6 +1279,20 @@ export function usePlatformChat(params: PlatformChatParams) {
         }
         case "error": {
           console.warn("Erro do servidor de chat (plataforma)", data.message);
+          // 2/out, bug achado (Douglas: "clico em inicar conversa... e
+          // nao inicia") -- esse "error" é a resposta de QUALQUER
+          // chat:create_direct/chat:create_group rejeitado (ver
+          // handleChatCreateDirect em server/index.js -- hoje só
+          // acontece quando tenta abrir conversa privada "Amigos" com
+          // alguém que NÃO é amigo mútuo de verdade, ver areMutualFriends
+          // em chatStore.js), mas até agora só ia pro console -- a tela
+          // ficava exatamente como estava, sem fechar o seletor nem
+          // avisar nada, parecendo que o clique não fez nada. Mensagem
+          // do servidor já vem pronta pra pessoa (nunca é texto técnico,
+          // ver os dois `return { error: ... }` em server/index.js).
+          if (typeof data.message === "string" && data.message) {
+            toastHandlerRef.current?.(data.message);
+          }
           break;
         }
         default:

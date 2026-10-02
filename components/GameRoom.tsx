@@ -3610,7 +3610,21 @@ export default function GameRoom({
         else scene.events.once("scene-ready", runWhenSceneReady);
       });
 
-      const socket = new PartySocket({ host: REALTIME_HOST, room: roomSlug });
+      const socket = new PartySocket({
+        host: REALTIME_HOST,
+        room: roomSlug,
+        // pedido do Douglas, 2/out: "ta errado, a conta so pode logar
+        // em uma aba so, um dispositivo so" -- ver comentário grande
+        // de kickOtherConnectionsForUser em server/index.js (derruba
+        // qualquer conexão anterior dessa MESMA conta assim que uma
+        // nova se identifica, código 4409). Sem isso aqui, essa aba
+        // (a antiga, que acabou de ser derrubada) tentaria reconectar
+        // sozinha na hora -- comportamento padrão de QUALQUER close
+        // nesse socket -- e reidentificaria, derrubando de volta a
+        // aba NOVA que tinha acabado de assumir: looping infinito indo
+        // e voltando entre as duas abas.
+        shouldReconnectOnClose: (event: { code: number }) => event.code !== 4409,
+      });
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
@@ -3635,7 +3649,12 @@ export default function GameRoom({
         // (removido junto do resto do estado local, ver comentário
         // grande logo abaixo sobre chat/agenda virarem `chat.*`).
       });
-      socket.addEventListener("close", () => setStatus("Desconectado"));
+      socket.addEventListener("close", (event) => {
+        // código 4409 (ver comentário grande na criação do socket
+        // acima) -- essa aba foi derrubada porque a MESMA conta logou
+        // em outra aba/dispositivo, não é uma queda de verdade.
+        setStatus(event.code === 4409 ? "Conta aberta em outra aba/dispositivo" : "Desconectado");
+      });
       socket.addEventListener("error", () => setStatus("Erro de conexão"));
       socket.addEventListener("message", (evt) => {
         try {
