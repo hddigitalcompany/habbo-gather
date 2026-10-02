@@ -235,6 +235,25 @@ function createBlackVideoTrack(): MediaStreamTrack {
   return canvas.captureStream(1).getVideoTracks()[0];
 }
 
+// 2/out, bug do Douglas: "o quadrado da camera preto continua ali" --
+// mesmo com a câmera ligada de verdade. Suspeita: reatribuir
+// .srcObject pro MESMO objeto MediaStream de sempre (só com as tracks
+// trocadas por dentro, ver toggleCam/switchCamDevice) às vezes não é
+// suficiente pra o navegador perceber e começar a desenhar a track
+// nova sozinho -- alguns motores só repintam de verdade com um
+// .play() explícito depois. Helper ÚNICO (reusado em todo canto que
+// hoje faz `localVideoRef.current.srcObject = X`, ver chamadas
+// abaixo) --  .catch vazio de propósito: .play() devolve uma Promise
+// que pode rejeitar (ex: AbortError se outro .play()/.pause() correu
+// por cima antes de resolver), e isso NUNCA deveria aparecer como
+// erro de verdade pro usuário, só uma corrida inofensiva de troca
+// rápida de track.
+function attachLocalVideo(video: HTMLVideoElement | null, stream: MediaStream | null) {
+  if (!video) return;
+  video.srcObject = stream;
+  if (stream) video.play().catch(() => {});
+}
+
 function statusColorFor(status: string | undefined): string {
   return STATUS_DOT_COLORS[(status as ProfileStatus) ?? "online"] ?? STATUS_DOT_COLORS.online;
 }
@@ -1005,9 +1024,9 @@ export default function GameRoom({
   useEffect(() => {
     if (!localVideoRef.current) return;
     if (screenOn) {
-      localVideoRef.current.srcObject = screenStreamRef.current;
+      attachLocalVideo(localVideoRef.current, screenStreamRef.current);
     } else if (camOn) {
-      localVideoRef.current.srcObject = localStreamRef.current;
+      attachLocalVideo(localVideoRef.current, localStreamRef.current);
     }
   }, [camOn, screenOn]);
 
@@ -3013,7 +3032,7 @@ export default function GameRoom({
         stream.addTrack(createBlackVideoTrack());
       }
       localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      attachLocalVideo(localVideoRef.current, stream);
       if (stream.getAudioTracks()[0]?.getSettings().deviceId) {
         setSelectedMicId(stream.getAudioTracks()[0].getSettings().deviceId as string);
       }
@@ -3679,7 +3698,7 @@ export default function GameRoom({
             sender?.replaceTrack(newTrack);
           });
           chat.replaceCallTrack(newTrack);
-          if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+          attachLocalVideo(localVideoRef.current, localStreamRef.current);
         }
         if (newTrack.getSettings().deviceId) setSelectedCamId(newTrack.getSettings().deviceId as string);
       } catch (e) {
@@ -3763,7 +3782,7 @@ export default function GameRoom({
           sender?.replaceTrack(newTrack);
         });
         chat.replaceCallTrack(newTrack);
-        if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+        attachLocalVideo(localVideoRef.current, localStreamRef.current);
       }
       setSelectedCamId(deviceId);
       setStoredCamDeviceId(deviceId);
@@ -3817,7 +3836,7 @@ export default function GameRoom({
       sender?.replaceTrack(screenTrack);
     });
 
-    if (localVideoRef.current) localVideoRef.current.srcObject = display;
+    attachLocalVideo(localVideoRef.current, display);
     setScreenOn(true);
   }
 
@@ -3835,7 +3854,7 @@ export default function GameRoom({
       if (camTrack) sender?.replaceTrack(camTrack);
     });
 
-    if (localVideoRef.current) localVideoRef.current.srcObject = camStream ?? null;
+    attachLocalVideo(localVideoRef.current, camStream ?? null);
     setScreenOn(false);
   }
 
