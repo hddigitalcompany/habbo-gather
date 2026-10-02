@@ -61,7 +61,6 @@ import {
 import SettingsPanel from "@/components/SettingsPanel";
 import FriendsPanel, { type ContactUser } from "@/components/FriendsPanel";
 import ProfileViewCard from "@/components/ProfileViewCard";
-import AccountCard from "@/components/AccountCard";
 // 1/out, pedido do Douglas ("eu quero a mesma estrutura nao que seja
 // separado", depois de "o layout do chat de fora tem que ser igual ao
 // de dentro, ja falei isso MIL VEZES") -- o chat de fora (LobbyChatPanel
@@ -2740,30 +2739,16 @@ export default function Lobby({
           </button>
         </nav>
 
-        {/* canto direito do topbar: só o card da conta agora -- o card
-            da Empresa saiu daqui (ver .lobby-company-card-pin logo
-            abaixo de .lobby-topbar) porque o Douglas apontou que a
-            posição certa dele é fixa no canto ESQUERDO da tela, não um
-            dropdown do lado direito. */}
-        <div className="lobby-topbar-right-group">
-          {/* "card" da conta do cliente -- pedido do Douglas (28/set,
-              print de referência de um card "Hello! I'm Max"): "aqui
-              nesse canto, faca o card da conta do cliente" + "faca o
-              'card' do perfil do usuario aberto". */}
-          {/* card da conta -- virou componente à parte (ver
-              components/AccountCard.tsx), pedido do Douglas 30/set:
-              "esse card, mantenha ele em toda tela que o usuario vai
-              inclusive no jogo" (ver o mesmo <AccountCard /> dentro de
-              GameRoom.tsx agora). Os 3 itens novos (perfil público/
-              dados da conta/selo) moram dentro dele. */}
-          <AccountCard
-            accountUserId={accountUserId}
-            accountProfile={accountProfile}
-            accountAccessToken={accountAccessToken ?? null}
-            onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
-            onSignOut={onSignOut}
-          />
-        </div>
+        {/* canto direito do topbar: ficava o card da conta aqui -- saiu
+            (2/out, pedido do Douglas: "eu quero tudo isso em estrutura
+            isolada do jogo, igual o chat") pra morar só 1 vez em
+            app/page.tsx (.platform-account-card-pin), igual
+            PlatformChatHost/AgendaDrawer já funcionavam -- ver
+            comentário grande lá. O card da Empresa também não é mais
+            daqui (ver .lobby-company-card-pin logo abaixo de
+            .lobby-topbar) -- esse canto do grid fica vazio de
+            propósito agora, só mantém o "Meus espaços"/nav centralizado
+            (grid 1fr auto 1fr). */}
       </div>
 
       {/* card da Empresa selecionada -- pedido do Douglas: "nesse canto

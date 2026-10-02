@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 import AuthGate, { type AccountProfile } from "@/components/AuthGate";
 import Lobby from "@/components/Lobby";
+import AccountCard from "@/components/AccountCard";
 import { usePlatformChat } from "@/components/usePlatformChat";
 
 const GameRoom = dynamic(() => import("@/components/GameRoom"), {
@@ -158,6 +159,41 @@ export default function Home() {
                     acima, nunca duplicada. onlinePlayers sempre [] aqui
                     (não existe "quem tá na sala" nesse nível, mesmo
                     padrão que Lobby.tsx já usa pro ChatDrawer dele). */}
+                {/* 2/out, pedido do Douglas: "eu quero tudo isso em
+                    estrutura isolada do jogo, igual o chat" -- o
+                    AccountCard (balão da conta + os 3 painéis do
+                    canto: perfil público/dados da conta/selo) vivia
+                    DUPLICADO, uma instância dentro de Lobby.tsx e
+                    outra dentro de GameRoom.tsx (cada uma com seu
+                    próprio estado local de cardOpen/panel) -- foi
+                    inclusive a CAUSA de um bug real (o painel
+                    ancorado só quebrava dentro da sala, nunca no
+                    Lobby, por causa de uma diferença entre as duas
+                    árvores de DOM em que cada cópia morava, ver
+                    AnchoredAccountPanel.tsx). Mesmo espírito do
+                    PlatformChatHost/AgendaDrawer acima: UMA instância
+                    só, irmã do `entered ? <GameRoom/> : <Lobby/>`,
+                    nunca mais duplicada. onSignOut também reseta
+                    `entered` pra false (igual o Lobby já fazia) --
+                    sair da conta de dentro da sala agora sempre volta
+                    pro portão de login em vez de deixar `entered`
+                    preso em true. */}
+                <div className="platform-account-card-pin">
+                  <AccountCard
+                    accountUserId={auth.accountUserId}
+                    accountProfile={auth.accountProfile}
+                    accountAccessToken={auth.accountAccessToken}
+                    onStartConversation={(targetUserId) => chat.startDirectWith(targetUserId)}
+                    onSignOut={
+                      auth.onSignOut
+                        ? () => {
+                            setEntered(false);
+                            auth.onSignOut?.();
+                          }
+                        : null
+                    }
+                  />
+                </div>
                 {chat.agendaOpen && (
                   <AgendaDrawer
                     myUserId={chat.myUserId}

@@ -9,9 +9,12 @@
 // componente À PARTE (não importa nada de Lobby.tsx/GameRoom.tsx, MESMO
 // motivo de ProfileViewCard/FriendsPanel/SettingsPanel serem
 // arquivos próprios) pra dar pra montar nas DUAS telas sem duplicar
-// ~200 linhas de JSX/estado -- ver <AccountCard /> em Lobby.tsx
-// (dentro de .lobby-topbar-right-group) e GameRoom.tsx (canto,
-// mesmo lugar do antigo botão avulso de sair).
+// ~200 linhas de JSX/estado. Virou único de verdade em 2/out ("eu
+// quero tudo isso em estrutura isolada do jogo, igual o chat"): antes
+// tinha 2 montagens separadas (Lobby.tsx dentro do extinto wrapper
+// .lobby-topbar-right-group, GameRoom.tsx no canto da sala) -- agora
+// é 1 instância só, montada em app/page.tsx (.platform-account-card-pin),
+// igual PlatformChatHost/AgendaDrawer já faziam.
 //
 // Reaproveita as MESMAS classes .lobby-topbar-account*/.lobby-account-card*
 // que já existiam só em Lobby.tsx (globals.css é um arquivo global só,

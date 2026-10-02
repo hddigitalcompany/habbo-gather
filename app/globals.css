@@ -3474,7 +3474,7 @@ button.chat-picker-item:disabled {
    irmão de .room-wrapper dentro de .room-and-editor (flex row, 100%
    de largura), então o CANTO SUPERIOR DIREITO desse painel sempre
    coincide com o canto superior direito da TELA -- exatamente onde o
-   balãozinho foto+nome da conta fica fixo (.room-account-card-pin,
+   balãozinho foto+nome da conta fica fixo (.platform-account-card-pin,
    top:16px/right:16px, ~42px de altura). Sem essa margem, a fileira de
    abas (Mobília/Piso/Parede) ficava por baixo dele -- 34px empurra ela
    pra começar depois dos ~58px que o balão ocupa (mais folga que o
@@ -6132,17 +6132,6 @@ button.chat-picker-item:disabled {
   overflow-x: hidden;
 }
 
-/* wrapper da 3ª coluna do grid -- só o card da conta agora (ver
-   próximo comentário sobre o card da Empresa ter saído daqui). */
-.lobby-topbar-right-group {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-self: end;
-}
-
 /* "card" da Empresa selecionada -- pedido do Douglas: "nesse canto
    quero o card da Empresa selecionada / Copie EXATAMENTE TUDO, ate os
    textos, cores, padrao de texto, verificado, tudo" (print de
@@ -8233,35 +8222,41 @@ button.chat-picker-item:disabled {
 }
 
 /* pedido do Douglas, 30/set: "esse card, mantenha ele em toda tela
-   que o usuario vai inclusive no jogo" -- .lobby-topbar-account-wrap
-   (ver AccountCard.tsx) só é "position: relative" porque no Lobby
-   quem posiciona é o flex do .lobby-topbar; aqui dentro da sala não
-   tem topbar nenhum, então esse wrapper fixa ele no canto, espelhando
-   .room-logo-home-btn do lado esquerdo. */
-.room-account-card-pin {
+   que o usuario vai inclusive no jogo" -- primeiro só fixava dentro da
+   sala (.room-account-card-pin, já que o Lobby tinha o AccountCard
+   embutido no flex do .lobby-topbar). Renomeado (2/out, "eu quero tudo
+   isso em estrutura isolada do jogo, igual o chat"): o AccountCard
+   agora mora 1 vez só em app/page.tsx (fora de Lobby/GameRoom, igual
+   PlatformChatHost/AgendaDrawer), então essa posição fixa no canto
+   passa a valer SEMPRE, não só dentro da sala -- .lobby-topbar-account-wrap
+   (ver AccountCard.tsx) continua "position: relative" só pra servir de
+   régua pro dropdown/painéis ancorados dele, igual sempre foi. */
+.platform-account-card-pin {
   position: fixed;
   top: 16px;
   right: 16px;
   z-index: 60;
 }
 
-/* bug reportado pelo Douglas: "o balao com nome no canto superior
-   direito dentro do jogo ta bugado" -- .lobby-topbar-account (ver
-   AccountCard.tsx) foi pensado só pro topbar CLARO do Lobby (fundo
-   quase transparente + texto quase preto #14121f, ver comentário "tema
-   claro" ali). Dentro da sala o fundo é ESCURO -- sem essa
-   sobrescrita, ficava um "balão" quase invisível (texto escuro sobre
-   fundo escuro). Mesma "pegada" vidro escuro do resto do HUD da sala
-   (fundo escuro translúcido + texto claro) -- só troca a
-   cor/fundo, mantém o resto (formato, tamanho) igual ao chip do
-   Lobby. */
-.room-account-card-pin .lobby-topbar-account {
+/* .lobby-topbar-account (ver AccountCard.tsx) nasceu pensado pro
+   topbar CLARO do Lobby (fundo quase transparente + texto quase preto
+   #14121f, ver comentário "tema claro" ali) -- bug reportado pelo
+   Douglas quando o card ainda só existia fixo dentro da sala ("o balao
+   com nome no canto superior direito dentro do jogo ta bugado"): sem
+   essa sobrescrita, cima de um fundo escuro ficava um "balão" quase
+   invisível (texto escuro sobre fundo escuro). Agora que o card é
+   SEMPRE fixo nesse canto (2/out, nunca mais embutido no topbar claro
+   do Lobby), o tema escuro vale incondicionalmente -- sem precisar
+   mais estar escopado sob nenhum ancestral "de sala" específico. Mesma
+   "pegada" vidro escuro do resto do HUD -- só troca a cor/fundo,
+   mantém o resto (formato, tamanho) igual ao chip de antes. */
+.platform-account-card-pin .lobby-topbar-account {
   background: rgba(13, 7, 21, 0.75);
   border-color: rgba(255, 255, 255, 0.14);
   color: #f5f0ff;
 }
 
-.room-account-card-pin .lobby-topbar-account:hover {
+.platform-account-card-pin .lobby-topbar-account:hover {
   background: rgba(13, 7, 21, 0.92);
 }
 

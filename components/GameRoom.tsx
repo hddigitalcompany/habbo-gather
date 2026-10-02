@@ -64,7 +64,6 @@ import RoomMembersPanel from "@/components/RoomMembersPanel";
 import FriendsPanel from "@/components/FriendsPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
-import AccountCard from "@/components/AccountCard";
 import {
   catalogEntryGroupKey,
   catalogIndicesForGroup,
@@ -5336,21 +5335,13 @@ export default function GameRoom({
           <img src="/logo-x-dark.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
         </button>
       )}
-      {/* pedido do Douglas, 30/set: "esse card, mantenha ele em toda
-          tela que o usuario vai inclusive no jogo" -- MESMO
-          <AccountCard /> que já existia só no Lobby (ver
-          components/Lobby.tsx), agora fixo aqui no canto igual o
-          logo/botão de voltar do lado esquerdo (ver
-          .room-account-card-pin). */}
-      <div className="room-account-card-pin">
-        <AccountCard
-          accountUserId={accountUserId}
-          accountProfile={accountProfile}
-          accountAccessToken={accountAccessToken}
-          onStartConversation={(targetUserId) => startDirectWith(targetUserId)}
-          onSignOut={onSignOut}
-        />
-      </div>
+      {/* AccountCard saiu daqui (2/out, pedido do Douglas: "eu quero
+          tudo isso em estrutura isolada do jogo, igual o chat") --
+          agora mora só 1 vez em app/page.tsx (.platform-account-card-pin),
+          irmã do `entered ? <GameRoom/> : <Lobby/>`, igual
+          PlatformChatHost/AgendaDrawer já funcionavam. Essa duplicação
+          (1 instância aqui, outra em Lobby.tsx) era inclusive a CAUSA
+          de um bug real -- ver AnchoredAccountPanel.tsx. */}
       {/* pedido do Douglas, 30/set (9): "coloque o sair da conta dentro
           das opcoes que abrem clicando no balao foto+nome, por ultimo,
           e em texto vermelho" -- morava aqui, um botão avulso (que
