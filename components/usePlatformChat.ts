@@ -1287,14 +1287,36 @@ export function usePlatformChat(params: PlatformChatParams) {
     setAgendaForm((prev) => ({ ...prev, ...partial }));
   }
 
+  // 2/out, bug do Douglas: "a agenda quando da erro, nao me solta mais,
+  // travou em alguem [...] fica dando isso mesmo que eu tire a selecao"
+  // -- bloqueava TODO toggle (marcar E desmarcar) de quem tava em
+  // busyUserIds. Isso fazia sentido pra impedir MARCAR alguém já
+  // indisponível, mas o convidado só vira "indisponível" DEPOIS de já
+  // estar selecionado (é o próprio "Marcar compromisso" que descobre o
+  // conflito, ver agenda:error/setBusyUserIds em handlePartyMessage) --
+  // então a MESMA trava também impedia tirar a seleção dele, prendendo
+  // o formulário pra sempre nesse erro (disabled={busy} no checkbox, ver
+  // AgendaDrawer, reforçava a mesma trava do lado da UI). Agora só
+  // bloqueia ADICIONAR um indisponível; tirar sempre funciona.
   function toggleAgendaParticipant(userId: string) {
-    if (busyUserIds.includes(userId)) return; // indisponível nesse horário, não deixa marcar
+    const alreadySelected = agendaForm.participantIds.includes(userId);
+    if (busyUserIds.includes(userId) && !alreadySelected) return; // indisponível, não deixa ADICIONAR
     setAgendaForm((prev) => ({
       ...prev,
-      participantIds: prev.participantIds.includes(userId)
+      participantIds: alreadySelected
         ? prev.participantIds.filter((x) => x !== userId)
         : [...prev.participantIds, userId],
     }));
+    // tirou alguém da seleção -- o erro antigo ("algum convidado ficou
+    // indisponível") pode não valer mais pra essa seleção nova; some
+    // com ele agora (só se não sobrar NINGUÉM indisponível ainda
+    // selecionado -- pode ter mais de um), não espera o próximo
+    // "Marcar compromisso" pra confirmar (reaparece sozinho se tentar
+    // de novo e ainda tiver problema).
+    if (alreadySelected) {
+      const stillBusy = agendaForm.participantIds.some((id) => id !== userId && busyUserIds.includes(id));
+      if (!stillBusy) setAgendaError(null);
+    }
   }
 
   function startNewCall() {

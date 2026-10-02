@@ -475,13 +475,31 @@ export function AgendaDrawer({
               <div className="chat-picker-list">
                 {roster.map((u) => {
                   const busy = busyUserIds.includes(u.userId);
+                  const selected = agendaForm.participantIds.includes(u.userId);
                   const online = onlineUserIds.has(u.userId);
                   return (
-                    <label key={u.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
+                    <label
+                      key={u.userId}
+                      // "busy" (opacidade reduzida + cursor de
+                      // bloqueado, ver globals.css) só representa
+                      // quem NÃO dá pra adicionar -- já selecionado
+                      // continua podendo ser removido (ver disabled
+                      // do checkbox abaixo), então não faz sentido
+                      // parecer travado nesse caso.
+                      className={busy && !selected ? "chat-picker-item busy" : "chat-picker-item"}
+                    >
                       <input
                         type="checkbox"
-                        checked={agendaForm.participantIds.includes(u.userId)}
-                        disabled={busy}
+                        checked={selected}
+                        // 2/out, bug do Douglas: "travou em alguem [...]
+                        // fica dando isso mesmo que eu tire a selecao"
+                        // -- indisponível só trava ADICIONAR; já
+                        // selecionado (foi assim que virou indisponível
+                        // -- ver comentário grande de
+                        // toggleAgendaParticipant/usePlatformChat.ts)
+                        // sempre pode ser removido, senão o formulário
+                        // ficava travado nesse erro pra sempre.
+                        disabled={busy && !selected}
                         onChange={() => onToggleAgendaParticipant(u.userId)}
                       />
                       <span className="chat-conv-avatar" style={{ background: u.color }}>
