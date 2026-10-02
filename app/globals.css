@@ -1114,6 +1114,19 @@ body {
   background: #8c6dff;
 }
 
+/* mic/câmera desligados dentro da barra da chamada (2/out, pedido do
+   Douglas: "a chamada em conversa nao deixa desligar a camera") --
+   mesma cor vermelha suave do .av-btn.off da av-bar principal (mesmo
+   estado, mesmo lugar visual, só em componente diferente). */
+.chat-icon-btn.off {
+  background: rgba(255, 69, 69, 0.85);
+  color: #fff;
+}
+
+.chat-icon-btn.off:hover {
+  background: rgba(255, 69, 69, 0.95);
+}
+
 .chat-rename-input {
   flex: 1;
   background: rgba(0, 0, 0, 0.3);
@@ -1524,11 +1537,24 @@ button.chat-picker-item:disabled {
 
 .chat-call-bar-label {
   font-size: 11px;
-  color: #a99fc2;
+  /* 2/out, pedido do Douglas: "o texto ta cinza" -- era #a99fc2 (cinza
+     fosco, baixo contraste no fundo escuro). Mesmo lavanda claro já
+     usado nos botões de ação da mensagem (.chat-message-action-btn). */
+  color: #cfc6e8;
   margin-left: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* mic/câmera/expandir da chamada (2/out, pedido do Douglas) -- grupo
+   de botões entre "X pessoas na chamada" e o Sair/Entrar, só aparece
+   com inActiveCall (ver JSX). */
+.chat-call-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .chat-call-bar-btn {
@@ -1577,6 +1603,20 @@ button.chat-picker-item:disabled {
   padding: 4px;
   border-radius: 8px;
   width: 92px;
+  /* borda transparente por padrão (nunca remove espaço quando acende,
+     ver .speaking abaixo) + border-box pra não crescer a caixa quando
+     a borda aparecer. */
+  border: 2px solid transparent;
+  box-sizing: border-box;
+  transition: border-color 0.1s, box-shadow 0.1s;
+}
+
+/* "podia dar um contorno verde no balao de quem ta falando" (2/out,
+   pedido do Douglas) -- ver useIsSpeaking/ChatCallTile em ChatDrawer.tsx,
+   acende com volume de verdade do áudio, não só "mic aberto". */
+.chat-call-video-tile.speaking {
+  border-color: #3ddc84;
+  box-shadow: 0 0 0 2px rgba(61, 220, 132, 0.3);
 }
 
 .chat-call-video {
@@ -1597,7 +1637,29 @@ button.chat-picker-item:disabled {
   justify-content: center;
   font-size: 20px;
   font-weight: 700;
-  color: #a99fc2;
+  color: #cfc6e8;
+}
+
+/* "opcao de Expandir a imagem da chamada tbm, expande todas junto"
+   (2/out, pedido do Douglas) -- um toggle só pra GRADE inteira (ver
+   callExpanded em ChatDrawer.tsx), não por pessoa -- todo mundo cresce
+   junto de uma vez. */
+.chat-call-videos.expanded {
+  gap: 10px;
+}
+
+.chat-call-videos.expanded .chat-call-video-tile {
+  width: 220px;
+}
+
+.chat-call-videos.expanded .chat-call-video,
+.chat-call-videos.expanded .chat-call-video-placeholder {
+  width: 212px;
+  height: 160px;
+}
+
+.chat-call-videos.expanded .chat-call-video-placeholder {
+  font-size: 40px;
 }
 
 .chat-messages {

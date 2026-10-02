@@ -1072,6 +1072,9 @@ function LobbyChatPanel({
   accountAccessToken,
   callVolume,
   camOn,
+  micOn,
+  onToggleMic,
+  onToggleCam,
   onClose,
   chat,
 }: {
@@ -1083,6 +1086,9 @@ function LobbyChatPanel({
   accountAccessToken?: string | null;
   callVolume: number;
   camOn: boolean;
+  micOn: boolean;
+  onToggleMic: () => void;
+  onToggleCam: () => void;
   onClose: () => void;
   chat: PlatformChat;
 }) {
@@ -1177,6 +1183,9 @@ function LobbyChatPanel({
       onLeaveCall={chat.leaveCall}
       localStreamRef={chat.callLocalStreamRef}
       camOn={camOn}
+      micOn={micOn}
+      onToggleMic={onToggleMic}
+      onToggleCam={onToggleCam}
       onClose={onClose}
       pinMode={pinMode}
       onToggleSidePin={onToggleSidePin}
@@ -3737,6 +3746,9 @@ export default function Lobby({
           accountAccessToken={accountAccessToken}
           callVolume={callVolume}
           camOn={camOn}
+          micOn={micOn}
+          onToggleMic={toggleMic}
+          onToggleCam={toggleCam}
           onClose={() => setChatPanelOpen(false)}
           chat={chat}
         />

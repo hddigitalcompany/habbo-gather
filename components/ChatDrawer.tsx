@@ -13,6 +13,7 @@ import {
 import {
   ChatCallVideoTile,
   MicIcon,
+  CamIcon,
   PencilIcon,
   BackIcon,
   CloseIcon,
@@ -67,6 +68,34 @@ function ReplyIcon() {
       />
       <path
         d="M4.5 12.5H14a5.5 5.5 0 0 1 5.5 5.5v1"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// "opcao de Expandir a imagem da chamada" (2/out, pedido do Douglas)
+// -- setas apontando pra fora (expandir) ou pra dentro (reduzir,
+// expanded=true), mesmo ícone invertendo o path conforme o estado
+// (ver callExpanded/chat-call-expand-btn).
+function ExpandIcon({ expanded }: { expanded: boolean }) {
+  return expanded ? (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ) : (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"
         stroke="currentColor"
         strokeWidth="1.7"
         strokeLinecap="round"
@@ -155,6 +184,16 @@ export function ChatDrawer({
   onLeaveCall,
   localStreamRef,
   camOn,
+  // "a chamada em conversa nao deixa desligar a camera" (2/out, pedido
+  // do Douglas) -- antes só dava pra mexer no mic/câmera pela av-bar
+  // PRINCIPAL da sala (fora da gaveta de chat, ver toggleMic/toggleCam
+  // em GameRoom.tsx/Lobby.tsx), que fica fora de vista enquanto a
+  // conversa tá aberta/fixada. Mesmas funções/estado de sempre, só
+  // expostos de novo aqui -- não é um controle NOVO, é o MESMO (ver
+  // chat-call-bar-controls mais abaixo), reaproveitado, não duplicado.
+  micOn,
+  onToggleMic,
+  onToggleCam,
   onClose,
   pinMode,
   onToggleSidePin,
@@ -282,6 +321,9 @@ export function ChatDrawer({
   onLeaveCall: () => void;
   localStreamRef: RefObject<MediaStream | null>;
   camOn: boolean;
+  micOn: boolean;
+  onToggleMic: () => void;
+  onToggleCam: () => void;
   onClose: () => void;
   pinMode: "float" | "side";
   onToggleSidePin: () => void;
@@ -457,6 +499,14 @@ export function ChatDrawer({
   // + toda mensagem que RESPONDEU a mensagem desse anexo, ver
   // repliesTo logo abaixo do JSX do modal). null = fechado.
   const [galleryItem, setGalleryItem] = useState<ChatAttachmentItem | null>(null);
+  // "opcao de Expandir a imagem da chamada tbm, expande todas junto"
+  // (2/out, pedido do Douglas) -- um toggle SÓ, afeta a grade inteira
+  // de vídeos de uma vez (não é um expandir por pessoa) -- efêmero,
+  // só enquanto essa gaveta tá montada, não precisa ir pro servidor
+  // nem sincronizar com ninguém (preferência de VISUALIZAÇÃO minha,
+  // não da chamada).
+  const [callExpanded, setCallExpanded] = useState(false);
+
   // @menção (pedido do Douglas, 1/out) -- dropdown de candidatos, aberto
   // enquanto a pessoa digita "@algumacoisa" no composer; startIndex é a
   // posição do "@" no texto (pra saber o que substituir quando escolhe
@@ -1078,6 +1128,41 @@ export function ChatDrawer({
                   {activeCallParticipants.length} {activeCallParticipants.length === 1 ? "pessoa" : "pessoas"} na chamada
                 </span>
               </div>
+              {inActiveCall && (
+                // "a chamada em conversa nao deixa desligar a camera"
+                // (2/out, pedido do Douglas) -- MESMO mic/câmera da
+                // av-bar principal (ver comentário grande em onToggleMic/
+                // onToggleCam no tipo lá em cima), só exposto aqui
+                // também, direto na barra da chamada, pra não precisar
+                // sair da conversa pra achar o botão. "Expandir" (ver
+                // ExpandIcon/callExpanded) afeta a grade TODA de uma vez.
+                <div className="chat-call-bar-controls">
+                  <button
+                    type="button"
+                    className={micOn ? "chat-icon-btn" : "chat-icon-btn off"}
+                    title={micOn ? "Desligar microfone" : "Ligar microfone"}
+                    onClick={onToggleMic}
+                  >
+                    <MicIcon off={!micOn} />
+                  </button>
+                  <button
+                    type="button"
+                    className={camOn ? "chat-icon-btn" : "chat-icon-btn off"}
+                    title={camOn ? "Desligar câmera" : "Ligar câmera"}
+                    onClick={onToggleCam}
+                  >
+                    <CamIcon off={!camOn} />
+                  </button>
+                  <button
+                    type="button"
+                    className={callExpanded ? "chat-icon-btn active" : "chat-icon-btn"}
+                    title={callExpanded ? "Reduzir vídeos" : "Expandir vídeos"}
+                    onClick={() => setCallExpanded((v) => !v)}
+                  >
+                    <ExpandIcon expanded={callExpanded} />
+                  </button>
+                </div>
+              )}
               {inActiveCall ? (
                 <button className="chat-call-bar-btn leave" onClick={onLeaveCall}>
                   Sair
@@ -1094,28 +1179,27 @@ export function ChatDrawer({
           )}
 
           {inActiveCall && (
-            <div className="chat-call-videos">
-              <div className="chat-call-video-tile">
-                {camOn && localCallStream ? (
-                  <ChatCallVideoTile stream={localCallStream} muted />
-                ) : (
-                  <span className="chat-call-video-placeholder">Você</span>
-                )}
-                <span className="video-name">Você</span>
-              </div>
+            <div className={callExpanded ? "chat-call-videos expanded" : "chat-call-videos"}>
+              <ChatCallTile
+                stream={localCallStream}
+                showVideo={camOn && !!localCallStream}
+                muted
+                label="Você"
+                placeholderText="Você"
+              />
               {activeCallParticipants
                 .filter((p) => p.userId !== myUserId)
                 .map((p) => {
                   const stream = callRemoteStreams[p.connectionId];
                   return (
-                    <div key={p.connectionId} className="chat-call-video-tile">
-                      {stream ? (
-                        <ChatCallVideoTile stream={stream} volume={callVolume} />
-                      ) : (
-                        <span className="chat-call-video-placeholder">{(p.name || "?").slice(0, 1).toUpperCase()}</span>
-                      )}
-                      <span className="video-name">{p.name || "?"}</span>
-                    </div>
+                    <ChatCallTile
+                      key={p.connectionId}
+                      stream={stream}
+                      showVideo={!!stream}
+                      volume={callVolume}
+                      label={p.name || "?"}
+                      placeholderText={(p.name || "?").slice(0, 1).toUpperCase()}
+                    />
                   );
                 })}
             </div>
@@ -1579,6 +1663,98 @@ export function ChatDrawer({
     </>
   );
 }
+// "podia dar um contorno verde no balao de quem ta falando" (2/out,
+// pedido do Douglas) -- mede o VOLUME de verdade do áudio de cada
+// participante (AnalyserNode/Web Audio API), não um "tá com o mic
+// aberto" -- então só acende quando a pessoa tá FALANDO mesmo, igual
+// Zoom/Meet/Discord. Funciona mesmo com a câmera desligada (o stream
+// de áudio existe independente do vídeo, ver showVideo em ChatCallTile
+// abaixo) -- é por isso que essa detecção usa o STREAM inteiro, nunca
+// só o <video>. "holdMs" segura o estado "falando" por um instante
+// depois do último pico alto, só pra não ficar piscando a cada sílaba
+// (micro-silêncios entre palavras).
+const SPEAKING_VOLUME_THRESHOLD = 14;
+const SPEAKING_HOLD_MS = 400;
+
+function useIsSpeaking(stream: MediaStream | null | undefined): boolean {
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => {
+    if (!stream || stream.getAudioTracks().length === 0) {
+      setSpeaking(false);
+      return;
+    }
+    const AudioCtxClass: typeof AudioContext | undefined =
+      typeof window !== "undefined" ? window.AudioContext || (window as any).webkitAudioContext : undefined;
+    if (!AudioCtxClass) return;
+    const ctx = new AudioCtxClass();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.6;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let raf = 0;
+    let lastLoudTs = 0;
+    let cancelled = false;
+    function tick() {
+      if (cancelled) return;
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i];
+      const avg = sum / data.length;
+      const now = performance.now();
+      if (avg > SPEAKING_VOLUME_THRESHOLD) lastLoudTs = now;
+      setSpeaking((prev) => {
+        const next = now - lastLoudTs < SPEAKING_HOLD_MS;
+        return prev === next ? prev : next;
+      });
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      source.disconnect();
+      ctx.close().catch(() => {});
+    };
+  }, [stream]);
+  return speaking;
+}
+
+// um tile só pra EU e pra cada participante remoto (antes era dois
+// blocos de JSX quase idênticos, ver histórico) -- showVideo separado
+// de stream porque a MINHA câmera pode tá desligada (camOn=false)
+// mesmo com o stream (mic) continuando vivo/detectável (ver
+// useIsSpeaking acima), diferença que o placeholder "Você" já tratava
+// antes, só que duplicada.
+function ChatCallTile({
+  stream,
+  showVideo,
+  muted,
+  volume,
+  label,
+  placeholderText,
+}: {
+  stream: MediaStream | null | undefined;
+  showVideo: boolean;
+  muted?: boolean;
+  volume?: number;
+  label: string;
+  placeholderText: string;
+}) {
+  const speaking = useIsSpeaking(stream);
+  return (
+    <div className={speaking ? "chat-call-video-tile speaking" : "chat-call-video-tile"}>
+      {showVideo && stream ? (
+        <ChatCallVideoTile stream={stream} muted={muted} volume={volume} />
+      ) : (
+        <span className="chat-call-video-placeholder">{placeholderText}</span>
+      )}
+      <span className="video-name">{label}</span>
+    </div>
+  );
+}
+
 function ChatMessageRow({
   msg,
   own,
