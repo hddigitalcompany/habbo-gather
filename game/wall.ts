@@ -294,17 +294,21 @@ export function wallBrickRects(pattern: WallPatternConfig, edgeLengthPx: number)
 
 /**
  * Mesma ideia de wallBrickRects acima, pro tipo de textura "panel" (ver
- * WallTextureKind) -- faixas horizontais de largura TOTAL
- * (edgeLengthPx inteiro, sem loop nenhum em u, sem amarração/offset),
- * cada uma com altura `pattern.brickHeightPx` (reaproveitado como
- * "altura do painel" -- ver comentário grande de WallTextureKind pro
- * motivo de não ter ganhado campo próprio) e separada da vizinha por um
+ * WallTextureKind) -- faixas horizontais (sem loop em u, sem
+ * amarração/offset -- um painel não se subdivide horizontalmente igual
+ * tijolo), cada uma com altura `pattern.brickHeightPx` (reaproveitado
+ * como "altura do painel" -- ver comentário grande de WallTextureKind
+ * pro motivo de não ter ganhado campo próprio) e emoldurada por um
  * friso de `pattern.mortarWidthPx` (idem, reaproveitado como "largura
- * do friso"). O LOOP em j (fileira) é literalmente copiado de
- * wallBrickRects -- só o loop interno em u (que fazia a amarração de
- * tijolo) que não existe aqui, porque um painel não se subdivide
- * horizontalmente. Função PURA (sem Phaser/DOM), mesmo contrato de
- * wallBrickRects -- ver wallFaceRects abaixo, que escolhe entre as 2.
+ * do friso") nos 4 lados -- horizontal ENTRE fileiras (v, condicional:
+ * nunca no chão/topo da parede, ver comentário dentro da função -- "a
+ * linha da borda nao pode passar no topo") E vertical nas 2 pontas do
+ * painel (u, incondicional -- "espessura do friso so muda do friso
+ * horizontal nao vertical", Douglas pedindo o friso vertical que
+ * faltava). O LOOP em j (fileira) é o mesmo de wallBrickRects -- só o
+ * loop interno em u (que fazia a amarração de tijolo) que não existe
+ * aqui. Função PURA (sem Phaser/DOM), mesmo contrato de wallBrickRects
+ * -- ver wallFaceRects abaixo, que escolhe entre as 2.
  */
 export function wallPanelRects(pattern: WallPatternConfig, edgeLengthPx: number): WallBrickRect[] {
   const rects: WallBrickRect[] = [];
@@ -330,7 +334,28 @@ export function wallPanelRects(pattern: WallPatternConfig, edgeLengthPx: number)
     const v0 = v0Full + (v0Full > 0 ? gap / 2 : 0);
     const v1 = v1Full - (v1Full < pattern.heightPx ? gap / 2 : 0);
     if (v1 <= v0) continue;
-    rects.push({ u0: 0, u1: edgeLengthPx, v0, v1, rowIndex: j });
+    // friso VERTICAL -- pedido do Douglas, depois de testar ao vivo:
+    // "espessura do friso so muda do friso horizontal nao vertical"
+    // (ou seja, a largura do friso de verdade SÓ aparecia nas linhas
+    // horizontais entre fileiras -- u0/u1 iam sempre de 0 a
+    // edgeLengthPx cheio, sem desconto nenhum, então não existia friso
+    // vertical NENHUM, em lugar nenhum). Diferente do v acima (onde o
+    // desconto é CONDICIONAL -- nunca no chão/topo, só confirmado:
+    // "a linha da borda nao pode passar no topo"), aqui é
+    // INCONDICIONAL nos 2 lados -- u=0/u=edgeLengthPx são sempre a
+    // ponta física do SEGMENTO de parede (nunca existe um "meio" do
+    // jeito que v=0/v=heightPx são sempre chão/topo da parede inteira),
+    // e é exatamente ali (nas pontas) que o friso vertical precisa
+    // aparecer: tanto numa emenda reta entre 2 segmentos vizinhos
+    // (metade do friso de cada lado, somando a largura cheia bem na
+    // emenda -- MESMA emenda onde o LED é plantado, ver
+    // LedSegmentDef/ledJunctionPoint em MainScene.ts) quanto numa
+    // ponta solta (sobra só como uma margem da cor do friso, sem
+    // vizinho do outro lado).
+    const u0 = Math.min(edgeLengthPx / 2, gap / 2);
+    const u1 = Math.max(edgeLengthPx / 2, edgeLengthPx - gap / 2);
+    if (u1 <= u0) continue;
+    rects.push({ u0, u1, v0, v1, rowIndex: j });
   }
   return rects;
 }
