@@ -78,13 +78,27 @@ export default function FriendsPanel({
       .catch(() => setFriends([]));
   }
 
-  // carrega os amigos assim que o painel abre (mesmo antes de trocar
-  // de aba) -- é a aba padrão.
+  // Recarrega a lista de amigos toda vez que a aba "Amigos" fica
+  // ativa -- não só na 1ª vez que o painel abre (era só isso antes,
+  // ver `[accountAccessToken]` como única dependência). Achado 02/out,
+  // pedido do Douglas: "eu e outra conta nos seguimos mutuamente
+  // porem ela nao entra nos meus amigos ainda" -- os únicos gatilhos
+  // de recarregar que existiam eram abrir o painel pela 1ª vez, seguir
+  // alguém você mesmo (toggleFollow chama reloadFriends) ou mexer no
+  // ProfileViewCard (onFollowChanged); nenhum deles cobre o caso de
+  // "a OUTRA pessoa seguiu de volta enquanto eu já tava com o painel
+  // aberto (ou tinha aberto antes dela seguir)" -- o mútuo acontece do
+  // LADO DELA, sem nenhum sinal chegando pro meu navegador. Agora
+  // `tab` entra como dependência: toda vez que volta (ou já começa)
+  // na aba "Amigos", busca de novo -- cobre o fluxo real de teste
+  // (segue, troca de aba, espera o outro seguir de volta, volta pra
+  // "Amigos") sem precisar fechar/reabrir o painel inteiro.
   useEffect(() => {
     if (!accountAccessToken) {
       setFriends([]);
       return;
     }
+    if (tab !== "friends") return;
     let cancelled = false;
     fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -97,7 +111,7 @@ export default function FriendsPanel({
     return () => {
       cancelled = true;
     };
-  }, [accountAccessToken]);
+  }, [accountAccessToken, tab]);
 
   // busca com debounce -- só roda na aba "Buscar pessoas" (sem gastar
   // chamada nenhuma enquanto a pessoa só olha os amigos).
