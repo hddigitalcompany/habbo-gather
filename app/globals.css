@@ -552,6 +552,26 @@ body {
    só troca posicionamento/tamanho/cantos (sobrescreve .chat-drawer, por
    isso vem DEPOIS dele aqui: mesma especificidade, quem vier por
    último no arquivo ganha). */
+/* 1/out: largura total do card quando a gaveta abre SOZINHA (sem a
+   coluna .chat-company-rail do lado -- toda conversa aberta/"nova
+   conversa" cai aqui, ver comentário grande de .chat-drawer-solo em
+   ChatDrawer.tsx) -- pedido do Douglas "deixe ela do tamanho do card
+   total, juntando com o da empresa" + "sem essa reducao na largura e
+   na altura". Os números são literalmente rail(92px) + gaveta própria,
+   os MESMOS que .chat-drawer-shell/-sidebar já somam quando as duas
+   peças aparecem juntas -- só que aqui numa peça só, sem a coluna
+   visível (ela simplesmente não existe nesse estado, não tem conversa
+   suficiente/não tá em "list" pra mostrar). Seletor de 2 classes pra
+   ganhar de .chat-drawer/.chat-drawer-sidebar (1 classe só) não
+   importa a ordem no arquivo. */
+.chat-drawer.chat-drawer-solo {
+  width: 472px;
+}
+
+.chat-drawer-sidebar.chat-drawer-solo {
+  width: 412px;
+}
+
 .chat-drawer-sidebar {
   position: static;
   flex-shrink: 0;

@@ -527,7 +527,22 @@ export function ChatDrawer({
   const drawerBody = (
     <div
       ref={drawerRef}
-      className={pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : "chat-drawer"}
+      /* 1/out, pedido do Douglas: "quando abro a conversa ela fica da
+         lagura menor, deixe ela do tamanho do card total, juntando com
+         o da empresa" -- sem a coluna .chat-company-rail do lado
+         (companyRail/showCompanyRail false: acontece sempre que entra
+         em "new"/"thread", e também em "list" com 0-1 empresa), a
+         gaveta voltava pra sua largura PRÓPRIA (380px flutuante/320px
+         fixa) em vez de manter a largura TOTAL que o par rail+gaveta
+         tem quando a coluna aparece (472px/412px, ver .chat-drawer-shell/
+         -sidebar) -- um "encolhão" visível ao abrir uma conversa.
+         .chat-drawer-solo (ver globals.css) força essa mesma largura
+         total mesmo sozinha, igual ao pedido de sempre de cartão de
+         tamanho FIXO (não quero coisas expansivas/encolhendo). */
+      className={
+        (pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : "chat-drawer") +
+        (companyRail ? "" : " chat-drawer-solo")
+      }
     >
       {view === "list" && (
         <>
