@@ -117,6 +117,7 @@ import {
 // `platformChat` (mesma instância que a sala vai consumir quando
 // ela também migrar, ver comentário em app/page.tsx).
 import { usePlatformChat } from "@/components/usePlatformChat";
+import { useRoomCompanyProfile } from "@/components/useRoomCompanyProfile";
 type PlatformChat = ReturnType<typeof usePlatformChat>;
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
@@ -2237,37 +2238,29 @@ export default function Lobby({
   // nome da empresa PRÓPRIA pra alimentar companyOptions no
   // ChatDrawer mesmo sem nenhuma conversa ainda.
   //
-  // 2/out, DOIS bugs seguidos aqui, o segundo causado por corrigir só
-  // metade do primeiro (Douglas, certo: "eu nao falei 50 vezes que
-  // nao quero regras diferentes? o chat tem que ser o MESMO"):
+  // 2/out, história de 3 capítulos aqui (Douglas, certo nos três):
   // 1) "as logos das empresas nao ta aparecendo, somente no lobby" --
-  //    isso usava `myRealRoom` (vira null de PROPÓSITO pra
-  //    sala-reservada, ver comentário dele acima -- regra feita só
-  //    pro dropdown "Meus espaços" não duplicar). Pro Douglas (dono
-  //    da plataforma) a Sala Principal/mapa-publicado É a sala de
-  //    verdade dele (fallback em app/api/room/mine/route.ts) --
-  //    `myRealRoom` ficava sempre null pra ele só por causa dessa
-  //    regra de dropdown, que não tem nada a ver com chat.
-  // 2) Troquei só a busca da LOGO pra `myRoom` mas esqueci que o NOME
-  //    (prop myRoomName no call-site, mais abaixo) continuava vindo
-  //    de `myRealRoom?.name` -- aí nome e logo vinham de fontes
-  //    DIFERENTES (exatamente a raiz do "regras diferentes" que o
-  //    Douglas tá cobrando), e pior: cada busca própria criava um
-  //    objeto NOVO a cada render pro chat.setRoomContext receber, e
-  //    como o retorno do hook inteiro não é memoizado (ver "return"
-  //    em usePlatformChat.ts) isso virou um LOOP de re-render -- foi
-  //    isso que quebrou "minhas conversas sumiram" logo em seguida.
-  //
-  // Fix de verdade agora: só avisa o motor único QUAL slug é "minha
-  // sala" (setRoomContextSlug) -- a busca em si, o cache e o
-  // roomContext {slug,name,logoUrl} completo moraram pra dentro de
-  // usePlatformChat.ts (ver comentário grande lá), UMA implementação
-  // só, e tanto o Lobby quanto a Sala (GameRoom.tsx) leem de volta o
-  // MESMO chat.roomContext (ver myRoomName/myRoomLogoUrl no call-site
-  // do LobbyChatPanel mais abaixo -- não são mais state própria).
+  //    usava `myRealRoom` (vira null de PROPÓSITO pra sala-reservada,
+  //    regra feita só pro dropdown "Meus espaços" não duplicar, nada
+  //    a ver com chat).
+  // 2) corrigi só a busca da LOGO, esqueci o NOME (ainda vindo de
+  //    `myRealRoom?.name`) -- nome e logo de fontes diferentes de
+  //    novo, e cada busca própria criando objeto NOVO a cada render
+  //    pro chat.setRoomContext -- virou LOOP de re-render ("minhas
+  //    conversas sumiram").
+  // 3) "toda hora aparece um novo [bug], isola esse chat, o chat tem
+  //    que ser uma coisa só" -- a busca em si SAIU de dentro do motor
+  //    único (ver useRoomCompanyProfile.ts: UMA implementação,
+  //    chamada aqui e em GameRoom.tsx, mas cada uma com seu próprio
+  //    estado isolado -- nunca mais pode derrubar a lista de
+  //    conversas). O motor só recebe de volta slug/nome/logo como
+  //    PRIMITIVAS (chat.setRoomContext(slug, name, logoUrl)) -- nunca
+  //    mais um objeto montado na hora, então o loop fica estruturalmente
+  //    impossível, não só "tomei cuidado".
+  const { name: myCompanyName, logoUrl: myCompanyLogoUrl } = useRoomCompanyProfile(myRoom?.room_slug ?? null);
   useEffect(() => {
-    chat.setRoomContextSlug(myRoom?.room_slug ?? null);
-  }, [chat, myRoom?.room_slug]);
+    chat.setRoomContext(myRoom?.room_slug ?? null, myCompanyName, myCompanyLogoUrl);
+  }, [chat, myRoom?.room_slug, myCompanyName, myCompanyLogoUrl]);
   const dropdownEntries = myRealRoom
     ? [...visibleRoomSlugs, { slug: myRealRoom.room_slug, label: myRealRoom.name, teamOnly: false }]
     : visibleRoomSlugs;
@@ -3737,8 +3730,8 @@ export default function Lobby({
           pinMode={chatPinMode}
           onToggleSidePin={toggleLobbyChatPinSide}
           myUserId={myUserId}
-          myRoomName={chat.roomContext?.name ?? null}
-          myRoomLogoUrl={chat.roomContext?.logoUrl ?? null}
+          myRoomName={myCompanyName}
+          myRoomLogoUrl={myCompanyLogoUrl}
           accountAccessToken={accountAccessToken}
           callVolume={callVolume}
           camOn={camOn}

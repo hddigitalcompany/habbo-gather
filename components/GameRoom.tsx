@@ -22,6 +22,7 @@ import { ChatDrawer } from "./ChatDrawer";
 // continua dono do que é GENUINAMENTE da sala: Sala/"quem tá por
 // perto" (chatLog/roomPins/roomTyping), avatar/presença/movimento.
 import { usePlatformChat } from "@/components/usePlatformChat";
+import { useRoomCompanyProfile } from "@/components/useRoomCompanyProfile";
 type PlatformChat = ReturnType<typeof usePlatformChat>;
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
@@ -1075,21 +1076,23 @@ export default function GameRoom({
   // conversa ainda. Usado também pra avisar o motor único QUAL é
   // "minha sala agora" (ver useEffect de chat.setRoomContext mais
   // abaixo).
-  // 2/out: isso aqui buscava o profile SOZINHO, em paralelo com uma
-  // cópia quase igual em Lobby.tsx -- duas implementações da mesma
-  // coisa (exatamente o que o Douglas pediu pra nunca mais fazer, ver
-  // comentário grande de roomContext/setRoomContextSlug em
-  // usePlatformChat.ts, onde a busca/estado moraram pra dentro de
-  // vez). Agora só avisa QUAL slug é "minha sala" -- o motor único
-  // busca e guarda o {slug,name,logoUrl}, lido de volta logo abaixo
-  // via chat.roomContext (ver roomCompanyName/roomCompanyLogoUrl no
-  // chatDrawerProps e em sendRoomCard, mais abaixo -- não são mais
-  // state própria daqui).
+  // 2/out, história de 3 capítulos (ver comentário grande igual em
+  // components/Lobby.tsx): isso aqui chegou a buscar o profile
+  // SOZINHO (cópia quase igual à do Lobby), depois mandei a busca pra
+  // dentro do motor único do chat (usePlatformChat) -- aí um bug nela
+  // conseguiu derrubar a lista de CONVERSAS junto, porque moravam no
+  // mesmo componente/estado ("toda hora aparece um novo, isola esse
+  // chat cara, o chat tem que ser uma coisa só"). Agora a busca mora
+  // em useRoomCompanyProfile.ts -- UMA implementação, usada aqui e no
+  // Lobby, cada chamada com seu próprio estado ISOLADO (nunca entra
+  // no motor do chat). Só avisa o motor QUAL slug é "minha sala"
+  // (chat.setRoomContext recebe slug/nome/logo como PRIMITIVAS, nunca
+  // um objeto montado na hora -- estruturalmente imune a loop) pra
+  // ele saber carimbar "Empresa" numa conversa nova/convite.
+  const { name: roomCompanyName, logoUrl: roomCompanyLogoUrl } = useRoomCompanyProfile(roomSlug);
   useEffect(() => {
-    chat.setRoomContextSlug(roomSlug);
-  }, [chat, roomSlug]);
-  const roomCompanyName = chat.roomContext?.slug === roomSlug ? chat.roomContext.name : null;
-  const roomCompanyLogoUrl = chat.roomContext?.slug === roomSlug ? chat.roomContext.logoUrl : null;
+    chat.setRoomContext(roomSlug, roomCompanyName, roomCompanyLogoUrl);
+  }, [chat, roomSlug, roomCompanyName, roomCompanyLogoUrl]);
 
   // recordingAudio/recordingElapsedSec/recordedPreview/
   // startVoiceRecording/stopVoiceRecording/cancelVoiceRecording/
