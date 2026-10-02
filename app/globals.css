@@ -702,6 +702,29 @@ body {
   margin-top: 0;
 }
 
+/* 1/out (2), bug reportado pelo Douglas com print comparando Lobby x
+   Sala ("a conversa, fora diminui, dentro mantem no tamanho do card" /
+   "na altura o bug") -- MESMO bug de double margin-top explicado no
+   comentário grande ali em cima, só que no caso SOZINHO (sem
+   .chat-company-rail do lado, ver companyRail/.chat-drawer-solo em
+   ChatDrawer.tsx -- acontece ao abrir qualquer conversa) em vez do
+   caso aninhado no shell. Na Sala, a gaveta sozinha é filha direta de
+   .room-and-editor, que NÃO tem nenhum top embutido (começa em y:0) --
+   o margin-top:80px próprio dela é o ÚNICO respiro, certo. No Lobby,
+   a gaveta sozinha é filha DIRETA de .lobby-chat-pin-anchor (sem
+   shell no meio, ver wrap condicional em Lobby.tsx), que JÁ é
+   position:fixed com top:80px PRÓPRIO -- somando os dois (80 do
+   anchor + 80 do margin-top da gaveta) a gaveta nascia 160px do topo,
+   80px mais embaixo que devia, "comendo" 80px da altura por baixo
+   (bottom:0 não muda) -- daí o card encolhido só fora. Seletor
+   `.lobby-chat-pin-anchor > .chat-drawer-sidebar` (filho DIRETO) pega
+   só esse caso -- quando tem shell no meio (rail visível), a gaveta
+   vira NETA do anchor (anchor > shell > gaveta), não bate aqui, e
+   continua usando a regra de cima (zerada pelo shell). */
+.lobby-chat-pin-anchor > .chat-drawer-sidebar {
+  margin-top: 0;
+}
+
 /* 1/out, pedido do Douglas: "fixar fora da sala também" -- mesma ideia
    de "fixar" do .chat-drawer-sidebar/.chat-drawer-shell-sidebar
    (sala, ver comentários grandes acima), só que pro chat de FORA da
