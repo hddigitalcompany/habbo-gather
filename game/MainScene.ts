@@ -690,12 +690,15 @@ const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
 // dupla de linhas grudadas como um corte na madeira, não como 2
 // listras soltas.
 // LED de parede (ver comentário grande de LedSegmentDef em
-// game/wall.ts) -- largura da fita desenhada (px de tela, mesma ordem
-// de grandeza de thicknessPx de parede "padrão") e raio de captura do
+// game/wall.ts) -- espessura da linha-base desenhada na emenda (px de
+// tela; pedido do Douglas "quero que o led apareça apenas o brilho da
+// borda da frente" -- então essa linha é só a "semente" fina que o
+// Glow FX (ver addLedSprite) precisa pra ter algo pra brilhar em volta,
+// não um corpo sólido visível por si só) e raio de captura do
 // clique/hover em volta de uma emenda (px de tela, generoso o bastante
 // pra clicar sem precisar de precisão de pixel, mas sem roubar o clique
 // de uma emenda vizinha de verdade numa parede bem segmentada).
-const LED_STRIP_WIDTH_PX = 10;
+const LED_LINE_WIDTH_PX = 3;
 const LED_SNAP_RADIUS_PX = 26;
 
 const WALL_BASEBOARD_HEIGHT_PX = 16;
@@ -4799,18 +4802,19 @@ export default class MainScene extends Phaser.Scene {
     if (!junction) return;
     const { point, heightPx, depth } = junction;
     const colorNum = Phaser.Display.Color.HexStringToColor(seg.color).color;
-    const width = LED_STRIP_WIDTH_PX;
+    const width = LED_LINE_WIDTH_PX;
     const gfx = this.add.graphics();
-    gfx.fillStyle(colorNum, 1).fillRoundedRect(point.x - width / 2, point.y - heightPx, width, heightPx, width / 2);
-    // núcleo mais claro por cima (mesma ideia de "tubo de neon" -- um
-    // miolo quase branco, mais estreito, dá a sensação de luz de verdade
-    // em vez de uma tarja lisa só da cor escolhida).
-    gfx
-      .fillStyle(0xffffff, 0.55)
-      .fillRoundedRect(point.x - width / 4, point.y - heightPx, width / 2, heightPx, width / 4);
+    // Pedido do Douglas: "quero que o led, apareça apenas o brilho da
+    // borda da frente, entende?" -- nada de corpo sólido "tubo de
+    // neon" (a tarja larga + núcleo branco de antes). Agora é só uma
+    // linha fina da cor escolhida, com alpha reduzido: ela sozinha mal
+    // se nota -- é o Glow FX logo abaixo (outerStrength bem maior que
+    // antes, sem innerStrength) que faz a emenda "ler" como luz de
+    // verdade, em vez de um objeto colorido desenhado ali.
+    gfx.fillStyle(colorNum, 0.5).fillRect(point.x - width / 2, point.y - heightPx, width, heightPx);
     gfx.setDepth(depth);
     const supportsGlowFX = this.game.renderer.type === Phaser.WEBGL;
-    const glow: Phaser.FX.Glow[] = supportsGlowFX ? [gfx.postFX.addGlow(colorNum, 0, 2.5, false, 0.4, 12)] : [];
+    const glow: Phaser.FX.Glow[] = supportsGlowFX ? [gfx.postFX.addGlow(colorNum, 0, 4.5, false, 0.5, 16)] : [];
     this.draftLedGfx.set(key, { gfx, glow });
   }
 
