@@ -1887,6 +1887,18 @@ function ChatMessageRow({
   // comentário grande em renderMentionText sobre a limitação de nomes
   // com espaço.
   const iWasMentioned = !own && (msg.mentionedUserIds ?? []).includes(myUserId);
+  // 2/out, pedido do Douglas: "nesse convite, bota a logo da empresa,
+  // ao inves de deixar essa imagem corrompida" -- o cardzinho de
+  // convite (ver "chat-room-card-icon" mais abaixo) confiava cegamente
+  // em roomCard.roomLogoUrl: só caía no ícone genérico (CompanyIcon)
+  // quando vinha VAZIO, nunca quando vinha preenchido mas a imagem em
+  // si falhava ao carregar (link quebrado/apagado do storage) -- aí o
+  // navegador mostrava o ícone nativo de "imagem corrompida" em vez do
+  // ícone genérico que já existia pronto pra isso. onError troca pro
+  // mesmo fallback que a ausência de logoUrl já usava. Precisa ser
+  // hook aqui em cima (antes do primeiro return, ver msg.deleted
+  // abaixo) pra nunca virar condicional entre renders.
+  const [roomCardLogoFailed, setRoomCardLogoFailed] = useState(false);
   if (msg.deleted) {
     return (
       <div className={own ? "chat-message own" : "chat-message"}>
@@ -2062,9 +2074,13 @@ function ChatMessageRow({
           {msg.kind === "room_card" && msg.roomCard && msg.roomCard.action === "invite" && (
             <div className="chat-room-card">
               <span className="chat-room-card-icon">
-                {msg.roomCard.roomLogoUrl ? (
+                {msg.roomCard.roomLogoUrl && !roomCardLogoFailed ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={msg.roomCard.roomLogoUrl} alt="" />
+                  <img
+                    src={msg.roomCard.roomLogoUrl}
+                    alt=""
+                    onError={() => setRoomCardLogoFailed(true)}
+                  />
                 ) : (
                   <CompanyIcon />
                 )}
