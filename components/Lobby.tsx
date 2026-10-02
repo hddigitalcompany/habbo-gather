@@ -2241,14 +2241,30 @@ export default function Lobby({
   // Busca separada da do companyProfile/selectedRoomSlug mais acima
   // (aquela é do espaço SELECIONADO/visitado agora, que pode ser o de
   // outra pessoa -- essa aqui é sempre a MINHA, pro chat).
+  //
+  // 2/out, bug achado (Douglas: "as logos das empresas nao ta
+  // aparecendo, somente no lobby, porque ta diferente?") -- isso aqui
+  // usava `myRealRoom` (que de PROPÓSITO vira null pra sala-reservada,
+  // ver comentário grande dele acima -- regra feita só pra dropdown
+  // "Meus espaços"/"Criar espaço +" não duplicar/esconder errado).
+  // Só que pro Douglas (dono da plataforma) a Sala Principal
+  // (mapa-publicado) É a sala de verdade dele (ver fallback em
+  // app/api/room/mine/route.ts) -- então `myRealRoom` ficava sempre
+  // null pra ele, e a logo da PRÓPRIA empresa nunca entrava na aba
+  // "Empresa" do chat daqui do Lobby. Dentro da Sala (GameRoom.tsx)
+  // não tem esse filtro (busca direto pelo roomSlug aberto) -- por
+  // isso só aparecia "diferente" lá dentro, nunca aqui. Troquei pra
+  // `myRoom` puro (a sala de verdade da pessoa, sem a trava de
+  // dedupe do dropdown) -- `myRealRoom` continua existindo só pro que
+  // já usava antes (dropdown/"Criar espaço").
   const [myRoomLogoUrl, setMyRoomLogoUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!myRealRoom) {
+    if (!myRoom) {
       setMyRoomLogoUrl(null);
       return;
     }
     let cancelled = false;
-    fetch(`/api/room/company-profile?slug=${encodeURIComponent(myRealRoom.room_slug)}`)
+    fetch(`/api/room/company-profile?slug=${encodeURIComponent(myRoom.room_slug)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setMyRoomLogoUrl(data?.profile?.logoUrl || null);
@@ -2260,18 +2276,16 @@ export default function Lobby({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myRealRoom?.room_slug]);
+  }, [myRoom?.room_slug]);
   // avisa o motor único (ver setRoomContext/roomContext em
   // usePlatformChat.ts) qual é "minha sala" agora, pra "convidar
   // amigo"/carimbar "Empresa" numa conversa criada daqui usarem a
   // sala certa -- MESMA informação que esse componente já buscava
-  // sozinho antes (myRealRoom/myRoomLogoUrl), só agora também
-  // alimenta o hook compartilhado.
+  // sozinho antes (myRoom/myRoomLogoUrl), só agora também alimenta o
+  // hook compartilhado.
   useEffect(() => {
-    chat.setRoomContext(
-      myRealRoom ? { slug: myRealRoom.room_slug, name: myRealRoom.name, logoUrl: myRoomLogoUrl } : null
-    );
-  }, [chat, myRealRoom, myRoomLogoUrl]);
+    chat.setRoomContext(myRoom ? { slug: myRoom.room_slug, name: myRoom.name, logoUrl: myRoomLogoUrl } : null);
+  }, [chat, myRoom, myRoomLogoUrl]);
   const dropdownEntries = myRealRoom
     ? [...visibleRoomSlugs, { slug: myRealRoom.room_slug, label: myRealRoom.name, teamOnly: false }]
     : visibleRoomSlugs;
