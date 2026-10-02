@@ -515,15 +515,25 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 const FACADE_TEXTURE_KEY = "fachada-predio";
 const DEPTH_FACADE = -2_500_000;
 /** Profundidade SÓ da vidraça 2 (quina2, fachada-predio-quina-2) --
- * pedido do Douglas: "coloque o vidro acima do piso em questao de
- * camada, sem mudar a posicao dele". Diferente da fachada principal
- * (DEPTH_FACADE, que fica ATRÁS do piso de propósito, "pendurada" pra
- * fora/baixo da sala) -- essa peça é tratada como vidro visível DENTRO
- * da sala, então precisa ficar NA FRENTE do piso (DEPTH_FLOOR). x/y
- * continuam exatamente iguais (tileToWorld + offset), só a ordem de
- * desenho muda -- por isso "+ 1", logo acima do piso, sem entrar na
- * faixa de tinta de área/móvel/boneco (DEPTH_AREA pra cima). */
-const DEPTH_FACADE_CORNER2_GLASS = DEPTH_FLOOR + 1;
+ * pedido do Douglas (1): "coloque o vidro acima do piso em questao de
+ * camada, sem mudar a posicao dele" -- primeira versão, só "+ 1" acima
+ * de DEPTH_FLOOR. Pedido (2), com print mostrando o painel de parede
+ * (MDF) tampando a vidraça: "a vidraça, da fachada, coloque ela acima
+ * de tudo nas camadas, mobis, paredes, piso" -- "+ 1" só vencia o
+ * PISO; móvel/parede/boneco usam a profundidade dinâmica por fileira
+ * (furnitureDepthForTile/wallDepthForSegment/avatarDepthForY, perto de
+ * 0 ou até bem maior em sala grande), então qualquer um desses sempre
+ * desenhava NA FRENTE da vidraça 2 (DEPTH_FLOOR+1, um número bem mais
+ * negativo). Troca pra uma profundidade fixa BEM maior que qualquer
+ * fileira de sala real consegue alcançar -- mas ainda bem abaixo de
+ * EDIT_UI_DEPTH (10_000_000, a MESMA barreira que a UI do editor usa
+ * pra garantir que fica acima de TUDO do jogo), pra não competir com
+ * contorno de hover/seleção do modo de edição. Diferente da fachada
+ * principal (DEPTH_FACADE, que continua ATRÁS do piso de propósito,
+ * "pendurada" pra fora/baixo da sala) -- só essa peça é tratada como
+ * vidro visível DENTRO da sala. x/y continuam exatamente iguais
+ * (tileToWorld + offset), só a ordem de desenho muda. */
+const DEPTH_FACADE_CORNER2_GLASS = 5_000_000;
 /** vértice do "V" de cima da fachada DENTRO da arte (px) -- é esse
  * ponto que cola no vértice de baixo do piso. NÃO está mais
  * centralizado na largura (era x=806.4=metade de 1613px na arte
