@@ -3472,10 +3472,23 @@ export default function GameRoom({
     };
   }, []);
 
+  // 2/out, bug achado (Douglas: "entrei com um visitante e na
+  // aproximidade clico nos botoes de audio e camera e nao ativou") --
+  // os dois tinham `if (!stream) return;` ANTES de mexer em qualquer
+  // state -- enquanto requestMedia() ainda não tinha resolvido o
+  // getUserMedia (aguardando a pessoa responder o aviso de permissão
+  // do navegador, que pra visitante novo pode demorar) ou se o
+  // getUserMedia falhou de vez (permissão negada), localStreamRef.current
+  // é null e o clique virava NADA -- nem o ícone mudava, nenhum feedback,
+  // silencioso. Agora sempre atualiza o state/preferência (feedback
+  // na hora, sempre) e só mexe nas tracks do stream de verdade SE ele
+  // já existir -- requestMedia() lê getStoredMicOn()/getStoredCamOn()
+  // quando o stream finalmente chega, então um toggle que aconteceu
+  // antes dele existir ainda é respeitado certinho assim que a
+  // permissão libera.
   function toggleMic() {
     const stream = localStreamRef.current;
-    if (!stream) return;
-    stream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
+    if (stream) stream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
     setMicOn((v) => {
       setStoredMicOn(!v); // persiste (ver lib/mediaPrefs.ts) -- próxima visita ao Lobby já abre mutado/desmutado igual deixou aqui
       return !v;
@@ -3484,8 +3497,7 @@ export default function GameRoom({
 
   function toggleCam() {
     const stream = localStreamRef.current;
-    if (!stream) return;
-    stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
+    if (stream) stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
     setCamOn((v) => {
       setStoredCamOn(!v);
       return !v;
