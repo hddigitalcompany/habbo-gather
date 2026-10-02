@@ -123,20 +123,27 @@ export function wallSegmentId(col: number, row: number, side: WallSide): string 
  * painel: menos campo novo no banco/formulário pra uma textura que é,
  * geometricamente, só "tijolo sem coluna nenhuma").
  *
- * Os 2 tipos compartilham TODO o resto (espessura, cor do topo, faces
- * de PONTA, e o RODAPÉ -- ver wallFaceRects abaixo, que escolhe qual
- * função de retângulo chamar, usada no MESMO lugar/ordem de desenho que
- * wallBrickRects sempre usou em createWallPatternGraphics, MainScene.ts
- * -- então o rodapé continua sendo desenhado DEPOIS, por cima, igual já
- * era pro tijolo: "ele fica por cima de tudo, ate do rodapé, voce
- * consegue?" perguntou o Douglas, e a resposta é "já funciona assim
- * sozinho", sem precisar de nenhum fix de z-order dedicado -- e o LED
- * (ver LedSegmentDef abaixo) também "só funciona", sem nenhuma mudança
- * de código, porque ele já lia a geometria genérica da parede
- * (wallJunctionAt/wallPatternFrontFloorPoints em MainScene.ts), nunca o
- * tipo de textura -- exatamente o que o Douglas pediu: "eu queroa gora
- * adicionar painel como opcao de textura de parede, justamente pra
- * tambem aparecer o led".
+ * Os 2 tipos compartilham a face da frente (wallFaceRects abaixo,
+ * escolhe qual função de retângulo chamar, usada no MESMO lugar/ordem
+ * de desenho que wallBrickRects sempre usou em
+ * createWallPatternGraphics, MainScene.ts), espessura, cor do topo e
+ * faces de PONTA -- MAS NÃO o RODAPÉ. 1ª pergunta do Douglas: "ele fica
+ * por cima de tudo, ate do rodapé, voce consegue?" -- resposta inicial
+ * foi manter o rodapé de sempre (desenhado por CIMA, como sempre foi
+ * pro tijolo, cobrindo a base do painel); testando ao vivo ele corrigiu
+ * o pedido: "quero por cima do rodape, quando tem painel, tira o
+ * rodapé" -- ou seja, pra textura "panel" o rodapé não é só desenhado
+ * ANTES (escondido atrás do painel) nem DEPOIS (por cima) -- ele
+ * simplesmente NÃO EXISTE (gate `pattern.textureKind !== "panel"` em
+ * volta de todo o bloco RODAPÉ, nas 3 faces que o desenham -- frente e
+ * as 2 de PONTA -- ver createWallPatternGraphics). Tijolo continua com
+ * o rodapé de sempre, sem mudança nenhuma. O LED (ver LedSegmentDef
+ * abaixo) também "só funciona" em paredes com painel, sem nenhuma
+ * mudança de código nele, porque ele já lia a geometria genérica da
+ * parede (wallJunctionAt/wallPatternFrontFloorPoints em MainScene.ts),
+ * nunca o tipo de textura nem o rodapé -- exatamente o que o Douglas
+ * pediu: "eu queroa gora adicionar painel como opcao de textura de
+ * parede, justamente pra tambem aparecer o led".
  */
 export type WallTextureKind = "brick" | "panel";
 

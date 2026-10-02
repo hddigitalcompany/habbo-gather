@@ -5574,37 +5574,49 @@ export default class MainScene extends Phaser.Scene {
     const baseboardGrooveTop = WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_GROOVE_OFFSET_PX;
     const baseboardGrooveMid = baseboardGrooveTop - WALL_BASEBOARD_GROOVE_LINE_PX;
     const baseboardGrooveBottom = baseboardGrooveMid - WALL_BASEBOARD_GROOVE_LINE_PX;
-    gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
-    gfx.fillPoints(
-      [mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX), mapPoint(0, WALL_BASEBOARD_HEIGHT_PX)],
-      true
-    );
-    // sombra (parede do sulco que olha pra BAIXO -- fica em CIMA, mais
-    // perto do topo da faixa).
-    gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
-    gfx.fillPoints(
-      [mapPoint(0, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveTop), mapPoint(0, baseboardGrooveTop)],
-      true
-    );
-    // brilho (parede do sulco que olha pra CIMA -- fica GRUDADA embaixo
-    // da linha de sombra, formando o entalhe).
-    gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
-    gfx.fillPoints(
-      [mapPoint(0, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(0, baseboardGrooveMid)],
-      true
-    );
-    // linha de CIMA -- marca a emenda rodapé/parede (ver
-    // WALL_BASEBOARD_TOP_LINE_* acima), bem no topo da faixa.
-    gfx.fillStyle(WALL_BASEBOARD_TOP_LINE_COLOR, 1);
-    gfx.fillPoints(
-      [
-        mapPoint(0, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
-        mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
-        mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX),
-        mapPoint(0, WALL_BASEBOARD_HEIGHT_PX),
-      ],
-      true
-    );
+    // Painel NÃO ganha rodapé nenhum -- pedido do Douglas, depois de
+    // confirmar que "por cima de tudo, ate do rodape" (pergunta
+    // original, ver comentário grande de WallTextureKind em
+    // game/wall.ts) não bastava manter o rodapé desenhado por cima
+    // (como já era e continua sendo pro tijolo): "quero por cima do
+    // rodape, quando tem painel, tira o rodapé" -- ou seja, pra textura
+    // "panel" o rodapé inteiro (faixa + cava + linha de cima, aqui e
+    // nas 2 faces de PONTA mais abaixo) simplesmente não é desenhado, o
+    // painel desce até o chão sem nada por cima dele. Tijolo continua
+    // com o rodapé de sempre, sem mudança nenhuma.
+    if (pattern.textureKind !== "panel") {
+      gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX), mapPoint(0, WALL_BASEBOARD_HEIGHT_PX)],
+        true
+      );
+      // sombra (parede do sulco que olha pra BAIXO -- fica em CIMA, mais
+      // perto do topo da faixa).
+      gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(0, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(edgeLengthExt, baseboardGrooveTop), mapPoint(0, baseboardGrooveTop)],
+        true
+      );
+      // brilho (parede do sulco que olha pra CIMA -- fica GRUDADA embaixo
+      // da linha de sombra, formando o entalhe).
+      gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
+      gfx.fillPoints(
+        [mapPoint(0, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveBottom), mapPoint(edgeLengthExt, baseboardGrooveMid), mapPoint(0, baseboardGrooveMid)],
+        true
+      );
+      // linha de CIMA -- marca a emenda rodapé/parede (ver
+      // WALL_BASEBOARD_TOP_LINE_* acima), bem no topo da faixa.
+      gfx.fillStyle(WALL_BASEBOARD_TOP_LINE_COLOR, 1);
+      gfx.fillPoints(
+        [
+          mapPoint(0, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
+          mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX - WALL_BASEBOARD_TOP_LINE_PX),
+          mapPoint(edgeLengthExt, WALL_BASEBOARD_HEIGHT_PX),
+          mapPoint(0, WALL_BASEBOARD_HEIGHT_PX),
+        ],
+        true
+      );
+    }
     // face de CIMA -- percurso ao redor da tira (farA2 -> farB2 ->
     // nearB2 -> nearA2), SEM pivô nenhum em NENHUM tipo de ponta --
     // "straight" e "open" usam farX/nearX crus (corte reto exato, sem
@@ -5704,34 +5716,38 @@ export default class MainScene extends Phaser.Scene {
     if (junctionA.kind === "open" && visibleCapEnd === "A") {
       gfx.fillStyle(shadeColor, 1);
       gfx.fillPoints([nearA, raise(nearA), raise(farA), farA], true);
-      gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
-      gfx.fillPoints([nearA, raiseBaseboard(nearA, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farA, WALL_BASEBOARD_HEIGHT_PX), farA], true);
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(nearA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveMid)],
-        true
-      );
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearA, baseboardGrooveBottom), raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveBottom)],
-        true
-      );
+      if (pattern.textureKind !== "panel") {
+        gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
+        gfx.fillPoints([nearA, raiseBaseboard(nearA, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farA, WALL_BASEBOARD_HEIGHT_PX), farA], true);
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(nearA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveTop), raiseBaseboard(farA, baseboardGrooveMid)],
+          true
+        );
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearA, baseboardGrooveBottom), raiseBaseboard(nearA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveMid), raiseBaseboard(farA, baseboardGrooveBottom)],
+          true
+        );
+      }
     }
     if (junctionB.kind === "open" && visibleCapEnd === "B") {
       gfx.fillStyle(shadeColor, 1);
       gfx.fillPoints([nearB, raise(nearB), raise(farB), farB], true);
-      gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
-      gfx.fillPoints([nearB, raiseBaseboard(nearB, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farB, WALL_BASEBOARD_HEIGHT_PX), farB], true);
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(nearB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveMid)],
-        true
-      );
-      gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
-      gfx.fillPoints(
-        [raiseBaseboard(nearB, baseboardGrooveBottom), raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveBottom)],
-        true
-      );
+      if (pattern.textureKind !== "panel") {
+        gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
+        gfx.fillPoints([nearB, raiseBaseboard(nearB, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farB, WALL_BASEBOARD_HEIGHT_PX), farB], true);
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_SHADOW_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(nearB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveTop), raiseBaseboard(farB, baseboardGrooveMid)],
+          true
+        );
+        gfx.fillStyle(WALL_BASEBOARD_GROOVE_HIGHLIGHT_COLOR, 1);
+        gfx.fillPoints(
+          [raiseBaseboard(nearB, baseboardGrooveBottom), raiseBaseboard(nearB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveMid), raiseBaseboard(farB, baseboardGrooveBottom)],
+          true
+        );
+      }
     }
     gfx.setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
     this.applyWallAvatarCutoutMask(gfx); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
