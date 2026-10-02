@@ -205,6 +205,36 @@ const STATUS_DOT_COLORS: Record<ProfileStatus, string> = {
   focus: "#f5c542",
 };
 
+// 2/out, bug do Douglas: "ta usando minha camera sem eu estar em
+// nenhuma chamada agr" -- toggleCam/requestMedia só DESATIVAVAM a
+// track (t.enabled = false) quando a câmera tava "desligada", nunca
+// soltavam o hardware de verdade (.stop()). O navegador/SO mantém o
+// indicador de câmera ACESO enquanto a track existir, mesmo
+// desativada -- e ela continua mandando quadro preto AO VIVO pra quem
+// tá por perto (ver RemoteVideoTile, sempre mostra o que chega, sem
+// checar enabled). Esse helper gera uma track de vídeo PRETA via
+// canvas (não pede câmera nenhuma) pra ocupar o lugar da track real
+// enquanto a câmera tá desligada -- assim todo código que já assume
+// "sempre tem uma track de vídeo no stream/no sender" (troca de
+// aparelho, compartilhar tela, ver switchCamDevice/toggleScreenShare/
+// stopScreenShare mais abaixo) continua funcionando SEM MUDAR NADA,
+// e o hardware de verdade só fica preso enquanto a câmera tá
+// REALMENTE ligada.
+function createBlackVideoTrack(): MediaStreamTrack {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 2;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, 2, 2);
+  }
+  // 1fps é suficiente (ninguém vê esse quadro de verdade) e custa
+  // menos que captureStream() sem argumento (framerate "natural" do
+  // canvas, que tentaria desenhar a cada paint).
+  return canvas.captureStream(1).getVideoTracks()[0];
+}
+
 function statusColorFor(status: string | undefined): string {
   return STATUS_DOT_COLORS[(status as ProfileStatus) ?? "online"] ?? STATUS_DOT_COLORS.online;
 }
@@ -946,6 +976,14 @@ export default function GameRoom({
   // Lobby e entrar na sala destravaria ele de novo sozinho.
   const [micOn, setMicOn] = useState(() => getStoredMicOn());
   const [camOn, setCamOn] = useState(() => getStoredCamOn());
+  // ref espelhando camOn (mesmo padrão de accountAccessTokenRef acima)
+  // -- o toggleCam de "ligar" é assíncrono agora (precisa de um
+  // getUserMedia novo, ver comentário grande dele), então quando a
+  // Promise resolve precisa checar se a pessoa não desligou nesse
+  // meio-tempo (clique duplo rápido) lendo o valor MAIS NOVO, não o
+  // que tava fechado no closure na hora que a função começou.
+  const camOnRef = useRef(camOn);
+  camOnRef.current = camOn;
   const [screenOn, setScreenOn] = useState(false);
 
   // 2/out, pedido do Douglas: "porque a camera fica ali preta?" --
@@ -2915,15 +2953,24 @@ export default function GameRoom({
       // não só nessa track).
       const micDeviceId = getStoredMicDeviceId();
       const camDeviceId = getStoredCamDeviceId();
+      // mudo/câmera desligada escolhidos no Lobby também valem aqui --
+      // sem isso, mutar lá e entrar destravaria o mic sozinho (o
+      // getUserMedia sempre devolve a track LIGADA, ver toggleMic).
+      // Lidos ANTES do getUserMedia agora (2/out, ver
+      // createBlackVideoTrack acima): se a câmera já entra desligada,
+      // nem pede o hardware dela (video:false) -- antes pedia sempre e
+      // só desativava a track depois, prendendo a câmera mesmo pra
+      // quem nunca ligou ela nessa visita.
+      const wantCamOnAtRequest = getStoredCamOn();
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: camDeviceId ? { deviceId: { exact: camDeviceId } } : true,
+          video: wantCamOnAtRequest ? (camDeviceId ? { deviceId: { exact: camDeviceId } } : true) : false,
           audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
         });
       } catch {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          stream = await navigator.mediaDevices.getUserMedia({ video: wantCamOnAtRequest, audio: true });
         } catch (e) {
           console.warn("Sem acesso a câmera/microfone — seguindo só com posição/chat.", e);
           return;
@@ -2933,13 +2980,38 @@ export default function GameRoom({
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      // mudo/câmera desligada escolhidos no Lobby também valem aqui --
-      // sem isso, mutar lá e entrar destravaria o mic sozinho (o
-      // getUserMedia sempre devolve a track LIGADA, ver toggleMic).
+      // relê DEPOIS do await (não reaproveita wantCamOnAtRequest) --
+      // a pessoa pode ter clicado mic/câmera ENQUANTO o navegador
+      // ainda tava mostrando o aviso de permissão (mesmo comentário
+      // grande de toggleMic/toggleCam mais abaixo: um toggle que
+      // acontece antes do stream existir precisa valer assim que ele
+      // chegar).
       const wantMicOn = getStoredMicOn();
       const wantCamOn = getStoredCamOn();
       stream.getAudioTracks().forEach((t) => (t.enabled = wantMicOn));
-      stream.getVideoTracks().forEach((t) => (t.enabled = wantCamOn));
+      const camTrackFromRequest = stream.getVideoTracks()[0]; // só existe se pedimos com vídeo acima
+      if (wantCamOn && camTrackFromRequest) {
+        camTrackFromRequest.enabled = true;
+      } else if (wantCamOn && !camTrackFromRequest) {
+        // queria desligada na hora do pedido (por isso não veio vídeo
+        // nenhum) mas religou nesse meio-tempo -- entra com a preta
+        // por enquanto; toggleCam (chamado durante a espera, com
+        // stream ainda null) só atualizou state/preferência, então é
+        // só isso mesmo que falta: o próximo toggle já busca a câmera
+        // de verdade normalmente.
+        stream.addTrack(createBlackVideoTrack());
+      } else if (!wantCamOn && camTrackFromRequest) {
+        // pediu com câmera (queria ligada) mas desligou nesse
+        // meio-tempo -- solta o hardware já de cara, não deixa preso
+        // até o próximo toggle.
+        stream.removeTrack(camTrackFromRequest);
+        camTrackFromRequest.stop();
+        stream.addTrack(createBlackVideoTrack());
+      } else {
+        // !wantCamOn && sem vídeo -- já pediu certo, só completa com
+        // a preta (ver createBlackVideoTrack).
+        stream.addTrack(createBlackVideoTrack());
+      }
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       if (stream.getAudioTracks()[0]?.getSettings().deviceId) {
@@ -3520,13 +3592,102 @@ export default function GameRoom({
     });
   }
 
+  // 2/out, bug do Douglas: "ta usando minha camera sem eu estar em
+  // nenhuma chamada agr" -- antes só desativava a track (t.enabled =
+  // !t.enabled), que NUNCA soltava o hardware (indicador do SO ficava
+  // aceso pra sempre depois do primeiro getUserMedia, e quem tava por
+  // perto continuava recebendo quadro preto AO VIVO, ver
+  // createBlackVideoTrack lá em cima). Agora desligar de verdade PARA
+  // a track real (.stop()) e põe uma track preta de mentira no lugar
+  // (sender/stream nunca ficam sem nenhuma track de vídeo, então
+  // switchCamDevice/toggleScreenShare/stopScreenShare não precisam
+  // mudar nada); ligar de novo pede uma captura NOVA (getUserMedia),
+  // por isso essa metade é assíncrona -- o ícone/estado muda na hora
+  // (feedback imediato) e a troca de verdade acontece quando a câmera
+  // responder.
   function toggleCam() {
     const stream = localStreamRef.current;
-    if (stream) stream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
-    setCamOn((v) => {
-      setStoredCamOn(!v);
-      return !v;
-    });
+    if (!stream) {
+      // getUserMedia inicial ainda não resolveu (ou falhou de vez) --
+      // só atualiza state/preferência, igual sempre foi (ver
+      // comentário grande de toggleMic acima); requestMedia() relê
+      // getStoredCamOn() depois que o stream chegar e já entra do
+      // jeito certo sozinho.
+      setCamOn((v) => {
+        setStoredCamOn(!v);
+        return !v;
+      });
+      return;
+    }
+
+    if (camOn) {
+      const camTrack = stream.getVideoTracks()[0];
+      const placeholder = createBlackVideoTrack();
+      stream.addTrack(placeholder);
+      if (camTrack) {
+        stream.removeTrack(camTrack);
+        camTrack.stop();
+      }
+      // com tela compartilhada agora, o sender de vídeo tá ocupado com
+      // ela (ver toggleScreenShare) -- não mexe nele aqui, só troca a
+      // track "de base" (localStreamRef); a câmera desligada só
+      // reaparece pros outros quando a pessoa PARAR o compartilhamento
+      // (stopScreenShare já pega a track atual de localStreamRef
+      // sozinho, mesmo esquema de switchCamDevice).
+      if (!screenOn) {
+        peersRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          sender?.replaceTrack(placeholder);
+        });
+        chat.replaceCallTrack(placeholder);
+      }
+      setCamOn(false);
+      setStoredCamOn(false);
+      return;
+    }
+
+    setCamOn(true);
+    setStoredCamOn(true);
+    (async () => {
+      const camDeviceId = getStoredCamDeviceId();
+      try {
+        const fresh = await navigator.mediaDevices.getUserMedia({
+          video: camDeviceId ? { deviceId: { exact: camDeviceId } } : true,
+        });
+        const newTrack = fresh.getVideoTracks()[0];
+        if (!newTrack) return;
+        if (!camOnRef.current) {
+          // desligou de novo enquanto a câmera ainda tava abrindo --
+          // não reacende sozinha.
+          newTrack.stop();
+          return;
+        }
+        const current = localStreamRef.current;
+        const oldTrack = current?.getVideoTracks()[0]; // a preta
+        if (current) {
+          current.addTrack(newTrack);
+          if (oldTrack) {
+            current.removeTrack(oldTrack);
+            oldTrack.stop();
+          }
+        } else {
+          localStreamRef.current = fresh;
+        }
+        if (!screenOn) {
+          peersRef.current.forEach((pc) => {
+            const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+            sender?.replaceTrack(newTrack);
+          });
+          chat.replaceCallTrack(newTrack);
+          if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+        }
+        if (newTrack.getSettings().deviceId) setSelectedCamId(newTrack.getSettings().deviceId as string);
+      } catch (e) {
+        console.warn("Não deu pra ligar a câmera", e);
+        setCamOn(false);
+        setStoredCamOn(false);
+      }
+    })();
   }
 
   // --- troca de aparelho (mic/câmera), ver SettingsPanel > "Áudio e
@@ -3568,6 +3729,16 @@ export default function GameRoom({
 
   async function switchCamDevice(deviceId: string) {
     if (!deviceId || deviceId === selectedCamId) return;
+    if (!camOn) {
+      // câmera desligada -- não pede o hardware só pra trocar de
+      // aparelho (2/out, mesmo espírito do toggleCam acima: só
+      // captura a câmera quando ela precisa estar LIGADA de verdade).
+      // Só guarda a escolha; religar (toggleCam) já busca ESSE
+      // aparelho sozinho.
+      setSelectedCamId(deviceId);
+      setStoredCamDeviceId(deviceId);
+      return;
+    }
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
       const newTrack = fresh.getVideoTracks()[0];
