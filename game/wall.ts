@@ -280,6 +280,57 @@ export interface WallSegmentDef {
   styleId: string;
 }
 
+/** Ponta A ou B de um segmento de parede (ver wallJunctionAt em
+ * MainScene.ts) -- qual dos 2 lados da aresta. */
+export type WallEnd = "A" | "B";
+
+/**
+ * LED de parede -- pedido do Douglas: "efeito de led... led de parede",
+ * esclarecido depois ("chat" ali era só forma de falar comigo, não
+ * sobre o chat da Sala) como uma fita colorida na EMENDA entre 2
+ * painéis de parede do MESMO estilo colocados lado a lado ("poe o led
+ * na emenda deles", confirmado como "Entre dois paineis colocados lado
+ * a lado" -- NÃO um recorte dentro de uma imagem só, pra valer com
+ * QUALQUER estilo de parede, imagem ou "padrão"). "eu queria faer algo
+ * simples pra usarem, como, adicioanr o led, e escolher a cor" -- sem
+ * redimensionamento livre nenhum (isso travava o Douglas): o
+ * tamanho/posição vêm de graça da geometria da própria emenda (ver
+ * wallJunctionAt/ledJunctionPoint em MainScene.ts), só a COR é
+ * escolhida.
+ *
+ * Mora na MESMA identidade de aresta que WallSegmentDef (col/row/side),
+ * com `end` a mais (ver WallEnd acima) pra dizer qual das 2 pontas da
+ * aresta é a emenda -- só faz sentido existir numa ponta classificada
+ * "straight" por wallJunctionAt (2 segmentos do MESMO estilo se
+ * encostando ali), nunca numa quina ou ponta solta (a ferramenta de
+ * colocar, em MainScene.ts, só deixa clicar numa ponta "straight" de
+ * verdade, então um LED salvo sempre deveria estar numa -- mas se o
+ * segmento vizinho for apagado depois, a ponta deixa de ser "straight"
+ * e o LED simplesmente para de ser desenhado, sem precisar apagar o
+ * dado -- ver loadSavedLed/revalidateLedsTouching em MainScene.ts).
+ *
+ * CANÔNICO: uma emenda reta entre 2 segmentos é o MESMO ponto físico
+ * visto de 2 jeitos (ex.: colPlus(c,r).B é o MESMO ponto que
+ * colPlus(c,r+1).A, ver wallJunctionAt) -- pra nunca existirem 2 LEDs
+ * "duplicados" representando a mesma emenda, SEMPRE se guarda pelo
+ * lado de índice MENOR com end="B" (ver canonicalLedEnd em
+ * MainScene.ts, que resolve isso ANTES de salvar/desenhar).
+ */
+export interface LedSegmentDef {
+  col: number;
+  row: number;
+  side: WallSide;
+  end: WallEnd;
+  /** cor hex (#rrggbb) escolhida pelo jogador. */
+  color: string;
+}
+
+/** Mesma ideia de wallSegmentId acima, com `end` a mais (ver
+ * LedSegmentDef). */
+export function ledSegmentId(col: number, row: number, side: WallSide, end: WallEnd): string {
+  return `${col}_${row}_${side}_${end}`;
+}
+
 /**
  * Os 2 pontos (em pixel) que marcam essa aresta no CHÃO (base da
  * parede, antes de "subir" -- a altura em si vem da própria arte, ver

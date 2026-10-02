@@ -87,9 +87,12 @@ import {
   WallPatternConfig,
   WallSegmentDef,
   WallSide,
+  WallEnd,
+  LedSegmentDef,
   wallEntryById,
   wallTextureKey,
   wallSegmentId,
+  ledSegmentId,
   wallWorldAnchor,
   wallDepthForSegment,
   wallEdgeFloorPoints,
@@ -686,6 +689,15 @@ const EDIT_HOVER_COLOR_OCCUPIED = 0xd95959;
 // do jogo (ver comentário de topColor em game/wall.ts). O olho lê essa
 // dupla de linhas grudadas como um corte na madeira, não como 2
 // listras soltas.
+// LED de parede (ver comentário grande de LedSegmentDef em
+// game/wall.ts) -- largura da fita desenhada (px de tela, mesma ordem
+// de grandeza de thicknessPx de parede "padrão") e raio de captura do
+// clique/hover em volta de uma emenda (px de tela, generoso o bastante
+// pra clicar sem precisar de precisão de pixel, mas sem roubar o clique
+// de uma emenda vizinha de verdade numa parede bem segmentada).
+const LED_STRIP_WIDTH_PX = 10;
+const LED_SNAP_RADIUS_PX = 26;
+
 const WALL_BASEBOARD_HEIGHT_PX = 16;
 const WALL_BASEBOARD_COLOR = 0xf0ebe0;
 /** distância do TOPO da faixa até a cava (sulco) -- ela fica perto do
@@ -791,6 +803,13 @@ type FloorTool = { kind: "paint"; entry: FloorCatalogEntry } | { kind: "erase" }
  * MESMA ideia da FloorTool acima, só que "paint" pinta uma ARESTA da
  * grade (não um tile inteiro, ver WallSegmentDef em game/wall.ts). */
 type WallTool = { kind: "paint"; entry: WallCatalogEntry } | { kind: "erase" } | null;
+
+/** Ferramenta de LED selecionada no editor (ver selectLedTool) --
+ * MESMA ideia de WallTool acima, só que "paint" carrega a COR escolhida
+ * (hex) em vez de um WallCatalogEntry -- LED não tem "modelo" nenhum
+ * pra escolher, só onde (a emenda clicada) e qual cor (ver comentário
+ * grande de LedSegmentDef em game/wall.ts). */
+type LedTool = { kind: "paint"; color: string } | { kind: "erase" } | null;
 
 /** Ferramenta de porta selecionada no editor (ver selectDoorTool) --
  * MESMA ideia da WallTool acima (mora numa ARESTA da grade, não um tile
@@ -1206,6 +1225,31 @@ export default class MainScene extends Phaser.Scene {
 
   /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftFloorChange, mas pra parede. */
   onDraftWallChange?: (items: WallSegmentDef[]) => void;
+
+  // --- LED de parede do editor de espaço (aba "LED", ver selectLedTool)
+  // -- pedido do Douglas: "efeito de led... led de parede", fita
+  // colorida na EMENDA entre 2 painéis do MESMO estilo (ver comentário
+  // grande de LedSegmentDef em game/wall.ts). MESMO esquema de
+  // Map<chave, def>+Map<chave, sprite> da parede acima, só que a chave
+  // (ledSegmentId) inclui `end` (A/B -- qual ponta da aresta), e o
+  // "sprite" aqui sempre é um Graphics+Glow próprio (nunca Image --
+  // LED não tem arte nenhuma, é desenhado, ver addLedSprite).
+  private selectedLedTool: LedTool = null;
+  private draftLed: Map<string, LedSegmentDef> = new Map();
+  private draftLedGfx: Map<
+    string,
+    { gfx: Phaser.GameObjects.Graphics; glow: Phaser.FX.Glow[]; tween: Phaser.Tweens.Tween | null }
+  > = new Map();
+  // destaque da emenda mais próxima do cursor com a ferramenta de LED
+  // armada -- mesma ideia/estilo visual de wallHoverGraphics acima (uma
+  // LINHA, só que vertical ao longo da emenda em vez de deitada ao
+  // longo da aresta), só aparece numa ponta classificada "straight" de
+  // verdade por wallJunctionAt (ver nearestLedCandidate).
+  private ledHoverGraphics?: Phaser.GameObjects.Graphics;
+  private hoveredLedCandidate: { col: number; row: number; side: WallSide; end: WallEnd } | null = null;
+
+  /** Definido de fora (GameRoom.tsx) -- mesma ideia do onDraftWallChange, mas pro LED. */
+  onDraftLedChange?: (items: LedSegmentDef[]) => void;
 
   // --- porta do editor de espaço (aba "Porta", ver selectDoorTool) --
   // pedido do Douglas: "vamos criar uma nova categoria 'porta'... porque
@@ -1727,6 +1771,7 @@ export default class MainScene extends Phaser.Scene {
     this.hoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
     this.roomHoverGraphics = this.add.graphics().setDepth(DEPTH_ROOM_TILE_HOVER).setVisible(false);
     this.wallHoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
+    this.ledHoverGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
     this.floorRectGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
     this.areaRectGraphics = this.add.graphics().setDepth(EDIT_UI_DEPTH).setVisible(false);
 
@@ -4021,6 +4066,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedLedTool = null;
     this.selectedRoomShapeTool = null;
     this.moveToolActive = false;
     this.deleteToolActive = false;
@@ -4067,6 +4113,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedLedTool = null;
     this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
@@ -4123,6 +4170,7 @@ export default class MainScene extends Phaser.Scene {
       this.selectedAreaTool = null;
       this.selectedWallTool = null;
       this.selectedDoorTool = null;
+      this.selectedLedTool = null;
       this.selectedRoomShapeTool = null;
       this.deleteToolActive = false;
       this.refreshCatalogGhost();
@@ -4150,6 +4198,7 @@ export default class MainScene extends Phaser.Scene {
       this.selectedAreaTool = null;
       this.selectedWallTool = null;
       this.selectedDoorTool = null;
+      this.selectedLedTool = null;
       this.selectedRoomShapeTool = null;
       this.selectMoveTool(false);
       this.refreshCatalogGhost();
@@ -4359,6 +4408,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedLedTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
     this.refreshCatalogGhost();
@@ -4542,6 +4592,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedAreaTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedLedTool = null;
     this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
@@ -4587,6 +4638,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedAreaTool = null;
     this.selectedDoorTool = null;
+    this.selectedLedTool = null;
     this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
@@ -4603,6 +4655,242 @@ export default class MainScene extends Phaser.Scene {
     this.draftWallSprites.clear();
     this.draftWall.clear();
     this.onDraftWallChange?.(this.getDraftWallList());
+  }
+
+  // ------------------------------------------------------------------
+  // LED de parede (aba "LED", ver comentário grande de LedSegmentDef em
+  // game/wall.ts e selectedLedTool/draftLed lá em cima) -- fita
+  // colorida numa EMENDA entre 2 painéis de parede do MESMO estilo.
+  // ------------------------------------------------------------------
+
+  /** Escolhe a ferramenta de LED ativa -- mesma ideia da selectWallTool
+   * acima. Desarma as outras (móvel/piso/área/parede/porta/mover, só uma
+   * ferramenta ativa por vez). */
+  selectLedTool(tool: LedTool) {
+    this.selectedLedTool = tool;
+    this.selectedCatalogEntry = null;
+    this.selectedFloorTool = null;
+    this.selectedAreaTool = null;
+    this.selectedWallTool = null;
+    this.selectedDoorTool = null;
+    this.selectedRoomShapeTool = null;
+    this.deleteToolActive = false;
+    this.selectMoveTool(false);
+    this.refreshCatalogGhost();
+    this.hoveredLedCandidate = null;
+    if (!tool) this.ledHoverGraphics?.setVisible(false);
+  }
+
+  getDraftLedList(): LedSegmentDef[] {
+    return Array.from(this.draftLed.values());
+  }
+
+  clearDraftLed() {
+    for (const handle of this.draftLedGfx.values()) {
+      handle.tween?.stop();
+      handle.gfx.destroy();
+    }
+    this.draftLedGfx.clear();
+    this.draftLed.clear();
+    this.onDraftLedChange?.(this.getDraftLedList());
+  }
+
+  /** Dado col/row/side/end de QUALQUER uma das 2 pontas de uma emenda
+   * reta, devolve a representação CANÔNICA dela (ver comentário grande
+   * de LedSegmentDef em game/wall.ts: sempre o lado de índice MENOR,
+   * end="B") -- a MESMA conta de vizinho reto que wallJunctionAt usa
+   * (col/row-1 pra colPlus/center, col+1/row pra rowPlus/centerRow),
+   * só que sem checar se esse vizinho existe de verdade (quem chama
+   * decide o que fazer com isso, ver ledJunctionPoint). end="B" já É a
+   * canônica (identidade), não faz nada. */
+  private canonicalLedEnd(
+    col: number,
+    row: number,
+    side: WallSide,
+    end: WallEnd
+  ): { col: number; row: number; side: WallSide; end: WallEnd } {
+    if (end === "B") return { col, row, side, end: "B" };
+    if (side === "colPlus" || side === "center") return { col, row: row - 1, side, end: "B" };
+    return { col: col + 1, row, side, end: "B" };
+  }
+
+  /** Altura visual (px de tela) de um segmento de parede JÁ EXISTENTE --
+   * mesma conta de updateAreaDim mais abaixo (sprite.displayHeight pra
+   * estilo de IMAGEM, pattern.heightPx pro "padrão"), com UM fallback a
+   * mais: se a sprite ainda não existe (corrida de carregar textura
+   * custom, ver addWallSprite) mas a TEXTURA já tá registrada, usa a
+   * altura NATIVA dela direto -- robustez extra só pro LED (que pode
+   * carregar ANTES da 2ª passada de retryWallSprites terminar), sem
+   * mexer em updateAreaDim (já testado e afinado com o Douglas, ver
+   * comentário grande dela). */
+  private wallVisualHeightPx(seg: { col: number; row: number; side: WallSide; styleId: string }): number {
+    const entry = wallEntryById(seg.styleId);
+    const sprite = this.draftWallSprites.get(wallSegmentId(seg.col, seg.row, seg.side));
+    if (sprite instanceof Phaser.GameObjects.Image) return sprite.displayHeight;
+    if (entry?.pattern) return entry.pattern.heightPx;
+    const key = wallTextureKey(seg.styleId);
+    if (this.textures.exists(key)) return this.textures.get(key).getSourceImage().height;
+    return 100;
+  }
+
+  /** Ponto (chão) + altura (px) de uma ponta de LED -- null se a ponta
+   * não for uma emenda "straight" de VERDADE agora (segmento base
+   * sumiu, ou o vizinho que fazia a emenda foi apagado/trocado de
+   * estilo) -- quem chama (addLedSprite/nearestLedCandidate) trata null
+   * como "não desenha"/"não é candidato válido", sem precisar apagar o
+   * dado salvo (ver comentário grande de LedSegmentDef). Ponto de
+   * ANCORAGEM: mesma régua "de frente" que a parede "padrão" desenha
+   * (wallPatternFrontFloorPoints, ver updateAreaDim) pra bater
+   * visualmente com o tijolo de verdade; estilo de imagem usa o ponto
+   * cru (wallEdgeFloorPoints), mesma ideia de wallWorldAnchor. */
+  private ledJunctionPoint(seg: {
+    col: number;
+    row: number;
+    side: WallSide;
+    end: WallEnd;
+  }): { point: Point; heightPx: number } | null {
+    const selfSeg = this.draftWall.get(wallSegmentId(seg.col, seg.row, seg.side));
+    if (!selfSeg) return null;
+    const junction = this.wallJunctionAt(seg.col, seg.row, seg.side, seg.end, selfSeg.styleId);
+    if (junction.kind !== "straight") return null;
+    const entry = wallEntryById(selfSeg.styleId);
+    const { a, b } = entry?.pattern
+      ? wallPatternFrontFloorPoints(selfSeg, entry.pattern.thicknessPx)
+      : wallEdgeFloorPoints(seg.col, seg.row, seg.side);
+    const point = seg.end === "A" ? a : b;
+    const heightPx = this.wallVisualHeightPx(selfSeg);
+    return { point, heightPx };
+  }
+
+  private destroyLedSprite(key: string) {
+    const handle = this.draftLedGfx.get(key);
+    if (!handle) return;
+    handle.tween?.stop();
+    handle.gfx.destroy();
+    this.draftLedGfx.delete(key);
+  }
+
+  /** Desenha (ou redesenha) UM LED -- uma fita vertical (Graphics, sem
+   * arte nenhuma) na emenda, com um brilho pulsante por cima (Phaser FX
+   * "Glow", mesma técnica já usada no destaque de hover do avatar, ver
+   * pointerover/glowFx lá em cima -- só que aqui o pulso é CONTÍNUO, não
+   * ligado a hover de mouse nenhum). Se a emenda não for "straight" de
+   * verdade agora (ver ledJunctionPoint), não desenha nada -- o LED fica
+   * "órfão" até o vizinho certo voltar a existir (ver
+   * revalidateLedsTouching, chamado de paintWallAt). */
+  private addLedSprite(seg: LedSegmentDef) {
+    const key = ledSegmentId(seg.col, seg.row, seg.side, seg.end);
+    this.destroyLedSprite(key);
+    const junction = this.ledJunctionPoint(seg);
+    if (!junction) return;
+    const { point, heightPx } = junction;
+    const colorNum = Phaser.Display.Color.HexStringToColor(seg.color).color;
+    const width = LED_STRIP_WIDTH_PX;
+    const gfx = this.add.graphics();
+    gfx.fillStyle(colorNum, 1).fillRoundedRect(point.x - width / 2, point.y - heightPx, width, heightPx, width / 2);
+    // núcleo mais claro por cima (mesma ideia de "tubo de neon" -- um
+    // miolo quase branco, mais estreito, dá a sensação de luz de verdade
+    // em vez de uma tarja lisa só da cor escolhida).
+    gfx
+      .fillStyle(0xffffff, 0.55)
+      .fillRoundedRect(point.x - width / 4, point.y - heightPx, width / 2, heightPx, width / 4);
+    gfx.setDepth(wallDepthForSegment({ col: seg.col, row: seg.row, side: seg.side, styleId: "" }, furnitureDepthForTile) + 1);
+    const supportsGlowFX = this.game.renderer.type === Phaser.WEBGL;
+    const glow: Phaser.FX.Glow[] = supportsGlowFX ? [gfx.postFX.addGlow(colorNum, 0, 0, false, 0.4, 12)] : [];
+    const tween =
+      glow.length > 0
+        ? this.tweens.add({ targets: glow, outerStrength: 3, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" })
+        : null;
+    this.draftLedGfx.set(key, { gfx, glow, tween });
+  }
+
+  /** Acha a emenda "straight" mais perto do cursor (ponta A ou B de
+   * QUALQUER parede já colocada, canonicalizada -- ver canonicalLedEnd),
+   * dentro de um raio de captura (LED_SNAP_RADIUS_PX) -- null fora do
+   * raio ou sem emenda nenhuma por perto. Usada tanto pelo hover (ver
+   * handleEditPointerMove) quanto pelo clique (handleEditPointerDown),
+   * sempre recalculada na hora a partir da posição de verdade do
+   * ponteiro (nunca cacheada entre os dois, mesmo espírito de
+   * wallJunctionAt: consulta this.draftWall AO VIVO). */
+  private nearestLedCandidate(
+    worldX: number,
+    worldY: number
+  ): { col: number; row: number; side: WallSide; end: WallEnd } | null {
+    let best: { col: number; row: number; side: WallSide; end: WallEnd } | null = null;
+    let bestDist = LED_SNAP_RADIUS_PX;
+    const seen = new Set<string>();
+    for (const seg of this.draftWall.values()) {
+      for (const end of ["A", "B"] as WallEnd[]) {
+        const canonical = this.canonicalLedEnd(seg.col, seg.row, seg.side, end);
+        const key = ledSegmentId(canonical.col, canonical.row, canonical.side, canonical.end);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const junction = this.ledJunctionPoint(canonical);
+        if (!junction) continue;
+        const dist = Phaser.Math.Distance.Between(worldX, worldY, junction.point.x, junction.point.y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = canonical;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Coloca/apaga/recolore um LED numa emenda (ver nearestLedCandidate
+   * pra achar `seg`) -- mesma estrutura de paintWallAt acima. */
+  private paintLedAt(seg: { col: number; row: number; side: WallSide; end: WallEnd }) {
+    const tool = this.selectedLedTool;
+    if (!tool) return;
+    const key = ledSegmentId(seg.col, seg.row, seg.side, seg.end);
+
+    if (tool.kind === "erase") {
+      if (!this.draftLed.has(key)) return;
+      this.destroyLedSprite(key);
+      this.draftLed.delete(key);
+      this.onDraftLedChange?.(this.getDraftLedList());
+      return;
+    }
+
+    const existing = this.draftLed.get(key);
+    if (existing && existing.color === tool.color) return;
+    const def: LedSegmentDef = { col: seg.col, row: seg.row, side: seg.side, end: seg.end, color: tool.color };
+    this.draftLed.set(key, def);
+    this.addLedSprite(def);
+    this.onDraftLedChange?.(this.getDraftLedList());
+  }
+
+  /** Chamado de paintWallAt (pintar OU apagar segmento) -- um LED cuja
+   * emenda dependia do segmento que acabou de mudar pode ter deixado de
+   * ser "straight" (vizinho sumiu/trocou de estilo), ou pode ter PASSADO
+   * a ser (2 segmentos do mesmo estilo se encostando agora) -- redesenha
+   * (ou apaga o desenho, mantendo o DADO -- ver comentário grande de
+   * LedSegmentDef: ele só some de verdade se a pessoa apagar com a
+   * ferramenta) as 2 pontas canônicas que tocam esse segmento (A e B).
+   * Mesma ideia/espírito de refreshWallNeighbors logo abaixo, só que pro
+   * LED (desenho, não dado). */
+  private revalidateLedsTouching(col: number, row: number, side: WallSide) {
+    for (const end of ["A", "B"] as WallEnd[]) {
+      const canonical = this.canonicalLedEnd(col, row, side, end);
+      const key = ledSegmentId(canonical.col, canonical.row, canonical.side, canonical.end);
+      const def = this.draftLed.get(key);
+      if (!def) continue;
+      this.addLedSprite(def); // some sozinho (addLedSprite não desenha nada) se a emenda não for mais "straight"
+    }
+  }
+
+  /** Carrega os LEDs salvos (GET /room/leds, ver GameRoom.tsx) -- chamado
+   * DEPOIS de loadSavedWall terminar (a validade/altura de cada LED
+   * depende da parede já estar no mapa, ver ledJunctionPoint), mesmo
+   * timing documentado em GameRoom.tsx. */
+  loadSavedLed(items: LedSegmentDef[]) {
+    this.clearDraftLed();
+    for (const item of items) {
+      const key = ledSegmentId(item.col, item.row, item.side, item.end);
+      this.draftLed.set(key, item);
+      this.addLedSprite(item);
+    }
+    this.onDraftLedChange?.(this.getDraftLedList());
   }
 
   /**
@@ -5591,6 +5879,7 @@ export default class MainScene extends Phaser.Scene {
       this.draftWallSprites.delete(key);
       this.draftWall.delete(key);
       this.refreshWallNeighbors(col, row, side);
+      this.revalidateLedsTouching(col, row, side); // segmento sumiu -- LED que dependia dessa emenda some do DESENHO (ver comentário grande dela)
       this.onDraftWallChange?.(this.getDraftWallList());
       // apagar uma parede pode abrir um "buraco" na borda de uma área
       // ativa (ver comentário grande de wallTouchesArea em
@@ -5618,6 +5907,7 @@ export default class MainScene extends Phaser.Scene {
     }
     this.draftWallSprites.set(key, sprite);
     this.refreshWallNeighbors(col, row, side);
+    this.revalidateLedsTouching(col, row, side); // segmento novo/trocado -- emenda pode ter passado A ou DEIXADO de ser "straight"
     this.onDraftWallChange?.(this.getDraftWallList());
     // parede nova pintada na borda de uma área ativa (ver comentário
     // grande de wallTouchesArea em updateAreaDim) -- sem isso o véu só
@@ -5655,6 +5945,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedWallTool = null;
     this.selectedAreaTool = null;
+    this.selectedLedTool = null;
     this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
@@ -5978,6 +6269,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectedFloorTool = null;
     this.selectedWallTool = null;
     this.selectedDoorTool = null;
+    this.selectedLedTool = null;
     this.selectedRoomShapeTool = null;
     this.deleteToolActive = false;
     this.selectMoveTool(false);
@@ -7307,6 +7599,34 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
 
+    // ferramenta de LED armada: NÃO mora numa aresta inteira (ver bloco
+    // de parede/porta acima) nem num tile (resto das ferramentas) --
+    // mora numa PONTA de aresta já pintada (ver comentário grande de
+    // LedSegmentDef em game/wall.ts), então o destaque segue a emenda
+    // "straight" mais perto do cursor (ver nearestLedCandidate), não um
+    // cálculo de grade direto. Sem arrasto (clique único por LED, ver
+    // handleEditPointerDown) -- emendas já ficam naturalmente espaçadas,
+    // arrastar não ganharia nada e arriscaria pintar uma emenda sem
+    // querer passando o mouse por cima.
+    if (this.selectedLedTool) {
+      this.hoverGraphics.setVisible(false);
+      this.catalogGhostSprite?.setVisible(false);
+      this.wallHoverGraphics?.setVisible(false);
+      const candidate = this.nearestLedCandidate(pointer.worldX, pointer.worldY);
+      this.hoveredLedCandidate = candidate;
+      const junction = candidate ? this.ledJunctionPoint(candidate) : null;
+      if (!candidate || !junction) {
+        this.ledHoverGraphics?.setVisible(false);
+        return;
+      }
+      this.ledHoverGraphics
+        ?.clear()
+        .lineStyle(6, 0x4ade80, 0.9)
+        .lineBetween(junction.point.x, junction.point.y, junction.point.x, junction.point.y - junction.heightPx)
+        .setVisible(true);
+      return;
+    }
+
     // ferramenta "Tamanho" armada (formato livre da sala, ver
     // selectRoomShapeTool) -- checagem/desenho PRÓPRIOS, ANTES do gate
     // de "inBounds" genérico logo abaixo (mesma ideia da parede acima):
@@ -7500,6 +7820,7 @@ export default class MainScene extends Phaser.Scene {
     if (
       !this.selectedWallTool &&
       !this.selectedDoorTool &&
+      !this.selectedLedTool &&
       !this.selectedRoomShapeTool &&
       !this.isTileInRoom(col, row)
     )
@@ -7668,6 +7989,17 @@ export default class MainScene extends Phaser.Scene {
       this.isPaintingDoor = true;
       this.lastPaintedDoorKey = doorSegmentId(edge.col, edge.row, edge.side);
       this.paintDoorAt(edge.col, edge.row, edge.side);
+      return;
+    }
+
+    // ferramenta de LED armada: clique único (sem arrasto, ver
+    // handleEditPointerMove) na emenda mais perto -- recalcula na hora
+    // em vez de confiar em hoveredLedCandidate (mesmo espírito de
+    // nearestWallEdge acima: sempre a partir da posição de verdade do
+    // ponteiro nesse clique).
+    if (this.selectedLedTool) {
+      const candidate = this.nearestLedCandidate(pointer.worldX, pointer.worldY);
+      if (candidate) this.paintLedAt(candidate);
       return;
     }
 

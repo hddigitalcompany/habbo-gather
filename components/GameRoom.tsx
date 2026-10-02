@@ -93,7 +93,8 @@ import {
   SeatTuningInfo,
 } from "@/game/furniture";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
-import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
+import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, LedSegmentDef, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
+import { ColorPickerField } from "@/components/ColorPickerField";
 import {
   DOOR_CATALOG,
   DOOR_FACING_ROTATE_ORDER,
@@ -2239,7 +2240,7 @@ export default function GameRoom({
   // grade vazia, até subir os arquivos de origem (combinado com o
   // Douglas: estrutura agora, arte depois).
   const [activeCategory, setActiveCategory] = useState<
-    FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
+    FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho"
   >("poltrona");
   const [selectedFloorToolId, setSelectedFloorToolId] = useState<string | "erase" | null>(null);
   const [draftFloorItems, setDraftFloorItems] = useState<FloorTileDef[]>([]);
@@ -2288,6 +2289,26 @@ export default function GameRoom({
   // (WallSegmentDef.side === "center"/"centerRow"), não precisa
   // persistir o toggle em si.
   const [wallCenterOrientation, setWallCenterOrientationState] = useState<"center" | "centerRow">("center");
+
+  // --- LED de parede (aba "LED" dentro da seção "Mapa", ver
+  // LedSegmentDef em game/wall.ts) -- pedido do Douglas: "efeito de
+  // led... led de parede", fita colorida numa EMENDA entre 2 painéis do
+  // MESMO estilo. MESMO esquema de parede acima (fonte de verdade fica
+  // na cena, React só espelha), SÓ que não existe "apagar e escolher de
+  // novo um estilo" (não tem estilo/catálogo nenhum, ver LedTool em
+  // MainScene.ts) -- `ledColor` é a cor que a PRÓXIMA emenda clicada vai
+  // usar (mesma ideia de doorFacing logo abaixo: escolhida ANTES de
+  // posicionar), `selectedLedToolId` só diferencia "pintar"/"apagar"/
+  // nenhum armado.
+  const [selectedLedToolId, setSelectedLedToolId] = useState<"paint" | "erase" | null>(null);
+  const [ledColor, setLedColor] = useState("#22d3ee");
+  const [draftLedItems, setDraftLedItems] = useState<LedSegmentDef[]>([]);
+  const [ledSaveStatus, setLedSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // true só depois que a busca inicial do LED salvo (GET /room/leds)
+  // terminar -- carregada DEPOIS da parede (ver fetchAndRegisterCustomWall
+  // mais abaixo: a validade/altura de cada LED depende da parede já
+  // estar no mapa, ver ledJunctionPoint em MainScene.ts).
+  const ledLoadedRef = useRef(false);
 
   // --- porta do editor de espaço (aba "Porta" dentro da seção "Mapa",
   // ver game/door.ts -- pedido do Douglas: "vamos criar uma nova
@@ -3224,6 +3245,7 @@ export default function GameRoom({
         // usado noutro lugar do editor pra avisos bloqueantes assim.
         scene.onRoomShapeEraseBlocked = (reason) => window.alert(reason);
         scene.onDraftWallChange = (items) => setDraftWallItems(items);
+        scene.onDraftLedChange = (items) => setDraftLedItems(items);
         scene.onDraftDoorChange = (items) => setDraftDoorItems(items);
         // Clique numa porta cuja área guardada é do jogador local (ver
         // handleRoomPointerDown em MainScene.ts) -- servidor é quem decide
@@ -3330,6 +3352,7 @@ export default function GameRoom({
             furnitureLoadedRef.current &&
             floorLoadedRef.current &&
             wallLoadedRef.current &&
+            ledLoadedRef.current &&
             doorLoadedRef.current &&
             areaLoadedRef.current
           ) {
@@ -3463,6 +3486,23 @@ export default function GameRoom({
             .finally(() => {
               wallLoadedRef.current = true;
               markRoomAssetsReadyIfDone();
+              // LED já salvo (ver GET /room/leds em server/index.js) --
+              // SÓ DEPOIS da parede acima terminar: a validade/altura de
+              // cada LED depende da parede já estar no mapa (ver
+              // ledJunctionPoint em MainScene.ts -- precisa achar o
+              // segmento BASE e o vizinho que fecha a emenda, os dois já
+              // carregados em this.draftWall).
+              fetch(roomApiPath(roomSlug, "/room/leds"))
+                .then((r) => (r.ok ? r.json() : null))
+                .then((data) => {
+                  if (destroyed) return;
+                  if (data?.items) sceneRef.current?.loadSavedLed(data.items);
+                })
+                .catch(() => {})
+                .finally(() => {
+                  ledLoadedRef.current = true;
+                  markRoomAssetsReadyIfDone();
+                });
             });
         });
         // porta já salva (ver GET /room/doors em server/index.js) -- mesmo
@@ -4237,7 +4277,7 @@ export default function GameRoom({
   // modo de ajuste na cena (ver setSeatTuningMode em MainScene.ts, muda o
   // que as setas de direção fazem enquanto sentado).
   function changeCategory(
-    category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
+    category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho"
   ) {
     setActiveCategory(category);
     setDeleteToolActive(false);
@@ -4377,6 +4417,41 @@ export default function GameRoom({
   function selectWallCenterOrientation(orientation: "center" | "centerRow") {
     setWallCenterOrientationState(orientation);
     sceneRef.current?.setWallCenterOrientation(orientation);
+  }
+
+  // MESMO padrão "clica de novo desarma" da parede acima, pro LED (ver
+  // selectLedTool em MainScene.ts) -- sem catálogo/modelo nenhum pra
+  // escolher (ver LedTool), usa sempre a `ledColor` ATUAL do momento.
+  function selectLedPaint() {
+    const next = selectedLedToolId === "paint" ? null : "paint";
+    setSelectedLedToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectLedTool(next === null ? null : { kind: "paint", color: ledColor });
+  }
+
+  function selectLedEraser() {
+    const next = selectedLedToolId === "erase" ? null : "erase";
+    setSelectedLedToolId(next);
+    setSelectedCatalogIndex(null);
+    setDeleteToolActive(false);
+    setMoveToolActive(false);
+    sceneRef.current?.selectLedTool(next === null ? null : { kind: "erase" });
+  }
+
+  // Troca a cor que a PRÓXIMA emenda clicada vai usar -- se a ferramenta
+  // "pintar" já tiver armada, reavisa a cena NA HORA com a cor nova (sem
+  // isso, trocar de cor no meio da sessão só valeria pro próximo clique
+  // em "LED" de novo, confuso -- o Editor de Itens já faz esse
+  // reaviso-na-hora pra campo de cor ao vivo igual, ver ColorPickerField).
+  function selectLedColor(color: string) {
+    setLedColor(color);
+    if (selectedLedToolId === "paint") sceneRef.current?.selectLedTool({ kind: "paint", color });
+  }
+
+  function clearDraftLedItems() {
+    sceneRef.current?.clearDraftLed();
   }
 
   // MESMO padrão "clica de novo desarma" da parede de sistema acima, pra
@@ -4561,6 +4636,31 @@ export default function GameRoom({
     }, 600);
     return () => clearTimeout(timer);
   }, [draftWallItems]);
+
+  // autosave do LED -- MESMA lógica/timing do autosave da parede acima
+  // (POST /room/leds, ver server/index.js).
+  useEffect(() => {
+    if (!ledLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      setLedSaveStatus("saving");
+      fetch(roomApiPath(roomSlug, "/room/leds"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accountAccessTokenRef.current
+            ? { Authorization: `Bearer ${accountAccessTokenRef.current}` }
+            : {}),
+        },
+        body: JSON.stringify({ items: draftLedItems }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setLedSaveStatus("saved");
+        })
+        .catch(() => setLedSaveStatus("error"));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [draftLedItems]);
 
   // autosave da porta -- MESMA lógica/timing do autosave da parede acima
   // (POST /room/doors, ver server/index.js).
@@ -5716,6 +5816,14 @@ export default function GameRoom({
           onSelectWallPlacementMode={selectWallPlacementMode}
           wallCenterOrientation={wallCenterOrientation}
           onSelectWallCenterOrientation={selectWallCenterOrientation}
+          selectedLedToolId={selectedLedToolId}
+          onSelectLedPaint={selectLedPaint}
+          onSelectLedEraser={selectLedEraser}
+          ledColor={ledColor}
+          onSelectLedColor={selectLedColor}
+          draftLedItems={draftLedItems}
+          onClearAllLed={clearDraftLedItems}
+          ledSaveStatus={ledSaveStatus}
           selectedDoorToolId={selectedDoorToolId}
           onSelectDoorPaint={selectDoorPaint}
           onSelectDoorEraser={selectDoorEraser}
@@ -5765,7 +5873,7 @@ const FACING_LABEL: Record<FurnitureFacing, string> = {
 };
 
 const EDIT_CATEGORY_TABS: {
-  id: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho";
+  id: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho";
   label: string;
   icon: () => JSX.Element;
 }[] = [
@@ -5793,6 +5901,13 @@ const EDIT_CATEGORY_TABS: {
   // (activeCategory === "parede-sistema" mais abaixo) em vez de cair no
   // fluxo genérico de FURNITURE_CATALOG das outras abas.
   { id: "parede-sistema", label: "Parede", icon: WallIcon },
+  // LED de parede -- pedido do Douglas: "efeito de led... led de
+  // parede", esclarecido como fita colorida numa EMENDA entre 2 painéis
+  // do mesmo estilo (ver comentário grande de LedSegmentDef em
+  // game/wall.ts). Mesma ideia de "Parede"/"Porta" logo acima/abaixo
+  // (painel próprio, activeCategory === "led-sistema" mais abaixo),
+  // mesma seção "Mapa".
+  { id: "led-sistema", label: "LED", icon: LedIcon },
   // porta -- pedido do Douglas: "vamos criar uma nova categoria 'porta'"
   // (ver comentário grande no topo de game/door.ts). Mesma ideia de
   // "Parede" logo acima: pinta ARESTA da grade, painel próprio
@@ -5833,7 +5948,7 @@ const EDIT_SECTIONS: {
   id: "moveis" | "construir" | "mapa";
   label: string;
   icon: () => JSX.Element;
-  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho";
+  defaultCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho";
 }[] = [
   // rótulos ajustados a pedido do Douglas: "Minha mesa"->"Mobília",
   // "Construir"->"Piso", "Mapa"->"Parede" (ids internos continuam os
@@ -5852,7 +5967,7 @@ const EDIT_SECTIONS: {
 // entra em "moveis" -- é ajuste fino de móvel sentável, não faz sentido
 // em outra seção.
 const CATEGORY_SECTION: Record<
-  FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho",
+  FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho",
   "moveis" | "construir" | "mapa"
 > = {
   poltrona: "moveis",
@@ -5866,6 +5981,7 @@ const CATEGORY_SECTION: Record<
   tamanho: "construir",
   divisoria: "mapa",
   "parede-sistema": "mapa",
+  "led-sistema": "mapa",
   porta: "mapa",
 };
 
@@ -5901,6 +6017,14 @@ function EditPanel({
   onSelectWallPlacementMode,
   wallCenterOrientation,
   onSelectWallCenterOrientation,
+  selectedLedToolId,
+  onSelectLedPaint,
+  onSelectLedEraser,
+  ledColor,
+  onSelectLedColor,
+  draftLedItems,
+  onClearAllLed,
+  ledSaveStatus,
   selectedDoorToolId,
   onSelectDoorPaint,
   onSelectDoorEraser,
@@ -5919,9 +6043,9 @@ function EditPanel({
   onClearAllArea,
   areaSaveStatus,
 }: {
-  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho";
+  activeCategory: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho";
   onChangeCategory: (
-    category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "porta" | "tamanho"
+    category: FurnitureCategoryId | "piso" | "area" | "assento" | "parede-sistema" | "led-sistema" | "porta" | "tamanho"
   ) => void;
   selectedRoomShapeToolId: "add" | "erase" | null;
   onSelectRoomShapeAdd: () => void;
@@ -5959,6 +6083,14 @@ function EditPanel({
   onSelectWallPlacementMode: (mode: "edge" | "center") => void;
   wallCenterOrientation: "center" | "centerRow";
   onSelectWallCenterOrientation: (orientation: "center" | "centerRow") => void;
+  selectedLedToolId: "paint" | "erase" | null;
+  onSelectLedPaint: () => void;
+  onSelectLedEraser: () => void;
+  ledColor: string;
+  onSelectLedColor: (color: string) => void;
+  draftLedItems: LedSegmentDef[];
+  onClearAllLed: () => void;
+  ledSaveStatus: "idle" | "saving" | "saved" | "error";
   selectedDoorToolId: string | "erase" | null;
   onSelectDoorPaint: (entry: DoorCatalogEntry) => void;
   onSelectDoorEraser: () => void;
@@ -6028,6 +6160,7 @@ function EditPanel({
     activeCategory === "area" ||
     activeCategory === "assento" ||
     activeCategory === "parede-sistema" ||
+    activeCategory === "led-sistema" ||
     activeCategory === "porta"
       ? []
       : FURNITURE_CATALOG.filter((e) => FURNITURE_TYPE_CATEGORY[e.type] === activeCategory);
@@ -6369,6 +6502,60 @@ function EditPanel({
           {draftWallItems.length === 0 && <p className="edit-hint">Nenhum segmento levantado ainda.</p>}
           {draftWallItems.length > 0 && (
             <button className="clear-btn" onClick={onClearAllWall}>
+              Limpar tudo
+            </button>
+          )}
+        </>
+      ) : activeCategory === "led-sistema" ? (
+        <>
+          {/* LED de parede (ver comentário grande de LedSegmentDef em
+              game/wall.ts) -- NÃO pinta uma aresta inteira (parede) nem
+              um tile (piso/móvel): planta numa PONTA já existente de 2
+              painéis de parede do MESMO estilo encostados, destacada em
+              verde quando o cursor chega perto (ver nearestLedCandidate/
+              handleEditPointerMove em MainScene.ts). Sem catálogo/modelo
+              -- só a cor. */}
+          <p className="edit-hint">
+            Escolha uma cor abaixo e clique na EMENDA entre 2 painéis de
+            parede do mesmo estilo colocados lado a lado (a linha verde
+            mostra onde, só aparece numa emenda de verdade). "Apagar LED"
+            derruba o que tiver ali. Salva sozinho.
+          </p>
+
+          <ColorPickerField value={ledColor} onChange={onSelectLedColor} />
+
+          <div className="wall-placement-mode-toggle" style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className={selectedLedToolId === "paint" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={onSelectLedPaint}
+              title="Colocar LED na cor escolhida"
+            >
+              Colocar LED
+            </button>
+            <button
+              type="button"
+              className={selectedLedToolId === "erase" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+              onClick={onSelectLedEraser}
+              title="Apagar LED de uma emenda"
+            >
+              Apagar LED
+            </button>
+          </div>
+
+          <h3>
+            LED colocado ({draftLedItems.length})
+            <span className={`floor-save-status floor-save-status-${ledSaveStatus}`}>
+              {ledSaveStatus === "saving" && "Salvando…"}
+              {ledSaveStatus === "saved" && "Salvo ✓"}
+              {ledSaveStatus === "error" && "Erro ao salvar"}
+            </span>
+          </h3>
+          {draftLedItems.length === 0 && (
+            <p className="edit-hint">Nenhum LED ainda -- precisa de 2 painéis de parede do mesmo estilo lado a lado primeiro.</p>
+          )}
+          {draftLedItems.length > 0 && (
+            <button className="clear-btn" onClick={onClearAllLed}>
               Limpar tudo
             </button>
           )}
@@ -6836,6 +7023,20 @@ function DoorIcon() {
       <rect x="2.5" y="2.5" width="19" height="19" rx="1.4" />
       <path d="M2.5 21V9M21.5 21V9" />
       <rect x="10.5" y="9" width="7" height="12" fill="currentColor" opacity="0.55" stroke="none" />
+    </svg>
+  );
+}
+
+// ícone da aba "LED" (ver EDIT_CATEGORY_TABS/game/wall.ts) -- fita
+// vertical (a própria fita de LED, ver addLedSprite em MainScene.ts)
+// com um raio de luz por cima, remete a "brilho"/"luz" sem copiar o
+// desenho de tijolo da "Parede" nem o vão da "Porta".
+function LedIcon() {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">
+      <rect x="9" y="2.5" width="6" height="19" rx="3" fill="currentColor" opacity="0.3" stroke="none" />
+      <path d="M12 2.5v19" />
+      <path d="M4 7l3.2 1.6M4 17l3.2-1.6M20 7l-3.2 1.6M20 17l-3.2-1.6" opacity="0.7" />
     </svg>
   );
 }
