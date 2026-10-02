@@ -1,4 +1,4 @@
-import { WallPatternConfig, wallFaceRects } from "@/game/wall";
+import { WallPatternConfig, wallFaceRects, wallPanelGrainShapes } from "@/game/wall";
 
 /**
  * Desenho EXATO da face da FRENTE de uma parede "padrão" (sem imagem,
@@ -44,8 +44,8 @@ export function WallPatternSwatch({ pattern, edgeLengthPx }: { pattern: WallPatt
       {/* face de cima (espessura) -- pattern.topColor, campo próprio
           (ver comentário grande acima). */}
       <rect x={0} y={0} width={edgeLengthPx} height={capH} fill={hexToCss(pattern.topColor)} />
-      {/* face da frente -- os tijolos de verdade, deslocados pra baixo
-          da tira de cima. */}
+      {/* face da frente -- os tijolos/painéis de verdade, deslocados
+          pra baixo da tira de cima. */}
       {rects.map((r, idx) => (
         <rect
           key={idx}
@@ -56,6 +56,27 @@ export function WallPatternSwatch({ pattern, edgeLengthPx }: { pattern: WallPatt
           fill={hexToCss(pattern.brickColor)}
         />
       ))}
+      {/* veio de madeira -- só textura "panel" com woodGrain ligado
+          (ver WallPatternConfig.woodGrain em game/wall.ts), MESMOS
+          polígonos que createWallPatternGraphics desenha de verdade
+          (ver wallPanelGrainShapes), só convertidos pro (x,y) do SVG em
+          vez de mapPoint (mesma conversão de (u,v) das faixas acima: x
+          = u, y = capH + (heightPx - v)). segmentSeed fixo (0) aqui --
+          o preview mostra o ESTILO, não um segmento de parede de
+          verdade (cada parede plantada na sala sorteia a própria
+          semente por (col,row,side), ver createWallPatternGraphics). */}
+      {pattern.textureKind === "panel" &&
+        pattern.woodGrain &&
+        rects.flatMap((r, ri) =>
+          wallPanelGrainShapes(r, 0, pattern.brickColor).map((shape, si) => (
+            <polygon
+              key={`g-${ri}-${si}`}
+              points={shape.points.map((pt) => `${pt.u},${capH + (pattern.heightPx - pt.v)}`).join(" ")}
+              fill={hexToCss(shape.fillColor)}
+              opacity={shape.opacity}
+            />
+          ))
+        )}
     </svg>
   );
 }

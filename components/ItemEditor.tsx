@@ -3041,6 +3041,10 @@ type CustomWallRow = {
   // "brick"/"panel" -- ver WallTextureKind em game/wall.ts e
   // supabase/migrations/0050_room_wall_items_texture_kind.sql.
   texture_kind: string;
+  // só importa pra texture_kind "panel" -- ver
+  // WallPatternConfig.woodGrain em game/wall.ts e
+  // supabase/migrations/0051_room_wall_items_wood_grain.sql.
+  wood_grain: boolean | null;
 };
 
 // comprimento (px) de UMA aresta da grade, usado só pro PREVIEW ao vivo
@@ -3110,6 +3114,12 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
   // "panel" tá selecionado (ver labels dinâmicos abaixo) -- por isso
   // não precisou de campo de estado novo nenhum além deste.
   const [wallTextureKind, setWallTextureKind] = useState<WallTextureKind>("brick");
+  // "madeira" (com veio) vs "liso" -- pedido do Douglas vendo o 1º
+  // painel sem veio nenhum: "cade a madeira os veios? kkk", depois
+  // "paineis de madeira, paineis normal liso" (2 opções de verdade,
+  // viraram este toggle -- ver WallPatternConfig.woodGrain em
+  // game/wall.ts). Só tem efeito/aparece na UI com "panel" selecionado.
+  const [wallWoodGrain, setWallWoodGrain] = useState(false);
   const [wallEditingId, setWallEditingId] = useState<string | null>(null);
   const [wallSubmitting, setWallSubmitting] = useState(false);
   const [wallBusyId, setWallBusyId] = useState<string | null>(null);
@@ -3132,7 +3142,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     const { data, error: fetchError } = await supabase
       .from("room_wall_items")
       .select(
-        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind"
+        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind, wood_grain"
       );
     if (fetchError) {
       setWallError(fetchError.message);
@@ -3153,6 +3163,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     setWallMortarWidth(2);
     setWallTopColor("#914025");
     setWallTextureKind("brick");
+    setWallWoodGrain(false);
   }
 
   function startEditWallItem(item: CustomWallRow) {
@@ -3167,6 +3178,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     setWallMortarWidth(item.mortar_width_px);
     setWallTopColor(item.top_color);
     setWallTextureKind(item.texture_kind === "panel" ? "panel" : "brick");
+    setWallWoodGrain(item.wood_grain ?? false);
   }
 
   async function handleWallSubmit(e: React.FormEvent) {
@@ -3189,6 +3201,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
         mortar_width_px: wallMortarWidth,
         top_color: wallTopColor,
         texture_kind: wallTextureKind,
+        wood_grain: wallWoodGrain,
       };
       const res = await fetch(wallEditingId ? `/api/wall-items/${wallEditingId}` : "/api/wall-items", {
         method: wallEditingId ? "PATCH" : "POST",
@@ -3355,6 +3368,18 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
           </div>
         </div>
 
+        {/* "paineis de madeira, paineis normal liso" -- ver
+            WallPatternConfig.woodGrain em game/wall.ts. Mesmo
+            componente/estilo de checkbox do "Efeito laminado" do piso
+            (FloorPatternCreatorPanel mais abaixo). Só aparece com
+            "Painéis" selecionado -- tijolo nunca teve veio. */}
+        {wallTextureKind === "panel" && (
+          <label className="settings-hint settings-hint-check">
+            <input type="checkbox" checked={wallWoodGrain} onChange={(e) => setWallWoodGrain(e.target.checked)} />
+            Efeito de madeira (veios)
+          </label>
+        )}
+
         {/* preview ao vivo -- os MESMOS retângulos que
             createWallPatternGraphics desenha de verdade no jogo (ver
             wallFaceRects em game/wall.ts, que escolhe tijolo ou painel
@@ -3375,6 +3400,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
                 mortarWidthPx: wallMortarWidth,
                 topColor: parseHexColor(wallTopColor),
                 textureKind: wallTextureKind,
+                woodGrain: wallWoodGrain,
               }}
               edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
             />
@@ -3418,6 +3444,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
                         mortarWidthPx: item.mortar_width_px,
                         topColor: parseHexColor(item.top_color),
                         textureKind: item.texture_kind === "panel" ? "panel" : "brick",
+                        woodGrain: item.wood_grain ?? false,
                       }}
                       edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
                     />

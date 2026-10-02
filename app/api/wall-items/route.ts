@@ -52,6 +52,13 @@ export async function POST(req: NextRequest) {
   // supabase/migrations/0050_room_wall_items_texture_kind.sql), então
   // nenhum chamador antigo (que não manda esse campo) quebra.
   const textureKind = body?.texture_kind === "panel" ? "panel" : "brick";
+  // veio de madeira (opcional -- só faz sentido textureKind "panel",
+  // ver WallPatternConfig.woodGrain em game/wall.ts e
+  // supabase/migrations/0051_room_wall_items_wood_grain.sql). Mesmo
+  // padrão do wood_grain de room_floor_items (app/api/floor-items/
+  // route.ts) -- só booleano, sem validação extra, ausente -> default
+  // da coluna (false).
+  const woodGrain = typeof body?.wood_grain === "boolean" ? body.wood_grain : undefined;
 
   if (!Number.isFinite(heightPx) || heightPx < 20 || heightPx > 400) {
     return NextResponse.json({ error: "altura da parede precisa ser entre 20 e 400" }, { status: 400 });
@@ -72,7 +79,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "cor do tijolo, da argamassa e do topo são obrigatórias" }, { status: 400 });
   }
 
-  const insert = {
+  const insert: Record<string, unknown> = {
     label,
     height_px: heightPx,
     thickness_px: thicknessPx,
@@ -85,6 +92,7 @@ export async function POST(req: NextRequest) {
     texture_kind: textureKind,
     created_by: callerId,
   };
+  if (woodGrain !== undefined) insert.wood_grain = woodGrain;
 
   const admin = getSupabaseAdminClient();
   if (!admin) return NextResponse.json({ error: "Supabase não configurado" }, { status: 500 });

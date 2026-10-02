@@ -259,7 +259,7 @@ function hexToCss(hex: number): string {
  * verdade). Duplicada de propósito -- esse arquivo não importa nada do
  * Phaser (é usado também fora da cena, ver ItemEditor.tsx), e é só uma
  * conta de 3 linhas, não vale a pena quebrar esse isolamento por isso. */
-function darkenHex(hex: number, factor = 0.55): number {
+export function darkenHex(hex: number, factor = 0.55): number {
   const r = Math.round(((hex >> 16) & 0xff) * factor);
   const g = Math.round(((hex >> 8) & 0xff) * factor);
   const b = Math.round((hex & 0xff) * factor);
@@ -272,7 +272,7 @@ function darkenHex(hex: number, factor = 0.55): number {
  * escurece, ver woodGrainShapesForPlank abaixo -- só escurecer sempre
  * ficaria "sujo" em vez de parecer veio de verdade). Cópia pura
  * (número, não Phaser) da MESMA conta de MainScene.lightenColor. */
-function lightenHex(hex: number, factor = 0.35): number {
+export function lightenHex(hex: number, factor = 0.35): number {
   const r = (hex >> 16) & 0xff;
   const g = (hex >> 8) & 0xff;
   const b = hex & 0xff;
@@ -292,7 +292,7 @@ function lightenHex(hex: number, factor = 0.35): number {
  * cai no mesmo número, então o veio não muda sozinho ao redesenhar (F5,
  * refreshFloorModel etc.) sem guardar nada em lugar nenhum. Cópia pura
  * da MESMA conta de MainScene.grainHash. */
-function grainHashPure(i: number, j: number, k: number, salt: number): number {
+export function grainHashPure(i: number, j: number, k: number, salt: number): number {
   let h = (i * 374761393 + j * 668265263 + k * 2246822519 + salt * 3266489917) ^ (i << 13);
   h = Math.imul(h ^ (h >>> 15), 1274126177);
   h = h ^ (h >>> 16);

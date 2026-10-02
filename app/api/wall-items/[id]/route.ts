@@ -95,6 +95,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     update.texture_kind = body.texture_kind;
   }
+  // veio de madeira -- ver WallPatternConfig.woodGrain em game/wall.ts
+  // e o comentário equivalente em ../route.ts (POST).
+  if (typeof body.wood_grain === "boolean") {
+    update.wood_grain = body.wood_grain;
+  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });

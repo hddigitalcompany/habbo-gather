@@ -99,6 +99,7 @@ import {
   wallPatternFrontFloorPoints,
   wallEdgeLengthPx,
   wallFaceRects,
+  wallPanelGrainShapes,
   nearestWallEdge,
 } from "./wall";
 import {
@@ -5546,12 +5547,34 @@ export default class MainScene extends Phaser.Scene {
       ],
       true
     );
+    const faceRects = wallFaceRects(pattern, edgeLengthExt);
     gfx.fillStyle(pattern.brickColor, 1);
-    for (const rect of wallFaceRects(pattern, edgeLengthExt)) {
+    for (const rect of faceRects) {
       gfx.fillPoints(
         [mapPoint(rect.u0, rect.v0), mapPoint(rect.u1, rect.v0), mapPoint(rect.u1, rect.v1), mapPoint(rect.u0, rect.v1)],
         true
       );
+    }
+    // Veio de madeira -- só textura "panel" com woodGrain ligado (ver
+    // comentário grande de WallPatternConfig.woodGrain em game/wall.ts):
+    // "cade a madeira os veios? kkk" -> "paineis de madeira, paineis
+    // normal liso" (virou toggle, não automático). Desenhado por CIMA
+    // de cada painel (mesma ordem de sempre: fundo/friso -> painel ->
+    // veio -> rodapé, quando tiver), com uma semente por SEGMENTO (col,
+    // row, side) pra painéis de paredes diferentes nunca sortearem o
+    // mesmo veio -- ver wallPanelGrainShapes em game/wall.ts.
+    if (pattern.textureKind === "panel" && pattern.woodGrain) {
+      const segmentSeed = seg.col * 97 + seg.row * 31 + (seg.side === "colPlus" ? 0 : seg.side === "rowPlus" ? 1 : seg.side === "center" ? 2 : 3);
+      for (const rect of faceRects) {
+        if (rect.rowIndex === undefined) continue;
+        for (const shape of wallPanelGrainShapes(rect, segmentSeed, pattern.brickColor)) {
+          gfx.fillStyle(shape.fillColor, shape.opacity);
+          gfx.fillPoints(
+            shape.points.map((pt) => mapPoint(pt.u, pt.v)),
+            true
+          );
+        }
+      }
     }
     // RODAPÉ -- pedido do Douglas, com foto de referência (rodapé
     // branco, moldura fina, contornando a quina de uma parede/coluna

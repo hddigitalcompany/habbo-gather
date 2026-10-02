@@ -1,5 +1,14 @@
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT, tileToWorld } from "./grid";
 import { Point } from "./iso";
+// reaproveita a MESMA matemática de veio de madeira do piso (ver
+// woodGrainShapesForPlank em game/floor.ts) -- ver wallPanelGrainShapes
+// abaixo pro motivo de não chamar woodGrainShapesForPlank direto (ela
+// devolve pontos já em coordenada de MUNDO, via rowAxis/colAxis
+// rotacionados pro losango isométrico do piso; parede usa uma
+// convenção LOCAL mais simples, (u,v) sem rotação nenhuma, igual
+// WallBrickRect -- só a PARTE ALEATÓRIA/cor é reaproveitada, não a
+// geometria).
+import { darkenHex, lightenHex, grainHashPure } from "./floor";
 
 /**
  * Parede de sistema -- pedido do Douglas: "agora eu quero paredes,
@@ -185,6 +194,18 @@ export interface WallPatternConfig {
    * em MainScene.ts) não leem este campo, continuam escurecendo
    * brickColor automaticamente. */
   topColor: number;
+  /** Só pra textura "panel" (ver WallTextureKind acima) -- liga o
+   * efeito de veio de madeira (riscos finos e semitransparentes, ver
+   * wallPanelGrainShapes abaixo) por cima de cada painel. Pedido do
+   * Douglas, depois de ver o primeiro painel "liso" demais: "cade a
+   * madeira os veios? kkk", esclarecido como 2 opções de verdade --
+   * "paineis de madeira, paineis normal liso" -- então virou TOGGLE
+   * (não automático), mesma ideia/nome de FloorPatternConfig.woodGrain
+   * em game/floor.ts (o piso já tinha exatamente essa escolha: tábua
+   * lisa vs. com veio). Ausente/false = liso (default, mesmo default
+   * do piso). Ignorado pra textura "brick" (tijolo nunca teve veio,
+   * não foi pedido). */
+  woodGrain?: boolean;
 }
 
 /**
@@ -215,6 +236,14 @@ export interface WallBrickRect {
   u1: number;
   v0: number;
   v1: number;
+  /** Índice da FILEIRA (de baixo pra cima, 0 = encostada no chão) --
+   * só preenchido por wallPanelRects (undefined em wallBrickRects, que
+   * não precisa: tijolo não tem veio, ver woodGrain em
+   * WallPatternConfig acima). Usado só como semente determinística do
+   * veio de madeira de CADA painel (ver wallPanelGrainShapes abaixo),
+   * pra 2 painéis vizinhos (fileiras diferentes) nunca sortearem o
+   * mesmo veio. */
+  rowIndex?: number;
 }
 
 /**
@@ -286,12 +315,105 @@ export function wallPanelRects(pattern: WallPatternConfig, edgeLengthPx: number)
     const v0Full = j * rowH;
     const v1Full = Math.min(pattern.heightPx, v0Full + rowH);
     if (v1Full <= v0Full) continue;
-    const v0 = v0Full + gap / 2;
-    const v1 = v1Full - gap / 2;
+    // só desconta a folga do friso no lado que É uma emenda de
+    // verdade ENTRE 2 painéis -- nunca no chão (v=0) nem no topo
+    // (v=heightPx, onde a parede encontra a face de CIMA/topColor).
+    // ACHADO (Douglas testando ao vivo): a 1ª versão descontava dos 2
+    // lados sempre (cópia direta do loop de fileira de wallBrickRects,
+    // que É sempre incondicional ali -- só o loop INTERNO em u, que
+    // não existe aqui, que tinha esse cuidado condicional pro tijolo),
+    // o que deixava uma friesta/linha de friso bem na beira de cima do
+    // painel, cortando contra o topo da parede: "a linha da borda nao
+    // pode passar no topo". Fix: mesma condição que wallBrickRects já
+    // usa no eixo horizontal (só desconta no lado que É junta de
+    // verdade), aplicada aqui no eixo vertical.
+    const v0 = v0Full + (v0Full > 0 ? gap / 2 : 0);
+    const v1 = v1Full - (v1Full < pattern.heightPx ? gap / 2 : 0);
     if (v1 <= v0) continue;
-    rects.push({ u0: 0, u1: edgeLengthPx, v0, v1 });
+    rects.push({ u0: 0, u1: edgeLengthPx, v0, v1, rowIndex: j });
   }
   return rects;
+}
+
+/** Um polígono de veio de madeira, em coordenada LOCAL do painel (u,v --
+ * MESMO espaço de WallBrickRect acima, nunca coordenada de mundo) --
+ * `fillColor` já vem o hex NUMÉRICO (não CSS: quem desenha de verdade
+ * decide o formato -- Phaser.Graphics.fillStyle quer número direto,
+ * SVG quer string, ver hexToCss em WallPatternSwatch.tsx). */
+export interface WallGrainShape {
+  points: { u: number; v: number }[];
+  fillColor: number;
+  opacity: number;
+}
+
+/**
+ * Os riscos de veio de madeira de UM painel (um WallBrickRect com
+ * `rowIndex` preenchido, ver wallPanelRects acima) -- mesma matemática
+ * EXATA de woodGrainShapesForPlank (game/floor.ts: mesmas constantes,
+ * mesmo número de riscos por faixa de largura, mesma onda de 6
+ * segmentos, ver comentário grande lá pro histórico/motivo de cada
+ * escolha), só reparametrizada pro espaço LOCAL (u,v) de parede (sem
+ * rowAxis/colAxis rotacionados -- painel de parede é uma faixa reta,
+ * não um losango isométrico) em vez de ir direto pra coordenada de
+ * mundo. Função PURA -- usada tanto pelo preview ao vivo (
+ * WallPatternSwatch.tsx) quanto pelo desenho de verdade
+ * (createWallPatternGraphics em MainScene.ts), mesma garantia de
+ * sempre (preview == jogo).
+ *
+ * `segmentSeed` diferencia o veio de UM segmento de parede do vizinho
+ * (2 painéis na MESMA fileira de 2 segmentos diferentes não sorteiam
+ * igual) -- quem chama deriva de (col,row,side) do segmento (ver
+ * createWallPatternGraphics) ou usa uma constante fixa no preview (o
+ * formulário não representa um segmento de verdade, só o ESTILO).
+ */
+export function wallPanelGrainShapes(rect: WallBrickRect, segmentSeed: number, baseColor: number): WallGrainShape[] {
+  const rowIndex = rect.rowIndex ?? 0;
+  const halfLength = (rect.u1 - rect.u0) / 2;
+  const halfWidth = (rect.v1 - rect.v0) / 2;
+  const cu = (rect.u0 + rect.u1) / 2;
+  const cv = (rect.v0 + rect.v1) / 2;
+  if (halfLength <= 0 || halfWidth <= 0) return [];
+  const count = halfWidth * 2 < 24 ? 2 : halfWidth * 2 < 48 ? 3 : 4;
+  const SEGMENTS = 6;
+  const shapes: WallGrainShape[] = [];
+  for (let k = 0; k < count; k++) {
+    const baseAcross = (grainHashPure(segmentSeed, rowIndex, k, 1) * 2 - 1) * halfWidth * 0.5;
+    const amplitude = halfWidth * (0.08 + grainHashPure(segmentSeed, rowIndex, k, 2) * 0.14);
+    const cycles = 0.8 + grainHashPure(segmentSeed, rowIndex, k, 3) * 1.6;
+    const phase = grainHashPure(segmentSeed, rowIndex, k, 4) * Math.PI * 2;
+    const halfThick = halfWidth * (0.045 + grainHashPure(segmentSeed, rowIndex, k, 5) * 0.05);
+    const segHalfLen = halfLength * (0.55 + grainHashPure(segmentSeed, rowIndex, k, 6) * 0.35);
+    const alongOffset = (grainHashPure(segmentSeed, rowIndex, k, 7) * 2 - 1) * (halfLength - segHalfLen);
+    const lighten = grainHashPure(segmentSeed, rowIndex, k, 8) < 0.5;
+    const shade = lighten
+      ? lightenHex(baseColor, 0.16 + grainHashPure(segmentSeed, rowIndex, k, 9) * 0.22)
+      : darkenHex(baseColor, 0.55 + grainHashPure(segmentSeed, rowIndex, k, 9) * 0.3);
+    const opacity = 0.18 + grainHashPure(segmentSeed, rowIndex, k, 10) * 0.24;
+
+    const alongMin = alongOffset - segHalfLen;
+    const alongMax = alongOffset + segHalfLen;
+    const acrossAt = (t: number) => baseAcross + amplitude * Math.sin(t * Math.PI * cycles + phase);
+
+    for (let s = 0; s < SEGMENTS; s++) {
+      const t0 = s / SEGMENTS;
+      const t1 = (s + 1) / SEGMENTS;
+      const u0 = cu + alongMin + (alongMax - alongMin) * t0;
+      const u1 = cu + alongMin + (alongMax - alongMin) * t1;
+      const v0 = cv + acrossAt(t0);
+      const v1 = cv + acrossAt(t1);
+      shapes.push({
+        points: [
+          { u: u0, v: v0 - halfThick },
+          { u: u1, v: v1 - halfThick },
+          { u: u1, v: v1 + halfThick },
+          { u: u0, v: v0 + halfThick },
+        ],
+        fillColor: shade,
+        opacity,
+      });
+    }
+  }
+  return shapes;
 }
 
 /**
