@@ -1330,6 +1330,24 @@ export default function Lobby({
   const [visitedRooms, setVisitedRooms] = useState<VisitedRoom[] | null>(null);
   const [visitedMenuOpen, setVisitedMenuOpen] = useState(false);
   const [visitSlug, setVisitSlug] = useState<string | null>(null);
+  // 2/out, bug achado (Douglas: "eu clico em copiar link de convite e
+  // ele para num lobby sem nada") -- a sala "própria" do Douglas (dono
+  // da plataforma) É a Sala Principal/mapa-publicado (ver fallback em
+  // app/api/room/mine/route.ts), e POST /api/room/visit RECUSA DE
+  // PROPÓSITO visitar ela por link (ver RESERVED_SLUGS na rota -- "só
+  // ele + time vê a Sala Principal", furar isso com um link
+  // adivinhável reabriria esse buraco pra qualquer conta no futuro,
+  // quando tiver cliente de verdade). ?visitar=<slug> nunca poderia
+  // servir pra ESSE caso -- não é um bug nela, é o convite pra sala
+  // reservada que precisava de um mecanismo DIFERENTE: código de
+  // convite de verdade (já existe, ver POST /api/room/invite +
+  // /api/room/invite/redeem, usado antes só por quem já tinha o
+  // código na mão) -- vira MEMBRO de verdade, não só "visitou".
+  // ?convite=<code> é o equivalente do ?visitar= só que pra esse
+  // mecanismo (ver handleCopyRoomLink mais abaixo, que decide qual
+  // dos dois gerar, e o efeito de resgate logo abaixo do de
+  // visitSlug).
+  const [conviteCode, setConviteCode] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   // "Página principal" -- pedido do Douglas, 30/set (20): "o cara nao
   // cai no lobby direto, ele vai cair na pagina principal / mesma
@@ -1351,8 +1369,8 @@ export default function Lobby({
   // "criar espaço" de nada adiantaria).
   const [lobbyView, setLobbyView] = useState<"home" | "spaces">("home");
   useEffect(() => {
-    if (visitSlug) setLobbyView("spaces");
-  }, [visitSlug]);
+    if (visitSlug || conviteCode) setLobbyView("spaces");
+  }, [visitSlug, conviteCode]);
   // pedido do Douglas, 30/set (20): "quando ja entrou antes, seja bem
   // vindo de volta" -- não existe "primeiro login" registrado em
   // lugar nenhum no backend (accountProfile não tem createdAt, ver
@@ -1941,6 +1959,11 @@ export default function Lobby({
     if (typeof window === "undefined") return;
     const v = new URLSearchParams(window.location.search).get("visitar");
     if (v && v.trim()) setVisitSlug(v.trim());
+    // ?convite=<code> -- MESMO padrão do ?visitar= acima, só que pro
+    // mecanismo de convite de verdade (ver comentário grande de
+    // conviteCode lá em cima).
+    const c = new URLSearchParams(window.location.search).get("convite");
+    if (c && c.trim()) setConviteCode(c.trim());
   }, []);
 
   // refaz a busca do "mapinha" toda vez que a seleção em "Meus espaços"
@@ -2113,6 +2136,34 @@ export default function Lobby({
     };
   }, [visitSlug, accountAccessToken]);
 
+  // resolve o ?convite=<code> lido acima (ver comentário grande de
+  // conviteCode lá em cima) -- POST /api/room/invite/redeem confere o
+  // código de verdade (válido/não expirado/não banido) e só DEPOIS de
+  // confirmado é que vira membro (ver app/api/room/invite/redeem/
+  // route.ts) -- nunca confia direto no que veio da URL, mesmo padrão
+  // do efeito de visitSlug acima. Vira membro de VERDADE (não só
+  // "visitou"), então já pode ir direto pra Sala Principal.
+  useEffect(() => {
+    if (!conviteCode || !accountAccessToken) return;
+    let cancelled = false;
+    fetch("/api/room/invite/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+      body: JSON.stringify({ code: conviteCode }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.ok) return;
+        userPickedRoomRef.current = true;
+        setRoomRole((prev) => (prev === "owner" ? prev : "member"));
+        setSelectedRoomSlug("mapa-publicado");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [conviteCode, accountAccessToken]);
+
   // catálogo de modelos publicados (GET /api/room/templates, ver
   // RoomTemplate acima) -- público/barato, busca sempre; só é
   // renderizado de fato quando needsToCreateRoom abaixo é true.
@@ -2181,17 +2232,46 @@ export default function Lobby({
   }
 
   /** Copia pra área de transferência o link que qualquer conta pode
-   * abrir pra visitar a sala PRÓPRIA de quem tá logado agora (ver POST
-   * /api/room/visit / comentário grande de visitSlug lá em cima) --
-   * pedido do Douglas: "se eu entrar na sala de um amigo, a sala dele
-   * vai ficar ali, como um link rapido". Só existe botão pra isso
-   * quando a sala selecionada É a própria (myRoom) -- ver JSX mais
-   * abaixo -- não faz sentido "convidar" pra Sala Principal/Mapa
-   * Modelo por aqui (ver RESERVED_SLUGS na rota, que recusaria mesmo
-   * assim). */
+   * abrir pra visitar a sala PRÓPRIA de quem tá logado agora -- pedido
+   * do Douglas: "se eu entrar na sala de um amigo, a sala dele vai
+   * ficar ali, como um link rapido". Só existe botão pra isso quando a
+   * sala selecionada É a própria (myRoom) -- ver JSX mais abaixo.
+   *
+   * 2/out, bug achado (Douglas: "eu clico em copiar link de convite e
+   * ele para num lobby sem nada") -- pra sala de CLIENTE de verdade
+   * isso sempre funcionou (?visitar=<slug>, POST /api/room/visit, ver
+   * comentário grande de visitSlug lá em cima). O problema é só quando
+   * `myRoom` É a Sala Principal/mapa-publicado (caso do Douglas, dono
+   * da plataforma, ver fallback em app/api/room/mine/route.ts) --
+   * RESERVED_SLUGS recusa visitar ela por link de PROPÓSITO (furar
+   * isso abriria a sala pra qualquer conta que adivinhasse o slug,
+   * sem o dono nunca ter concordado -- vira problema de verdade assim
+   * que tiver cliente). Pra esse caso específico, gera um convite de
+   * VERDADE (POST /api/room/invite, vira membro de verdade ao
+   * resgatar -- ver app/api/room/invite/redeem/route.ts, mecanismo
+   * que já existia, só não tinha um jeito de copiar/mandar por link)
+   * em vez de um link de visita. */
   async function handleCopyRoomLink() {
     if (!myRoom || typeof window === "undefined") return;
-    const url = `${window.location.origin}${window.location.pathname}?visitar=${encodeURIComponent(myRoom.room_slug)}`;
+    const isReservedRoom = myRoom.room_slug === "mapa-publicado" || myRoom.room_slug === "mapa-modelo";
+    let url: string;
+    if (isReservedRoom) {
+      if (!accountAccessToken) return;
+      try {
+        const res = await fetch("/api/room/invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
+          body: JSON.stringify({}),
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (!data?.code) return;
+        url = `${window.location.origin}${window.location.pathname}?convite=${encodeURIComponent(data.code)}`;
+      } catch {
+        return;
+      }
+    } else {
+      url = `${window.location.origin}${window.location.pathname}?visitar=${encodeURIComponent(myRoom.room_slug)}`;
+    }
     try {
       await navigator.clipboard.writeText(url);
       setLinkCopied(true);
@@ -2292,7 +2372,12 @@ export default function Lobby({
   // o preview/"Entrar na sala" normais de sempre (ver JSX mais abaixo)
   // -- assim que o POST confirma, selectedRoomSlug vira a sala
   // visitada e a pessoa entra nela, não na tela de criar espaço.
-  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRealRoom && !visitSlug;
+  // 2/out: precisa excluir !conviteCode também (mesmo motivo do
+  // !visitSlug, ver comentário acima) -- senão, enquanto o resgate do
+  // convite ainda não voltou, canSeeSalaPrincipal/myRealRoom ainda tão
+  // "vazios" e isso piscava o fluxo de "criar sua própria sala" antes
+  // do convite terminar de processar.
+  const needsToCreateRoom = !stillCheckingRoomAccess && !canSeeSalaPrincipal && !myRealRoom && !visitSlug && !conviteCode;
   // 29/set (10), pedido do Douglas: "adicione mais um opcao: Criar
   // espaço +" -- até aqui só quem NÃO era do time (needsToCreateRoom
   // acima) conseguia criar a própria sala; o time (Douglas/membros)
