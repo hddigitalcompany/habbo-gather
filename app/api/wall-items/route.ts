@@ -46,6 +46,12 @@ export async function POST(req: NextRequest) {
   const brickColor = typeof body?.brick_color === "string" ? body.brick_color : "";
   const mortarColor = typeof body?.mortar_color === "string" ? body.mortar_color : "";
   const topColor = typeof body?.top_color === "string" ? body.top_color : "";
+  // "brick" (padrão, tijolo de sempre) ou "panel" (ripas horizontais --
+  // ver WallTextureKind em game/wall.ts). Ausente/inválido -> "brick",
+  // igual ao default da coluna (texture_kind, ver
+  // supabase/migrations/0050_room_wall_items_texture_kind.sql), então
+  // nenhum chamador antigo (que não manda esse campo) quebra.
+  const textureKind = body?.texture_kind === "panel" ? "panel" : "brick";
 
   if (!Number.isFinite(heightPx) || heightPx < 20 || heightPx > 400) {
     return NextResponse.json({ error: "altura da parede precisa ser entre 20 e 400" }, { status: 400 });
@@ -76,6 +82,7 @@ export async function POST(req: NextRequest) {
     mortar_color: mortarColor,
     mortar_width_px: mortarWidthPx,
     top_color: topColor,
+    texture_kind: textureKind,
     created_by: callerId,
   };
 

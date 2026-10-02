@@ -93,7 +93,7 @@ import {
   SeatTuningInfo,
 } from "@/game/furniture";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
-import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, LedSegmentDef, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
+import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, LedSegmentDef, WallTextureKind, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
 import { ColorPickerField } from "@/components/ColorPickerField";
 import {
   DOOR_CATALOG,
@@ -1736,7 +1736,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_wall_items")
         .select(
-          "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color"
+          "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind"
         );
       if (error || !data || data.length === 0) return;
       const entries: WallCatalogEntry[] = data.map(
@@ -1751,6 +1751,7 @@ export default function GameRoom({
           mortar_color: string;
           mortar_width_px: number;
           top_color: string;
+          texture_kind: string;
         }) => ({
           id: row.id,
           label: row.label,
@@ -1767,6 +1768,11 @@ export default function GameRoom({
             mortarColor: parseInt(row.mortar_color.replace("#", ""), 16),
             mortarWidthPx: row.mortar_width_px,
             topColor: parseInt(row.top_color.replace("#", ""), 16),
+            // "brick"/"panel" (ver WallTextureKind em game/wall.ts) --
+            // qualquer valor que não seja "panel" (inclusive linha
+            // antiga de antes dessa coluna existir, ou lixo) cai em
+            // "brick", mesmo default da coluna no banco.
+            textureKind: (row.texture_kind === "panel" ? "panel" : "brick") as WallTextureKind,
           },
         })
       );

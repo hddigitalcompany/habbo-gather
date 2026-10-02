@@ -1,4 +1,4 @@
-import { WallPatternConfig, wallBrickRects } from "@/game/wall";
+import { WallPatternConfig, wallFaceRects } from "@/game/wall";
 
 /**
  * Desenho EXATO da face da FRENTE de uma parede "padrão" (sem imagem,
@@ -30,7 +30,7 @@ import { WallPatternConfig, wallBrickRects } from "@/game/wall";
  * uniforme), passado explícito só por clareza.
  */
 export function WallPatternSwatch({ pattern, edgeLengthPx }: { pattern: WallPatternConfig; edgeLengthPx: number }) {
-  const rects = wallBrickRects(pattern, edgeLengthPx);
+  const rects = wallFaceRects(pattern, edgeLengthPx);
   // altura da tira de cima (espessura) -- proporcional à espessura de
   // verdade, com um mínimo pra nunca sumir numa parede bem fina.
   const capH = Math.max(4, Math.min(pattern.thicknessPx, pattern.heightPx * 0.25));

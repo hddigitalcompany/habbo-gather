@@ -104,12 +104,53 @@ export function wallSegmentId(col: number, row: number, side: WallSide): string 
  * darkenColor(brickColor) direto (ver createWallPatternGraphics em
  * MainScene.ts) -- nunca leem topColor.
  */
+/**
+ * Tipo de TEXTURA da face da frente de uma parede "padrão" (ver
+ * WallPatternConfig abaixo) -- pedido do Douglas, com foto de
+ * referência (parede de madeira com 3 painéis horizontais, separados
+ * por 2 frisos/emendas visíveis): "quero deixar a parede com efeito de
+ * paineis, direto nela" + "obviamente isso como opcao de textura né"
+ * (ou seja, um SEGUNDO estilo de desenho, ao lado do tijolo "amarração"
+ * que já existia -- nunca substituindo ele, as 2 opções convivem,
+ * escolhidas por estilo cadastrado no formulário "Criar Parede").
+ *
+ * "brick" = tijolo em fileiras desencontradas (comportamento ORIGINAL,
+ * ver wallBrickRects) -- "panel" = faixas horizontais de largura TOTAL
+ * (sem subdivisão nenhuma, sem amarração -- ver wallPanelRects), cada
+ * uma separada da vizinha por um friso (reaproveita mortarWidthPx/
+ * mortarColor abaixo como largura/cor do friso -- não ganhou campo
+ * próprio, mesma ideia de reaproveitar brickHeightPx como altura de UM
+ * painel: menos campo novo no banco/formulário pra uma textura que é,
+ * geometricamente, só "tijolo sem coluna nenhuma").
+ *
+ * Os 2 tipos compartilham TODO o resto (espessura, cor do topo, faces
+ * de PONTA, e o RODAPÉ -- ver wallFaceRects abaixo, que escolhe qual
+ * função de retângulo chamar, usada no MESMO lugar/ordem de desenho que
+ * wallBrickRects sempre usou em createWallPatternGraphics, MainScene.ts
+ * -- então o rodapé continua sendo desenhado DEPOIS, por cima, igual já
+ * era pro tijolo: "ele fica por cima de tudo, ate do rodapé, voce
+ * consegue?" perguntou o Douglas, e a resposta é "já funciona assim
+ * sozinho", sem precisar de nenhum fix de z-order dedicado -- e o LED
+ * (ver LedSegmentDef abaixo) também "só funciona", sem nenhuma mudança
+ * de código, porque ele já lia a geometria genérica da parede
+ * (wallJunctionAt/wallPatternFrontFloorPoints em MainScene.ts), nunca o
+ * tipo de textura -- exatamente o que o Douglas pediu: "eu queroa gora
+ * adicionar painel como opcao de textura de parede, justamente pra
+ * tambem aparecer o led".
+ */
+export type WallTextureKind = "brick" | "panel";
+
 export interface WallPatternConfig {
   /** Altura do painel em px "de tela" -- sem imagem pra "ditar" isso
    * (diferente do estilo com arte, ver wallWorldAnchor abaixo), esse
    * número decide o tanto que a parede sobe. Ajusta por olho no preview
    * ao vivo do Editor de Itens. */
   heightPx: number;
+  /** "brick" (tijolo, comportamento de sempre) ou "panel" (ripas/
+   * painéis horizontais, ver comentário grande de WallTextureKind
+   * acima). Decide só a face da FRENTE (wallFaceRects) -- todo o resto
+   * do desenho (topo, pontas, rodapé) é idêntico pros 2 tipos. */
+  textureKind: WallTextureKind;
   /** Espessura da parede, em px "de tela" -- METADE fica de cada lado da
    * divisa entre os 2 tiles que essa aresta separa (ver
    * createWallPatternGraphics em MainScene.ts), dando volume de verdade
@@ -213,6 +254,49 @@ export function wallBrickRects(pattern: WallPatternConfig, edgeLengthPx: number)
     }
   }
   return rects;
+}
+
+/**
+ * Mesma ideia de wallBrickRects acima, pro tipo de textura "panel" (ver
+ * WallTextureKind) -- faixas horizontais de largura TOTAL
+ * (edgeLengthPx inteiro, sem loop nenhum em u, sem amarração/offset),
+ * cada uma com altura `pattern.brickHeightPx` (reaproveitado como
+ * "altura do painel" -- ver comentário grande de WallTextureKind pro
+ * motivo de não ter ganhado campo próprio) e separada da vizinha por um
+ * friso de `pattern.mortarWidthPx` (idem, reaproveitado como "largura
+ * do friso"). O LOOP em j (fileira) é literalmente copiado de
+ * wallBrickRects -- só o loop interno em u (que fazia a amarração de
+ * tijolo) que não existe aqui, porque um painel não se subdivide
+ * horizontalmente. Função PURA (sem Phaser/DOM), mesmo contrato de
+ * wallBrickRects -- ver wallFaceRects abaixo, que escolhe entre as 2.
+ */
+export function wallPanelRects(pattern: WallPatternConfig, edgeLengthPx: number): WallBrickRect[] {
+  const rects: WallBrickRect[] = [];
+  const rowH = Math.max(4, pattern.brickHeightPx);
+  const gap = Math.max(0, pattern.mortarWidthPx);
+  const rowCount = Math.max(1, Math.ceil(pattern.heightPx / rowH));
+  for (let j = 0; j < rowCount; j++) {
+    const v0Full = j * rowH;
+    const v1Full = Math.min(pattern.heightPx, v0Full + rowH);
+    if (v1Full <= v0Full) continue;
+    const v0 = v0Full + gap / 2;
+    const v1 = v1Full - gap / 2;
+    if (v1 <= v0) continue;
+    rects.push({ u0: 0, u1: edgeLengthPx, v0, v1 });
+  }
+  return rects;
+}
+
+/**
+ * Dispatcher -- escolhe wallBrickRects ou wallPanelRects conforme
+ * pattern.textureKind (ver WallTextureKind acima). Ponto ÚNICO chamado
+ * tanto pelo preview ao vivo (WallPatternSwatch.tsx) quanto pelo
+ * desenho de verdade no jogo (createWallPatternGraphics, MainScene.ts)
+ * -- mesma garantia de sempre (preview == jogo) que wallBrickRects já
+ * dava sozinha antes de existir um segundo tipo de textura.
+ */
+export function wallFaceRects(pattern: WallPatternConfig, edgeLengthPx: number): WallBrickRect[] {
+  return pattern.textureKind === "panel" ? wallPanelRects(pattern, edgeLengthPx) : wallBrickRects(pattern, edgeLengthPx);
 }
 
 export interface WallCatalogEntry {

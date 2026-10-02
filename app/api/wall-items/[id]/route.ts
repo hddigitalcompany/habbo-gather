@@ -87,6 +87,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!HEX_COLOR_RE.test(body.top_color)) return NextResponse.json({ error: "cor do topo inválida" }, { status: 400 });
     update.top_color = body.top_color;
   }
+  // "brick"/"panel" -- ver WallTextureKind em game/wall.ts e o comentário
+  // equivalente em ../route.ts (POST).
+  if (typeof body.texture_kind === "string") {
+    if (body.texture_kind !== "brick" && body.texture_kind !== "panel") {
+      return NextResponse.json({ error: "tipo de textura inválido" }, { status: 400 });
+    }
+    update.texture_kind = body.texture_kind;
+  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });

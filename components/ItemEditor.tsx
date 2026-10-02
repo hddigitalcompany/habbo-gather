@@ -23,7 +23,7 @@ import type { FurnitureModelColorOption } from "@/game/furniture";
 import { ISO_TILE_WIDTH, ISO_TILE_HEIGHT } from "@/game/grid";
 import { FLOOR_CATEGORIES, FloorCategory, TILE_SIZED_PLANK_PX } from "@/game/floor";
 import { FloorPatternSwatch } from "@/components/FloorPatternSwatch";
-import { wallEdgeLengthPx } from "@/game/wall";
+import { wallEdgeLengthPx, WallTextureKind } from "@/game/wall";
 import { DOOR_KINDS, DoorKind, doorEdgeLengthPx } from "@/game/door";
 import { WallPatternSwatch } from "@/components/WallPatternSwatch";
 import { ColorPickerField } from "@/components/ColorPickerField";
@@ -3038,6 +3038,9 @@ type CustomWallRow = {
   mortar_color: string;
   mortar_width_px: number;
   top_color: string;
+  // "brick"/"panel" -- ver WallTextureKind em game/wall.ts e
+  // supabase/migrations/0050_room_wall_items_texture_kind.sql.
+  texture_kind: string;
 };
 
 // comprimento (px) de UMA aresta da grade, usado só pro PREVIEW ao vivo
@@ -3100,6 +3103,13 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
   const [wallMortarColor, setWallMortarColor] = useState("#d9d2c8");
   const [wallMortarWidth, setWallMortarWidth] = useState(2);
   const [wallTopColor, setWallTopColor] = useState("#914025");
+  // "brick" (tijolo, default) ou "panel" (ripas horizontais -- ver
+  // comentário grande de WallTextureKind em game/wall.ts). Reaproveita
+  // wallBrickHeight/wallMortarWidth/wallBrickColor/wallMortarColor como
+  // altura do painel/largura do friso/cor do painel/cor do friso quando
+  // "panel" tá selecionado (ver labels dinâmicos abaixo) -- por isso
+  // não precisou de campo de estado novo nenhum além deste.
+  const [wallTextureKind, setWallTextureKind] = useState<WallTextureKind>("brick");
   const [wallEditingId, setWallEditingId] = useState<string | null>(null);
   const [wallSubmitting, setWallSubmitting] = useState(false);
   const [wallBusyId, setWallBusyId] = useState<string | null>(null);
@@ -3122,7 +3132,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     const { data, error: fetchError } = await supabase
       .from("room_wall_items")
       .select(
-        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color"
+        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind"
       );
     if (fetchError) {
       setWallError(fetchError.message);
@@ -3142,6 +3152,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     setWallMortarColor("#d9d2c8");
     setWallMortarWidth(2);
     setWallTopColor("#914025");
+    setWallTextureKind("brick");
   }
 
   function startEditWallItem(item: CustomWallRow) {
@@ -3155,6 +3166,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     setWallMortarColor(item.mortar_color);
     setWallMortarWidth(item.mortar_width_px);
     setWallTopColor(item.top_color);
+    setWallTextureKind(item.texture_kind === "panel" ? "panel" : "brick");
   }
 
   async function handleWallSubmit(e: React.FormEvent) {
@@ -3176,6 +3188,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
         mortar_color: wallMortarColor,
         mortar_width_px: wallMortarWidth,
         top_color: wallTopColor,
+        texture_kind: wallTextureKind,
       };
       const res = await fetch(wallEditingId ? `/api/wall-items/${wallEditingId}` : "/api/wall-items", {
         method: wallEditingId ? "PATCH" : "POST",
@@ -3230,10 +3243,37 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
         />
 
         <p className="settings-hint">
-          Sem imagem nenhuma -- o jogo desenha tijolos em fileiras (padrão "amarração", desencontradas uma da outra)
-          num painel com espessura de verdade, centrado na divisa entre os 2 quadrados (metade da espessura pra cada
-          lado), do jeito que você configurar abaixo.
+          Sem imagem nenhuma -- o jogo desenha a face da frente por código, do jeito que você configurar abaixo.
         </p>
+
+        {/* Tipo de textura -- pedido do Douglas com foto de referência
+            (parede de madeira com painéis horizontais separados por
+            frisos): "quero deixar a parede com efeito de paineis,
+            direto nela", confirmado como opção reusável (não uma
+            parede só): "obviamente isso como opcao de textura né" --
+            ver WallTextureKind em game/wall.ts. Mesmo componente visual
+            de toggle 2-botões do modo de inserção de parede
+            (wall-placement-mode-toggle/-btn, GameRoom.tsx), reaproveitado
+            aqui por ser exatamente a mesma ideia (2 opções mutuamente
+            exclusivas). */}
+        <div className="wall-placement-mode-toggle">
+          <button
+            type="button"
+            className={wallTextureKind === "brick" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+            onClick={() => setWallTextureKind("brick")}
+            title="Tijolo em fileiras desencontradas"
+          >
+            Tijolo
+          </button>
+          <button
+            type="button"
+            className={wallTextureKind === "panel" ? "wall-placement-mode-btn selected" : "wall-placement-mode-btn"}
+            onClick={() => setWallTextureKind("panel")}
+            title="Faixas horizontais de largura total, separadas por frisos"
+          >
+            Painéis
+          </button>
+        </div>
 
         <label className="items-panel-upload-field">
           <span>Altura da parede (px)</span>
@@ -3257,19 +3297,28 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
             onChange={(e) => setWallThickness(Number(e.target.value))}
           />
         </label>
+        {/* Largura do tijolo não existe no tipo "painel" -- uma faixa
+            de painel cobre a largura TOTAL do painel de parede, sem
+            subdivisão horizontal nenhuma (ver wallPanelRects em
+            game/wall.ts) -- escondido (não removido: continua indo no
+            payload com o valor de sempre, a coluna no banco não aceita
+            nulo, só fica sem efeito nenhum no desenho enquanto
+            "painel" estiver selecionado). */}
+        {wallTextureKind === "brick" && (
+          <label className="items-panel-upload-field">
+            <span>Largura do tijolo (px)</span>
+            <input
+              className="items-panel-input"
+              type="number"
+              min={4}
+              max={200}
+              value={wallBrickWidth}
+              onChange={(e) => setWallBrickWidth(Number(e.target.value))}
+            />
+          </label>
+        )}
         <label className="items-panel-upload-field">
-          <span>Largura do tijolo (px)</span>
-          <input
-            className="items-panel-input"
-            type="number"
-            min={4}
-            max={200}
-            value={wallBrickWidth}
-            onChange={(e) => setWallBrickWidth(Number(e.target.value))}
-          />
-        </label>
-        <label className="items-panel-upload-field">
-          <span>Altura do tijolo (px)</span>
+          <span>{wallTextureKind === "panel" ? "Altura do painel (px)" : "Altura do tijolo (px)"}</span>
           <input
             className="items-panel-input"
             type="number"
@@ -3280,7 +3329,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
           />
         </label>
         <label className="items-panel-upload-field">
-          <span>Espessura da junta (px)</span>
+          <span>{wallTextureKind === "panel" ? "Espessura do friso (px)" : "Espessura da junta (px)"}</span>
           <input
             className="items-panel-input"
             type="number"
@@ -3293,11 +3342,11 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
 
         <div className="items-panel-submit-row">
           <div className="items-panel-upload-field">
-            <span>Cor do tijolo</span>
+            <span>{wallTextureKind === "panel" ? "Cor do painel" : "Cor do tijolo"}</span>
             <ColorPickerField value={wallBrickColor} onChange={setWallBrickColor} />
           </div>
           <div className="items-panel-upload-field">
-            <span>Cor da argamassa</span>
+            <span>{wallTextureKind === "panel" ? "Cor do friso" : "Cor da argamassa"}</span>
             <ColorPickerField value={wallMortarColor} onChange={setWallMortarColor} />
           </div>
           <div className="items-panel-upload-field">
@@ -3308,10 +3357,11 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
 
         {/* preview ao vivo -- os MESMOS retângulos que
             createWallPatternGraphics desenha de verdade no jogo (ver
-            wallBrickRects em game/wall.ts), com a tira de cima
-            representando a espessura (ver WallPatternSwatch.tsx), num
-            painel retangular (a parede é uma face plana/vertical, sem
-            losango pra recortar feito o piso). */}
+            wallFaceRects em game/wall.ts, que escolhe tijolo ou painel
+            conforme wallTextureKind), com a tira de cima representando
+            a espessura (ver WallPatternSwatch.tsx), num painel
+            retangular (a parede é uma face plana/vertical, sem losango
+            pra recortar feito o piso). */}
         <div className="wall-pattern-preview-wrap">
           <div className="wall-pattern-preview-tile" style={{ aspectRatio: `${WALL_PREVIEW_EDGE_LENGTH_PX} / ${wallHeight}` }}>
             <WallPatternSwatch
@@ -3324,6 +3374,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
                 mortarColor: parseHexColor(wallMortarColor),
                 mortarWidthPx: wallMortarWidth,
                 topColor: parseHexColor(wallTopColor),
+                textureKind: wallTextureKind,
               }}
               edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
             />
@@ -3366,6 +3417,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
                         mortarColor: parseHexColor(item.mortar_color),
                         mortarWidthPx: item.mortar_width_px,
                         topColor: parseHexColor(item.top_color),
+                        textureKind: item.texture_kind === "panel" ? "panel" : "brick",
                       }}
                       edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
                     />

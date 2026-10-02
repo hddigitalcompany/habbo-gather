@@ -98,7 +98,7 @@ import {
   wallEdgeFloorPoints,
   wallPatternFrontFloorPoints,
   wallEdgeLengthPx,
-  wallBrickRects,
+  wallFaceRects,
   nearestWallEdge,
 } from "./wall";
 import {
@@ -5547,7 +5547,7 @@ export default class MainScene extends Phaser.Scene {
       true
     );
     gfx.fillStyle(pattern.brickColor, 1);
-    for (const rect of wallBrickRects(pattern, edgeLengthExt)) {
+    for (const rect of wallFaceRects(pattern, edgeLengthExt)) {
       gfx.fillPoints(
         [mapPoint(rect.u0, rect.v0), mapPoint(rect.u1, rect.v0), mapPoint(rect.u1, rect.v1), mapPoint(rect.u0, rect.v1)],
         true
