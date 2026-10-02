@@ -9,7 +9,6 @@ import { Point } from "./iso";
 // WallBrickRect -- só a PARTE ALEATÓRIA/cor é reaproveitada, não a
 // geometria).
 import { darkenHex, lightenHex, grainHashPure } from "./floor";
-import { luminance } from "./colorTint";
 
 /**
  * Parede de sistema -- pedido do Douglas: "agora eu quero paredes,
@@ -439,13 +438,6 @@ export interface WallGrainShape {
  * ou usa uma constante fixa no preview (o formulário não representa um
  * segmento de verdade, só o ESTILO).
  */
-/** Luminância 0..1 de uma cor hex -- reaproveita luminance(r,g,b) de
- * colorTint.ts (mesma fórmula perceptual, já usada no gerador de cor)
- * em vez de duplicar a conta aqui. */
-function hexLuminance(hex: number): number {
-  return luminance((hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff);
-}
-
 export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number, baseColor: number): WallGrainShape[] {
   if (rows.length === 0) return [];
   const u0 = rows[0].u0;
@@ -464,64 +456,38 @@ export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number,
   // "mais linhas, mais finas e mais quantidade" -- Douglas testando ao
   // vivo a 1ª leva (pós-correção de orientação/continuidade, ver
   // comentário grande acima): poucos riscos grossos não lia como
-  // madeira de verdade. Bem mais riscos que antes.
-  const count = halfAcross * 2 < 40 ? 8 : halfAcross * 2 < 80 ? 12 : 17;
+  // madeira de verdade. Bem mais riscos (quase o dobro) e bem mais
+  // finos que antes.
+  const count = halfAcross * 2 < 40 ? 7 : halfAcross * 2 < 80 ? 11 : 16;
   const SEGMENTS = 16;
   const shapes: WallGrainShape[] = [];
 
-  // NÓ da madeira -- "nó da madeira, escurecida" -- ACHADO (Douglas
-  // testando ao vivo, 3ª rodada: "nem nó tem, quase nao da de ver, e
-  // nao parece veio de madeira"): a 1ª leva de "mais fino" tinha
-  // passado do ponto -- halfThick/opacity ficaram tão baixos que o
-  // veio quase sumia (pior ainda: um risco fino o bastante pode cair
-  // abaixo de 1px de verdade na tela, e a antialiasing do WebGL
-  // "dilui" ele ainda mais sozinha, ficando praticamente invisível) --
-  // e a chance de 60% do nó (pra "nem todo painel ter um", realista)
-  // significa que é bem comum simplesmente não sair nenhum, o que lido
-  // como "nem nó tem" quando cai do lado errado da moeda. Fix: chão
-  // mínimo de espessura em PIXEL de verdade (Math.max abaixo, nunca
-  // sub-pixel), opacidade bem mais alta, contraste de cor mais forte
-  // (clareia/escurece mais), e o nó agora SEMPRE aparece (painel alto
-  // o bastante), bem maior e mais escuro/opaco.
-  const hasKnot = halfAlong > 24;
-  const knotAlong = (grainHashPure(segmentSeed, 31, 0, 2) * 2 - 1) * halfAlong * 0.5;
-  const knotAcross = (grainHashPure(segmentSeed, 31, 0, 3) * 2 - 1) * halfAcross * 0.4;
-  const knotRAlong = halfAlong * (0.09 + grainHashPure(segmentSeed, 31, 0, 4) * 0.05);
-  const knotRAcross = halfAcross * (0.2 + grainHashPure(segmentSeed, 31, 0, 5) * 0.12);
-  // ACHADO (Douglas testando ao vivo): "em paineis escuros nao aparecem
-  // os veios" -- darkenHex MULTIPLICA cada canal por um fator (<1): numa
-  // cor já escura (pouco "estoque" de luz sobrando pra tirar), o
-  // resultado fica quase idêntico à própria baseColor (ex: rgb(20,15,10)
-  // * 0.5 ainda é quase preto, invisível contra o próprio fundo), enquanto
-  // lightenHex SOMA luz na direção do branco (sempre tem "estoque" de
-  // escuro sobrando pra clarear) -- por isso metade dos riscos (os que
-  // caíam no lado "escurece" da moeda 50/50) e o nó inteiro (sempre
-  // escurecido, nunca clareado, ver abaixo) praticamente desapareciam
-  // num painel escuro. Fix: em vez de sortear clarear/escurecer 50/50
-  // fixo, pesa a moeda pela luminância da própria baseColor -- painel
-  // escuro sorteia MUITO mais risco "clareia" (o lado que de fato rende
-  // contraste ali), painel claro sorteia mais risco "escurece" (mesma
-  // lógica espelhada, pro caso oposto), e o nó troca de escurecido pra
-  // clareado quando a base já é escura o bastante pra escurecer virar
-  // nada.
-  const baseLum = hexLuminance(baseColor);
-  const lightenProb = Math.min(0.85, Math.max(0.15, 0.85 - baseLum * 0.7));
+  // NÓ da madeira -- "nó da madeira, escurecida" -- um painel alto o
+  // bastante ganha 1 nó (sorteado, nem todo painel tem -- madeira de
+  // verdade também não), um ponto escuro com ovais concêntricas (ver
+  // loop de anéis mais abaixo) e os veios PRÓXIMOS se desviam dele em
+  // vez de atravessar por cima (madeira de verdade cresce CONTORNANDO
+  // o nó, não ignora ele) -- ver `deflectAcross` dentro do loop
+  // principal abaixo.
+  const hasKnot = halfAlong > 24 && grainHashPure(segmentSeed, 31, 0, 1) < 0.6;
+  const knotAlong = (grainHashPure(segmentSeed, 31, 0, 2) * 2 - 1) * halfAlong * 0.55;
+  const knotAcross = (grainHashPure(segmentSeed, 31, 0, 3) * 2 - 1) * halfAcross * 0.45;
+  const knotRAlong = halfAlong * (0.05 + grainHashPure(segmentSeed, 31, 0, 4) * 0.035);
+  const knotRAcross = halfAcross * (0.12 + grainHashPure(segmentSeed, 31, 0, 5) * 0.08);
 
   for (let k = 0; k < count; k++) {
     const baseAcross = (grainHashPure(segmentSeed, 11, k, 1) * 2 - 1) * halfAcross * 0.8;
     const amplitude = halfAcross * (0.025 + grainHashPure(segmentSeed, 11, k, 2) * 0.05);
     const cycles = 0.3 + grainHashPure(segmentSeed, 11, k, 3) * 0.5;
     const phase = grainHashPure(segmentSeed, 11, k, 4) * Math.PI * 2;
-    // chão de 1.3px DE VERDADE (não relativo) -- um risco mais fino que
-    // isso vira quase nada depois da antialiasing (ver ACHADO acima).
-    const halfThick = Math.max(1.3, halfAcross * (0.02 + grainHashPure(segmentSeed, 11, k, 5) * 0.025));
+    const halfThick = halfAcross * (0.006 + grainHashPure(segmentSeed, 11, k, 5) * 0.012);
     const segHalfLen = halfAlong * (0.92 + grainHashPure(segmentSeed, 11, k, 6) * 0.08);
     const alongOffset = (grainHashPure(segmentSeed, 11, k, 7) * 2 - 1) * (halfAlong - segHalfLen);
-    const lighten = grainHashPure(segmentSeed, 11, k, 8) < lightenProb;
+    const lighten = grainHashPure(segmentSeed, 11, k, 8) < 0.5;
     const shade = lighten
-      ? lightenHex(baseColor, 0.22 + grainHashPure(segmentSeed, 11, k, 9) * 0.2)
-      : darkenHex(baseColor, 0.45 + grainHashPure(segmentSeed, 11, k, 9) * 0.25);
-    const opacity = 0.5 + grainHashPure(segmentSeed, 11, k, 10) * 0.3;
+      ? lightenHex(baseColor, 0.1 + grainHashPure(segmentSeed, 11, k, 9) * 0.14)
+      : darkenHex(baseColor, 0.68 + grainHashPure(segmentSeed, 11, k, 9) * 0.22);
+    const opacity = 0.22 + grainHashPure(segmentSeed, 11, k, 10) * 0.22;
 
     const alongMin = alongOffset - segHalfLen;
     const alongMax = alongOffset + segHalfLen;
@@ -566,21 +532,12 @@ export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number,
     }
   }
 
-  // Desenha o nó em si -- anéis ovais concêntricos (de fora pra dentro).
-  // ACHADO (Douglas, com foto de referência de painel de verdade: "os
-  // nós nao sao tao marcados, olha essa imagem e veja oq da pra
-  // chegar"): a leva anterior (contraste forte, 4 anéis bem opacos)
-  // tinha ido longe demais -- virou um alvo/bullseye chamativo, quando
-  // madeira de verdade tem só uma marca BEM sutil, quase lida mais como
-  // uma variação de tom do que uma forma desenhada. Contraste e
-  // opacidade bem mais baixos (mais perto da própria baseColor em vez
-  // de longe dela), 3 anéis em vez de 4 -- ainda escurecida como pedido
-  // ("escurecida"), só que de um jeito discreto -- mas com a MESMA
-  // troca pra clarear (ver lightenProb acima) quando a base já é escura
-  // o bastante pra escurecer virar invisível de novo.
+  // Desenha o nó em si -- anéis ovais concêntricos (de fora pra dentro,
+  // escurecendo cada vez mais -- mesma ideia de "anel de árvore"),
+  // escurecida (pedido literal "escurecida") a partir da MESMA
+  // baseColor do painel, nunca uma cor nova/sem relação.
   if (hasKnot) {
-    const knotDark = baseLum >= 0.32;
-    const ringCount = 3;
+    const ringCount = 4;
     const ringSegs = 20;
     for (let r = 0; r < ringCount; r++) {
       const t = r / (ringCount - 1);
@@ -601,8 +558,8 @@ export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number,
       if (!insideRow(cAlong + knotAlong)) continue;
       shapes.push({
         points,
-        fillColor: knotDark ? darkenHex(baseColor, 0.8 - t * 0.2) : lightenHex(baseColor, 0.14 + t * 0.14),
-        opacity: 0.3 + t * 0.14,
+        fillColor: darkenHex(baseColor, 0.5 - t * 0.22),
+        opacity: 0.55 + t * 0.15,
       });
     }
   }
