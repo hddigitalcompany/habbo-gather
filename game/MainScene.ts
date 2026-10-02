@@ -1236,10 +1236,7 @@ export default class MainScene extends Phaser.Scene {
   // LED não tem arte nenhuma, é desenhado, ver addLedSprite).
   private selectedLedTool: LedTool = null;
   private draftLed: Map<string, LedSegmentDef> = new Map();
-  private draftLedGfx: Map<
-    string,
-    { gfx: Phaser.GameObjects.Graphics; glow: Phaser.FX.Glow[]; tween: Phaser.Tweens.Tween | null }
-  > = new Map();
+  private draftLedGfx: Map<string, { gfx: Phaser.GameObjects.Graphics; glow: Phaser.FX.Glow[] }> = new Map();
   // destaque da emenda mais próxima do cursor com a ferramenta de LED
   // armada -- mesma ideia/estilo visual de wallHoverGraphics acima (uma
   // LINHA, só que vertical ao longo da emenda em vez de deitada ao
@@ -4687,7 +4684,6 @@ export default class MainScene extends Phaser.Scene {
 
   clearDraftLed() {
     for (const handle of this.draftLedGfx.values()) {
-      handle.tween?.stop();
       handle.gfx.destroy();
     }
     this.draftLedGfx.clear();
@@ -4748,7 +4744,7 @@ export default class MainScene extends Phaser.Scene {
     row: number;
     side: WallSide;
     end: WallEnd;
-  }): { point: Point; heightPx: number } | null {
+  }): { point: Point; heightPx: number; depth: number } | null {
     const selfSeg = this.draftWall.get(wallSegmentId(seg.col, seg.row, seg.side));
     if (!selfSeg) return null;
     const junction = this.wallJunctionAt(seg.col, seg.row, seg.side, seg.end, selfSeg.styleId);
@@ -4759,22 +4755,40 @@ export default class MainScene extends Phaser.Scene {
       : wallEdgeFloorPoints(seg.col, seg.row, seg.side);
     const point = seg.end === "A" ? a : b;
     const heightPx = this.wallVisualHeightPx(selfSeg);
-    return { point, heightPx };
+    // 2/out, Douglas: "ela ficou meio escondida, tras ela 20% mais pra
+    // frente" -- a profundidade de ANTES usava só o segmento "dono"
+    // (selfSeg) + 1, mas a emenda tem 2 segmentos (selfSeg E o vizinho
+    // que fecha a reta, ver junction.neighbor) com profundidades bem
+    // diferentes (tiles vizinhos, não o mesmo) -- o LED, sentado bem na
+    // fronteira dos dois, podia ficar atrás do vizinho que desenha
+    // DEPOIS dele (profundidade maior = mais na frente, ver
+    // avatarDepthForY/wallDepthForSegment). Fix: usa o MAIOR dos 2 (nunca
+    // atrás de nenhum dos dois), com um empurrão a mais pra frente --
+    // 20% de ISO_TILE_HEIGHT (pedido literal do Douglas), bem maior que
+    // o "+1" de antes.
+    const selfDepth = wallDepthForSegment({ col: seg.col, row: seg.row, side: seg.side, styleId: "" }, furnitureDepthForTile);
+    const neighborDepth = wallDepthForSegment(
+      { col: junction.neighbor.col, row: junction.neighbor.row, side: junction.neighbor.side, styleId: "" },
+      furnitureDepthForTile
+    );
+    const depth = Math.max(selfDepth, neighborDepth) + ISO_TILE_HEIGHT * 0.2;
+    return { point, heightPx, depth };
   }
 
   private destroyLedSprite(key: string) {
     const handle = this.draftLedGfx.get(key);
     if (!handle) return;
-    handle.tween?.stop();
     handle.gfx.destroy();
     this.draftLedGfx.delete(key);
   }
 
   /** Desenha (ou redesenha) UM LED -- uma fita vertical (Graphics, sem
-   * arte nenhuma) na emenda, com um brilho pulsante por cima (Phaser FX
+   * arte nenhuma) na emenda, com um brilho FIXO por cima (Phaser FX
    * "Glow", mesma técnica já usada no destaque de hover do avatar, ver
-   * pointerover/glowFx lá em cima -- só que aqui o pulso é CONTÍNUO, não
-   * ligado a hover de mouse nenhum). Se a emenda não for "straight" de
+   * pointerover/glowFx lá em cima -- aqui SEM animação nenhuma, pedido
+   * do Douglas: "e tira o pulsante" -- o brilho pulsando ligado/
+   * desligado o tempo todo ficava poluindo visualmente uma luz que
+   * devia ficar simplesmente ACESA). Se a emenda não for "straight" de
    * verdade agora (ver ledJunctionPoint), não desenha nada -- o LED fica
    * "órfão" até o vizinho certo voltar a existir (ver
    * revalidateLedsTouching, chamado de paintWallAt). */
@@ -4783,7 +4797,7 @@ export default class MainScene extends Phaser.Scene {
     this.destroyLedSprite(key);
     const junction = this.ledJunctionPoint(seg);
     if (!junction) return;
-    const { point, heightPx } = junction;
+    const { point, heightPx, depth } = junction;
     const colorNum = Phaser.Display.Color.HexStringToColor(seg.color).color;
     const width = LED_STRIP_WIDTH_PX;
     const gfx = this.add.graphics();
@@ -4794,14 +4808,10 @@ export default class MainScene extends Phaser.Scene {
     gfx
       .fillStyle(0xffffff, 0.55)
       .fillRoundedRect(point.x - width / 4, point.y - heightPx, width / 2, heightPx, width / 4);
-    gfx.setDepth(wallDepthForSegment({ col: seg.col, row: seg.row, side: seg.side, styleId: "" }, furnitureDepthForTile) + 1);
+    gfx.setDepth(depth);
     const supportsGlowFX = this.game.renderer.type === Phaser.WEBGL;
-    const glow: Phaser.FX.Glow[] = supportsGlowFX ? [gfx.postFX.addGlow(colorNum, 0, 0, false, 0.4, 12)] : [];
-    const tween =
-      glow.length > 0
-        ? this.tweens.add({ targets: glow, outerStrength: 3, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" })
-        : null;
-    this.draftLedGfx.set(key, { gfx, glow, tween });
+    const glow: Phaser.FX.Glow[] = supportsGlowFX ? [gfx.postFX.addGlow(colorNum, 0, 2.5, false, 0.4, 12)] : [];
+    this.draftLedGfx.set(key, { gfx, glow });
   }
 
   /** Acha a emenda "straight" mais perto do cursor (ponta A ou B de
