@@ -5749,16 +5749,24 @@ export default class MainScene extends Phaser.Scene {
     // de comportamento/performance pra quem não usa textura.
     const faceImages: Phaser.GameObjects.Image[] = [];
     const faceRects = wallFaceRects(pattern, edgeLengthExt);
+    // Textura de VERDADE (imagem, ver WallPatternConfig.textureImageUrl
+    // em game/wall.ts) -- calculada UMA vez aqui em cima (não só pra
+    // face da frente logo abaixo, mas reaproveitada também na face de
+    // PONTA mais embaixo, pedido do Douglas: "essa cor da lateral, quero
+    // a textura passando ali tambem, nessa face da espessura da
+    // parede" -- MESMA imagem, só ladrilhada numa forma/eixo diferente,
+    // ver capMapPoint lá embaixo).
+    const textureKey = pattern.textureImageUrl ? wallTextureImageKey(pattern.textureImageUrl) : null;
+    const textureReady = textureKey !== null && this.textures.exists(textureKey);
     if (pattern.textureImageUrl) {
       // Textura de VERDADE (imagem) -- ver comentário grande de
       // WallPatternConfig.textureImageUrl em game/wall.ts. Substitui
       // POR COMPLETO o preenchimento liso/com veio por código abaixo
       // (a imagem já traz grão/emenda/tom prontos) -- só a face da
-      // frente muda, topo/ponta/rodapé continuam exatamente como
-      // sempre, mais abaixo neste método.
-      const textureKey = wallTextureImageKey(pattern.textureImageUrl);
-      if (this.textures.exists(textureKey)) {
-        faceImages.push(this.buildWallTextureFaceImage(textureKey, mapPoint, alongX, alongY, edgeLengthExt, pattern.heightPx));
+      // frente muda, topo continua exatamente como sempre (ponta
+      // agora também ladrilha a MESMA textura, ver mais abaixo).
+      if (textureReady) {
+        faceImages.push(this.buildWallTextureFaceImage(textureKey!, mapPoint, alongX, alongY, edgeLengthExt, pattern.heightPx));
       } else {
         // defensivo -- não deveria acontecer na prática (GameRoom.tsx
         // só chama registerCustomWallModels/redesenha DEPOIS que
@@ -5978,8 +5986,24 @@ export default class MainScene extends Phaser.Scene {
     const raiseBaseboard = (p: { x: number; y: number }, v: number) => ({ x: p.x, y: p.y - v });
     const visibleCapEnd: "A" | "B" = seg.side === "colPlus" || seg.side === "center" ? "B" : "A";
     if (junctionA.kind === "open" && visibleCapEnd === "A") {
-      gfx.fillStyle(shadeColor, 1);
-      gfx.fillPoints([nearA, raise(nearA), raise(farA), farA], true);
+      // Face de PONTA (espessura) -- pedido do Douglas 02/out: "essa
+      // cor da lateral, quero a textura passando ali tambem, nessa
+      // face da espessura da parede". MESMA textura da face da frente
+      // (ver textureReady acima), só ladrilhada no eixo da ESPESSURA
+      // (perpX/perpY, de nearA até farA) em vez do eixo do COMPRIMENTO
+      // (alongX/alongY) -- buildWallTextureFaceImage já é genérica o
+      // bastante pra aceitar qualquer eixo "u" reto + "v" vertical pra
+      // cima, não precisa de função nova. Sem textura (caso de sempre:
+      // tijolo/painel liso ou com veio), continua a cor sólida
+      // escurecida de sempre (shadeColor), ZERO mudança.
+      if (textureReady) {
+        const capLenA = Math.hypot(farA.x - nearA.x, farA.y - nearA.y) || 1;
+        const capMapA = (u: number, v: number) => ({ x: nearA.x + perpX * u, y: nearA.y + perpY * u - v });
+        faceImages.push(this.buildWallTextureFaceImage(textureKey!, capMapA, perpX, perpY, capLenA, pattern.heightPx));
+      } else {
+        gfx.fillStyle(shadeColor, 1);
+        gfx.fillPoints([nearA, raise(nearA), raise(farA), farA], true);
+      }
       if (pattern.textureKind !== "panel") {
         gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
         gfx.fillPoints([nearA, raiseBaseboard(nearA, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farA, WALL_BASEBOARD_HEIGHT_PX), farA], true);
@@ -5996,8 +6020,16 @@ export default class MainScene extends Phaser.Scene {
       }
     }
     if (junctionB.kind === "open" && visibleCapEnd === "B") {
-      gfx.fillStyle(shadeColor, 1);
-      gfx.fillPoints([nearB, raise(nearB), raise(farB), farB], true);
+      // Face de PONTA (espessura) -- mesmo esquema da ponta A acima,
+      // espelhado (nearB/farB no lugar de nearA/farA).
+      if (textureReady) {
+        const capLenB = Math.hypot(farB.x - nearB.x, farB.y - nearB.y) || 1;
+        const capMapB = (u: number, v: number) => ({ x: nearB.x + perpX * u, y: nearB.y + perpY * u - v });
+        faceImages.push(this.buildWallTextureFaceImage(textureKey!, capMapB, perpX, perpY, capLenB, pattern.heightPx));
+      } else {
+        gfx.fillStyle(shadeColor, 1);
+        gfx.fillPoints([nearB, raise(nearB), raise(farB), farB], true);
+      }
       if (pattern.textureKind !== "panel") {
         gfx.fillStyle(WALL_BASEBOARD_COLOR, 1);
         gfx.fillPoints([nearB, raiseBaseboard(nearB, WALL_BASEBOARD_HEIGHT_PX), raiseBaseboard(farB, WALL_BASEBOARD_HEIGHT_PX), farB], true);
