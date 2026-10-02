@@ -1334,19 +1334,23 @@ export default function Lobby({
   // ele para num lobby sem nada") -- a sala "própria" do Douglas (dono
   // da plataforma) É a Sala Principal/mapa-publicado (ver fallback em
   // app/api/room/mine/route.ts), e POST /api/room/visit RECUSA DE
-  // PROPÓSITO visitar ela por link (ver RESERVED_SLUGS na rota -- "só
-  // ele + time vê a Sala Principal", furar isso com um link
-  // adivinhável reabriria esse buraco pra qualquer conta no futuro,
-  // quando tiver cliente de verdade). ?visitar=<slug> nunca poderia
-  // servir pra ESSE caso -- não é um bug nela, é o convite pra sala
-  // reservada que precisava de um mecanismo DIFERENTE: código de
-  // convite de verdade (já existe, ver POST /api/room/invite +
-  // /api/room/invite/redeem, usado antes só por quem já tinha o
-  // código na mão) -- vira MEMBRO de verdade, não só "visitou".
-  // ?convite=<code> é o equivalente do ?visitar= só que pra esse
-  // mecanismo (ver handleCopyRoomLink mais abaixo, que decide qual
-  // dos dois gerar, e o efeito de resgate logo abaixo do de
-  // visitSlug).
+  // PROPÓSITO visitar ela por link adivinhado (ver RESERVED_SLUGS na
+  // rota -- "só ele + time vê a Sala Principal", furar isso com um
+  // link adivinhável reabriria esse buraco pra qualquer conta no
+  // futuro, quando tiver cliente de verdade). ?visitar=<slug> sozinho
+  // nunca poderia servir pra ESSE caso -- não é um bug nela.
+  //
+  // Fix: a rota passou a aceitar um `code` junto (ver comentário
+  // grande em app/api/room/visit/route.ts) -- um convite de verdade
+  // (POST /api/room/invite, só o dono gera) que prova que foi
+  // compartilhado de propósito. Mesmo assim continua sendo só uma
+  // VISITA normal (nunca vira membro por aqui -- Douglas, certo: "o
+  // link de convite, é convite de visita, nao membro direeto", "com
+  // clique manual tornar membro" é coisa separada, feita de DENTRO da
+  // sala, ver RoomMembersPanel.tsx). ?convite=<code> é o equivalente
+  // do ?visitar= só que carregando esse código (ver handleCopyRoomLink
+  // mais abaixo, que decide qual dos dois gerar, e o efeito de resgate
+  // logo abaixo do de visitSlug).
   const [conviteCode, setConviteCode] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   // "Página principal" -- pedido do Douglas, 30/set (20): "o cara nao
@@ -2137,26 +2141,33 @@ export default function Lobby({
   }, [visitSlug, accountAccessToken]);
 
   // resolve o ?convite=<code> lido acima (ver comentário grande de
-  // conviteCode lá em cima) -- POST /api/room/invite/redeem confere o
-  // código de verdade (válido/não expirado/não banido) e só DEPOIS de
-  // confirmado é que vira membro (ver app/api/room/invite/redeem/
-  // route.ts) -- nunca confia direto no que veio da URL, mesmo padrão
-  // do efeito de visitSlug acima. Vira membro de VERDADE (não só
-  // "visitou"), então já pode ir direto pra Sala Principal.
+  // conviteCode lá em cima) -- MESMO POST /api/room/visit do
+  // ?visitar= de cima, só que com `code` junto (ver comentário grande
+  // na rota): o código prova que o DONO compartilhou esse link de
+  // propósito, então a rota abre uma exceção só pra ESSE pedido e
+  // registra uma VISITA normal à Sala Principal -- nunca vira membro
+  // por aqui (Douglas: "o link de convite, é convite de visita, nao
+  // membro direeto" / "com clique manual tornar membro" -- isso
+  // continua sendo uma ação separada, manual, do dono, de DENTRO da
+  // sala, ver RoomMembersPanel.tsx). Nunca confia direto no que veio
+  // da URL, mesmo padrão do efeito de visitSlug acima.
   useEffect(() => {
     if (!conviteCode || !accountAccessToken) return;
     let cancelled = false;
-    fetch("/api/room/invite/redeem", {
+    fetch("/api/room/visit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountAccessToken}` },
-      body: JSON.stringify({ code: conviteCode }),
+      body: JSON.stringify({ roomSlug: "mapa-publicado", code: conviteCode }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled || !data?.ok) return;
+        if (cancelled || typeof data?.room?.room_slug !== "string") return;
         userPickedRoomRef.current = true;
-        setRoomRole((prev) => (prev === "owner" ? prev : "member"));
-        setSelectedRoomSlug("mapa-publicado");
+        setSelectedRoomSlug(data.room.room_slug);
+        if (!data.ownRoom) {
+          const visited: VisitedRoom = { id: data.room.id, name: String(data.room.name ?? "Sala"), room_slug: data.room.room_slug };
+          setVisitedRooms((prev) => [visited, ...(prev ?? []).filter((r) => r.id !== visited.id)]);
+        }
       })
       .catch(() => {});
     return () => {
@@ -2243,14 +2254,16 @@ export default function Lobby({
    * comentário grande de visitSlug lá em cima). O problema é só quando
    * `myRoom` É a Sala Principal/mapa-publicado (caso do Douglas, dono
    * da plataforma, ver fallback em app/api/room/mine/route.ts) --
-   * RESERVED_SLUGS recusa visitar ela por link de PROPÓSITO (furar
-   * isso abriria a sala pra qualquer conta que adivinhasse o slug,
+   * RESERVED_SLUGS recusa visitar ela por link ADIVINHADO de PROPÓSITO
+   * (furar isso abriria a sala pra qualquer conta que soubesse o slug,
    * sem o dono nunca ter concordado -- vira problema de verdade assim
    * que tiver cliente). Pra esse caso específico, gera um convite de
-   * VERDADE (POST /api/room/invite, vira membro de verdade ao
-   * resgatar -- ver app/api/room/invite/redeem/route.ts, mecanismo
-   * que já existia, só não tinha um jeito de copiar/mandar por link)
-   * em vez de um link de visita. */
+   * VERDADE (POST /api/room/invite -- prova que o dono compartilhou
+   * de propósito) e embute o código no link (?convite=<code>, ver POST
+   * /api/room/visit) -- continua sendo só uma VISITA ao resgatar,
+   * nunca vira membro sozinho (Douglas: "o link de convite, é convite
+   * de visita, nao membro direeto" -- virar membro é manual, de
+   * dentro da sala, ver RoomMembersPanel.tsx). */
   async function handleCopyRoomLink() {
     if (!myRoom || typeof window === "undefined") return;
     const isReservedRoom = myRoom.room_slug === "mapa-publicado" || myRoom.room_slug === "mapa-modelo";
