@@ -178,7 +178,30 @@ export default function Home() {
                     sair da conta de dentro da sala agora sempre volta
                     pro portão de login em vez de deixar `entered`
                     preso em true. */}
-                <div className="platform-account-card-pin">
+                {/* 2/out (2) -- bug reportado pelo Douglas depois do fix de
+                    z-index acima ("voltou mas ta bugado na posicao"):
+                    right:16px (certo pra dentro da Sala, onde não tem
+                    card nenhum nesse canto -- mesmo "flush" raso que
+                    .room-logo-home-btn já usa do lado esquerdo) ficava
+                    ERRADO no Lobby, onde esse balão mora DENTRO do
+                    "card" de vidro .lobby-topbar (ver globals.css,
+                    padding:0 32px) -- right:16px bate na MESMA borda
+                    crua da tela que a própria .lobby-topbar usa (ela
+                    também é right:16px), sem contar com o padding de
+                    32px que a topbar tem por dentro, então o balão
+                    ficava espremido contra (cortando) a borda
+                    arredondada dela em vez de ficar recuado como os
+                    outros itens do menu. Modificador só pro Lobby (ver
+                    .platform-account-card-pin-lobby) soma esse mesmo
+                    32px -- nunca durou precisar tocar a Sala, que já
+                    tava certa. */}
+                <div
+                  className={
+                    entered
+                      ? "platform-account-card-pin"
+                      : "platform-account-card-pin platform-account-card-pin-lobby"
+                  }
+                >
                   <AccountCard
                     accountUserId={auth.accountUserId}
                     accountProfile={auth.accountProfile}

@@ -8230,12 +8230,52 @@ button.chat-picker-item:disabled {
    PlatformChatHost/AgendaDrawer), então essa posição fixa no canto
    passa a valer SEMPRE, não só dentro da sala -- .lobby-topbar-account-wrap
    (ver AccountCard.tsx) continua "position: relative" só pra servir de
-   régua pro dropdown/painéis ancorados dele, igual sempre foi. */
+   régua pro dropdown/painéis ancorados dele, igual sempre foi.
+
+   BUG achado 2/out depois do rename acima ("sumiu o avatar+nome"):
+   z-index:60 era de sobra enquanto o AccountCard morava DENTRO do
+   Lobby/GameRoom (descendente não compete em z-index com o próprio
+   pai) -- virando IRMÃO de `entered ? <GameRoom/> : <Lobby/>` em
+   app/page.tsx, ele passou a competir de igual pra igual com
+   .lobby-backdrop (raiz do Lobby, position:fixed + inset:0 +
+   z-index:500 + fundo opaco de verdade, ver mais abaixo) -- 500 > 60,
+   então o fundo do Lobby pintava POR CIMA do balão inteiro, escondendo
+   ele completamente (sem erro nenhum, sem sumir do DOM -- só coberto).
+   Dentro da sala nunca deu pra notar porque .room-and-editor (raiz do
+   GameRoom) não é position:fixed/z-index nenhum, então nunca ganhava
+   dessa disputa de qualquer forma. 600 > 500 (maior z-index "de tela
+   cheia" que existe no app) resolve pros dois lados. MESMO problema
+   já existia, sem ninguém ter notado ainda, no
+   AgendaDrawer (outro irmão desse mesmo nível, ver .agenda-drawer
+   logo abaixo -- z-index:7 herdado de .chat-drawer, mesma exposição). */
 .platform-account-card-pin {
   position: fixed;
   top: 16px;
   right: 16px;
-  z-index: 60;
+  z-index: 600;
+}
+
+/* ver comentário grande em app/page.tsx (onde essa classe extra é
+   aplicada só fora da sala) -- soma o padding:0 32px que .lobby-topbar
+   tem por dentro, pra o balão ficar recuado DENTRO do card de vidro
+   igual os outros itens do menu, em vez de flush/cortando a borda
+   arredondada dela. */
+.platform-account-card-pin-lobby {
+  right: 48px;
+}
+
+/* mesmo bug/mesma causa documentados no comentário grande de
+   .platform-account-card-pin logo acima: AgendaDrawer.tsx reaproveita
+   o visual de .chat-drawer (globals.css, z-index:7) mas é montado como
+   IRMÃO de `entered ? <GameRoom/> : <Lobby/>` em app/page.tsx (ver
+   PlatformChatHost lá) -- não dentro de Lobby/GameRoom como o
+   ChatDrawer "de verdade" (esse sim um descendente, por isso nunca
+   teve esse problema). 7 nunca foi páreo pro z-index:500 de
+   .lobby-backdrop -- escopado só nessa classe extra (`.agenda-drawer`,
+   que SÓ esse componente usa, ver AgendaDrawer.tsx) pra não mexer no
+   z-index:7 do ChatDrawer normal, que continua certo onde está. */
+.agenda-drawer {
+  z-index: 600;
 }
 
 /* .lobby-topbar-account (ver AccountCard.tsx) nasceu pensado pro
