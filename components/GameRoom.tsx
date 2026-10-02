@@ -235,6 +235,25 @@ function createBlackVideoTrack(): MediaStreamTrack {
   return canvas.captureStream(1).getVideoTracks()[0];
 }
 
+// 2/out, MESMO bug de novo, agora no MICROFONE: "ta usando o microfone
+// agr" (indicador do SO aceso com o botão de mic da sala mostrando
+// mudo) -- toggleMic/requestMedia tinham EXATAMENTE o mesmo problema já
+// corrigido pra câmera acima (t.enabled = false nunca solta o
+// hardware), só que meio disfarçado: requestMedia sempre pedia
+// audio:true de cara (mesmo entrando mutado), e toggleMic só desativava
+// a track, nunca parava ela. Mesmo remédio: uma track de ÁUDIO muda de
+// mentira (Web Audio, nó de destino SEM nenhuma fonte ligada nele =
+// silêncio de verdade, não pede microfone nenhum) ocupa o lugar da
+// track real enquanto o mic tá desligado -- todo código que assume
+// "sempre tem uma track de áudio no stream/sender" (switchMicDevice,
+// os addTrack de peer novo) continua igual, sem precisar virar
+// tolerante a track nula em nenhum lugar.
+function createSilentAudioTrack(): MediaStreamTrack {
+  const ctx = new AudioContext();
+  const dst = ctx.createMediaStreamDestination();
+  return dst.stream.getAudioTracks()[0];
+}
+
 // 2/out, bug do Douglas: "o quadrado da camera preto continua ali" --
 // mesmo com a câmera ligada de verdade. Suspeita: reatribuir
 // .srcObject pro MESMO objeto MediaStream de sempre (só com as tracks
@@ -1003,6 +1022,11 @@ export default function GameRoom({
   // que tava fechado no closure na hora que a função começou.
   const camOnRef = useRef(camOn);
   camOnRef.current = camOn;
+  // mesmo espelho, agora pro mic (ver comentário grande de
+  // createSilentAudioTrack acima -- toggleMic de "ligar" também virou
+  // assíncrono).
+  const micOnRef = useRef(micOn);
+  micOnRef.current = micOn;
   const [screenOn, setScreenOn] = useState(false);
 
   // 2/out, pedido do Douglas: "porque a camera fica ali preta?" --
@@ -2981,24 +3005,40 @@ export default function GameRoom({
       // só desativava a track depois, prendendo a câmera mesmo pra
       // quem nunca ligou ela nessa visita.
       const wantCamOnAtRequest = getStoredCamOn();
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: wantCamOnAtRequest ? (camDeviceId ? { deviceId: { exact: camDeviceId } } : true) : false,
-          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-        });
-      } catch {
+      // MESMO raciocínio do vídeo acima, agora pro áudio (2/out, bug
+      // "ta usando o microfone agr"): se o mic já entra mutado, nem pede
+      // o hardware dele (audio:false) -- antes pedia sempre, prendendo
+      // o microfone mesmo pra quem nunca desmutou nessa visita.
+      const wantMicOnAtRequest = getStoredMicOn();
+      // getUserMedia com os 2 lados falsos (video:false, audio:false)
+      // rejeita direto (TypeError da spec: precisa pedir pelo menos UM
+      // dos dois) -- entrando com câmera E mic desligados no Lobby, nem
+      // chama o hardware nenhum (nada precisa de permissão ainda): o
+      // stream fica só com as 2 tracks de mentira (pretas/mudas) desde
+      // já, e o primeiro toggle que a pessoa clicar (mic OU câmera) pede
+      // o de verdade sozinho (ver localStreamRef.current = fresh dentro
+      // de toggleMic/toggleCam).
+      let stream: MediaStream | null = null;
+      if (wantCamOnAtRequest || wantMicOnAtRequest) {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: wantCamOnAtRequest, audio: true });
-        } catch (e) {
-          console.warn("Sem acesso a câmera/microfone — seguindo só com posição/chat.", e);
-          return;
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: wantCamOnAtRequest ? (camDeviceId ? { deviceId: { exact: camDeviceId } } : true) : false,
+            audio: wantMicOnAtRequest ? (micDeviceId ? { deviceId: { exact: micDeviceId } } : true) : false,
+          });
+        } catch {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: wantCamOnAtRequest, audio: wantMicOnAtRequest });
+          } catch (e) {
+            console.warn("Sem acesso a câmera/microfone — seguindo só com posição/chat.", e);
+          }
         }
       }
       if (destroyed) {
-        stream.getTracks().forEach((t) => t.stop());
+        stream?.getTracks().forEach((t) => t.stop());
         return;
       }
+      if (!stream) stream = new MediaStream(); // nada pedido (ou pedido falhou) -- completa só com as tracks de mentira abaixo
+
       // relê DEPOIS do await (não reaproveita wantCamOnAtRequest) --
       // a pessoa pode ter clicado mic/câmera ENQUANTO o navegador
       // ainda tava mostrando o aviso de permissão (mesmo comentário
@@ -3007,7 +3047,29 @@ export default function GameRoom({
       // chegar).
       const wantMicOn = getStoredMicOn();
       const wantCamOn = getStoredCamOn();
-      stream.getAudioTracks().forEach((t) => (t.enabled = wantMicOn));
+      // MESMA reconciliação de 4 casos do vídeo logo abaixo, agora pro
+      // áudio (ver comentário grande de createSilentAudioTrack acima).
+      const micTrackFromRequest = stream.getAudioTracks()[0]; // só existe se pedimos com áudio acima
+      if (wantMicOn && micTrackFromRequest) {
+        micTrackFromRequest.enabled = true;
+      } else if (wantMicOn && !micTrackFromRequest) {
+        // queria mudo na hora do pedido (por isso não veio áudio nenhum)
+        // mas desmutou nesse meio-tempo -- entra com a muda por
+        // enquanto, mesmo esquema da câmera: o próximo toggle busca o
+        // microfone de verdade normalmente.
+        stream.addTrack(createSilentAudioTrack());
+      } else if (!wantMicOn && micTrackFromRequest) {
+        // pediu com mic (queria ligado) mas mutou nesse meio-tempo --
+        // solta o hardware já de cara, não deixa preso até o próximo
+        // toggle.
+        stream.removeTrack(micTrackFromRequest);
+        micTrackFromRequest.stop();
+        stream.addTrack(createSilentAudioTrack());
+      } else {
+        // !wantMicOn && sem áudio -- já pediu certo, só completa com a
+        // muda (ver createSilentAudioTrack).
+        stream.addTrack(createSilentAudioTrack());
+      }
       const camTrackFromRequest = stream.getVideoTracks()[0]; // só existe se pedimos com vídeo acima
       if (wantCamOn && camTrackFromRequest) {
         camTrackFromRequest.enabled = true;
@@ -3602,13 +3664,89 @@ export default function GameRoom({
   // quando o stream finalmente chega, então um toggle que aconteceu
   // antes dele existir ainda é respeitado certinho assim que a
   // permissão libera.
+  // 2/out, bug do Douglas: "ta usando o microfone agr kkkk" -- MESMO
+  // defeito já corrigido na câmera (t.enabled = !t.enabled nunca soltava
+  // o hardware, indicador do SO ficava aceso pra sempre depois do
+  // primeiro getUserMedia). Agora mutar de verdade PARA a track real
+  // (.stop()) e põe uma track muda de mentira no lugar (ver
+  // createSilentAudioTrack acima -- sender/stream nunca ficam sem
+  // nenhuma track de áudio, então switchMicDevice não precisa mudar
+  // nada); desmutar de novo pede uma captura NOVA (getUserMedia), por
+  // isso essa metade é assíncrona -- mesma estrutura de toggleCam
+  // abaixo, só que sem o desvio de tela compartilhada (áudio nunca é
+  // "roubado" por outra fonte do jeito que o vídeo é pelo
+  // compartilhamento de tela).
   function toggleMic() {
     const stream = localStreamRef.current;
-    if (stream) stream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
-    setMicOn((v) => {
-      setStoredMicOn(!v); // persiste (ver lib/mediaPrefs.ts) -- próxima visita ao Lobby já abre mutado/desmutado igual deixou aqui
-      return !v;
-    });
+    if (!stream) {
+      // getUserMedia inicial ainda não resolveu (ou nem foi chamado,
+      // ver requestMedia acima) -- só atualiza state/preferência; o
+      // stream, quando chegar (ou o primeiro toggle, se não tiver sido
+      // pedido), já relê getStoredMicOn() e entra do jeito certo.
+      setMicOn((v) => {
+        setStoredMicOn(!v);
+        return !v;
+      });
+      return;
+    }
+
+    if (micOn) {
+      const micTrack = stream.getAudioTracks()[0];
+      const placeholder = createSilentAudioTrack();
+      stream.addTrack(placeholder);
+      if (micTrack) {
+        stream.removeTrack(micTrack);
+        micTrack.stop();
+      }
+      peersRef.current.forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        sender?.replaceTrack(placeholder);
+      });
+      chat.replaceCallTrack(placeholder);
+      setMicOn(false);
+      setStoredMicOn(false);
+      return;
+    }
+
+    setMicOn(true);
+    setStoredMicOn(true);
+    (async () => {
+      const micDeviceId = getStoredMicDeviceId();
+      try {
+        const fresh = await navigator.mediaDevices.getUserMedia({
+          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
+        });
+        const newTrack = fresh.getAudioTracks()[0];
+        if (!newTrack) return;
+        if (!micOnRef.current) {
+          // mutou de novo enquanto o microfone ainda tava abrindo --
+          // não desmuta sozinho.
+          newTrack.stop();
+          return;
+        }
+        const current = localStreamRef.current;
+        const oldTrack = current?.getAudioTracks()[0]; // a muda
+        if (current) {
+          current.addTrack(newTrack);
+          if (oldTrack) {
+            current.removeTrack(oldTrack);
+            oldTrack.stop();
+          }
+        } else {
+          localStreamRef.current = fresh;
+        }
+        peersRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+          sender?.replaceTrack(newTrack);
+        });
+        chat.replaceCallTrack(newTrack);
+        if (newTrack.getSettings().deviceId) setSelectedMicId(newTrack.getSettings().deviceId as string);
+      } catch (e) {
+        console.warn("Não deu pra ligar o microfone", e);
+        setMicOn(false);
+        setStoredMicOn(false);
+      }
+    })();
   }
 
   // 2/out, bug do Douglas: "ta usando minha camera sem eu estar em
@@ -3720,6 +3858,19 @@ export default function GameRoom({
   // chamada de chat, que reusam o mesmo localStreamRef).
   async function switchMicDevice(deviceId: string) {
     if (!deviceId || deviceId === selectedMicId) return;
+    if (!micOn) {
+      // mic desligado -- não pede o hardware só pra trocar de aparelho
+      // (2/out, mesmo bug "ta usando o microfone agr" por outra porta:
+      // com o mic mutado, stream.getAudioTracks()[0] já é a track MUDA
+      // de mentira -- ver createSilentAudioTrack -- não undefined, então
+      // sem esse guard caía no ramo "troca a track" normal e pedia o
+      // microfone de VERDADE só pra trocar o aparelho escolhido, mesmo
+      // mutado). Só guarda a escolha; desmutar (toggleMic) já busca ESSE
+      // aparelho sozinho.
+      setSelectedMicId(deviceId);
+      setStoredMicDeviceId(deviceId);
+      return;
+    }
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
       const newTrack = fresh.getAudioTracks()[0];
