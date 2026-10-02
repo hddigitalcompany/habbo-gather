@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Avatar } from "@/components/Avatar";
+import AnchoredAccountPanel from "@/components/AnchoredAccountPanel";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type ViewedProfile = {
@@ -719,9 +720,7 @@ export default function ProfileViewCard({
   if (anchored) {
     return (
       <>
-        <div className="account-card-anchor-backdrop" onClick={onClose}>
-          <div className="account-card-anchor">{card}</div>
-        </div>
+        <AnchoredAccountPanel onClose={onClose}>{card}</AnchoredAccountPanel>
         {followListPortal}
       </>
     );

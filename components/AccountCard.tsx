@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/Avatar";
 import ProfileViewCard from "@/components/ProfileViewCard";
+import AnchoredAccountPanel from "@/components/AnchoredAccountPanel";
 
 type ProfileStatus = "online" | "away" | "focus";
 type AccountProfile = {
@@ -69,17 +70,6 @@ export default function AccountCard({
   const [cardOpen, setCardOpen] = useState(false);
   const [panel, setPanel] = useState<MenuPanel>(null);
 
-  // DEBUG TEMPORÁRIO (2/out) -- confirma se é o COMPONENTE inteiro
-  // sendo desmontado/remontado pelo pai (GameRoom) que reseta `panel`
-  // de volta pro valor inicial (null), em vez de algo dentro do
-  // próprio AccountCard chamando setPanel(null). Roda só 1x na
-  // montagem (array vazio) -- a função de limpeza só dispara mesmo no
-  // desmonte de verdade, nunca em re-render normal.
-  useEffect(() => {
-    console.log("[account-card][DEBUG] MONTOU");
-    return () => console.log("[account-card][DEBUG] DESMONTOU");
-  }, []);
-
   const displayName = accountProfile?.name?.trim() || "visitante";
   const accountBio = accountProfile?.bio?.trim() || "";
   const accountInstagram = accountProfile?.instagram?.trim().replace(/^@/, "") || "";
@@ -87,27 +77,9 @@ export default function AccountCard({
   const accountStatusLabel = ACCOUNT_STATUS_LABELS[accountStatusId] || ACCOUNT_STATUS_LABELS.online;
 
   function openPanel(p: MenuPanel) {
-    // DEBUG TEMPORÁRIO (2/out) -- Douglas: "o card das opcoes abre, mas
-    // nenhuma delas abre" (dentro do jogo) -- loga aqui (handler
-    // chamado de verdade?) e no render logo abaixo (chegou a tentar
-    // desenhar o painel ancorado?) pra descobrir se é estado/JS que não
-    // dispara ou layout/CSS que esconde o que já renderizou. Remover
-    // depois de achar a causa.
-    console.log("[account-card][DEBUG] openPanel ->", p);
     setPanel(p);
     setCardOpen(false);
   }
-
-  // DEBUG TEMPORÁRIO (2/out, ver comentário em openPanel acima) -- loga
-  // toda renderização com o `panel` atual, pra confirmar se o React
-  // chega a tentar montar o painel ancorado (profile/account/
-  // verification) mesmo quando nada aparece na tela.
-  console.log(
-    "[account-card][DEBUG] render panel=", panel,
-    "cardOpen=", cardOpen,
-    "accountUserId=", accountUserId,
-    "accountAccessToken=", accountAccessToken ? "(presente)" : accountAccessToken
-  );
 
   return (
     <div className="lobby-topbar-account-wrap">
@@ -192,31 +164,16 @@ export default function AccountCard({
         <ProfileViewCard
           userId={accountUserId}
           accountAccessToken={accountAccessToken}
-          onClose={() => {
-            console.log("[account-card][DEBUG] onClose chamado (profile)");
-            setPanel(null);
-          }}
+          onClose={() => setPanel(null)}
           onStartConversation={(targetUserId, targetName) => onStartConversation?.(targetUserId, targetName)}
           anchored
         />
       )}
       {panel === "account" && accountAccessToken && (
-        <AccountDataPanel
-          accountAccessToken={accountAccessToken}
-          onClose={() => {
-            console.log("[account-card][DEBUG] onClose chamado (account)");
-            setPanel(null);
-          }}
-        />
+        <AccountDataPanel accountAccessToken={accountAccessToken} onClose={() => setPanel(null)} />
       )}
       {panel === "verification" && accountAccessToken && (
-        <VerificationPanel
-          accountAccessToken={accountAccessToken}
-          onClose={() => {
-            console.log("[account-card][DEBUG] onClose chamado (verification)");
-            setPanel(null);
-          }}
-        />
+        <VerificationPanel accountAccessToken={accountAccessToken} onClose={() => setPanel(null)} />
       )}
     </div>
   );
@@ -390,8 +347,7 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
   }
 
   return (
-    <div className="account-card-anchor-backdrop" onClick={onClose}>
-      <div className="account-card-anchor">
+    <AnchoredAccountPanel onClose={onClose}>
       <div className="profile-card account-data-card" onClick={(e) => e.stopPropagation()}>
         <button className="profile-close" onClick={onClose} title="Fechar">
           ✕
@@ -507,8 +463,7 @@ function AccountDataPanel({ accountAccessToken, onClose }: { accountAccessToken:
           )}
         </div>
       </div>
-      </div>
-    </div>
+    </AnchoredAccountPanel>
   );
 }
 
@@ -612,8 +567,7 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
   }
 
   return (
-    <div className="account-card-anchor-backdrop" onClick={onClose}>
-      <div className="account-card-anchor">
+    <AnchoredAccountPanel onClose={onClose}>
       <div className="profile-card account-data-card" onClick={(e) => e.stopPropagation()}>
         <button className="profile-close" onClick={onClose} title="Fechar">
           ✕
@@ -670,8 +624,7 @@ function VerificationPanel({ accountAccessToken, onClose }: { accountAccessToken
           )}
         </div>
       </div>
-      </div>
-    </div>
+    </AnchoredAccountPanel>
   );
 }
 
