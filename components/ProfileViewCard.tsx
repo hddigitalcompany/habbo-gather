@@ -305,8 +305,20 @@ export default function ProfileViewCard({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // 2/out, investigando "Seguir precisa clicar varias vezes pra
+    // funcionar" (Douglas: "cliquei deu seguindo e nada, abria de
+    // novo e tinha que clicar 3 vezes pra dar") -- a lógica de
+    // seguir/deixar de seguir (toggle + leitura aqui) tá certa (ver
+    // app/api/friends/toggle/route.ts, constraint UNIQUE na tabela
+    // followers -- não tem como duplicar linha). A hipótese que sobra
+    // é cache: sem `cache: "no-store"` explícito, o navegador pode
+    // servir essa resposta do cache HTTP em vez de buscar de novo ao
+    // reabrir o card -- aí mostra o following de ANTES do clique.
+    // `force-dynamic` na rota evita o cache do PRÓPRIO Next no
+    // servidor, mas não garante nada sobre o cache do navegador.
     fetch(`/api/profile/view?userId=${encodeURIComponent(userId)}`, {
       headers: { Authorization: `Bearer ${accountAccessToken}` },
+      cache: "no-store",
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {

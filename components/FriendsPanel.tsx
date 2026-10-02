@@ -64,9 +64,14 @@ export default function FriendsPanel({
   // pessoa" (ver components/ProfileViewCard.tsx).
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
 
+  // 2/out: cache: "no-store" nos GETs abaixo (ver comentário grande
+  // igual em ProfileViewCard.tsx, investigando "Seguir precisa clicar
+  // varias vezes") -- garante que reabrir/recarregar sempre busca o
+  // following/friends de VERDADE, nunca uma resposta antiga do cache
+  // do navegador.
   function reloadFriends() {
     if (!accountAccessToken) return;
-    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setFriends(Array.isArray(data?.friends) ? data.friends : []))
       .catch(() => setFriends([]));
@@ -80,7 +85,7 @@ export default function FriendsPanel({
       return;
     }
     let cancelled = false;
-    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setFriends(Array.isArray(data?.friends) ? data.friends : []);
@@ -101,6 +106,7 @@ export default function FriendsPanel({
     const t = setTimeout(() => {
       fetch(`/api/friends/search?q=${encodeURIComponent(query.trim())}`, {
         headers: { Authorization: `Bearer ${accountAccessToken}` },
+        cache: "no-store",
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
