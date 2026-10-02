@@ -61,6 +61,7 @@ import {
   setStoredSpeakerDeviceId,
 } from "@/lib/mediaPrefs";
 import RoomMembersPanel from "@/components/RoomMembersPanel";
+import ProfileViewCard from "@/components/ProfileViewCard";
 import FriendsPanel from "@/components/FriendsPanel";
 import ItemEditor from "@/components/ItemEditor";
 import SettingsPanel from "@/components/SettingsPanel";
@@ -2540,12 +2541,11 @@ export default function GameRoom({
   // controla o que aparece NA LISTA, o card em si não muda de tamanho
   // trocando de aba (ver .profile-edit-scroll, rolagem interna).
   const [editorCategory, setEditorCategory] = useState<CustomizationCategoryId>("cabelo");
-  // altura MEDIDA de verdade do card de perfil (versão base, com
-  // foto+campos) -- a versão de edição usa esse mesmo valor (ver
-  // .profile-card.editing style inline), pra nunca ter um tamanho
-  // diferente entre as duas telas. Medido ao vivo (ResizeObserver) em
-  // vez de um número fixo chutado, ver ProfileCard.
-  const [profileCardHeight, setProfileCardHeight] = useState<number | null>(null);
+  // profileCardHeight (altura medida do card de perfil base) foi
+  // removido 2/out -- esse card virou <ProfileViewCard> (ver comentário
+  // grande no call site dele), e o editor de personagem (ProfileCard,
+  // único dono de .profile-card.editing agora) voltou pro valor fixo
+  // 560px de sempre em vez de seguir uma medição que não existe mais.
 
   useEffect(() => {
     let destroyed = false;
@@ -5396,15 +5396,48 @@ export default function GameRoom({
           />
         )}
 
-        {profileCard && (
+        {/* 2/out -- pedido do Douglas: "coloca o nosso card de perfil
+            pessoal publico no lugar desse card aqui" + "eu quero a
+            edicao igual ao nosso card, abrindo pra editar, nao
+            editando assim direto". O card de BASE (foto/nome/status/
+            instagram/bio + Seguir|Conversar|Editar perfil) agora é o
+            MESMO <ProfileViewCard> que Lobby.tsx/FriendsPanel.tsx/
+            AccountCard.tsx já usam -- ProfileCard.tsx (abaixo) ficou
+            só com o editor de APARÊNCIA do boneco (cabelo/pele/roupa,
+            outra feature, ver onEditCharacter/onStartEdit), que
+            continua sendo renderizado por cima quando editingCharacter
+            vira true (ver profile-card.editing em globals.css, mesmo
+            "troca de tela" de sempre -- só que agora é um componente
+            diferente no lugar do card de base, não um `if` dentro do
+            mesmo). userId: isLocal usa accountUserId (a própria
+            conta); outro jogador usa o userId PERSISTENTE resolvido
+            via remotePlayersRef (profileCard.playerId é só o id de
+            CONEXÃO -- mesma resolução que sendMessageTo já fazia, ver
+            comentário grande lá). Sem accountUserId (visitante sem
+            conta vendo o PRÓPRIO perfil) cai no fallback "visitante"
+            de sempre -- /api/profile/view não acha nada, mas não
+            quebra (mesmo profile null tratado em todo lugar que já usa
+            esse card). */}
+        {profileCard && !editingCharacter && (
+          <ProfileViewCard
+            userId={
+              profileCard.isLocal
+                ? accountUserId ?? ""
+                : remotePlayersRef.current.get(profileCard.playerId)?.userId ?? profileCard.playerId
+            }
+            accountAccessToken={accountAccessToken ?? ""}
+            onClose={closeProfileCard}
+            onStartConversation={(targetUserId) => {
+              startDirectWith(targetUserId);
+              setChatOpen(true);
+              closeProfileCard();
+            }}
+            onEditCharacter={profileCard.isLocal ? startEditingCharacter : undefined}
+            onSendNote={!profileCard.isLocal ? (text) => sendNote(profileCard.playerId, text) : undefined}
+          />
+        )}
+        {profileCard && editingCharacter && (
           <ProfileCard
-            info={profileCard}
-            myProfile={myProfile}
-            onChangeMyProfile={updateMyProfile}
-            onChangePhoto={handlePhotoChange}
-            remoteProfile={remoteProfiles[profileCard.playerId]}
-            editing={editingCharacter}
-            onStartEdit={startEditingCharacter}
             onCancelEdit={cancelEditingCharacter}
             onSaveEdit={saveEditingCharacter}
             onClose={closeProfileCard}
@@ -5429,12 +5462,6 @@ export default function GameRoom({
             onSelectOutfitColor={selectOutfitColor}
             editorCategory={editorCategory}
             onSelectCategory={setEditorCategory}
-            measuredHeight={profileCardHeight}
-            onMeasuredHeight={setProfileCardHeight}
-            onAskAvailable={() => sendPoke(profileCard.playerId, "available")}
-            onCallOver={() => sendPoke(profileCard.playerId, "call")}
-            onSendMessage={() => sendMessageTo(profileCard.playerId)}
-            onSendNote={(text) => sendNote(profileCard.playerId, text)}
           />
         )}
 
@@ -7555,25 +7582,20 @@ function PersonIcon() {
   );
 }
 
-// Card de perfil -- visual "cartão fosco" (foto grande no topo, nome,
-// status/cargo, ação embaixo) parecido com o card de compartilhar
-// perfil do iOS que o usuário mandou de referência. Dois modos bem
-// diferentes:
-//   isLocal=true  -> TUDO editável (foto/nome/status/insta/bio) +
-//                     botão "Editar meu personagem" (abre o seletor de
-//                     cabelo já existente).
-//   isLocal=false -> só leitura (dados vêm sincronizados pelo servidor,
-//                     ver "profile" em server/index.js) + botões de
-//                     interação fixados embaixo (Disponível? / Chamar
-//                     até você / Enviar mensagem).
+// Editor de APARÊNCIA do boneco (cabelo/pele/barba/acessório/roupa) --
+// pedido original do Douglas pro "Editar meu personagem". Até 2/out
+// isso era só um `if (editing)` dentro de um componente maior
+// (ProfileCard) que TAMBÉM desenhava o card de base (foto/nome/status/
+// instagram/bio editáveis direto) -- esse card de base virou o mesmo
+// <ProfileViewCard> que Lobby.tsx/FriendsPanel.tsx/AccountCard.tsx já
+// usam (ver comentário grande no lugar que montava <ProfileCard>, e
+// onEditCharacter em ProfileViewCard.tsx), pedido do Douglas: "coloca
+// o nosso card de perfil pessoal publico no lugar desse card aqui" +
+// "eu quero a edicao igual ao nosso card, abrindo pra editar, nao
+// editando assim direto". Sobrou só isso aqui -- renderizado por cima
+// quando editingCharacter vira true (ver onEditCharacter chamando
+// startEditingCharacter). Nada de nome/status/bio mora mais aqui.
 function ProfileCard({
-  info,
-  myProfile,
-  onChangeMyProfile,
-  onChangePhoto,
-  remoteProfile,
-  editing,
-  onStartEdit,
   onCancelEdit,
   onSaveEdit,
   onClose,
@@ -7598,20 +7620,7 @@ function ProfileCard({
   onSelectOutfitColor,
   editorCategory,
   onSelectCategory,
-  measuredHeight,
-  onMeasuredHeight,
-  onAskAvailable,
-  onCallOver,
-  onSendMessage,
-  onSendNote,
 }: {
-  info: { playerId: string; isLocal: boolean };
-  myProfile: ProfileFields;
-  onChangeMyProfile: (partial: Partial<ProfileFields>) => void;
-  onChangePhoto: (file: File) => void;
-  remoteProfile: RemoteProfile | undefined;
-  editing: boolean;
-  onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveEdit: () => void;
   onClose: () => void;
@@ -7648,80 +7657,16 @@ function ProfileCard({
   onSelectOutfitColor: (id: string | null) => void;
   editorCategory: CustomizationCategoryId;
   onSelectCategory: (id: CustomizationCategoryId) => void;
-  measuredHeight: number | null;
-  onMeasuredHeight: (h: number) => void;
-  onAskAvailable: () => void;
-  onCallOver: () => void;
-  onSendMessage: () => void;
-  /** "Deixar um recado" -- ver sendNote em GameRoom.tsx. Recebe o TEXTO
-   * já digitado no composer inline do card (ver recado-composer no JSX
-   * abaixo), diferente de onAskAvailable/onCallOver/onSendMessage (esses
-   * não precisam de argumento nenhum, são sempre o mesmo aviso fixo). */
-  onSendNote: (text: string) => void;
 }) {
   const thumbScale = HAIR_THUMB_W / 200;
-  const photoInputRef = useRef<HTMLInputElement>(null);
-  const baseCardRef = useRef<HTMLDivElement>(null);
   // pra qual lado o boneco fixo do topo tá virado agora (setas ‹ ›, ver
-  // avatar-preview-rotate-wrap mais abaixo) -- só existe/importa na tela
-  // de edição, mas mora aqui em cima (fora do `if (editing)`) porque
-  // hook não pode ser condicional. Sempre volta pra "down" ao abrir a
-  // edição de novo (ver reset no onStartEdit já existente lá em
+  // avatar-preview-rotate-wrap mais abaixo). Sempre volta pra "down" ao
+  // abrir a edição de novo (ver reset em startEditingCharacter lá em
   // GameRoom, esse aqui é só o estado local da prévia -- não precisa
   // persistir).
   const [previewDirection, setPreviewDirection] = useState<Direction>("down");
 
-  // composer inline de "Deixar um recado" (ver onSendNote/sendNote em
-  // GameRoom.tsx) -- fica FECHADO por padrão (só o botão), abre um campo
-  // de texto pequeno dentro do próprio card ao clicar. Estado local do
-  // card mesmo (não precisa subir pra GameRoom), mas o <ProfileCard> não
-  // tem `key` no JSX (GameRoom só troca o objeto `info`, não desmonta o
-  // componente ao trocar de pessoa) -- por isso reseta À MÃO sempre que
-  // o playerId mudar, senão um recado meio-digitado pra uma pessoa
-  // vazaria pro card da PRÓXIMA se clicar em outro boneco sem fechar.
-  const [recadoOpen, setRecadoOpen] = useState(false);
-  const [recadoText, setRecadoText] = useState("");
-  useEffect(() => {
-    setRecadoOpen(false);
-    setRecadoText("");
-  }, [info.playerId]);
-
-  const fields: RemoteProfile = info.isLocal
-    ? { ...myProfile, role: "" }
-    : remoteProfile ?? pickRemoteProfile(undefined);
-  const status = statusMeta(fields.status);
-  const displayName = fields.name || (info.isLocal ? "Sem nome ainda" : "Visitante");
-
-  // mede a altura de VERDADE do card base (foto + campos) sempre que
-  // ele está na tela, e guarda lá em cima (GameRoom) -- é esse valor
-  // que a tela de edição usa (ver style logo abaixo), pra nunca ficar
-  // com um tamanho diferente do card de perfil. ResizeObserver em vez
-  // de medir só uma vez porque a largura do card pode encolher em
-  // telas pequenas (max-width:85%), o que muda a altura da foto
-  // (aspect-ratio 1/1) junto.
-  useLayoutEffect(() => {
-    if (editing) return;
-    const el = baseCardRef.current;
-    if (!el) return;
-    const measure = () => onMeasuredHeight(el.getBoundingClientRect().height);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [editing, onMeasuredHeight]);
-
-  // "Editar meu personagem" toma o card INTEIRO (categorias + itens +
-  // Cancelar/Salvar) em vez de aparecer espremido junto com os campos
-  // de nome/status/bio -- ver onStartEdit/onCancelEdit. Título e abas
-  // de categoria ficam FIXOS no topo, Cancelar/Salvar fixos embaixo;
-  // só a lista de itens (e as cores do item selecionado) rola por
-  // dentro -- assim o card nunca muda de tamanho trocando de categoria
-  // ou categoria com mais/menos itens. A ALTURA em si (não só o
-  // max) é a mesma medida do card de perfil (measuredHeight, ver
-  // useLayoutEffect acima) -- por isso as duas telas têm
-  // EXATAMENTE o mesmo tamanho, "seguindo" o perfil.
-  if (editing) {
-    const selectedHairOption = HAIR_CATALOG.find((opt) => opt.id === selectedHairId);
+  const selectedHairOption = HAIR_CATALOG.find((opt) => opt.id === selectedHairId);
     // cor escolhida dentro do penteado atual (se houver) -- troca só o
     // ARQUIVO exibido/aplicado, o penteado "selecionado" continua sendo
     // o mesmo pro resto da UI (grade de penteados, categoria etc).
@@ -7804,15 +7749,17 @@ function ProfileCard({
       <div className="profile-backdrop" onClick={onClose}>
         <div
           className="profile-card editing"
-          // pedido do Douglas: "a altura fixa na altura do card do
-          // perfil" -- volta a seguir CEGAMENTE a altura medida do card
-          // de perfil normal (measuredHeight, ver comentário grande mais
-          // abaixo em "Editar meu personagem toma o card INTEIRO"),
-          // igual sempre foi. O layout em 3 colunas lado a lado (boneco +
-          // abas+grade, ver .profile-edit-main) já não precisa de mais
-          // altura que isso -- foi só a largura que cresceu (ver width
-          // em .profile-card.editing).
-          style={{ height: measuredHeight ?? 560 }}
+          // 2/out -- antes essa altura SEGUIA a altura medida do card
+          // de perfil normal (measuredHeight), pra bater exatamente com
+          // o card de baixo que esse editor substituía (ProfileCard
+          // tinha os dois: base view + editor, ver comentário grande no
+          // topo do arquivo sobre a unificação com <ProfileViewCard>).
+          // Esse componente agora SÓ existe pro editor (nunca mais mede
+          // um card "de base" próprio, isso virou outro componente) --
+          // volta pro valor fixo de sempre, 560px (mesmo fallback que
+          // já existia aqui antes de measuredHeight ser medido pela
+          // primeira vez).
+          style={{ height: 560 }}
           onClick={(e) => e.stopPropagation()}
         >
           <h3
@@ -8286,190 +8233,6 @@ function ProfileCard({
         </div>
       </div>
     );
-  }
-
-  return (
-    <div className="profile-backdrop" onClick={onClose}>
-      <div className="profile-card" ref={baseCardRef} onClick={(e) => e.stopPropagation()}>
-        <button className="profile-close" onClick={onClose} title="Fechar">
-          ✕
-        </button>
-
-        <div className="profile-photo-wrap">
-          <div className="profile-photo" style={{ backgroundImage: fields.photoUrl ? `url(${fields.photoUrl})` : undefined }}>
-            {!fields.photoUrl && <span className="profile-photo-fallback">{displayName.slice(0, 1).toUpperCase()}</span>}
-            <div className="profile-photo-fade" />
-            <div className="profile-photo-text">
-              <span className="profile-name-row">
-                <span className="profile-status-dot" style={{ background: status.dot }} title={status.label} />
-                {info.isLocal ? (
-                  <input
-                    className="profile-name-input"
-                    value={myProfile.name}
-                    placeholder="Seu nome"
-                    maxLength={40}
-                    onChange={(e) => onChangeMyProfile({ name: e.target.value })}
-                  />
-                ) : (
-                  <span className="profile-name">{displayName}</span>
-                )}
-              </span>
-              <span className="profile-role">{fields.role || (info.isLocal ? "Cargo (definido pelo admin)" : " ")}</span>
-            </div>
-          </div>
-
-          {info.isLocal && (
-            <>
-              <button
-                className="profile-photo-edit"
-                title="Trocar foto"
-                onClick={() => photoInputRef.current?.click()}
-              >
-                <BrushIcon />
-              </button>
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) onChangePhoto(file);
-                  e.target.value = "";
-                }}
-              />
-            </>
-          )}
-        </div>
-
-        <div className="profile-body">
-        {info.isLocal ? (
-          <div className="profile-fields">
-            <label className="profile-field">
-              <span>Status</span>
-              <select
-                value={myProfile.status}
-                onChange={(e) => onChangeMyProfile({ status: e.target.value as ProfileStatus })}
-              >
-                {STATUS_OPTIONS.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="profile-field">
-              <span>Instagram</span>
-              <input
-                value={myProfile.instagram}
-                placeholder="@seuusuario"
-                maxLength={30}
-                onChange={(e) => onChangeMyProfile({ instagram: e.target.value })}
-              />
-            </label>
-
-            <label className="profile-field">
-              <span>Bio</span>
-              <textarea
-                value={myProfile.bio}
-                placeholder="Fale um pouco sobre você"
-                maxLength={280}
-                rows={3}
-                onChange={(e) => onChangeMyProfile({ bio: e.target.value })}
-              />
-            </label>
-          </div>
-        ) : (
-          <div className="profile-view">
-            <span className="profile-status-line">
-              <span className="profile-status-dot" style={{ background: status.dot }} />
-              {status.label}
-            </span>
-            {fields.instagram && (
-              <a
-                className="profile-instagram-link"
-                href={instagramHref(fields.instagram)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                @{fields.instagram.replace(/^@/, "")}
-              </a>
-            )}
-            {fields.bio && <p className="profile-bio">{fields.bio}</p>}
-          </div>
-        )}
-
-        {info.isLocal && (
-          <button className="edit-character-btn" onClick={onStartEdit}>
-            <PencilIcon />
-            Editar meu personagem
-          </button>
-        )}
-
-        {!info.isLocal && (
-          <div className="profile-actions">
-            <button className="profile-action-btn primary" onClick={onSendMessage}>
-              <ShareIcon />
-              Enviar mensagem
-            </button>
-            {recadoOpen ? (
-              // composer do "Deixar um recado" (ver onSendNote em
-              // GameRoom.tsx) -- SUBSTITUI a fileira de botões enquanto
-              // aberto, em vez de empilhar embaixo, pra não bagunçar o
-              // card com os dois ao mesmo tempo.
-              <div className="profile-recado-composer">
-                <textarea
-                  className="profile-recado-input"
-                  value={recadoText}
-                  onChange={(e) => setRecadoText(e.target.value.slice(0, 200))}
-                  placeholder="Escreve um recado..."
-                  rows={2}
-                  maxLength={200}
-                  autoFocus
-                />
-                <div className="profile-actions-row">
-                  <button
-                    className="profile-action-btn"
-                    onClick={() => {
-                      setRecadoOpen(false);
-                      setRecadoText("");
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    className="profile-action-btn primary"
-                    disabled={!recadoText.trim()}
-                    onClick={() => {
-                      onSendNote(recadoText);
-                      setRecadoOpen(false);
-                      setRecadoText("");
-                    }}
-                  >
-                    Enviar
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="profile-actions-row">
-                <button className="profile-action-btn" onClick={onAskAvailable}>
-                  Disponível?
-                </button>
-                <button className="profile-action-btn" onClick={onCallOver}>
-                  Chamar até você
-                </button>
-                <button className="profile-action-btn" onClick={() => setRecadoOpen(true)}>
-                  Recado
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ShareIcon() {

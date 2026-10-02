@@ -117,6 +117,8 @@ export default function ProfileViewCard({
   onStartConversation,
   onFollowChanged,
   anchored = false,
+  onEditCharacter,
+  onSendNote,
 }: {
   userId: string;
   accountAccessToken: string;
@@ -134,6 +136,31 @@ export default function ProfileViewCard({
   // (.profile-backdrop position:fixed preso pelo backdrop-filter da
   // topbar) + a explicação de ancorar em vez de centralizar.
   anchored?: boolean;
+  // 2/out -- pedido do Douglas: "coloca o nosso card de perfil pessoal
+  // publico no lugar desse card aqui [o de clicar no proprio boneco
+  // dentro da sala], se ja nao sao a mesma coisa" + "eu quero a
+  // edicao igual ao nosso card, abrindo pra editar, nao editando assim
+  // direto". Esse card virou o ÚNICO perfil que existe (antes
+  // GameRoom.tsx tinha uma cópia própria, ProfileCard, com campos de
+  // Status/Instagram/Bio SEMPRE editáveis direto no card -- Douglas
+  // queria a visualização normal + botão "Editar perfil" abrindo o
+  // modo de edição, igual este card já fazia). "Editar meu personagem"
+  // (cabelo/pele/roupa do boneco, ProfileCard.tsx em GameRoom.tsx
+  // continua existindo só pra ISSO agora) é outra feature inteira,
+  // sem nada a ver com nome/status/bio -- esse prop só pluga um botão
+  // aqui que ABRE aquele editor (GameRoom continua dono de tudo sobre
+  // aparência do boneco). Só existe quando `isSelf` E estamos dentro
+  // da sala (Lobby/FriendsPanel não têm personagem nenhum pra editar).
+  onEditCharacter?: () => void;
+  // "Deixar um recado" -- só faz sentido pra quem tá NA SALA agora
+  // (mesmo espírito de "Disponível?"/"Chamar até você", que ficaram
+  // pra trás -- Douglas confirmou "o card se mantem igual ao de fora,
+  // porem dentro do jogo tem um deixar recado": Seguir/Conversar
+  // (comuns, perfil de fora OU de dentro) + esse extra só dentro.
+  // Texto já digitado no composer inline (ver profile-recado-* no
+  // JSX), portado de ProfileCard.tsx -- nunca fica salvo em lugar
+  // nenhum (nem chat, nem banco), só um toast do lado de quem recebe.
+  onSendNote?: (text: string) => void;
 }) {
   const [profile, setProfile] = useState<ViewedProfile | null>(null);
   const [following, setFollowing] = useState(false);
@@ -176,6 +203,22 @@ export default function ProfileViewCard({
   const [followPanel, setFollowPanel] = useState<"followers" | "following" | null>(null);
   const [followUsers, setFollowUsers] = useState<FollowUser[] | null>(null);
   const [followPanelViewingUserId, setFollowPanelViewingUserId] = useState<string | null>(null);
+
+  // composer inline de "Deixar um recado" (ver onSendNote acima,
+  // portado de ProfileCard.tsx em GameRoom.tsx) -- fica fechado por
+  // padrão, abre um campo de texto pequeno dentro do próprio card.
+  // Reseta sempre que troca de perfil (userId muda) -- MESMO motivo
+  // documentado no original: esse componente pode ficar montado e só
+  // trocar de pessoa (empilhando um <ProfileViewCard> por cima do
+  // outro ao clicar numa linha de seguidores, ver followPanel acima),
+  // sem desmontar -- um recado meio-digitado pra uma pessoa não pode
+  // vazar pro card da PRÓXIMA.
+  const [recadoOpen, setRecadoOpen] = useState(false);
+  const [recadoText, setRecadoText] = useState("");
+  useEffect(() => {
+    setRecadoOpen(false);
+    setRecadoText("");
+  }, [userId]);
 
   useEffect(() => {
     if (!followPanel) {
@@ -598,6 +641,17 @@ export default function ProfileViewCard({
                         <button className="profile-action-btn primary" onClick={() => startEditing(profile)}>
                           Editar perfil
                         </button>
+                        {/* 2/out -- pedido do Douglas: "o botao editar
+                            meu personagem -- acoplado no card, embaixo"
+                            -- ver comentário grande de onEditCharacter
+                            lá em cima dos props. Só existe dentro da
+                            sala (GameRoom.tsx é quem passa esse prop),
+                            nunca no Lobby/FriendsPanel. */}
+                        {onEditCharacter && (
+                          <button className="profile-action-btn edit-character-btn" onClick={onEditCharacter}>
+                            Editar meu personagem
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <div className="profile-actions-row">
@@ -612,6 +666,52 @@ export default function ProfileViewCard({
                             Conversar
                           </button>
                         )}
+                        {/* "Deixar um recado" -- ver comentário grande
+                            de onSendNote lá em cima dos props (só
+                            existe dentro da sala). Composer SUBSTITUI a
+                            fileira de botões enquanto aberto (mesmo
+                            comportamento de ProfileCard.tsx original),
+                            em vez de empilhar embaixo. */}
+                        {onSendNote &&
+                          (recadoOpen ? (
+                            <div className="profile-recado-composer">
+                              <textarea
+                                className="profile-recado-input"
+                                value={recadoText}
+                                onChange={(e) => setRecadoText(e.target.value.slice(0, 200))}
+                                placeholder="Escreve um recado..."
+                                rows={2}
+                                maxLength={200}
+                                autoFocus
+                              />
+                              <div className="profile-actions-row">
+                                <button
+                                  className="profile-action-btn"
+                                  onClick={() => {
+                                    setRecadoOpen(false);
+                                    setRecadoText("");
+                                  }}
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  className="profile-action-btn primary"
+                                  disabled={!recadoText.trim()}
+                                  onClick={() => {
+                                    onSendNote(recadoText);
+                                    setRecadoOpen(false);
+                                    setRecadoText("");
+                                  }}
+                                >
+                                  Enviar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button className="profile-action-btn" onClick={() => setRecadoOpen(true)}>
+                              Recado
+                            </button>
+                          ))}
                       </div>
                     )}
                   </div>
