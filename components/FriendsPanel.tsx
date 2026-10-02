@@ -34,6 +34,7 @@
 // idêntica (fundo/borda/cabeçalho/lista) -- busca/avatar/abas são
 // próprias daqui (.contacts-panel-*), ver app/globals.css.
 import { useEffect, useState } from "react";
+import { Avatar } from "@/components/Avatar";
 import ProfileViewCard from "@/components/ProfileViewCard";
 
 // mantido pro resto do app (Lobby.tsx/GameRoom.tsx) continuar tipando
@@ -216,14 +217,7 @@ export default function FriendsPanel({
                   onClick={() => setViewingUserId(u.userId)}
                 >
                   <span className="contacts-panel-identity">
-                    <span className="contacts-panel-avatar" style={{ background: "#5a4b7c" }}>
-                      {u.photoUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={u.photoUrl} alt="" />
-                      ) : (
-                        (u.name || "?").trim().charAt(0).toUpperCase() || "?"
-                      )}
-                    </span>
+                    <Avatar className="contacts-panel-avatar" background="#5a4b7c" photoUrl={u.photoUrl} name={u.name} />
                     <span className="members-panel-name">{u.name || "(sem nome)"}</span>
                   </span>
                   <button
@@ -252,14 +246,7 @@ export default function FriendsPanel({
                 onClick={() => setViewingUserId(u.userId)}
               >
                 <span className="contacts-panel-identity">
-                  <span className="contacts-panel-avatar" style={{ background: "#5a4b7c" }}>
-                    {u.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={u.photoUrl} alt="" />
-                    ) : (
-                      (u.name || "?").trim().charAt(0).toUpperCase() || "?"
-                    )}
-                  </span>
+                  <Avatar className="contacts-panel-avatar" background="#5a4b7c" photoUrl={u.photoUrl} name={u.name} />
                   <span className="members-panel-name">{u.name || "(sem nome)"}</span>
                 </span>
                 <button

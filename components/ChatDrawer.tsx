@@ -10,6 +10,7 @@ import {
   type ChangeEvent,
   type RefObject,
 } from "react";
+import { Avatar } from "@/components/Avatar";
 import {
   ChatCallVideoTile,
   MicIcon,
@@ -130,6 +131,7 @@ export function ChatDrawer({
   messages,
   unreadSinceTs,
   roomChatLog,
+  roomUnreadCount = 0,
   hasRoom,
   myUserId,
   onlinePlayers,
@@ -230,6 +232,12 @@ export function ChatDrawer({
   // não chegou do servidor.
   unreadSinceTs: number | null;
   roomChatLog: ChatMessage[];
+  // 2/out, pedido do Douglas: "o balaozinho nao veio na conversa da
+  // sala" -- ver comentário grande de roomUnreadCount em GameRoom.tsx
+  // (chatDrawerProps). Opcional porque o Lobby reaproveita esse MESMO
+  // componente sem Sala nenhuma (hasRoom=false, ver abaixo) -- lá nem
+  // faz sentido existir, então nem precisa passar.
+  roomUnreadCount?: number;
   // 1/out (unificação Lobby/GameRoom, pedido do Douglas: "quero a
   // mesma estrutura nao que seja separado") -- a Sala ("quem ta por
   // perto") só existe DENTRO da sala de verdade (GameRoom.tsx); o
@@ -450,8 +458,8 @@ export function ChatDrawer({
   // aberta. Mesmo "balãozinho" de sempre (.lobby-icon-badge), só que
   // em cima de cada aba em vez de em cima do ícone.
   const companyUnread = useMemo(
-    () => conversations.reduce((sum, c) => (c.lane === "company" ? sum + (c.unreadCount ?? 0) : sum), 0),
-    [conversations]
+    () => conversations.reduce((sum, c) => (c.lane === "company" ? sum + (c.unreadCount ?? 0) : sum), 0) + roomUnreadCount,
+    [conversations, roomUnreadCount]
   );
   const privateUnread = useMemo(
     () => conversations.reduce((sum, c) => (c.lane === "private" ? sum + (c.unreadCount ?? 0) : sum), 0),
@@ -718,6 +726,7 @@ export function ChatDrawer({
                       : "Conversa com todo mundo por perto"}
                   </span>
                 </span>
+                {roomUnreadCount > 0 && <span className="chat-conv-unread-badge">{roomUnreadCount}</span>}
               </button>
             )}
             {visibleLaneConversations.map((c) => {
@@ -968,14 +977,12 @@ export function ChatDrawer({
                         checked={newConvSelection.includes(p.userId)}
                         onChange={() => onToggleNewConvSelection(p.userId)}
                       />
-                      <span className="chat-conv-avatar" style={{ background: p.color || "#5a4b7c" }}>
-                        {p.photoUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.photoUrl} alt="" />
-                        ) : (
-                          (p.name || "?").slice(0, 1).toUpperCase()
-                        )}
-                      </span>
+                      <Avatar
+                        className="chat-conv-avatar"
+                        background={p.color || "#5a4b7c"}
+                        photoUrl={p.photoUrl}
+                        name={p.name}
+                      />
                       <span>{p.name || "Sem nome"}</span>
                     </label>
                   ))}
@@ -1031,14 +1038,12 @@ export function ChatDrawer({
                   onClick={() => onOpenProfile(activeConv.participants[0].id)}
                   title="Ver perfil"
                 >
-                  <span className="chat-drawer-header-avatar" style={{ background: activeConv.participants[0].color || "#5a4b7c" }}>
-                    {activeConv.participants[0].photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={activeConv.participants[0].photoUrl} alt="" />
-                    ) : (
-                      (activeConv.participants[0].name || "?").trim().charAt(0).toUpperCase() || "?"
-                    )}
-                  </span>
+                  <Avatar
+                    className="chat-drawer-header-avatar"
+                    background={activeConv.participants[0].color || "#5a4b7c"}
+                    photoUrl={activeConv.participants[0].photoUrl}
+                    name={activeConv.participants[0].name}
+                  />
                   <h3>{conversationDisplayName(activeConv)}</h3>
                 </button>
                 {/* "Convidar amigo" / "Visitar amigo" -- pedido do

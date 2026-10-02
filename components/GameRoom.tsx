@@ -4662,6 +4662,38 @@ export default function GameRoom({
   // (chatLog/roomPins/roomTyping/pendingMentionIds locais, "hasRoom")
   // continua daqui.
   const activeConversationId = chat.activeConversationId;
+
+  // 2/out, pedido do Douglas: "o balaozinho nao veio na conversa da
+  // sala" -- o balãozinho de não-lida (chat-conv-unread-badge, ver
+  // ChatDrawer) já existia pras conversas de verdade (unreadCount vem
+  // do SERVIDOR, ver chat:history acima), mas a "Sala" é a
+  // pseudo-conversa local (chatLog, sem persistência -- ver comentário
+  // grande lá em cima de myUserId) e nunca teve esse conceito. Local
+  // porque a Sala em si já é local/efêmera (nunca existiu um
+  // "unreadCount da Sala" no servidor pra reaproveitar); o badge em si
+  // é o MESMO componente/classe CSS das conversas de verdade, só a
+  // CONTAGEM é própria daqui.
+  //
+  // "visto" = thread da Sala estava de fato ABERTA (gaveta aberta +
+  // Sala selecionada + view "thread", não só "list" no fundo) na hora
+  // que a mensagem chegou. roomChatSeenIdsRef guarda os ids já vistos
+  // (Set, não contagem -- sobrevive a chatLog sendo truncado/
+  // substituído por snapshot do servidor, ver setChatLog acima).
+  const roomChatSeenIdsRef = useRef<Set<string>>(new Set());
+  const [roomUnreadCount, setRoomUnreadCount] = useState(0);
+  useEffect(() => {
+    const isRoomThreadOpen = chatOpen && activeConversationId === null && chat.chatView === "thread";
+    if (isRoomThreadOpen) {
+      for (const m of chatLog) roomChatSeenIdsRef.current.add(m.id);
+      setRoomUnreadCount(0);
+      return;
+    }
+    let count = 0;
+    for (const m of chatLog) {
+      if (m.senderId !== myUserId && !roomChatSeenIdsRef.current.has(m.id)) count++;
+    }
+    setRoomUnreadCount(count);
+  }, [chatLog, chatOpen, activeConversationId, chat.chatView, myUserId]);
   const chatDrawerProps = {
     view: chat.chatView,
     onChangeView: chat.setChatView,
@@ -4674,6 +4706,7 @@ export default function GameRoom({
     // esse conceito).
     unreadSinceTs: activeConversationId === null ? null : chat.unreadSinceTsByConv[activeConversationId] ?? null,
     roomChatLog: chatLog,
+    roomUnreadCount,
     // 1/out (unificação Lobby/GameRoom) -- ver comentário grande de
     // hasRoom em components/ChatDrawer.tsx; a sala de verdade sempre tem
     // "Sala" na lista, só o Lobby (sem WebSocket/sem "por perto") passa

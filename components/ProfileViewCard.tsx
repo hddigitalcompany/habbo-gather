@@ -12,6 +12,7 @@
 // Seguir/Conversar.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Avatar } from "@/components/Avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type ViewedProfile = {
@@ -684,14 +685,7 @@ export default function ProfileViewCard({
                 onClick={() => setFollowPanelViewingUserId(u.userId)}
               >
                 <span className="contacts-panel-identity">
-                  <span className="contacts-panel-avatar" style={{ background: "#5a4b7c" }}>
-                    {u.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={u.photoUrl} alt="" />
-                    ) : (
-                      (u.name || "?").trim().charAt(0).toUpperCase() || "?"
-                    )}
-                  </span>
+                  <Avatar className="contacts-panel-avatar" background="#5a4b7c" photoUrl={u.photoUrl} name={u.name} />
                   <span className="members-panel-name">{u.name || "(sem nome)"}</span>
                 </span>
               </li>

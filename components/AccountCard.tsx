@@ -19,6 +19,7 @@
 // duas telas, sem escrever CSS novo pra isso.
 import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { Avatar } from "@/components/Avatar";
 import ProfileViewCard from "@/components/ProfileViewCard";
 
 type ProfileStatus = "online" | "away" | "focus";
@@ -71,7 +72,6 @@ export default function AccountCard({
   const displayName = accountProfile?.name?.trim() || "visitante";
   const accountBio = accountProfile?.bio?.trim() || "";
   const accountInstagram = accountProfile?.instagram?.trim().replace(/^@/, "") || "";
-  const accountInitial = displayName.charAt(0).toUpperCase() || "?";
   const accountStatusId = accountProfile?.status || "online";
   const accountStatusLabel = ACCOUNT_STATUS_LABELS[accountStatusId] || ACCOUNT_STATUS_LABELS.online;
 
@@ -88,14 +88,7 @@ export default function AccountCard({
         onClick={() => setCardOpen((v) => !v)}
         aria-expanded={cardOpen}
       >
-        <span className="lobby-topbar-account-avatar">
-          {accountProfile?.photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={accountProfile.photoUrl} alt="" />
-          ) : (
-            accountInitial
-          )}
-        </span>
+        <Avatar className="lobby-topbar-account-avatar" photoUrl={accountProfile?.photoUrl} name={displayName} />
         <span className="lobby-topbar-account-name">{displayName}</span>
       </button>
       {cardOpen && (

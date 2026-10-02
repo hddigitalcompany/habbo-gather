@@ -1235,6 +1235,19 @@ body {
   font-size: 15px;
   font-weight: 700;
   color: #fff;
+  /* 2/out, bug do Douglas: "quando entro pra criar nova conversa a
+     imagem ta assim" -- a foto vinha com tamanho NATURAL (uma selfie
+     de verdade é bem maior que 38px) e sem isso aqui o <img> estourava
+     o círculo inteiro, tipo capa de fundo. .chat-conv-company-logo (a
+     logo quadrada da empresa) já tinha esse mesmo overflow+img abaixo
+     -- só esse aqui, de pessoa, tava faltando. */
+  overflow: hidden;
+}
+
+.chat-conv-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .chat-conv-avatar-room {
