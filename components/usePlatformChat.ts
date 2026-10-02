@@ -32,6 +32,14 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import PartySocket from "partysocket";
 import { resolveUserId } from "@/lib/identity";
+// 1/out -- notificação de mensagem nova (som/toast do navegador) era só
+// do GameRoom.tsx (ver fireNotification no handler de "chat:message" de
+// lá) -- o Lobby nunca teve. Migrando pra cá os dois ganham igual, sem
+// precisar guardar em ref/state: getStoredNotificationPrefs() já lê
+// direto do localStorage (ver lib/settingsPrefs.ts), não depende de
+// render nenhum, então dá pra chamar fresco a cada mensagem que chega
+// dentro do efeito de conexão (vida longa) sem closure velha.
+import { fireNotification, getStoredNotificationPrefs } from "@/lib/settingsPrefs";
 import type {
   Conversation,
   ChatMsg,
@@ -553,6 +561,21 @@ export function usePlatformChat(params: PlatformChatParams) {
     setCallRemoteStreams({});
   }
 
+  // 1/out -- trocar de microfone/câmera (ver switchMicDevice/
+  // switchCamDevice em GameRoom.tsx) precisa reencaminhar a track NOVA
+  // pros peers de uma chamada de conversa em andamento também, igual já
+  // fazia pros peers de proximidade da Sala -- sem isso, trocar o
+  // aparelho com uma chamada de conversa ativa deixaria o OUTRO lado
+  // ainda ouvindo/vendo o aparelho antigo. callPeersRef é interno daqui
+  // (a sala não tem acesso), por isso essa função fica exposta pro
+  // chamador usar no lugar de mexer no Map direto.
+  function replaceCallTrack(newTrack: MediaStreamTrack) {
+    callPeersRef.current.forEach((pc) => {
+      const sender = pc.getSenders().find((s) => s.track?.kind === newTrack.kind);
+      sender?.replaceTrack(newTrack);
+    });
+  }
+
   async function connectToCallPeer(peerId: string) {
     if (callPeersRef.current.has(peerId)) return;
     const pc = createCallPeerConnection(peerId);
@@ -750,6 +773,29 @@ export function usePlatformChat(params: PlatformChatParams) {
             [data.conversationId]: [...(prev[data.conversationId] ?? []), msg],
           }));
           const isMine = msg.senderId === myUserId;
+          // pedido do Douglas, 30/set (5): "permitir notificacoes de
+          // conversas privadas? conversas de empresa?" -- só notifica
+          // mensagem de OUTRA pessoa e só se o toggle certo (privateChats/
+          // companyChats, conforme a lane da conversa) tá ligado -- MESMA
+          // regra que já existia só em GameRoom.tsx.
+          if (!isMine) {
+            const lane = conversationsRef.current.find((c) => c.id === data.conversationId)?.lane;
+            const prefs = getStoredNotificationPrefs();
+            const allowed = lane === "private" ? prefs.privateChats : lane === "company" ? prefs.companyChats : false;
+            if (allowed) {
+              const preview =
+                msg.kind === "text"
+                  ? msg.text
+                  : msg.kind === "image"
+                    ? "📷 Foto"
+                    : msg.kind === "audio"
+                      ? "🎤 Áudio"
+                      : msg.kind === "room_card"
+                        ? "🔑 Convite de sala"
+                        : "📎 Arquivo";
+              fireNotification(msg.senderName || "Nova mensagem", preview);
+            }
+          }
           if (!isMine && readingConversationIdRef.current === data.conversationId) {
             socket.send(JSON.stringify({ type: "chat:open", conversationId: data.conversationId }));
           }
@@ -952,5 +998,6 @@ export function usePlatformChat(params: PlatformChatParams) {
     joinCall,
     leaveCall,
     callLocalStreamRef,
+    replaceCallTrack,
   };
 }

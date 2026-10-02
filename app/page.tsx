@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import AuthGate, { type AccountProfile } from "@/components/AuthGate";
 import Lobby from "@/components/Lobby";
 import { usePlatformChat } from "@/components/usePlatformChat";
@@ -35,14 +35,28 @@ function PlatformChatHost({
   children,
 }: {
   auth: AuthResult;
-  children: (chat: ReturnType<typeof usePlatformChat>) => React.ReactNode;
+  children: (
+    chat: ReturnType<typeof usePlatformChat>,
+    ambientStreamRef: React.MutableRefObject<MediaStream | null>
+  ) => React.ReactNode;
 }) {
+  // câmera/mic da Sala (ver localStreamRef de sempre em GameRoom.tsx) --
+  // criado AQUI (não dentro do GameRoom) pra poder entrar tanto no
+  // usePlatformChat (reaproveita no "entrar numa chamada"/"gravar
+  // áudio" de uma conversa, ver getLocalStreamForCalls/
+  // startVoiceRecording em usePlatformChat.ts) quanto no GameRoom (que
+  // continua sendo quem de fato CAPTURA/solta essa stream, só que
+  // guardando o resultado nesse ref em vez de num useRef próprio). No
+  // Lobby não existe sala nenhuma pra ter stream ambiente -- por isso
+  // só é passado pro GameRoom, nunca pro Lobby (ver Home() abaixo).
+  const ambientStreamRef = useRef<MediaStream | null>(null);
   const chat = usePlatformChat({
     accountUserId: auth.accountUserId,
     accountProfile: auth.accountProfile,
     accountAccessToken: auth.accountAccessToken,
+    ambientStreamRef,
   });
-  return <>{children(chat)}</>;
+  return <>{children(chat, ambientStreamRef)}</>;
 }
 
 export default function Home() {
@@ -67,7 +81,7 @@ export default function Home() {
       <AuthGate>
         {(auth) => (
           <PlatformChatHost auth={auth}>
-            {(chat) =>
+            {(chat, ambientStreamRef) =>
               entered ? (
                 <GameRoom
                   accountUserId={auth.accountUserId}
@@ -80,13 +94,11 @@ export default function Home() {
                   // onEnter faz no sentido contrário (ver comentário
                   // grande de `entered` lá em cima).
                   onBackToLobby={() => setEntered(false)}
-                  // GameRoom.tsx ainda não foi migrado pra consumir o
-                  // motor único (ver usePlatformChat) -- continua com a
-                  // própria implementação de chat por enquanto (ver
-                  // comentário grande no topo de usePlatformChat.ts).
-                  // `chat` (usePlatformChat) fica montado aqui do mesmo
-                  // jeito (mesma conexão viva), só ainda sem consumidor
-                  // do lado da sala.
+                  // GameRoom.tsx migrado pra consumir o motor único (ver
+                  // comentário grande no topo de usePlatformChat.ts) --
+                  // mesma conexão/estado que o Lobby já usa.
+                  platformChat={chat}
+                  ambientStreamRef={ambientStreamRef}
                 />
               ) : (
                 <Lobby

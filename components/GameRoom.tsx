@@ -13,6 +13,16 @@ import {
   type RefObject,
 } from "react";
 import { ChatDrawer } from "./ChatDrawer";
+// 1/out -- pedido direto do Douglas ("pega o chat de dentro e
+// transforma ele em CHAT que acompanha toda a plataforma"): GameRoom
+// não é mais dono do PRÓPRIO estado/conexão de conversa (direta/grupo)
+// -- isso agora é usePlatformChat, montado uma vez em app/page.tsx e
+// recebido aqui por prop (platformChat), o MESMO motor que o Lobby já
+// usa (ver comentário grande no topo de usePlatformChat.ts). GameRoom
+// continua dono do que é GENUINAMENTE da sala: Sala/"quem tá por
+// perto" (chatLog/roomPins/roomTyping), avatar/presença/movimento.
+import { usePlatformChat } from "@/components/usePlatformChat";
+type PlatformChat = ReturnType<typeof usePlatformChat>;
 // ver comentário em game/config.ts -- import default do phaser quebra
 // no bundle do navegador, precisa ser namespace import
 import * as Phaser from "phaser";
@@ -169,6 +179,17 @@ type GameRoomProps = {
   // prop (mesmo espírito de onSignOut acima) -- sem ela, o botão
   // simplesmente não aparece.
   onBackToLobby?: (() => void) | null;
+  // motor único de conversa (ver comentário grande no import de
+  // usePlatformChat acima) -- montado UMA VEZ acima da troca
+  // Lobby<->GameRoom (ver PlatformChatHost em app/page.tsx), não aqui.
+  platformChat: PlatformChat;
+  // MESMO MediaStream ref que localStreamRef usava antes (câmera/mic da
+  // Sala) -- agora criado em PlatformChatHost (app/page.tsx) e passado
+  // tanto pra cá quanto pro usePlatformChat (ambientStreamRef), pra
+  // gravação de áudio/chamada de conversa reaproveitarem a MESMA
+  // captura em vez de pedir getUserMedia de novo (ver comentário grande
+  // de getLocalStreamForCalls em usePlatformChat.ts).
+  ambientStreamRef: MutableRefObject<MediaStream | null>;
 };
 
 type RemoteProfile = ProfileFields & { role: string };
@@ -729,7 +750,28 @@ export default function GameRoom({
   onSignOut = null,
   roomSlug = "mapa-publicado",
   onBackToLobby = null,
+  platformChat,
+  ambientStreamRef,
 }: GameRoomProps) {
+  // atalho curto (mesmo nome que Lobby.tsx já usa pra isso).
+  const chat = platformChat;
+  // funções 100% de conversa (sem variante de Sala nenhuma) -- ficam só
+  // de passagem com o MESMO nome que esse arquivo já chamava, pra não
+  // precisar mudar cada chamador: agora são literalmente
+  // usePlatformChat.ts, não uma cópia daqui.
+  const {
+    startDirectWith,
+    moveConversationLane,
+    submitNewConversation,
+    toggleNewConvSelection,
+    changeNewConvMode,
+    submitRenameGroup,
+    openFilesPanel,
+    closeFilesPanel,
+    mentionAttachmentInChat,
+    joinCall,
+    leaveCall,
+  } = chat;
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -846,7 +888,10 @@ export default function GameRoom({
     setAreaOwnerHoverCard(null);
   }
   const socketRef = useRef<PartySocket | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
+  // MESMO ref de sempre, só que agora vem de fora (ver
+  // ambientStreamRef em GameRoomProps acima) em vez de nascer aqui --
+  // nenhuma leitura/escrita abaixo precisou mudar, é o mesmo objeto.
+  const localStreamRef = ambientStreamRef;
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
@@ -857,17 +902,6 @@ export default function GameRoom({
   // arredondada iguais ao que já tava lá).
   const lastRemoteMetaRef = useRef<Record<string, { name: string; distance: number }>>({});
   const selfIdRef = useRef<string>("");
-  // mesh PARALELO da chamada de chat (ver comentário grande na função
-  // sendCallSignal lá embaixo) -- connectionId -> RTCPeerConnection,
-  // igual peersRef mas só entre quem tá NA MESMA chamada, não por
-  // proximidade. myCallConversationIdRef espelha o estado
-  // myCallConversationId (ver embaixo) pra ler o valor atual de DENTRO
-  // do efeito de conexão (que só roda uma vez, ver useEffect com
-  // handlePartyMessage) sem cair em stale closure -- mesmo padrão já
-  // usado pra agendaColleagueIdRef/myProfileRef.
-  const callPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const myCallConversationIdRef = useRef<string | null>(null);
-
   // valor inicial vem do que a pessoa já tinha escolhido no LOBBY (ver
   // lib/mediaPrefs.ts, pedido do Douglas: "cade o restante,
   // configuracoes, audio, video, tela") -- sem isso, mutar o mic no
@@ -960,154 +994,39 @@ export default function GameRoom({
   const accountAccessTokenRef = useRef(accountAccessToken);
   accountAccessTokenRef.current = accountAccessToken;
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatView, setChatView] = useState<"list" | "thread" | "new">("list");
-  // sempre que a aba "Nova conversa" abre, começa do zero no modo
-  // "Conversa" (ver newConvMode) -- sem isso, reabrir "Nova conversa"
-  // depois de ter mexido em "Criar grupo" (ou vice-versa) numa visita
-  // anterior deixaria seleção/nome velhos "vazando" pra próxima vez.
-  useEffect(() => {
-    if (chatView === "new") {
-      setNewConvMode("direct");
-      setNewConvSelection([]);
-      setNewConvName("");
-    }
-  }, [chatView]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  // pedido do Douglas, 30/set (5): notificação (ver fireNotification em
-  // lib/settingsPrefs.ts, chamada no handler de "chat:message" mais
-  // abaixo) precisa saber a "lane" (private/company) da conversa que
-  // recebeu mensagem NOVA -- mesmo motivo de activeConversationIdRef/
-  // readingConversationIdRef logo abaixo: esse handler WS vive num
-  // efeito de vida longa, ler `conversations` direto seria closure
-  // velha (sempre o valor de quando o efeito rodou a primeira vez).
-  const conversationsRef = useRef<Conversation[]>([]);
-  conversationsRef.current = conversations;
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMsg[]>>({});
-  // 29/set (14), pedido do Douglas: "quando eu abro a conversa nao
-  // mostra onde ta a mensagem nao vista" -- corte "mensagens não
-  // vistas" de CADA conversa (ver "chat:history"/unreadSinceTs em
-  // server/index.js), guardado por conversationId igual messagesByConv
-  // ali em cima -- pra ChatDrawer desenhar a linha divisória na
-  // conversa que tiver aberta no momento sem se confundir se a
-  // resposta de "chat:open" de uma conversa antiga chegar atrasada
-  // depois de já ter trocado pra outra.
-  const [unreadSinceTsByConv, setUnreadSinceTsByConv] = useState<Record<string, number>>({});
-  // mensagem fixada / "visto por" / "digitando..." / painel de arquivos
-  // (pedido do Douglas, 1/out, comparando com o Slack) -- MESMO padrão
-  // "um estado pra Sala, um Record por conversationId" do resto do chat
-  // ali em cima (messagesByConv/unreadSinceTsByConv). roomPins/roomTyping
-  // são da pseudo-conversa "Sala" (activeConversationId===null); os
-  // outros três são só de conversa de verdade (a Sala não tem "visto
-  // por" nem painel de arquivos por enquanto, ver comentário grande em
-  // chatStore.js).
+  // mensagem fixada/"digitando..." da SALA (pseudo-conversa, ver
+  // chatInput/chatLog acima) -- conversa de verdade (direta/grupo) é
+  // 100% de chat.* agora (motor único, ver usePlatformChat.ts).
   const [roomPins, setRoomPins] = useState<ChatPin[]>([]);
-  const [pinsByConv, setPinsByConv] = useState<Record<string, ChatPin[]>>({});
   const [roomTyping, setRoomTyping] = useState<ChatTypingEntry[]>([]);
-  const [typingByConv, setTypingByConv] = useState<Record<string, ChatTypingEntry[]>>({});
-  // "visto por" -- userId -> ts da última mensagem que essa pessoa já
-  // leu NESSA conversa (ver chat:read/chat:open em server/index.js),
-  // por conversationId igual o resto.
-  const [lastReadByConv, setLastReadByConv] = useState<Record<string, Record<string, number>>>({});
-  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out) --
-  // mesmo espírito de view/activeConversationId acima: um estado só
-  // (o painel só existe pra UMA conversa de verdade aberta por vez,
-  // nunca a Sala, ver comentário grande dele em ChatDrawer).
-  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
-  const [filesPanelItems, setFilesPanelItems] = useState<ChatAttachmentItem[] | null>(null);
-  const [filesPanelFilter, setFilesPanelFilter] = useState<"all" | "image" | "file" | "audio">("all");
-  const [filesPanelQuery, setFilesPanelQuery] = useState("");
   // @menção (pedido do Douglas, 1/out) -- quem foi @mencionado na
-  // mensagem que tô digitando AGORA (preenchido por insertMention no
-  // ChatDrawer, zerado depois que a mensagem sai, ver sendChat/
-  // sendActiveChatMessage mais abaixo) -- um array só, serve tanto pro
-  // composer da Sala quanto o de conversa (nunca escrevo nos dois ao
-  // mesmo tempo).
+  // mensagem que tô digitando AGORA na Sala (preenchido por
+  // insertMention no ChatDrawer, zerado depois que a mensagem sai, ver
+  // sendChat mais abaixo). Conversa de verdade usa o pendingMentionIds
+  // do motor único (ver chatDrawerProps/onAddPendingMentionId).
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
-  // "fulano está digitando..." não tem "parei de digitar" explícito (ver
-  // comentário grande em TYPING_EXPIRE_MS/chat:typing em server/
-  // index.js) -- então quem RECEBE precisa varrer sozinho de tempos em
+  // "fulano está digitando..." da Sala não tem "parei de digitar"
+  // explícito -- quem RECEBE precisa varrer sozinho de tempos em
   // tempos e tirar quem não mandou novidade há TYPING_EXPIRE_MS, senão
   // o "digitando..." nunca sumiria se a pessoa simplesmente parasse sem
-  // mandar mais nada.
+  // mandar mais nada. Conversa de verdade tem o PRÓPRIO expire-sweep
+  // (ver usePlatformChat.ts).
   useEffect(() => {
     const interval = setInterval(() => {
       const cutoff = Date.now() - TYPING_EXPIRE_MS;
       setRoomTyping((prev) => (prev.some((t) => t.ts < cutoff) ? prev.filter((t) => t.ts >= cutoff) : prev));
-      setTypingByConv((prev) => {
-        let changed = false;
-        const next: Record<string, ChatTypingEntry[]> = {};
-        for (const [convId, list] of Object.entries(prev)) {
-          const filtered = list.filter((t) => t.ts >= cutoff);
-          if (filtered.length !== list.length) changed = true;
-          next[convId] = filtered;
-        }
-        return changed ? next : prev;
-      });
     }, 1000);
     return () => clearInterval(interval);
   }, []);
   // espelha "tô literalmente vendo essa conversa AGORA" (drawer aberto
-  // + na aba de thread + é essa a conversa ativa) pro handler de
-  // "chat:message" (fechado uma vez só dentro do useEffect de conexão
-  // do socket, mesmo motivo/mesmo padrão de myCallConversationIdRef
-  // logo abaixo) saber se soma no contador de não-lida ou se já
-  // considera "vista" na hora (pedido do Douglas: "quando eu vejo, ela
-  // nao some a marcacao").
-  const readingConversationIdRef = useRef<string | null>(null);
-  readingConversationIdRef.current = chatOpen && chatView === "thread" ? activeConversationId : null;
-  // mesmo padrão do readingConversationIdRef acima -- espelha
-  // activeConversationId (state) num ref, reatribuído a CADA render,
-  // pra dar pra ler o valor ATUAL de dentro do handler de mensagens do
-  // WebSocket (fechado sobre o estado "congelado" do mount, ver
-  // comentário grande do efeito do Phaser). Usado por
-  // "chat:conversation_removed" (ver handlePartyMessage) pra saber se a
-  // conversa que acabou de sumir (mesclada em outra, "3 pontinhos") era
-  // a que tava aberta na hora.
-  const activeConversationIdRef = useRef<string | null>(null);
-  activeConversationIdRef.current = activeConversationId;
-  // chamada de voz/vídeo de uma conversa ("tipo discord") -- ver o tipo
-  // ChatCallParticipant lá em cima e o mesh em callPeersRef/
-  // sendCallSignal. callParticipantsByConversation cobre TODAS as
-  // conversas (é o que acende o botão verde de quem ainda não entrou);
-  // myCallConversationId é só a MINHA (não dá pra estar em duas ao mesmo
-  // tempo -- entrar numa nova sai da anterior sozinho, ver joinCall).
-  const [callParticipantsByConversation, setCallParticipantsByConversation] = useState<
-    Record<string, ChatCallParticipant[]>
-  >({});
-  const [myCallConversationId, setMyCallConversationId] = useState<string | null>(null);
-  myCallConversationIdRef.current = myCallConversationId;
-  const [callRemoteStreams, setCallRemoteStreams] = useState<Record<string, MediaStream>>({});
-  const [chatComposerText, setChatComposerText] = useState("");
-  const [newConvSelection, setNewConvSelection] = useState<string[]>([]);
-  const [newConvName, setNewConvName] = useState("");
-  // 1/out, pedido do Douglas: "quero o criar grupo de forma melhor mais
-  // visivel 'criar grupo'" -- antes "criar grupo" só existia escondido
-  // (selecionar mais de 1 pessoa fazia o botão/campo de nome aparecerem
-  // sozinhos, sem nenhum jeito de saber disso de antemão). Agora é um
-  // modo explícito, escolhido LOGO no topo da tela "Nova conversa" (ver
-  // JSX em ChatDrawer) -- "direct" (padrão) só deixa escolher UMA
-  // pessoa (rádio, não checkbox) e nunca mostra o campo de nome; "group"
-  // libera multi-seleção (checkbox, ver toggleNewConvSelection) e exige
-  // nome antes de deixar criar (ver disabled do botão em ChatDrawer).
-  const [newConvMode, setNewConvMode] = useState<"direct" | "group">("direct");
-  // 30/set, pedido do Douglas ("nova conversa aparece isso, nao minha
-  // lista nem o filtro", apontando pro picker de "quem tá na sala"
-  // vazio) -- MESMO filtro Amigos/Empresa que o Lobby ganhou
-  // (LobbyChatPanel/newConvFilter em components/Lobby.tsx), agora
-  // também dentro da sala: "Amigos" busca só amigo mútuo
-  // (GET /api/friends/list) e inicia conversa "private"; "Empresa"
-  // busca qualquer conta (GET /api/friends/search) só quando tem
-  // texto digitado -- sem texto, continua mostrando quem tá online na
-  // sala agora (pickable/onlinePlayers, atalho rápido de sempre).
-  const [newConvFilter, setNewConvFilter] = useState<"company" | "friends">("company");
-  const [newConvQuery, setNewConvQuery] = useState("");
-  const [newConvSearchResults, setNewConvSearchResults] = useState<
-    { userId: string; name: string; photoUrl: string }[] | null
-  >(null);
-  const [newConvFriends, setNewConvFriends] = useState<
-    { userId: string; name: string; photoUrl: string }[] | null
-  >(null);
+  // + na aba de thread) pro motor único saber se soma no contador de
+  // não-lida ou se já considera "vista" na hora (pedido do Douglas:
+  // "quando eu vejo, ela nao some a marcacao") -- ver updateReadingState
+  // em usePlatformChat.ts (MESMO padrão que Lobby.tsx já usa).
+  useEffect(() => {
+    chat.updateReadingState(chatOpen && chat.chatView === "thread");
+    return () => chat.updateReadingState(false);
+  }, [chat, chatOpen, chat.chatView, chat.activeConversationId]);
   // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
   // chat, quero que eles vejam a possibilidade, sempre ali, abriu o
   // chat, ela ta junto" -- MESMA ideia do Lobby (ver myRoomLogoUrl lá
@@ -1116,7 +1035,9 @@ export default function GameRoom({
   // getRoomCompanyInfo usa no servidor, só que essa aqui é a versão
   // pública/cliente, GET /api/room/company-profile) entram como opção
   // garantida em companyOptions do ChatDrawer, mesmo sem nenhuma
-  // conversa ainda.
+  // conversa ainda. Usado também pra avisar o motor único QUAL é
+  // "minha sala agora" (ver useEffect de chat.setRoomContext mais
+  // abaixo).
   const [roomCompanyName, setRoomCompanyName] = useState<string | null>(null);
   const [roomCompanyLogoUrl, setRoomCompanyLogoUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -1138,66 +1059,15 @@ export default function GameRoom({
       cancelled = true;
     };
   }, [roomSlug]);
-
-  // "Empresa" -- só busca com texto (sem query, continua mostrando
-  // pickable/onlinePlayers, ver JSX do view "new" no ChatDrawer) --
-  // MESMO endpoint/debounce que o Lobby usa (newConvOpen em
-  // components/Lobby.tsx).
+  // avisa o motor único (usePlatformChat.ts) qual é "minha sala agora"
+  // -- precisa ser um useEffect (não um param fixo do hook) porque ele
+  // monta ANTES do roomSlug/roomCompanyName existirem de verdade (ver
+  // comentário grande de roomContext/setRoomContext lá, MESMO padrão
+  // que Lobby.tsx já usa pro myRealRoom dele).
   useEffect(() => {
-    if (chatView !== "new" || newConvFilter !== "company" || !accountAccessToken || !newConvQuery.trim()) {
-      setNewConvSearchResults(null);
-      return;
-    }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      fetch(`/api/friends/search?q=${encodeURIComponent(newConvQuery.trim())}`, {
-        headers: { Authorization: `Bearer ${accountAccessToken}` },
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!cancelled) setNewConvSearchResults(Array.isArray(data?.users) ? data.users : []);
-        })
-        .catch(() => {
-          if (!cancelled) setNewConvSearchResults([]);
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [chatView, newConvFilter, newConvQuery, accountAccessToken]);
+    chat.setRoomContext({ slug: roomSlug, name: roomCompanyName, logoUrl: roomCompanyLogoUrl });
+  }, [chat, roomSlug, roomCompanyName, roomCompanyLogoUrl]);
 
-  // "Amigos" -- busca a lista inteira uma vez (mesma ideia do Lobby),
-  // filtro por texto é local (ver visibleNewConvFriends no ChatDrawer).
-  useEffect(() => {
-    if (chatView !== "new" || newConvFilter !== "friends" || !accountAccessToken) return;
-    let cancelled = false;
-    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setNewConvFriends(Array.isArray(data?.friends) ? data.friends : []);
-      })
-      .catch(() => {
-        if (!cancelled) setNewConvFriends([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [chatView, newConvFilter, accountAccessToken]);
-
-  // sai do view "new" -- limpa busca/filtro pra próxima vez que abrir
-  // começar do zero (mesmo comportamento do closeNewConv no Lobby).
-  useEffect(() => {
-    if (chatView !== "new") {
-      setNewConvQuery("");
-      setNewConvFilter("company");
-      setNewConvSearchResults(null);
-      setNewConvFriends(null);
-    }
-  }, [chatView]);
-
-  const [renamingGroup, setRenamingGroup] = useState(false);
-  const [groupNameDraft, setGroupNameDraft] = useState("");
   const [recordingAudio, setRecordingAudio] = useState(false);
   // contador ao vivo (segundos) enquanto tá gravando, e o áudio já
   // parado esperando confirmação de envio (igual WhatsApp: grava, mostra
@@ -1219,7 +1089,9 @@ export default function GameRoom({
       return "float";
     }
   });
-  const autoOpenNextConversationRef = useRef(false);
+  // autoOpenNextConversationRef (abrir sozinho a conversa que EU acabei
+  // de criar) agora é interno de usePlatformChat.ts -- não existe mais
+  // aqui.
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordedBlobRef = useRef<Blob | null>(null);
@@ -2677,92 +2549,6 @@ export default function GameRoom({
       }
     }
 
-    // --- chamada de voz/vídeo de uma conversa (chat direto/grupo) --
-    // mesh de WebRTC PARALELO ao de cima (peersRef, por proximidade na
-    // Sala): endereçado pelo MESMO connectionId e pelo MESMO relay
-    // "signal" do servidor, mas com um "channel":"call" dentro do "data"
-    // pra não se misturar com o sinal de proximidade (ver handleSignal
-    // acima e handlePartyMessage embaixo, que decide pra qual dos dois
-    // mandar). Reaproveita o MESMO localStreamRef da Sala (câmera/mic já
-    // capturados ali) em vez de pedir uma segunda captura -- entrar numa
-    // chamada de chat não depende de tá perto de ninguém no mapa.
-    function sendCallSignal(to: string, data: unknown) {
-      socketRef.current?.send(JSON.stringify({ type: "signal", to, data: { channel: "call", ...(data as object) } }));
-    }
-
-    function createCallPeerConnection(peerId: string): RTCPeerConnection {
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-
-      const localStream = localStreamRef.current;
-      if (localStream) {
-        localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
-      }
-
-      pc.ontrack = (event) => {
-        setCallRemoteStreams((prev) => ({ ...prev, [peerId]: event.streams[0] }));
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) sendCallSignal(peerId, { candidate: event.candidate });
-      };
-
-      callPeersRef.current.set(peerId, pc);
-      return pc;
-    }
-
-    function closeCallPeer(peerId: string) {
-      const pc = callPeersRef.current.get(peerId);
-      if (pc) {
-        pc.close();
-        callPeersRef.current.delete(peerId);
-      }
-      setCallRemoteStreams((prev) => {
-        const next = { ...prev };
-        delete next[peerId];
-        return next;
-      });
-    }
-
-    function closeAllCallPeers() {
-      callPeersRef.current.forEach((pc) => pc.close());
-      callPeersRef.current.clear();
-      setCallRemoteStreams({});
-    }
-
-    async function connectToCallPeer(peerId: string) {
-      if (callPeersRef.current.has(peerId)) return;
-      const pc = createCallPeerConnection(peerId);
-      // mesmo critério de empate do mesh de proximidade: quem tem o id
-      // "menor" oferta primeiro, assim os dois lados não ofertam juntos.
-      const amInitiator = selfIdRef.current < peerId;
-      if (amInitiator) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        sendCallSignal(peerId, { sdp: pc.localDescription });
-      }
-    }
-
-    async function handleCallSignal(from: string, data: any) {
-      let pc = callPeersRef.current.get(from);
-      if (!pc) pc = createCallPeerConnection(from);
-
-      if (data.sdp) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        if (data.sdp.type === "offer") {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          sendCallSignal(from, { sdp: pc.localDescription });
-        }
-      } else if (data.candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (e) {
-          console.warn("Falha ao adicionar candidato ICE (chamada)", e);
-        }
-      }
-    }
 
     // "Área" (mesa privada/sala, ver game/areas.ts) isola áudio/vídeo: se
     // EU ou a outra pessoa estiver dentro de uma área, só conectamos se
@@ -3052,14 +2838,10 @@ export default function GameRoom({
         scene?.removeRemotePlayer(data.id);
         closePeer(data.id);
       } else if (data.type === "signal") {
-        // "channel":"call" = sinalização da chamada de chat (mesh
-        // paralelo, ver handleCallSignal acima); sem isso é o sinal de
-        // proximidade normal da Sala.
-        if (data.data && data.data.channel === "call") {
-          handleCallSignal(data.from, data.data);
-        } else {
-          handleSignal(data.from, data.data);
-        }
+        // chamada de conversa (direta/grupo) migrou pro socket da
+        // PLATAFORMA (ver usePlatformChat.ts) -- esse socket da sala só
+        // sinaliza proximidade (handleSignal) agora.
+        handleSignal(data.from, data.data);
       } else if (data.type === "chat:room_history") {
         // "semente" do histórico da Sala pra essa conexão (pedido do
         // Douglas, 1/out: "histórico persistido por conversa ... chat
@@ -3088,141 +2870,12 @@ export default function GameRoom({
         setChatLog((prev) => prev.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null } : m)));
       } else if (data.type === "users:list") {
         setAllUsers(data.users as DirectoryUser[]);
-      } else if (data.type === "chat:conversations") {
-        const list = (data.conversations as Conversation[]).slice().sort((a, b) => b.updatedAt - a.updatedAt);
-        setConversations(list);
-      } else if (data.type === "chat:conversation") {
-        const conv = data.conversation as Conversation;
-        setConversations((prev) => {
-          const rest = prev.filter((c) => c.id !== conv.id);
-          return [conv, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
-        });
-        // se FOI EU que acabei de criar essa conversa (ver
-        // startDirectWith/submitCreateGroup), abre ela direto -- os
-        // outros participantes só recebem essa mensagem pra aparecer
-        // na LISTA deles, sem abrir sozinha.
-        if (autoOpenNextConversationRef.current) {
-          autoOpenNextConversationRef.current = false;
-          setActiveConversationId(conv.id);
-          setChatView("thread");
-          socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: conv.id }));
-        }
-      } else if (data.type === "chat:conversation_removed") {
-        // "3 pontinhos" -- mover conversa de aba mesclou ela com outra
-        // que já existia na lane de destino (ver setConversationLane em
-        // server/chatStore.js); essa aqui é a "perdedora", some da
-        // lista. Se era a conversa ABERTA agora, volta pra lista em vez
-        // de deixar a gaveta apontando pra um id que não existe mais --
-        // a sobrevivente já chega logo em seguida via "chat:conversation"
-        // (mesmo servidor manda os dois eventos juntos, ver
-        // chat:set_lane em server/index.js).
-        const removedId = data.conversationId as string;
-        setConversations((prev) => prev.filter((c) => c.id !== removedId));
-        setMessagesByConv((prev) => {
-          if (!(removedId in prev)) return prev;
-          const next = { ...prev };
-          delete next[removedId];
-          return next;
-        });
-        if (activeConversationIdRef.current === removedId) {
-          setActiveConversationId(null);
-          setChatView("list");
-        }
-      } else if (data.type === "chat:history") {
-        setMessagesByConv((prev) => ({ ...prev, [data.conversationId]: data.messages }));
-        // 29/set (14): corte "mensagens não vistas" de ANTES de marcar
-        // como lida (ver comentário grande no case "chat:open" em
-        // server/index.js) -- guarda por conversationId (ver
-        // unreadSinceTsByConv lá em cima) e já zera o unreadCount dessa
-        // conversa na lista, sem esperar a próxima "chat:conversations"/
-        // "chat:conversation" (pedido do Douglas: "quando eu vejo, ela
-        // nao some a marcacao").
-        if (typeof data.unreadSinceTs === "number") {
-          setUnreadSinceTsByConv((prev) => ({ ...prev, [data.conversationId]: data.unreadSinceTs }));
-        }
-        // 1/out: faixa de fixadas + "semente" de quem já leu até onde,
-        // mandadas junto nessa mesma resposta (ver comentário grande em
-        // server/index.js) -- sem round-trip extra.
-        setPinsByConv((prev) => ({ ...prev, [data.conversationId]: (data.pins as ChatPin[]) ?? [] }));
-        setLastReadByConv((prev) => ({
-          ...prev,
-          [data.conversationId]: (data.lastRead as Record<string, number>) ?? {},
-        }));
-        setConversations((prev) => prev.map((c) => (c.id === data.conversationId ? { ...c, unreadCount: 0 } : c)));
-      } else if (data.type === "chat:message_deleted") {
-        // "apaga pra todos" numa conversa direta/grupo -- a mensagem já
-        // chega tarjada do servidor (ver deleteMessage em
-        // server/chatStore.js), só reflete no estado local.
-        const { conversationId, messageId } = data as { conversationId: string; messageId: string };
-        setMessagesByConv((prev) => {
-          const list = prev[conversationId];
-          if (!list) return prev;
-          return {
-            ...prev,
-            [conversationId]: list.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null } : m)),
-          };
-        });
-      } else if (data.type === "chat:message") {
-        const msg = data.message as ChatMsg;
-        setMessagesByConv((prev) => ({
-          ...prev,
-          [data.conversationId]: [...(prev[data.conversationId] ?? []), msg],
-        }));
-        // pedido do Douglas, 30/set (5): "permitir notificacoes de
-        // conversas privadas? conversas de empresa?" -- só notifica
-        // mensagem de OUTRA pessoa (não a minha própria) e só se o
-        // toggle certo (privateChats/companyChats, conforme a lane da
-        // conversa, ver conversationsRef acima) tá ligado.
-        if (msg.senderId !== myUserId) {
-          const lane = conversationsRef.current.find((c) => c.id === data.conversationId)?.lane;
-          const prefs = notificationPrefsRef.current;
-          const allowed = lane === "private" ? prefs.privateChats : lane === "company" ? prefs.companyChats : false;
-          if (allowed) {
-            const preview =
-              msg.kind === "text"
-                ? msg.text
-                : msg.kind === "image"
-                  ? "📷 Foto"
-                  : msg.kind === "audio"
-                    ? "🎤 Áudio"
-                    : msg.kind === "room_card"
-                      ? "🔑 Convite de sala"
-                      : "📎 Arquivo";
-            fireNotification(msg.senderName || "Nova mensagem", preview);
-          }
-        }
-        // 29/set (14), pedido do Douglas: "quando eu abro a conversa
-        // nao mostra onde ta a mensagem nao vista, e quando eu vejo,
-        // ela nao some a marcacao" -- se essa mensagem é de OUTRA
-        // pessoa e a conversa dela é a que eu tô literalmente com o
-        // olho em cima agora (ver readingConversationIdRef lá em
-        // cima), já considera "vista" na hora: reabre "chat:open" (o
-        // servidor marca lastRead de novo e responde chat:history com
-        // unreadSinceTs atualizado, ver handler acima) em vez de somar
-        // no contador. Senão, soma 1 no unreadCount local (o servidor
-        // só sabe o número certo na próxima chat:list/chat:summary --
-        // isso aqui é só pra não esperar).
-        const isMine = msg.senderId === myUserId;
-        if (!isMine && readingConversationIdRef.current === data.conversationId) {
-          socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: data.conversationId }));
-        }
-        setConversations((prev) => {
-          const idx = prev.findIndex((c) => c.id === data.conversationId);
-          if (idx === -1) return prev;
-          const bumpUnread = !isMine && readingConversationIdRef.current !== data.conversationId;
-          const updated: Conversation = {
-            ...prev[idx],
-            updatedAt: msg.ts,
-            unreadCount: bumpUnread ? (prev[idx].unreadCount ?? 0) + 1 : prev[idx].unreadCount ?? 0,
-            lastMessage: { senderId: msg.senderId, senderName: msg.senderName, kind: msg.kind, text: msg.text, ts: msg.ts },
-          };
-          const rest = prev.filter((c) => c.id !== data.conversationId);
-          return [updated, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
-        });
       } else if (data.type === "chat:reaction") {
-        // reação com emoji (pedido do Douglas, 1/out) -- "reactions" já
-        // vem PRONTO (substitui, não mescla, ver comentário grande em
-        // server/index.js). conversationId null = mensagem da Sala.
+        // reação com emoji na Sala (pedido do Douglas, 1/out) --
+        // "reactions" já vem PRONTO (substitui, não mescla, ver
+        // comentário grande em server/index.js). Conversa de verdade
+        // (direta/grupo) migrou pro socket da PLATAFORMA -- ver
+        // usePlatformChat.ts, que tem o MESMO case pro lado dela.
         const { conversationId, messageId, reactions } = data as {
           conversationId: string | null;
           messageId: string;
@@ -3230,91 +2883,21 @@ export default function GameRoom({
         };
         if (conversationId === null) {
           setChatLog((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions } : m)));
-        } else {
-          setMessagesByConv((prev) => {
-            const list = prev[conversationId];
-            if (!list) return prev;
-            return { ...prev, [conversationId]: list.map((m) => (m.id === messageId ? { ...m, reactions } : m)) };
-          });
         }
       } else if (data.type === "chat:pins") {
-        // "mensagem fixada" (pedido do Douglas, 1/out) -- "pins" já vem
-        // a LISTA INTEIRA atualizada (mais recente primeiro), mesmo
-        // espírito de "reactions" acima.
+        // "mensagem fixada" na Sala (pedido do Douglas, 1/out) -- "pins"
+        // já vem a LISTA INTEIRA atualizada. Conversa de verdade migrou
+        // pro socket da plataforma (ver comentário acima).
         const { conversationId, pins } = data as { conversationId: string | null; pins: ChatPin[] };
         if (conversationId === null) setRoomPins(pins);
-        else setPinsByConv((prev) => ({ ...prev, [conversationId]: pins }));
       } else if (data.type === "chat:typing") {
-        // "fulano está digitando..." (pedido do Douglas, 1/out) --
-        // efêmero, nunca persiste (ver comentário grande em server/
-        // index.js); upsert por userId (substitui o "ts" se já tava
-        // digitando, expira sozinho depois de TYPING_EXPIRE_MS sem
-        // novidade, ver efeito de limpeza em ChatDrawer/GameRoom).
+        // "fulano está digitando..." na Sala (pedido do Douglas, 1/out)
+        // -- efêmero, nunca persiste. Conversa de verdade migrou pro
+        // socket da plataforma (ver comentário acima).
         const { conversationId, userId, name } = data as { conversationId: string | null; userId: string; name: string };
-        if (userId === myUserId) {
-          // nunca deveria chegar (servidor não ecoa pro próprio autor,
-          // ver broadcast(..., id) em server/index.js), mas por segurança
-          // nunca mostra "eu tô digitando" pra mim mesmo.
-        } else {
+        if (conversationId === null && userId !== myUserId) {
           const entry: ChatTypingEntry = { userId, name, ts: Date.now() };
-          if (conversationId === null) {
-            setRoomTyping((prev) => [...prev.filter((t) => t.userId !== userId), entry]);
-          } else {
-            setTypingByConv((prev) => ({
-              ...prev,
-              [conversationId]: [...(prev[conversationId] ?? []).filter((t) => t.userId !== userId), entry],
-            }));
-          }
-        }
-      } else if (data.type === "chat:read") {
-        // "confirmação de leitura (visto por quem)" (pedido do Douglas,
-        // 1/out) -- só existe pra conversa de verdade (a Sala nunca
-        // manda isso, ver comentário grande em server/index.js).
-        const { conversationId, userId, ts } = data as { conversationId: string; userId: string; ts: number };
-        setLastReadByConv((prev) => ({
-          ...prev,
-          [conversationId]: { ...(prev[conversationId] ?? {}), [userId]: ts },
-        }));
-      } else if (data.type === "chat:attachments") {
-        // resposta de openFilesPanel (ver função mais abaixo) -- o painel
-        // só existe pra uma conversa de VERDADE aberta (nunca a Sala, ver
-        // comentário grande em filesPanelOpen lá em cima), então só
-        // aplica se ainda for a MESMA conversa ativa agora -- pra uma
-        // resposta atrasada de uma conversa antiga não sobrescrever o
-        // painel depois que a pessoa já trocou de aba (mesmo cuidado de
-        // agenda:colleague_calls acima).
-        const { conversationId, items } = data as { conversationId: string | null; items: ChatAttachmentItem[] };
-        if (conversationId !== null && activeConversationIdRef.current === conversationId) {
-          setFilesPanelItems(items);
-        }
-      } else if (data.type === "call:state") {
-        // "quem tá na chamada" de UMA conversa -- chega pra todo mundo
-        // que participa dela (esteja ou não na call agora, é o que
-        // acende o botão verde na lista, ver ChatDrawer). Se essa
-        // conversa é a MINHA chamada ativa (ver myCallConversationIdRef,
-        // espelho pra ler aqui dentro do efeito sem stale-closure),
-        // reconcilia o mesh: conecta quem entrou, desconecta quem saiu.
-        const conversationId = data.conversationId as string;
-        const participants = data.participants as ChatCallParticipant[];
-        setCallParticipantsByConversation((prev) => ({ ...prev, [conversationId]: participants }));
-        if (myCallConversationIdRef.current === conversationId) {
-          const stillIn = participants.some((p) => p.userId === myUserId);
-          if (!stillIn) {
-            // saí (ou outra aba minha saiu) -- limpa o lado local também.
-            myCallConversationIdRef.current = null;
-            setMyCallConversationId(null);
-            closeAllCallPeers();
-          } else {
-            const wantedPeerIds = new Set(
-              participants.filter((p) => p.userId !== myUserId).map((p) => p.connectionId)
-            );
-            callPeersRef.current.forEach((_pc, peerId) => {
-              if (!wantedPeerIds.has(peerId)) closeCallPeer(peerId);
-            });
-            wantedPeerIds.forEach((peerId) => {
-              if (!callPeersRef.current.has(peerId)) connectToCallPeer(peerId);
-            });
-          }
+          setRoomTyping((prev) => [...prev.filter((t) => t.userId !== userId), entry]);
         }
       } else if (data.type === "agenda:calls") {
         setCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
@@ -3954,8 +3537,13 @@ export default function GameRoom({
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       peersRef.current.forEach((pc) => pc.close());
       peersRef.current.clear();
-      callPeersRef.current.forEach((pc) => pc.close());
-      callPeersRef.current.clear();
+      // NÃO fecha a chamada de conversa aqui -- ela mora no motor único
+      // (usePlatformChat.ts, callPeersRef interno dele) e precisa
+      // SOBREVIVER a sair da sala (voltar pro Lobby não deveria
+      // derrubar uma chamada em andamento, mesmo espírito de
+      // conversas/mensagens continuarem abertas). Quem fecha é
+      // leaveCall (botão) ou o próprio hook ao desmontar de vez
+      // (logout, ver PlatformChatHost em app/page.tsx).
     };
   }, []);
 
@@ -4004,10 +3592,11 @@ export default function GameRoom({
       } else {
         localStreamRef.current = fresh;
       }
-      [...peersRef.current.values(), ...callPeersRef.current.values()].forEach((pc) => {
+      peersRef.current.forEach((pc) => {
         const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
         sender?.replaceTrack(newTrack);
       });
+      chat.replaceCallTrack(newTrack);
       setSelectedMicId(deviceId);
       setStoredMicDeviceId(deviceId);
     } catch (e) {
@@ -4036,10 +3625,11 @@ export default function GameRoom({
       // só assume quando a pessoa PARAR o compartilhamento
       // (stopScreenShare já pega a track atual de localStreamRef sozinho).
       if (!screenOn) {
-        [...peersRef.current.values(), ...callPeersRef.current.values()].forEach((pc) => {
+        peersRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === "video");
           sender?.replaceTrack(newTrack);
         });
+        chat.replaceCallTrack(newTrack);
         if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
       }
       setSelectedCamId(deviceId);
@@ -4133,129 +3723,42 @@ export default function GameRoom({
   // sendChat/chatLog de cima -- mesmo formato de mensagem (com anexo),
   // só que sem histórico salvo (ver comentário no tipo ChatMessage). ---
 
+  // Sala (conversationId===null) continua sendo o PRÓPRIO socket da
+  // sala (wsSend); conversa de verdade (direta/grupo) delega inteiro
+  // pro motor único (chat.*, ver usePlatformChat.ts) -- startDirectWith/
+  // moveConversationLane/submitNewConversation/toggleNewConvSelection/
+  // changeNewConvMode/submitRenameGroup/openFilesPanel/closeFilesPanel/
+  // mentionAttachmentInChat/joinCall/leaveCall já vêm de lá (ver
+  // destructure de "chat" lá em cima), chamados pelo MESMO nome de
+  // sempre.
   function openConversation(id: string | null) {
-    setActiveConversationId(id);
-    setChatView("thread");
-    // painel de arquivos é sempre da conversa que tava aberta -- trocar
-    // de conversa (ou voltar pra Sala) fecha ele, senão ficaria mostrando
-    // arquivo da conversa ERRADA (ver comentário grande em
-    // openFilesPanel).
-    setFilesPanelOpen(false);
-    if (id !== null && !messagesByConv[id]) {
-      socketRef.current?.send(JSON.stringify({ type: "chat:open", conversationId: id }));
-    }
-  }
-
-  function startDirectWith(targetUserId: string, lane: "company" | "private" = "company") {
-    autoOpenNextConversationRef.current = true;
-    socketRef.current?.send(JSON.stringify({ type: "chat:create_direct", targetUserId, lane }));
-    setNewConvSelection([]);
-    setNewConvName("");
-  }
-
-  // "3 pontinhos" numa conversa 1x1 já existente (pedido do Douglas,
-  // 29/set (18): "nas conversas tem que ter 3 pontinhos do lado lá,
-  // que ele pode jogar a conversa pra alguma empresa, e vice versa,
-  // apenas com conversas 1x1, nos grupos nao") -- ChatDrawer já filtra
-  // pra só mostrar o menu em c.kind === "direct", aqui só manda pro
-  // servidor decidir de verdade (ver case "chat:set_lane" em
-  // server/index.js, que confere participante/kind de novo -- nunca
-  // confia só no filtro do cliente).
-  function moveConversationLane(conversationId: string, lane: "company" | "private") {
-    socketRef.current?.send(JSON.stringify({ type: "chat:set_lane", conversationId, lane }));
-  }
-
-  function submitNewConversation() {
-    if (newConvSelection.length === 0) return;
-    if (newConvSelection.length === 1 && !newConvName.trim()) {
-      // 30/set, pedido do Douglas: filtro Amigos/Empresa em "Nova
-      // conversa" (ver newConvFilter acima) -- "Amigos" sempre inicia
-      // "private" (servidor confere amigo mútuo de novo, ver case
-      // "chat:create_direct" em server/index.js), "Empresa" continua
-      // "company" (comportamento de sempre).
-      startDirectWith(newConvSelection[0], newConvFilter === "friends" ? "private" : "company");
-      return;
-    }
-    autoOpenNextConversationRef.current = true;
-    socketRef.current?.send(
-      JSON.stringify({
-        type: "chat:create_group",
-        name: newConvName.trim(),
-        participantIds: newConvSelection,
-      })
-    );
-    setNewConvSelection([]);
-    setNewConvName("");
-  }
-
-  function toggleNewConvSelection(userId: string) {
-    // modo "Conversa" (ver newConvMode) é rádio, não checkbox -- escolher
-    // outra pessoa TROCA a seleção inteira, nunca acumula (uma conversa
-    // direta é sempre eu + 1). O ramo "desmarca ao clicar nela de novo"
-    // abaixo é só defensivo -- um <input type="radio"> de verdade não
-    // dispara onChange de novo ao clicar no mesmo já marcado, então na
-    // prática a única forma de esvaziar a seleção é trocar pra outra
-    // pessoa (ou mudar de modo, ver changeNewConvMode). "Criar grupo"
-    // continua multi-seleção (checkbox) de sempre.
-    setNewConvSelection((prev) =>
-      newConvMode === "direct"
-        ? prev.includes(userId)
-          ? []
-          : [userId]
-        : prev.includes(userId)
-          ? prev.filter((x) => x !== userId)
-          : [...prev, userId]
-    );
-  }
-
-  // alterna entre "Conversa" (1:1) e "Criar grupo" (pedido do Douglas,
-  // 1/out) -- zera a seleção/nome ao trocar, pra não ficar com gente
-  // marcada de um modo "vazando" pro outro (ex: trocar de "Criar grupo"
-  // com 3 pessoas marcadas pra "Conversa" não devia pré-selecionar uma
-  // delas sozinha).
-  function changeNewConvMode(mode: "direct" | "group") {
-    setNewConvMode(mode);
-    setNewConvSelection([]);
-    setNewConvName("");
-  }
-
-  function submitRenameGroup() {
-    const name = groupNameDraft.trim();
-    if (!activeConversationId || !name) return;
-    socketRef.current?.send(
-      JSON.stringify({ type: "chat:rename_group", conversationId: activeConversationId, name })
-    );
-    setRenamingGroup(false);
-  }
-
-  function sendActiveChatMessage() {
-    const text = chatComposerText.trim();
-    if (!text) return;
-    // @menção, ver comentário grande em sendChat acima -- mesmo esquema,
-    // só que pro composer de conversa de verdade (chat:send).
-    const ok =
-      activeConversationId === null
-        ? wsSend({ type: "chat", text, mentionedUserIds: pendingMentionIds })
-        : wsSend({ type: "chat:send", conversationId: activeConversationId, text, mentionedUserIds: pendingMentionIds });
-    if (!ok) return;
-    setChatComposerText("");
-    setPendingMentionIds([]);
+    chat.openConversation(id);
+    // chat.openConversation(null) assume "list" (não existe Sala pra
+    // ela) -- aqui null É a Sala, então força "thread" de novo por
+    // cima (mesmo comportamento de sempre: abrir a Sala já mostra o
+    // histórico dela, nunca a lista de conversas).
+    if (id === null) chat.setChatView("thread");
   }
 
   async function sendChatAttachment(file: Blob, filename: string, kind: ChatAttachmentKind) {
-    setSendingAttachment(true);
-    try {
-      const attachment = await uploadChatFile(file, filename);
-      if (activeConversationId === null) {
+    if (chat.activeConversationId === null) {
+      setSendingAttachment(true);
+      try {
+        const attachment = await uploadChatFile(file, filename);
         wsSend({ type: "chat", attachment, kind });
-      } else {
-        wsSend({ type: "chat:send", conversationId: activeConversationId, attachment, kind });
+      } catch (e) {
+        console.warn("Falha ao enviar anexo no chat", e);
+        showErrorToast("Não deu pra enviar o anexo -- tenta de novo.");
+      } finally {
+        setSendingAttachment(false);
       }
-    } catch (e) {
-      console.warn("Falha ao enviar anexo no chat", e);
-      showErrorToast("Não deu pra enviar o anexo -- tenta de novo.");
-    } finally {
-      setSendingAttachment(false);
+    } else {
+      setSendingAttachment(true);
+      try {
+        await chat.sendChatAttachment(file, filename, kind);
+      } finally {
+        setSendingAttachment(false);
+      }
     }
   }
 
@@ -4275,17 +3778,17 @@ export default function GameRoom({
   // recebe decide convidar de volta clicando no próprio cardzinho (ver
   // onAcceptVisit em ChatMessageRow). Só faz sentido numa conversa
   // direta de verdade (nunca no chat da Sala), mas aceita o mesmo
-  // "roteamento" de sempre (activeConversationId null cairia no chat
-  // da Sala, só não tem botão nenhum chamando isso nesse caso).
+  // "roteamento" de sempre (conversationId null cairia no chat da
+  // Sala, só não tem botão nenhum chamando isso nesse caso).
   function sendRoomCard(action: "invite" | "visit") {
-    const roomCard =
-      action === "invite"
-        ? { action, roomSlug, roomName: roomCompanyName || "Minha sala", roomLogoUrl: roomCompanyLogoUrl || "" }
-        : { action, roomSlug: "", roomName: "", roomLogoUrl: "" };
-    if (activeConversationId === null) {
+    if (chat.activeConversationId === null) {
+      const roomCard =
+        action === "invite"
+          ? { action, roomSlug, roomName: roomCompanyName || "Minha sala", roomLogoUrl: roomCompanyLogoUrl || "" }
+          : { action, roomSlug: "", roomName: "", roomLogoUrl: "" };
       wsSend({ type: "chat", roomCard });
     } else {
-      wsSend({ type: "chat:send", conversationId: activeConversationId, roomCard });
+      chat.sendRoomCard(action);
     }
   }
 
@@ -4393,59 +3896,61 @@ export default function GameRoom({
   // "apagar mensagem" -- apaga PRA TODOS (ver server/chatStore.js
   // deleteMessage e o case chat:delete/chat:delete_room em
   // server/index.js). conversationId null = mensagem da Sala.
+  // "apagar mensagem" -- apaga PRA TODOS. Sala usa o PRÓPRIO socket
+  // (chat:delete_room, sem histórico persistido só pra quem tá
+  // conectado agora); conversa de verdade delega pro motor único.
   function deleteMessage(conversationId: string | null, messageId: string) {
     if (conversationId === null) {
       wsSend({ type: "chat:delete_room", messageId });
     } else {
-      wsSend({ type: "chat:delete", conversationId, messageId });
+      chat.deleteMessage(conversationId, messageId);
     }
   }
 
-  // --- reação/fixar/digitando/painel de arquivos (pedido do Douglas,
-  // 1/out, comparando com o Slack) -- mesmo esquema de deleteMessage
-  // acima: conversationId null = Sala. ---
+  // --- reação/fixar/digitando (pedido do Douglas, 1/out, comparando
+  // com o Slack) -- mesmo esquema de deleteMessage acima: Sala usa o
+  // socket da sala, conversa de verdade delega pro motor único. ---
 
   function toggleReaction(conversationId: string | null, messageId: string, emoji: string) {
-    wsSend({ type: "chat:react", conversationId: conversationId ?? undefined, messageId, emoji });
+    if (conversationId === null) {
+      wsSend({ type: "chat:react", messageId, emoji });
+    } else {
+      chat.toggleReaction(conversationId, messageId, emoji);
+    }
   }
 
   function pinMessage(conversationId: string | null, messageId: string, durationMs: number | null) {
-    wsSend({ type: "chat:pin", conversationId: conversationId ?? undefined, messageId, durationMs: durationMs ?? undefined });
+    if (conversationId === null) {
+      wsSend({ type: "chat:pin", messageId, durationMs: durationMs ?? undefined });
+    } else {
+      chat.pinMessage(conversationId, messageId, durationMs);
+    }
   }
 
   function unpinMessage(conversationId: string | null, messageId: string) {
-    wsSend({ type: "chat:unpin", conversationId: conversationId ?? undefined, messageId });
+    if (conversationId === null) {
+      wsSend({ type: "chat:unpin", messageId });
+    } else {
+      chat.unpinMessage(conversationId, messageId);
+    }
   }
 
-  // "fulano está digitando..." -- throttled (no máximo 1x a cada 2.5s,
-  // ver comentário grande em TYPING_THROTTLE_MS), chamado a cada tecla
-  // do composer enquanto tiver conteúdo (ver onChangeComposerText em
-  // ChatDrawer). O lado que recebe expira sozinho (TYPING_EXPIRE_MS),
-  // não existe "parei de digitar" explícito.
+  // "fulano está digitando..." -- throttled (no máximo 1x a cada 2.5s),
+  // chamado a cada tecla do composer enquanto tiver conteúdo. Sala usa
+  // um throttle local (só ela mora aqui agora); conversa de verdade
+  // delega pro motor único (que já tem o PRÓPRIO throttle por
+  // conversationId, ver usePlatformChat.ts).
   const TYPING_THROTTLE_MS = 2500;
-  const lastTypingSentAtRef = useRef<Record<string, number>>({});
+  const lastRoomTypingSentAtRef = useRef(0);
   function sendTypingNotification(conversationId: string | null) {
-    const key = conversationId ?? "__room__";
-    const now = Date.now();
-    if (now - (lastTypingSentAtRef.current[key] ?? 0) < TYPING_THROTTLE_MS) return;
-    lastTypingSentAtRef.current[key] = now;
-    wsSend({ type: "chat:typing", conversationId: conversationId ?? undefined });
-  }
-
-  // painel lateral "arquivos da conversa" (pedido do Douglas, 1/out) --
-  // só existe pra conversa de VERDADE aberta (nunca a Sala, ver
-  // comentário grande em filesPanelOpen lá em cima).
-  function openFilesPanel() {
-    if (activeConversationId === null) return;
-    setFilesPanelOpen(true);
-    setFilesPanelItems(null);
-    setFilesPanelFilter("all");
-    setFilesPanelQuery("");
-    wsSend({ type: "chat:attachments", conversationId: activeConversationId });
-  }
-
-  function closeFilesPanel() {
-    setFilesPanelOpen(false);
+    if (conversationId === null) {
+      const now = Date.now();
+      if (now - lastRoomTypingSentAtRef.current < TYPING_THROTTLE_MS) return;
+      lastRoomTypingSentAtRef.current = now;
+      wsSend({ type: "chat:typing" });
+    } else {
+      chat.sendTypingNotification(conversationId);
+    }
   }
 
   // "mencionar na conversa" (pedido do Douglas, 1/out: "...e botao de
@@ -4453,44 +3958,9 @@ export default function GameRoom({
   // o arquivo no composer da conversa aberta agora (sem reabrir a
   // mensagem original, só um atalho pra comentar sobre ele); fecha o
   // painel em seguida, igual clicar "Mencionar" fecha o dropdown normal.
-  function mentionAttachmentInChat(item: ChatAttachmentItem) {
-    const mentionText = `@${item.senderName || "Alguém"} `;
-    if (activeConversationId === null) {
-      setChatInput((prev) => (prev ? `${prev} ${mentionText}` : mentionText));
-    } else {
-      setChatComposerText((prev) => (prev ? `${prev} ${mentionText}` : mentionText));
-    }
-    setPendingMentionIds((prev) => (prev.includes(item.senderId) ? prev : [...prev, item.senderId]));
-    setFilesPanelOpen(false);
-  }
-
-  // --- chamada de voz/vídeo de uma conversa ("tipo discord") -- opt-in
-  // (ver call:join/call:leave em server/index.js), só dá pra estar numa
-  // por vez: entrar numa nova sai da anterior sozinho. Fecha o mesh local
-  // NA HORA (não espera o "call:state" confirmar, ver
-  // handlePartyMessage) pra UI reagir de imediato; o eco que volta do
-  // servidor só reconcilia de novo, sem efeito nenhum já que já tá tudo
-  // limpo. ---
-  function joinCall(conversationId: string) {
-    if (myCallConversationId === conversationId) return;
-    if (myCallConversationId) {
-      wsSend({ type: "call:leave", conversationId: myCallConversationId });
-      callPeersRef.current.forEach((pc) => pc.close());
-      callPeersRef.current.clear();
-      setCallRemoteStreams({});
-    }
-    setMyCallConversationId(conversationId);
-    wsSend({ type: "call:join", conversationId });
-  }
-
-  function leaveCall() {
-    if (!myCallConversationId) return;
-    wsSend({ type: "call:leave", conversationId: myCallConversationId });
-    setMyCallConversationId(null);
-    callPeersRef.current.forEach((pc) => pc.close());
-    callPeersRef.current.clear();
-    setCallRemoteStreams({});
-  }
+  // mentionAttachmentInChat/joinCall/leaveCall: usePlatformChat.ts (ver
+  // destructure de "chat" lá em cima) -- painel de arquivos e chamada
+  // de conversa são 100% dela, nunca existiram pra Sala.
 
   // --- Agenda (ver tipos/comentário grande lá em cima) ---
 
@@ -5520,26 +4990,25 @@ export default function GameRoom({
   // não-lida (ver unreadCount em server/chatStore.js/
   // listConversationsForUser), usada no badge do botão "Chat" da
   // av-bar (ver mais abaixo).
-  const totalUnreadMessages = useMemo(
-    () => conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0),
-    [conversations]
-  );
-
   // props compartilhadas do ChatDrawer -- o MESMO componente é usado em
   // dois lugares do JSX agora (flutuante por cima do jogo, ou fixo como
   // barra lateral à esquerda, ver chatPinned), só a posição/pinned muda.
+  // Tudo que é CONVERSA de verdade (direta/grupo) vem de chat.* (motor
+  // único, ver usePlatformChat.ts); só o que é GENUINAMENTE da Sala
+  // (chatLog/roomPins/roomTyping/pendingMentionIds locais, "hasRoom")
+  // continua daqui.
+  const activeConversationId = chat.activeConversationId;
   const chatDrawerProps = {
-    view: chatView,
-    onChangeView: setChatView,
-    conversations,
+    view: chat.chatView,
+    onChangeView: chat.setChatView,
+    conversations: chat.conversations,
     activeConversationId,
     onOpenConversation: openConversation,
-    messages: activeConversationId === null ? [] : messagesByConv[activeConversationId] ?? [],
+    messages: activeConversationId === null ? [] : chat.messagesByConv[activeConversationId] ?? [],
     // 29/set (14): corte "mensagens não vistas" da conversa aberta
-    // agora (ver unreadSinceTsByConv lá em cima e o comentário grande
-    // no handler de "chat:history") -- null enquanto ainda não chegou
-    // (ou é a Sala, que não tem esse conceito).
-    unreadSinceTs: activeConversationId === null ? null : unreadSinceTsByConv[activeConversationId] ?? null,
+    // agora -- null enquanto ainda não chegou (ou é a Sala, que não tem
+    // esse conceito).
+    unreadSinceTs: activeConversationId === null ? null : chat.unreadSinceTsByConv[activeConversationId] ?? null,
     roomChatLog: chatLog,
     // 1/out (unificação Lobby/GameRoom) -- ver comentário grande de
     // hasRoom em components/ChatDrawer.tsx; a sala de verdade sempre tem
@@ -5555,33 +5024,36 @@ export default function GameRoom({
     // no vídeo/áudio da chamada de conversa (ver ChatCallVideoTile
     // mais abaixo), ajustável em Configurações mesmo fora da sala.
     callVolume,
-    // "Conversa" vs "Criar grupo" (pedido do Douglas, 1/out) -- ver
-    // comentário grande em newConvMode/changeNewConvMode lá em cima.
-    newConvMode,
+    // "Conversa" vs "Criar grupo" (pedido do Douglas, 1/out) -- agora
+    // 100% de chat.* (motor único).
+    newConvMode: chat.newConvMode,
     onChangeNewConvMode: changeNewConvMode,
-    newConvSelection,
+    newConvSelection: chat.newConvSelection,
     onToggleNewConvSelection: toggleNewConvSelection,
-    newConvName,
-    onChangeNewConvName: setNewConvName,
+    newConvName: chat.newConvName,
+    onChangeNewConvName: chat.setNewConvName,
     onSubmitNewConversation: submitNewConversation,
-    newConvFilter,
-    onChangeNewConvFilter: setNewConvFilter,
-    newConvQuery,
-    onChangeNewConvQuery: setNewConvQuery,
-    newConvSearchResults,
-    newConvFriends,
-    renamingGroup,
+    newConvFilter: chat.newConvFilter,
+    onChangeNewConvFilter: chat.setNewConvFilter,
+    newConvQuery: chat.newConvQuery,
+    onChangeNewConvQuery: chat.setNewConvQuery,
+    newConvSearchResults: chat.newConvSearchResults,
+    newConvFriends: chat.newConvFriends,
+    renamingGroup: chat.renamingGroup,
     onStartRenameGroup: (currentName: string) => {
-      setGroupNameDraft(currentName);
-      setRenamingGroup(true);
+      chat.setGroupNameDraft(currentName);
+      chat.setRenamingGroup(true);
     },
-    onCancelRenameGroup: () => setRenamingGroup(false),
-    groupNameDraft,
-    onChangeGroupNameDraft: setGroupNameDraft,
+    onCancelRenameGroup: () => chat.setRenamingGroup(false),
+    groupNameDraft: chat.groupNameDraft,
+    onChangeGroupNameDraft: chat.setGroupNameDraft,
     onSubmitRenameGroup: submitRenameGroup,
-    composerText: activeConversationId === null ? chatInput : chatComposerText,
-    onChangeComposerText: activeConversationId === null ? setChatInput : setChatComposerText,
-    onSendComposer: activeConversationId === null ? sendChat : sendActiveChatMessage,
+    // composer/gravação/anexo: Sala continua com o PRÓPRIO (chatInput/
+    // sendChat local, reaproveitando localStreamRef pra gravar, ver
+    // startVoiceRecording) -- conversa de verdade usa o do motor único.
+    composerText: activeConversationId === null ? chatInput : chat.composerText,
+    onChangeComposerText: activeConversationId === null ? setChatInput : chat.setComposerText,
+    onSendComposer: activeConversationId === null ? sendChat : chat.onSendComposer,
     onPickFile: () => chatFileInputRef.current?.click(),
     sendingAttachment,
     recordingAudio,
@@ -5595,9 +5067,9 @@ export default function GameRoom({
     onDeleteMessage: deleteMessage,
     onSendRoomCard: sendRoomCard,
     onMoveConversationLane: moveConversationLane,
-    callParticipantsByConversation,
-    myCallConversationId,
-    callRemoteStreams,
+    callParticipantsByConversation: chat.callParticipantsByConversation,
+    myCallConversationId: chat.myCallConversationId,
+    callRemoteStreams: chat.callRemoteStreams,
     onJoinCall: joinCall,
     onLeaveCall: leaveCall,
     localStreamRef,
@@ -5616,38 +5088,44 @@ export default function GameRoom({
     // arquivo), então funciona pra visitante sem conta também (não dá
     // pra usar o ProfileViewCard "de conta" aqui, ele exige login).
     onOpenProfile: (playerId: string) => setProfileCard({ playerId, isLocal: false }),
-    // reação/fixar/digitando/visto por/painel de arquivos (pedido do
-    // Douglas, 1/out) -- "pins"/"typingUsers"/"lastRead" trocam de fonte
-    // conforme a aba aberta (Sala usa roomPins/roomTyping, conversa de
-    // verdade usa o Record por conversationId, ver comentário grande
-    // deles lá em cima); onToggleReaction/onPinMessage/onUnpinMessage já
+    // reação/fixar/digitando/visto por (pedido do Douglas, 1/out) --
+    // "pins"/"typingUsers"/"lastRead" trocam de fonte conforme a aba
+    // aberta (Sala usa roomPins/roomTyping locais, conversa de verdade
+    // usa chat.*); onToggleReaction/onPinMessage/onUnpinMessage já
     // fecham sobre o activeConversationId certo, ChatMessageRow não
     // precisa saber qual conversa é.
-    pins: activeConversationId === null ? roomPins : pinsByConv[activeConversationId] ?? [],
-    typingUsers: activeConversationId === null ? roomTyping : typingByConv[activeConversationId] ?? [],
-    lastRead: activeConversationId === null ? {} : lastReadByConv[activeConversationId] ?? {},
+    pins: activeConversationId === null ? roomPins : chat.pinsByConv[activeConversationId] ?? [],
+    typingUsers: activeConversationId === null ? roomTyping : chat.typingByConv[activeConversationId] ?? [],
+    lastRead: activeConversationId === null ? {} : chat.lastReadByConv[activeConversationId] ?? {},
     onToggleReaction: (messageId: string, emoji: string) => toggleReaction(activeConversationId, messageId, emoji),
     onPinMessage: (messageId: string, durationMs: number | null) => pinMessage(activeConversationId, messageId, durationMs),
     onUnpinMessage: (messageId: string) => unpinMessage(activeConversationId, messageId),
     onTypingNotify: () => sendTypingNotification(activeConversationId),
     // painel lateral "arquivos da conversa" -- só existe pra conversa de
-    // VERDADE aberta (ver comentário grande em openFilesPanel acima).
-    filesPanelOpen,
-    filesPanelItems,
-    filesPanelFilter,
-    onChangeFilesPanelFilter: setFilesPanelFilter,
-    filesPanelQuery,
-    onChangeFilesPanelQuery: setFilesPanelQuery,
+    // VERDADE aberta, 100% de chat.* (nunca existiu pra Sala).
+    filesPanelOpen: chat.filesPanelOpen,
+    filesPanelItems: chat.filesPanelItems,
+    filesPanelFilter: chat.filesPanelFilter,
+    onChangeFilesPanelFilter: chat.setFilesPanelFilter,
+    filesPanelQuery: chat.filesPanelQuery,
+    onChangeFilesPanelQuery: chat.setFilesPanelQuery,
     onOpenFilesPanel: openFilesPanel,
     onCloseFilesPanel: closeFilesPanel,
     onMentionAttachmentInChat: mentionAttachmentInChat,
-    // @menção (pedido do Douglas, 1/out) -- ver comentário grande em
-    // pendingMentionIds lá em cima; onAddPendingMentionId é chamado por
-    // insertMention (local ao ChatDrawer) quando a pessoa escolhe um
-    // candidato no dropdown.
-    pendingMentionIds,
-    onAddPendingMentionId: (userId: string) =>
-      setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId])),
+    // @menção (pedido do Douglas, 1/out) -- Sala usa pendingMentionIds
+    // local, conversa de verdade usa o do motor único (ver comentário
+    // grande em pendingMentionIds lá em cima); onAddPendingMentionId é
+    // chamado por insertMention (local ao ChatDrawer) quando a pessoa
+    // escolhe um candidato no dropdown -- despacha pro lado certo
+    // conforme o que tá aberto agora.
+    pendingMentionIds: activeConversationId === null ? pendingMentionIds : chat.pendingMentionIds,
+    onAddPendingMentionId: (userId: string) => {
+      if (activeConversationId === null) {
+        setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]));
+      } else {
+        chat.setPendingMentionIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]));
+      }
+    },
   };
 
   // props do AgendaDrawer -- gaveta própria, separada do chat (ver
@@ -6086,7 +5564,7 @@ export default function GameRoom({
                 quantidade de conversa. */}
             <span className="lobby-badge-wrap">
               <ChatIcon />
-              {totalUnreadMessages > 0 && <span className="lobby-icon-badge">{totalUnreadMessages}</span>}
+              {chat.totalUnreadMessages > 0 && <span className="lobby-icon-badge">{chat.totalUnreadMessages}</span>}
             </span>
           </button>
           <button
