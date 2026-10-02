@@ -69,6 +69,17 @@ export default function AccountCard({
   const [cardOpen, setCardOpen] = useState(false);
   const [panel, setPanel] = useState<MenuPanel>(null);
 
+  // DEBUG TEMPORÁRIO (2/out) -- confirma se é o COMPONENTE inteiro
+  // sendo desmontado/remontado pelo pai (GameRoom) que reseta `panel`
+  // de volta pro valor inicial (null), em vez de algo dentro do
+  // próprio AccountCard chamando setPanel(null). Roda só 1x na
+  // montagem (array vazio) -- a função de limpeza só dispara mesmo no
+  // desmonte de verdade, nunca em re-render normal.
+  useEffect(() => {
+    console.log("[account-card][DEBUG] MONTOU");
+    return () => console.log("[account-card][DEBUG] DESMONTOU");
+  }, []);
+
   const displayName = accountProfile?.name?.trim() || "visitante";
   const accountBio = accountProfile?.bio?.trim() || "";
   const accountInstagram = accountProfile?.instagram?.trim().replace(/^@/, "") || "";
@@ -91,7 +102,12 @@ export default function AccountCard({
   // toda renderização com o `panel` atual, pra confirmar se o React
   // chega a tentar montar o painel ancorado (profile/account/
   // verification) mesmo quando nada aparece na tela.
-  console.log("[account-card][DEBUG] render panel=", panel, "cardOpen=", cardOpen);
+  console.log(
+    "[account-card][DEBUG] render panel=", panel,
+    "cardOpen=", cardOpen,
+    "accountUserId=", accountUserId,
+    "accountAccessToken=", accountAccessToken ? "(presente)" : accountAccessToken
+  );
 
   return (
     <div className="lobby-topbar-account-wrap">
@@ -176,16 +192,31 @@ export default function AccountCard({
         <ProfileViewCard
           userId={accountUserId}
           accountAccessToken={accountAccessToken}
-          onClose={() => setPanel(null)}
+          onClose={() => {
+            console.log("[account-card][DEBUG] onClose chamado (profile)");
+            setPanel(null);
+          }}
           onStartConversation={(targetUserId, targetName) => onStartConversation?.(targetUserId, targetName)}
           anchored
         />
       )}
       {panel === "account" && accountAccessToken && (
-        <AccountDataPanel accountAccessToken={accountAccessToken} onClose={() => setPanel(null)} />
+        <AccountDataPanel
+          accountAccessToken={accountAccessToken}
+          onClose={() => {
+            console.log("[account-card][DEBUG] onClose chamado (account)");
+            setPanel(null);
+          }}
+        />
       )}
       {panel === "verification" && accountAccessToken && (
-        <VerificationPanel accountAccessToken={accountAccessToken} onClose={() => setPanel(null)} />
+        <VerificationPanel
+          accountAccessToken={accountAccessToken}
+          onClose={() => {
+            console.log("[account-card][DEBUG] onClose chamado (verification)");
+            setPanel(null);
+          }}
+        />
       )}
     </div>
   );
