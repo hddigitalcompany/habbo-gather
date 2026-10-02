@@ -8300,19 +8300,27 @@ button.chat-picker-item:disabled {
    Douglas quando o card ainda só existia fixo dentro da sala ("o balao
    com nome no canto superior direito dentro do jogo ta bugado"): sem
    essa sobrescrita, cima de um fundo escuro ficava um "balão" quase
-   invisível (texto escuro sobre fundo escuro). Agora que o card é
-   SEMPRE fixo nesse canto (2/out, nunca mais embutido no topbar claro
-   do Lobby), o tema escuro vale incondicionalmente -- sem precisar
-   mais estar escopado sob nenhum ancestral "de sala" específico. Mesma
-   "pegada" vidro escuro do resto do HUD -- só troca a cor/fundo,
-   mantém o resto (formato, tamanho) igual ao chip de antes. */
-.platform-account-card-pin .lobby-topbar-account {
+   invisível (texto escuro sobre fundo escuro). Mesma "pegada" vidro
+   escuro do resto do HUD da sala -- só troca a cor/fundo, mantém o
+   resto (formato, tamanho) igual ao chip claro de fora.
+
+   2/out: chegou a ficar incondicional por um tempo (pelo raciocínio
+   errado de que "nunca mais embutido no topbar claro do Lobby" sem
+   contar que o balão continua flutuando visualmente POR CIMA desse
+   topbar claro, só não é mais descendente dela no DOM) -- Douglas viu
+   ("ta estranho") um balão escuro sólido destoando do vidro claro ao
+   redor no Lobby. Escopado de volta só pra dentro da sala
+   (.platform-account-card-pin-room, ver app/page.tsx) -- fora da sala
+   volta a cair na regra "crua" de .lobby-topbar-account lá em cima
+   (tema claro, quase transparente), igual sempre foi antes de existir
+   posição fixa nenhuma aqui. */
+.platform-account-card-pin-room .lobby-topbar-account {
   background: rgba(13, 7, 21, 0.75);
   border-color: rgba(255, 255, 255, 0.14);
   color: #f5f0ff;
 }
 
-.platform-account-card-pin .lobby-topbar-account:hover {
+.platform-account-card-pin-room .lobby-topbar-account:hover {
   background: rgba(13, 7, 21, 0.92);
 }
 

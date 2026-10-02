@@ -193,12 +193,28 @@ export default function Home() {
                     arredondada dela em vez de ficar recuado como os
                     outros itens do menu. Modificador só pro Lobby (ver
                     .platform-account-card-pin-lobby) soma esse mesmo
-                    32px -- nunca durou precisar tocar a Sala, que já
-                    tava certa. */}
+                    32px.
+
+                    2/out (3) -- bug reportado pelo Douglas com print
+                    ("ficou fora"/"ta estranho"): o tema ESCURO do
+                    balão (ver .platform-account-card-pin .lobby-topbar-
+                    account em globals.css) tinha virado incondicional
+                    na consolidação original, pelo raciocínio errado de
+                    que "o balão nunca mais embutido no topbar claro do
+                    Lobby" -- só que ele continua flutuando VISUALMENTE
+                    por cima do topbar claro do Lobby (só não é mais
+                    DESCENDENTE dela no DOM, posição fixa agora), então
+                    o fundo escuro sólido (pensado só pro fundo escuro
+                    da Sala) ficava destoando ali, um "balão dentro de
+                    balão" sem nada a ver com o vidro claro ao redor.
+                    Modificador .platform-account-card-pin-room
+                    devolve o tema escuro pra só dentro da sala -- fora
+                    dela volta pro .lobby-topbar-account "cru" (tema
+                    claro, quase transparente, igual sempre foi). */}
                 <div
                   className={
                     entered
-                      ? "platform-account-card-pin"
+                      ? "platform-account-card-pin platform-account-card-pin-room"
                       : "platform-account-card-pin platform-account-card-pin-lobby"
                   }
                 >
