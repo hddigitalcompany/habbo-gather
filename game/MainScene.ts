@@ -416,6 +416,37 @@ const DEPTH_FURNITURE_ROW_HEIGHT = ISO_TILE_HEIGHT;
 // móveis.
 const DEPTH_STACK_ON_TOP = 4;
 
+/**
+ * Vidro (divisória, FurnitureType "vidro") -- pedido do Douglas:
+ * "coloque a vidraca acima dos mobis tambem" (depois de já ter pedido
+ * pra vidraça da fachada ficar acima do piso, ver
+ * DEPTH_FACADE_CORNER2_GLASS). A arte do vidro tem 2 tiles de altura
+ * (ver FURNITURE_ART.vidro), mas usava a MESMA profundidade-por-fileira
+ * de um móvel comum de 1 tile -- então um móvel ancorado na fileira
+ * logo "na frente" dele (col+row maior) desenhava por cima da METADE DE
+ * CIMA do vidro, que visualmente invade essa fileira seguinte. Empurrão
+ * de uma fileira inteira garante que o vidro sempre desenha na frente
+ * de móvel comum ancorado na fileira seguinte -- sem mudar x/y (só a
+ * ordem de desenho, mesma ideia da vidraça da fachada).
+ */
+const DEPTH_GLASS_DIVIDER_BOOST = DEPTH_FURNITURE_ROW_HEIGHT;
+
+/**
+ * Empurrão extra (px) somado à profundidade-base por fileira
+ * (furnitureDepthForTile) de um móvel -- junta num lugar só os 2 casos
+ * especiais que antes eram repetidos em 3 pontos diferentes
+ * (addFurnitureSprite, fantasma do catálogo, preview ao arrastar/mover)
+ * cada um com seu próprio `(stackOffsetY !== 0 ? DEPTH_STACK_ON_TOP : 0)`
+ * -- pra não ter 3 cópias do mesmo "if" se desincronizando quando um
+ * caso novo (como o do vidro) precisar entrar nos 3 ao mesmo tempo.
+ */
+function furnitureDepthBoost(type: FurnitureType, stackOffsetY: number): number {
+  let boost = 0;
+  if (stackOffsetY !== 0) boost += DEPTH_STACK_ON_TOP;
+  if (type === "vidro") boost += DEPTH_GLASS_DIVIDER_BOOST;
+  return boost;
+}
+
 // exceção: móveis "flat" (tapete, por exemplo -- sem altura de verdade,
 // não faz sentido o boneco passar "por trás" deles) ficam sempre atrás
 // de tudo, feito decoração colada no chão, fora desse jogo de
@@ -2117,7 +2148,7 @@ export default class MainScene extends Phaser.Scene {
     // verdade embaixo (stackOffsetY !== 0) -- item "Sobrepor" sem base
     // configurada nesse tile ainda não ganha nenhum tratamento especial
     // de profundidade, continua na fileira lógica normal.
-    const depth = f.flat ? DEPTH_FLAT_FURNITURE : baseDepth + (stackOffsetY !== 0 ? DEPTH_STACK_ON_TOP : 0);
+    const depth = f.flat ? DEPTH_FLAT_FURNITURE : baseDepth + furnitureDepthBoost(f.type, stackOffsetY);
     const image = this.add
       .image(pos.x, pos.y + stackOffsetY, key)
       .setOrigin(0.5, 1)
@@ -8161,7 +8192,8 @@ export default class MainScene extends Phaser.Scene {
       const ghostDepthTile = ghostBase ? furnitureDepthTile(ghostBase) : { col, row };
       this.catalogGhostSprite.setPosition(x, y + ghostStackOffsetY);
       this.catalogGhostSprite.setDepth(
-        furnitureDepthForTile(ghostDepthTile.col, ghostDepthTile.row) + (ghostStackOffsetY !== 0 ? DEPTH_STACK_ON_TOP : 0)
+        furnitureDepthForTile(ghostDepthTile.col, ghostDepthTile.row) +
+          furnitureDepthBoost(hoverEntry?.type ?? "poltrona", ghostStackOffsetY)
       );
       this.catalogGhostSprite.setVisible(!occupied);
     }
@@ -8290,7 +8322,7 @@ export default class MainScene extends Phaser.Scene {
           sprite.setDepth(
             moving.flat
               ? DEPTH_FLAT_FURNITURE
-              : furnitureDepthForTile(movingDepthTile.col, movingDepthTile.row) + (stackOffsetY !== 0 ? DEPTH_STACK_ON_TOP : 0)
+              : furnitureDepthForTile(movingDepthTile.col, movingDepthTile.row) + furnitureDepthBoost(moving.type, stackOffsetY)
           );
           sprite.clearTint();
         }
