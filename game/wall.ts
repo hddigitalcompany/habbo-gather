@@ -296,9 +296,11 @@ export function wallBrickRects(pattern: WallPatternConfig, edgeLengthPx: number)
  * Mesma ideia de wallBrickRects acima, pro tipo de textura "panel" (ver
  * WallTextureKind) -- faixas horizontais (sem loop em u, sem
  * amarração/offset -- um painel não se subdivide horizontalmente igual
- * tijolo), cada uma com altura `pattern.brickHeightPx` (reaproveitado
+ * tijolo), cada uma com altura ~`pattern.brickHeightPx` (reaproveitado
  * como "altura do painel" -- ver comentário grande de WallTextureKind
- * pro motivo de não ter ganhado campo próprio) e emoldurada por um
+ * pro motivo de não ter ganhado campo próprio; só ALVO aproximado --
+ * ver ACHADO dentro da função pro motivo de toda fileira sair com a
+ * MESMA altura exata, sem resto nenhum sobrando) e emoldurada por um
  * friso de `pattern.mortarWidthPx` (idem, reaproveitado como "largura
  * do friso") nos 4 lados -- horizontal ENTRE fileiras (v, condicional:
  * nunca no chão/topo da parede, ver comentário dentro da função -- "a
@@ -312,12 +314,30 @@ export function wallBrickRects(pattern: WallPatternConfig, edgeLengthPx: number)
  */
 export function wallPanelRects(pattern: WallPatternConfig, edgeLengthPx: number): WallBrickRect[] {
   const rects: WallBrickRect[] = [];
-  const rowH = Math.max(4, pattern.brickHeightPx);
   const gap = Math.max(0, pattern.mortarWidthPx);
-  const rowCount = Math.max(1, Math.ceil(pattern.heightPx / rowH));
+  // ACHADO (Douglas testando ao vivo, 2ª rodada -- "o frizo na borda
+  // ainda ta ali sem a espessura pra eu editar" + "ele continua
+  // cortando o topo"): a versão anterior usava rowH FIXO
+  // (brickHeightPx) e cortava a ÚLTIMA fileira (a mais perto do topo)
+  // no que sobrava (heightPx % rowH) -- quando esse resto era menor
+  // que o friso (gap), a fileira de cima virava uma TIRA minúscula (ou
+  // suficiente curta que o IF de baixo descartava ela de vez), expondo
+  // o fundo (mortarColor) puro bem debaixo do topo -- uma "linha" cuja
+  // espessura era na verdade o RESTO da divisão, não a "Espessura do
+  // friso" nenhuma (por isso parecia "sem espessura pra editar": mudar
+  // o campo de verdade não mudava aquilo). Fix: em vez de um rowH fixo
+  // com resto, divide heightPx em rowCount fileiras de altura IGUAL
+  // (sem resto nenhum sobrando) -- brickHeightPx vira só o ALVO
+  // aproximado (arredonda pro número de fileiras mais perto que cabe
+  // inteiro), mesma ideia de "Travar tábuas na grade do tile" do piso
+  // (FloorPatternConfig, ItemEditor.tsx) aplicada aqui sem precisar de
+  // toggle (painel sempre tranca, não tem motivo pra deixar sobra).
+  const targetRowH = Math.max(4, pattern.brickHeightPx);
+  const rowCount = Math.max(1, Math.round(pattern.heightPx / targetRowH));
+  const rowH = pattern.heightPx / rowCount;
   for (let j = 0; j < rowCount; j++) {
     const v0Full = j * rowH;
-    const v1Full = Math.min(pattern.heightPx, v0Full + rowH);
+    const v1Full = j === rowCount - 1 ? pattern.heightPx : v0Full + rowH;
     if (v1Full <= v0Full) continue;
     // só desconta a folga do friso no lado que É uma emenda de
     // verdade ENTRE 2 painéis -- nunca no chão (v=0) nem no topo
@@ -433,16 +453,35 @@ export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number,
   // verdade -- o que cairia num vão de friso (horizontal, entre
   // fileiras, ou vertical já recortado nas próprias rows) fica de fora.
   const insideRow = (v: number) => rows.some((r) => v >= r.v0 - 0.01 && v <= r.v1 + 0.01);
-  const count = halfAcross * 2 < 40 ? 4 : halfAcross * 2 < 80 ? 6 : 9;
+  // "mais linhas, mais finas e mais quantidade" -- Douglas testando ao
+  // vivo a 1ª leva (pós-correção de orientação/continuidade, ver
+  // comentário grande acima): poucos riscos grossos não lia como
+  // madeira de verdade. Bem mais riscos (quase o dobro) e bem mais
+  // finos que antes.
+  const count = halfAcross * 2 < 40 ? 7 : halfAcross * 2 < 80 ? 11 : 16;
   const SEGMENTS = 16;
   const shapes: WallGrainShape[] = [];
+
+  // NÓ da madeira -- "nó da madeira, escurecida" -- um painel alto o
+  // bastante ganha 1 nó (sorteado, nem todo painel tem -- madeira de
+  // verdade também não), um ponto escuro com ovais concêntricas (ver
+  // loop de anéis mais abaixo) e os veios PRÓXIMOS se desviam dele em
+  // vez de atravessar por cima (madeira de verdade cresce CONTORNANDO
+  // o nó, não ignora ele) -- ver `deflectAcross` dentro do loop
+  // principal abaixo.
+  const hasKnot = halfAlong > 24 && grainHashPure(segmentSeed, 31, 0, 1) < 0.6;
+  const knotAlong = (grainHashPure(segmentSeed, 31, 0, 2) * 2 - 1) * halfAlong * 0.55;
+  const knotAcross = (grainHashPure(segmentSeed, 31, 0, 3) * 2 - 1) * halfAcross * 0.45;
+  const knotRAlong = halfAlong * (0.05 + grainHashPure(segmentSeed, 31, 0, 4) * 0.035);
+  const knotRAcross = halfAcross * (0.12 + grainHashPure(segmentSeed, 31, 0, 5) * 0.08);
+
   for (let k = 0; k < count; k++) {
-    const baseAcross = (grainHashPure(segmentSeed, 11, k, 1) * 2 - 1) * halfAcross * 0.78;
-    const amplitude = halfAcross * (0.04 + grainHashPure(segmentSeed, 11, k, 2) * 0.07);
-    const cycles = 0.35 + grainHashPure(segmentSeed, 11, k, 3) * 0.55;
+    const baseAcross = (grainHashPure(segmentSeed, 11, k, 1) * 2 - 1) * halfAcross * 0.8;
+    const amplitude = halfAcross * (0.025 + grainHashPure(segmentSeed, 11, k, 2) * 0.05);
+    const cycles = 0.3 + grainHashPure(segmentSeed, 11, k, 3) * 0.5;
     const phase = grainHashPure(segmentSeed, 11, k, 4) * Math.PI * 2;
-    const halfThick = halfAcross * (0.015 + grainHashPure(segmentSeed, 11, k, 5) * 0.025);
-    const segHalfLen = halfAlong * (0.9 + grainHashPure(segmentSeed, 11, k, 6) * 0.1);
+    const halfThick = halfAcross * (0.006 + grainHashPure(segmentSeed, 11, k, 5) * 0.012);
+    const segHalfLen = halfAlong * (0.92 + grainHashPure(segmentSeed, 11, k, 6) * 0.08);
     const alongOffset = (grainHashPure(segmentSeed, 11, k, 7) * 2 - 1) * (halfAlong - segHalfLen);
     const lighten = grainHashPure(segmentSeed, 11, k, 8) < 0.5;
     const shade = lighten
@@ -452,7 +491,24 @@ export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number,
 
     const alongMin = alongOffset - segHalfLen;
     const alongMax = alongOffset + segHalfLen;
-    const acrossAt = (t: number) => baseAcross + amplitude * Math.sin(t * Math.PI * cycles + phase);
+    // desvio em volta do nó -- quanto mais perto o risco passa do nó
+    // (no eixo along, o "longo" do painel), mais ele é empurrado pra
+    // LONGE do centro do nó (no eixo across) -- um "sino" (gaussiana)
+    // centrado em knotAlong, com alcance proporcional ao raio do nó.
+    // Mesmo pro painel SEM nó (hasKnot=false): a influência dá 0 sozinha
+    // (nunca é chamada, ver condicional abaixo).
+    const deflectAcross = (alongPos: number): number => {
+      if (!hasKnot) return 0;
+      const dAlong = alongPos - knotAlong;
+      const spread = knotRAlong * 2.2;
+      const influence = Math.exp(-(dAlong * dAlong) / (2 * spread * spread));
+      const side = baseAcross >= knotAcross ? 1 : -1;
+      return side * influence * knotRAcross * 1.6;
+    };
+    const acrossAt = (t: number) => {
+      const alongPos = alongMin + (alongMax - alongMin) * t;
+      return baseAcross + amplitude * Math.sin(t * Math.PI * cycles + phase) + deflectAcross(alongPos);
+    };
 
     for (let s = 0; s < SEGMENTS; s++) {
       const t0 = s / SEGMENTS;
@@ -475,6 +531,39 @@ export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number,
       });
     }
   }
+
+  // Desenha o nó em si -- anéis ovais concêntricos (de fora pra dentro,
+  // escurecendo cada vez mais -- mesma ideia de "anel de árvore"),
+  // escurecida (pedido literal "escurecida") a partir da MESMA
+  // baseColor do painel, nunca uma cor nova/sem relação.
+  if (hasKnot) {
+    const ringCount = 4;
+    const ringSegs = 20;
+    for (let r = 0; r < ringCount; r++) {
+      const t = r / (ringCount - 1);
+      const rAlong = knotRAlong * (1 - t * 0.78);
+      const rAcross = knotRAcross * (1 - t * 0.78);
+      const points: { u: number; v: number }[] = [];
+      for (let i = 0; i < ringSegs; i++) {
+        const ang = (i / ringSegs) * Math.PI * 2;
+        // oval levemente irregular (raio variando um pouco por ângulo)
+        // em vez de elipse perfeita -- nó de verdade nunca é redondo
+        // certinho.
+        const wobble = 1 + 0.12 * Math.sin(ang * 3 + segmentSeed);
+        points.push({
+          u: cAcross + knotAcross + Math.cos(ang) * rAcross * wobble,
+          v: cAlong + knotAlong + Math.sin(ang) * rAlong * wobble,
+        });
+      }
+      if (!insideRow(cAlong + knotAlong)) continue;
+      shapes.push({
+        points,
+        fillColor: darkenHex(baseColor, 0.5 - t * 0.22),
+        opacity: 0.55 + t * 0.15,
+      });
+    }
+  }
+
   return shapes;
 }
 
