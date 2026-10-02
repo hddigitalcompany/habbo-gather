@@ -5558,22 +5558,25 @@ export default class MainScene extends Phaser.Scene {
     // Veio de madeira -- só textura "panel" com woodGrain ligado (ver
     // comentário grande de WallPatternConfig.woodGrain em game/wall.ts):
     // "cade a madeira os veios? kkk" -> "paineis de madeira, paineis
-    // normal liso" (virou toggle, não automático). Desenhado por CIMA
-    // de cada painel (mesma ordem de sempre: fundo/friso -> painel ->
-    // veio -> rodapé, quando tiver), com uma semente por SEGMENTO (col,
-    // row, side) pra painéis de paredes diferentes nunca sortearem o
-    // mesmo veio -- ver wallPanelGrainShapes em game/wall.ts.
+    // normal liso" (virou toggle, não automático), depois corrigido pra
+    // vertical + mais realista ("os veios e na vertical" + "tem que
+    // ser mais realista essas linha ai ficou uma bosta... olha cmo e
+    // painel de vdd" -- ver comentário grande de wallPanelGrainShapes
+    // em game/wall.ts). Desenhado por CIMA de todo o painel de uma vez
+    // (mesma ordem de sempre: fundo/friso -> painel -> veio -> rodapé,
+    // quando tiver) -- wallPanelGrainShapes recebe TODAS as fileiras
+    // juntas (faceRects inteiro) pra correr o veio pela altura TOTAL
+    // do painel, contínuo por trás dos frisos horizontais, com uma
+    // semente por SEGMENTO (col, row, side) pra painéis de paredes
+    // diferentes nunca sortearem o mesmo veio.
     if (pattern.textureKind === "panel" && pattern.woodGrain) {
       const segmentSeed = seg.col * 97 + seg.row * 31 + (seg.side === "colPlus" ? 0 : seg.side === "rowPlus" ? 1 : seg.side === "center" ? 2 : 3);
-      for (const rect of faceRects) {
-        if (rect.rowIndex === undefined) continue;
-        for (const shape of wallPanelGrainShapes(rect, segmentSeed, pattern.brickColor)) {
-          gfx.fillStyle(shape.fillColor, shape.opacity);
-          gfx.fillPoints(
-            shape.points.map((pt) => mapPoint(pt.u, pt.v)),
-            true
-          );
-        }
+      for (const shape of wallPanelGrainShapes(faceRects, segmentSeed, pattern.brickColor)) {
+        gfx.fillStyle(shape.fillColor, shape.opacity);
+        gfx.fillPoints(
+          shape.points.map((pt) => mapPoint(pt.u, pt.v)),
+          true
+        );
       }
     }
     // RODAPÉ -- pedido do Douglas, com foto de referência (rodapé

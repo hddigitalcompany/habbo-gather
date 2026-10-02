@@ -372,48 +372,83 @@ export interface WallGrainShape {
 }
 
 /**
- * Os riscos de veio de madeira de UM painel (um WallBrickRect com
- * `rowIndex` preenchido, ver wallPanelRects acima) -- mesma matemática
- * EXATA de woodGrainShapesForPlank (game/floor.ts: mesmas constantes,
- * mesmo número de riscos por faixa de largura, mesma onda de 6
- * segmentos, ver comentário grande lá pro histórico/motivo de cada
- * escolha), só reparametrizada pro espaço LOCAL (u,v) de parede (sem
- * rowAxis/colAxis rotacionados -- painel de parede é uma faixa reta,
- * não um losango isométrico) em vez de ir direto pra coordenada de
- * mundo. Função PURA -- usada tanto pelo preview ao vivo (
- * WallPatternSwatch.tsx) quanto pelo desenho de verdade
+ * Os riscos de veio de madeira de UM painel de parede -- recebe TODAS
+ * as fileiras (`rows`, cada uma um WallBrickRect com `rowIndex`
+ * preenchido, ver wallPanelRects acima) de UM segmento de parede de
+ * uma vez, não uma por uma.
+ *
+ * 2 correções grandes, as 2 testando com foto de painel de madeira de
+ * verdade ao lado do resultado no jogo:
+ *
+ * 1) ORIENTAÇÃO -- "os veios e na vertical": a 1ª versão corria o veio
+ * ao longo de U (largura), reaproveitando sem ajuste a orientação de
+ * woodGrainShapesForPlank (game/floor.ts), onde o veio corre ao longo
+ * do COMPRIMENTO da tábua DEITADA -- certo pro piso, errado pra um
+ * painel de parede EM PÉ (madeira de verdade é serrada/montada com o
+ * veio correndo na vertical). Agora o risco corre ao longo de V
+ * (altura), com a onda/distribuição lado a lado em U (largura).
+ *
+ * 2) COMPRIMENTO/CONTINUIDADE -- "tem que ser mais realista essas
+ * linha ai ficou uma bosta, esconde no piso porque tem as emendas": no
+ * piso, cada risco é curto (cabe DENTRO de uma tábua só) e as juntas
+ * entre várias tábuas pequenas escondem a repetição; na parede, um
+ * painel é uma faixa ÚNICA e grande -- um risco igualmente curto (preso
+ * dentro de só UMA fileira do friso horizontal, ~altura do painel)
+ * ficava visivelmente picotado/artificial, sem nada pra "esconder" o
+ * padrão. Fix: `rows` entra INTEIRO (todas as fileiras do segmento, do
+ * chão até o topo) e o risco corre pela ALTURA TOTAL do painel (quase
+ * de ponta a ponta, `segHalfLen` perto de `halfAlong` inteiro),
+ * contínuo por trás dos frisos horizontais -- só fica de fora
+ * (`insideRow`, abaixo) o pedacinho que cairia bem EM CIMA de um friso
+ * de verdade (senão o veio "vazaria" por cima da linha que separa 2
+ * painéis).
+ *
+ * Onda mais suave (menos ciclos, menos amplitude) e mais riscos, mais
+ * finos -- madeira de verdade tem MUITOS veios finos quase retos, não
+ * poucos bem ondulados.
+ *
+ * Função PURA -- usada tanto pelo preview ao vivo
+ * (WallPatternSwatch.tsx) quanto pelo desenho de verdade
  * (createWallPatternGraphics em MainScene.ts), mesma garantia de
  * sempre (preview == jogo).
  *
  * `segmentSeed` diferencia o veio de UM segmento de parede do vizinho
- * (2 painéis na MESMA fileira de 2 segmentos diferentes não sorteiam
- * igual) -- quem chama deriva de (col,row,side) do segmento (ver
- * createWallPatternGraphics) ou usa uma constante fixa no preview (o
- * formulário não representa um segmento de verdade, só o ESTILO).
+ * (2 segmentos diferentes não sorteiam o mesmo veio) -- quem chama
+ * deriva de (col,row,side) do segmento (ver createWallPatternGraphics)
+ * ou usa uma constante fixa no preview (o formulário não representa um
+ * segmento de verdade, só o ESTILO).
  */
-export function wallPanelGrainShapes(rect: WallBrickRect, segmentSeed: number, baseColor: number): WallGrainShape[] {
-  const rowIndex = rect.rowIndex ?? 0;
-  const halfLength = (rect.u1 - rect.u0) / 2;
-  const halfWidth = (rect.v1 - rect.v0) / 2;
-  const cu = (rect.u0 + rect.u1) / 2;
-  const cv = (rect.v0 + rect.v1) / 2;
-  if (halfLength <= 0 || halfWidth <= 0) return [];
-  const count = halfWidth * 2 < 24 ? 2 : halfWidth * 2 < 48 ? 3 : 4;
-  const SEGMENTS = 6;
+export function wallPanelGrainShapes(rows: WallBrickRect[], segmentSeed: number, baseColor: number): WallGrainShape[] {
+  if (rows.length === 0) return [];
+  const u0 = rows[0].u0;
+  const u1 = rows[0].u1;
+  const vBottom = Math.min(...rows.map((r) => r.v0));
+  const vTop = Math.max(...rows.map((r) => r.v1));
+  const halfAlong = (vTop - vBottom) / 2;
+  const halfAcross = (u1 - u0) / 2;
+  const cAlong = (vTop + vBottom) / 2;
+  const cAcross = (u0 + u1) / 2;
+  if (halfAlong <= 0 || halfAcross <= 0) return [];
+  // só deixa passar o pedaço do veio que cai DENTRO de uma fileira de
+  // verdade -- o que cairia num vão de friso (horizontal, entre
+  // fileiras, ou vertical já recortado nas próprias rows) fica de fora.
+  const insideRow = (v: number) => rows.some((r) => v >= r.v0 - 0.01 && v <= r.v1 + 0.01);
+  const count = halfAcross * 2 < 40 ? 4 : halfAcross * 2 < 80 ? 6 : 9;
+  const SEGMENTS = 16;
   const shapes: WallGrainShape[] = [];
   for (let k = 0; k < count; k++) {
-    const baseAcross = (grainHashPure(segmentSeed, rowIndex, k, 1) * 2 - 1) * halfWidth * 0.5;
-    const amplitude = halfWidth * (0.08 + grainHashPure(segmentSeed, rowIndex, k, 2) * 0.14);
-    const cycles = 0.8 + grainHashPure(segmentSeed, rowIndex, k, 3) * 1.6;
-    const phase = grainHashPure(segmentSeed, rowIndex, k, 4) * Math.PI * 2;
-    const halfThick = halfWidth * (0.045 + grainHashPure(segmentSeed, rowIndex, k, 5) * 0.05);
-    const segHalfLen = halfLength * (0.55 + grainHashPure(segmentSeed, rowIndex, k, 6) * 0.35);
-    const alongOffset = (grainHashPure(segmentSeed, rowIndex, k, 7) * 2 - 1) * (halfLength - segHalfLen);
-    const lighten = grainHashPure(segmentSeed, rowIndex, k, 8) < 0.5;
+    const baseAcross = (grainHashPure(segmentSeed, 11, k, 1) * 2 - 1) * halfAcross * 0.78;
+    const amplitude = halfAcross * (0.04 + grainHashPure(segmentSeed, 11, k, 2) * 0.07);
+    const cycles = 0.35 + grainHashPure(segmentSeed, 11, k, 3) * 0.55;
+    const phase = grainHashPure(segmentSeed, 11, k, 4) * Math.PI * 2;
+    const halfThick = halfAcross * (0.015 + grainHashPure(segmentSeed, 11, k, 5) * 0.025);
+    const segHalfLen = halfAlong * (0.9 + grainHashPure(segmentSeed, 11, k, 6) * 0.1);
+    const alongOffset = (grainHashPure(segmentSeed, 11, k, 7) * 2 - 1) * (halfAlong - segHalfLen);
+    const lighten = grainHashPure(segmentSeed, 11, k, 8) < 0.5;
     const shade = lighten
-      ? lightenHex(baseColor, 0.16 + grainHashPure(segmentSeed, rowIndex, k, 9) * 0.22)
-      : darkenHex(baseColor, 0.55 + grainHashPure(segmentSeed, rowIndex, k, 9) * 0.3);
-    const opacity = 0.18 + grainHashPure(segmentSeed, rowIndex, k, 10) * 0.24;
+      ? lightenHex(baseColor, 0.1 + grainHashPure(segmentSeed, 11, k, 9) * 0.14)
+      : darkenHex(baseColor, 0.68 + grainHashPure(segmentSeed, 11, k, 9) * 0.22);
+    const opacity = 0.22 + grainHashPure(segmentSeed, 11, k, 10) * 0.22;
 
     const alongMin = alongOffset - segHalfLen;
     const alongMax = alongOffset + segHalfLen;
@@ -422,16 +457,18 @@ export function wallPanelGrainShapes(rect: WallBrickRect, segmentSeed: number, b
     for (let s = 0; s < SEGMENTS; s++) {
       const t0 = s / SEGMENTS;
       const t1 = (s + 1) / SEGMENTS;
-      const u0 = cu + alongMin + (alongMax - alongMin) * t0;
-      const u1 = cu + alongMin + (alongMax - alongMin) * t1;
-      const v0 = cv + acrossAt(t0);
-      const v1 = cv + acrossAt(t1);
+      const along0 = alongMin + (alongMax - alongMin) * t0;
+      const along1 = alongMin + (alongMax - alongMin) * t1;
+      const vMid = cAlong + (along0 + along1) / 2;
+      if (!insideRow(vMid)) continue;
+      const across0 = acrossAt(t0);
+      const across1 = acrossAt(t1);
       shapes.push({
         points: [
-          { u: u0, v: v0 - halfThick },
-          { u: u1, v: v1 - halfThick },
-          { u: u1, v: v1 + halfThick },
-          { u: u0, v: v0 + halfThick },
+          { u: cAcross + across0 - halfThick, v: cAlong + along0 },
+          { u: cAcross + across1 - halfThick, v: cAlong + along1 },
+          { u: cAcross + across1 + halfThick, v: cAlong + along1 },
+          { u: cAcross + across0 + halfThick, v: cAlong + along0 },
         ],
         fillColor: shade,
         opacity,

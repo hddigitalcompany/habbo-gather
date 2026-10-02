@@ -67,16 +67,14 @@ export function WallPatternSwatch({ pattern, edgeLengthPx }: { pattern: WallPatt
           semente por (col,row,side), ver createWallPatternGraphics). */}
       {pattern.textureKind === "panel" &&
         pattern.woodGrain &&
-        rects.flatMap((r, ri) =>
-          wallPanelGrainShapes(r, 0, pattern.brickColor).map((shape, si) => (
-            <polygon
-              key={`g-${ri}-${si}`}
-              points={shape.points.map((pt) => `${pt.u},${capH + (pattern.heightPx - pt.v)}`).join(" ")}
-              fill={hexToCss(shape.fillColor)}
-              opacity={shape.opacity}
-            />
-          ))
-        )}
+        wallPanelGrainShapes(rects, 0, pattern.brickColor).map((shape, si) => (
+          <polygon
+            key={`g-${si}`}
+            points={shape.points.map((pt) => `${pt.u},${capH + (pattern.heightPx - pt.v)}`).join(" ")}
+            fill={hexToCss(shape.fillColor)}
+            opacity={shape.opacity}
+          />
+        ))}
     </svg>
   );
 }
