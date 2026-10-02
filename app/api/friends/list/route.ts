@@ -25,6 +25,16 @@ export async function GET(req: NextRequest) {
   const followingIds = new Set((following ?? []).map((r) => r.followed_id as string));
   const followerIds = new Set((followers ?? []).map((r) => r.follower_id as string));
   const mutualIds = [...followingIds].filter((id) => followerIds.has(id));
+  // DEBUG TEMPORÁRIO (2/out) -- Douglas: "eu e outra conta nos
+  // seguimos mutuamente porem ela nao entra nos meus amigos ainda",
+  // segunda tentativa (tab como dependência em FriendsPanel.tsx) não
+  // resolveu ("nada ainda") -- ou seja, nem reabrir/recarregar a lista
+  // do zero traz a conta mútua, o que aponta pro cálculo/dado no
+  // SERVIDOR, não pra cache/staleness do navegador. Sem acesso direto
+  // ao banco nessa sessão -- loga aqui pra ver no terminal (`npm run
+  // dev`) o que o servidor realmente está vendo da próxima vez que
+  // reproduzir. Remover depois de achar a causa.
+  console.log("[friends/list][DEBUG] userId=%s following=%o followers=%o mutualIds=%o", userId, [...followingIds], [...followerIds], mutualIds);
   if (mutualIds.length === 0) return NextResponse.json({ friends: [] });
 
   const { data: profiles, error } = await admin.from("profiles").select("id, name, photo_url").in("id", mutualIds);
