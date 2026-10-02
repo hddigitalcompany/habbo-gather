@@ -250,6 +250,10 @@ function wallAlongUnit(side: WallSide): { x: number; y: number } {
 // pontos diferentes do código (addWallSprite é o único que TODOS eles
 // passam, mas o Map exigiria centralizar/repetir a chave em cada um).
 const WALL_CUTOUT_MASK_GFX_DATA_KEY = "wallCutoutMaskGfx";
+// 2/out, pedido de performance (Douglas: "mac ficou lento, apenas um
+// usuario, imagina varios") -- ver comentário grande de
+// updateWallAvatarCutoutMask mais abaixo.
+const WALL_CUTOUT_MASK_NONEMPTY_DATA_KEY = "wallCutoutMaskNonEmpty";
 
 // [parado, passoA, passoB] -- passoA/passoB alternam a cada passo dado
 // (ver playWalk), não por tempo -- assim funciona igual pra um pulo de
@@ -5220,15 +5224,37 @@ export default class MainScene extends Phaser.Scene {
     for (const [key, wall] of this.draftWallSprites.entries()) {
       const maskGfx = wall.getData(WALL_CUTOUT_MASK_GFX_DATA_KEY) as Phaser.GameObjects.Graphics | undefined;
       if (!maskGfx) continue;
-      maskGfx.clear();
-      if (containers.length === 0) continue;
       const side = this.draftWall.get(key)?.side;
       if (!side) continue; // defensivo -- não deveria existir sprite sem segmento correspondente
+      // 2/out, pedido de performance (Douglas: "mac ficou lento, apenas
+      // um usuario, imagina varios") -- ANTES, essa função fazia
+      // maskGfx.clear()+fillPoints() pra CADA parede, TODO frame (até
+      // 60x/s), mesmo pras paredes bem longe de qualquer boneco (óbvio
+      // que nunca têm recorte nenhum pra desenhar) -- numa sala com
+      // bastante parede, isso é um Graphics.clear()+redesenho (custo
+      // real de rasterização, não só matemática) rodando dezenas de
+      // vezes por frame, o tempo todo, mesmo sozinho na sala parado.
+      // Agora só clear()+redesenha quando tem DE VERDADE algo mudando
+      // nessa parede: ou tem pelo menos um boneco atrás dela AGORA
+      // (relevant.length > 0), ou ela ainda tinha um recorte desenhado
+      // do frame ANTERIOR que precisa sumir (wasNonEmpty) -- uma parede
+      // que já tava vazia e continua vazia nunca mais toca o Graphics
+      // dela. Resultado visual idêntico (zero mudança de comportamento,
+      // só menos trabalho jogado fora).
+      const relevant = containers.filter((c) => c.depth < wall.depth);
+      const wasNonEmpty = maskGfx.getData(WALL_CUTOUT_MASK_NONEMPTY_DATA_KEY) === true;
+      if (relevant.length === 0) {
+        if (wasNonEmpty) {
+          maskGfx.clear();
+          maskGfx.setData(WALL_CUTOUT_MASK_NONEMPTY_DATA_KEY, false);
+        }
+        continue;
+      }
+      maskGfx.clear();
       const along = wallAlongUnit(side);
       const halfW = WALL_AVATAR_CUTOUT_WIDTH_PX / 2;
       maskGfx.fillStyle(0xffffff);
-      for (const c of containers) {
-        if (c.depth >= wall.depth) continue; // não tá atrás DESSA parede -- sem buraco aqui
+      for (const c of relevant) {
         // container.y é o CENTRO do tile (ver comentário de
         // AVATAR_FOOT_OFFSET_Y) -- os pés de verdade ficam em y+offset;
         // a base do paralelogramo (bl/br) anda a partir daí ao longo da
@@ -5243,6 +5269,7 @@ export default class MainScene extends Phaser.Scene {
         const tr = { x: br.x, y: br.y - WALL_AVATAR_CUTOUT_HEIGHT_PX };
         maskGfx.fillPoints([bl, br, tr, tl], true);
       }
+      maskGfx.setData(WALL_CUTOUT_MASK_NONEMPTY_DATA_KEY, true);
     }
   }
 
