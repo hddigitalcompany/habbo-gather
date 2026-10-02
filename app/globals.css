@@ -529,6 +529,23 @@ body {
   z-index: 7;
 }
 
+/* 1/out, Douglas (comparando print do chat do Lobby com o de dentro):
+   "Sobre a cor eu gostei mais do de fora" + "quero igual" -- o
+   background era o MESMO gradiente translúcido que .lobby-panel usa
+   (ver regra combinada acima), só que por trás dele tem um
+   backdrop-filter:blur (ver .chat-drawer, .lobby-panel) que deixa
+   transparecer o que tá atrás: fundo claro do Lobby (gradiente da
+   tela) vs o jogo escuro da Sala -- MESMO CSS, cor final diferente
+   porque o fundo por trás é diferente. Sobrescreve aqui SÓ pro chat
+   (não pro .lobby-panel/Agenda, que continua com o vidro mais
+   transparente de sempre -- nunca foi comparado ao chat) um
+   background bem mais opaco: com o blur contribuindo pouco, a cor
+   final fica praticamente a mesma nos dois lugares, não depende mais
+   do que tá atrás. */
+.chat-drawer {
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.86), rgba(20, 20, 24, 0.93));
+}
+
 /* "Fixar": em vez de flutuar por cima do jogo, a gaveta vira uma barra
    lateral FIXA à esquerda (irmã de .room-wrapper dentro de
    .room-and-editor, ver render em GameRoom.tsx) -- mesma pegada visual,
@@ -786,7 +803,11 @@ body {
   align-items: stretch;
   gap: 12px;
   padding: 14px 14px 14px 12px;
-  background: linear-gradient(160deg, rgba(150, 150, 158, 0.3), rgba(20, 20, 24, 0.42));
+  /* 1/out -- mesmo ajuste de opacidade do .chat-drawer logo acima
+     (Douglas: "quero igual"), senão essa coluna ficaria mais
+     transparente que a gaveta colada nela (rail + gaveta são uma peça
+     só visualmente, sem gap entre elas, ver .chat-drawer-shell). */
+  background: linear-gradient(160deg, rgba(150, 150, 158, 0.86), rgba(20, 20, 24, 0.93));
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-right: none;
   /* 30/set, pedido do Douglas: "tire a borda arredondada da direita
