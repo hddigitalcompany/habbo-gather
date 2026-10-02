@@ -29,7 +29,7 @@
 // anexo/áudio/room-card), apagar, reagir, fixar/desfixar, "visto por",
 // painel de arquivos, "digitando..." e chamada de voz/vídeo.
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import PartySocket from "partysocket";
 import { resolveUserId } from "@/lib/identity";
 // 1/out -- notificação de mensagem nova (som/toast do navegador) era só
@@ -181,20 +181,85 @@ export function usePlatformChat(params: PlatformChatParams) {
     selectedCamId = null,
   } = params;
 
-  // "convidar amigo pra minha sala"/"pedir pra visitar" (RoomCard) e
+  // "convidar amigo pra minha sala"/"pedir pra visitar" (RoomCard),
   // carimbar "Empresa" numa conversa (ver getRoomCompanyInfo em
-  // server/roomAuth.js) precisam saber QUAL é "minha sala" agora --
-  // dentro da sala é a sala aberta, fora (Lobby) é a sala que a
-  // própria pessoa já tem (myRealRoom). Isso NÃO é fixo desde o mount
-  // (o hook monta ANTES de qualquer uma das duas telas saber disso --
-  // ver PlatformChatHost em app/page.tsx), então é estado de verdade
-  // que quem usa o hook atualiza via setRoomContext sempre que souber
-  // (ou deixar de saber, null) sua própria sala.
-  const [roomContext, setRoomContext] = useState<{
+  // server/roomAuth.js) e a aba "Empresa" do chat (logo+nome sempre
+  // visíveis, ver companyOptions em ChatDrawer.tsx) precisam saber
+  // QUAL é "minha sala" agora -- dentro da sala é a sala aberta, fora
+  // (Lobby) é a sala que a própria pessoa já tem. Isso NÃO é fixo
+  // desde o mount (o hook monta ANTES de qualquer uma das duas telas
+  // saber disso -- ver PlatformChatHost em app/page.tsx).
+  //
+  // 2/out, bug achado (Douglas: "eu nao falei 50 vezes que nao quero
+  // regras diferentes? o chat tem que ser o MESMO") -- antes disso
+  // Lobby.tsx E GameRoom.tsx tinham CADA UM sua própria cópia de
+  // "busca /api/room/company-profile?slug=X, guarda em state, manda
+  // pro setRoomContext" -- duas implementações separadas da MESMA
+  // coisa, só "parecidas" (exatamente o padrão que o Douglas já pediu
+  // pra nunca mais fazer). Uma delas usava um filtro
+  // (myRealRoom, feito só pra outra finalidade -- dropdown "Meus
+  // espaços") que não devia se aplicar aqui, e corrigir só ELA
+  // deixava as duas cópias divergentes de novo (nome vindo de um
+  // lado, logo de outro) -- foi isso que quebrou "minhas conversas
+  // sumiram" (ver mais abaixo). Agora é UMA SÓ: quem usa o hook só
+  // avisa QUAL slug é "minha sala" (setRoomContextSlug), a busca e o
+  // roomContext {slug,name,logoUrl} completo vivem só aqui, e os dois
+  // lugares LEEM o mesmo roomContext de volta (chat.roomContext) em
+  // vez de guardar cópia própria.
+  const [roomContextSlug, setRoomContextSlugState] = useState<string | null>(null);
+  const [roomContext, setRoomContextState] = useState<{
     slug: string;
     name: string | null;
     logoUrl: string | null;
   } | null>(null);
+  // identidade estável (useCallback) de propósito -- quem chama isso
+  // (Lobby.tsx/GameRoom.tsx) faz `useEffect(() => chat.setRoomContextSlug(...),
+  // [chat, ...])`, e o retorno do hook inteiro NÃO é memoizado (ver
+  // "return {" lá embaixo) -- se essa função fosse recriada a cada
+  // render ela mudaria de identidade toda vez que QUALQUER outro
+  // estado do hook mudasse, o que re-dispara aqueles efeitos, que
+  // chamam ela de novo, re-renderiza nesse componente, muda a
+  // identidade de novo -- um loop. (Foi exatamente esse loop,
+  // via o objeto novo que o antigo setRoomContext recebia pronto a
+  // cada chamada, que causou "minhas conversas sumiram" agora há
+  // pouco -- a tela trava re-renderizando e a lista para de refletir
+  // o que chega do socket.)
+  const setRoomContextSlug = useCallback((slug: string | null) => {
+    setRoomContextSlugState((prev) => (prev === slug ? prev : slug));
+  }, []);
+  useEffect(() => {
+    if (!roomContextSlug) {
+      setRoomContextState((prev) => (prev === null ? prev : null));
+      return;
+    }
+    let cancelled = false;
+    // slug disponível NA HORA (quem lê roomContext?.slug pra criar
+    // conversa/convidar não pode esperar a busca do nome/logo) --
+    // nome/logo chegam depois, async, só preenchendo.
+    setRoomContextState((prev) => (prev && prev.slug === roomContextSlug ? prev : { slug: roomContextSlug, name: null, logoUrl: null }));
+    fetch(`/api/room/company-profile?slug=${encodeURIComponent(roomContextSlug)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const name = data?.profile?.name || null;
+        const logoUrl = data?.profile?.logoUrl || null;
+        // compara campo a campo antes de trocar a referência -- evita
+        // re-render (e o loop acima) quando o valor chegou igual ao
+        // que já tinha.
+        setRoomContextState((prev) =>
+          prev && prev.slug === roomContextSlug && prev.name === name && prev.logoUrl === logoUrl
+            ? prev
+            : { slug: roomContextSlug, name, logoUrl }
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRoomContextState((prev) => (prev && prev.slug === roomContextSlug ? prev : { slug: roomContextSlug, name: null, logoUrl: null }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomContextSlug]);
 
   const myUserId = useMemo(() => resolveUserId(accountUserId), [accountUserId]);
   const myName = accountProfile?.name?.trim() || "Visitante";
@@ -1488,7 +1553,8 @@ export function usePlatformChat(params: PlatformChatParams) {
   return {
     connected,
     myUserId,
-    setRoomContext,
+    roomContext,
+    setRoomContextSlug,
     // conversas/mensagens
     conversations,
     chatView,

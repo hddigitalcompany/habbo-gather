@@ -2233,59 +2233,41 @@ export default function Lobby({
   const myRealRoom =
     myRoom && myRoom.room_slug !== "mapa-publicado" && myRoom.room_slug !== "mapa-modelo" ? myRoom : null;
   // 30/set, pedido do Douglas: "quero essa aba sempre aberta com o
-  // chat, quero que eles vejam a possibilidade, sempre ali" -- logo da
-  // empresa PRÓPRIA (myRealRoom.name já tem o nome, mas não a logo --
-  // MyRoom não carrega esse campo, ver tipo acima) pra alimentar
-  // companyOptions no ChatDrawer (roomCompanyLogoUrl, ver mais abaixo)
-  // mesmo sem nenhuma conversa ainda.
-  // Busca separada da do companyProfile/selectedRoomSlug mais acima
-  // (aquela é do espaço SELECIONADO/visitado agora, que pode ser o de
-  // outra pessoa -- essa aqui é sempre a MINHA, pro chat).
+  // chat, quero que eles vejam a possibilidade, sempre ali" -- logo+
+  // nome da empresa PRÓPRIA pra alimentar companyOptions no
+  // ChatDrawer mesmo sem nenhuma conversa ainda.
   //
-  // 2/out, bug achado (Douglas: "as logos das empresas nao ta
-  // aparecendo, somente no lobby, porque ta diferente?") -- isso aqui
-  // usava `myRealRoom` (que de PROPÓSITO vira null pra sala-reservada,
-  // ver comentário grande dele acima -- regra feita só pra dropdown
-  // "Meus espaços"/"Criar espaço +" não duplicar/esconder errado).
-  // Só que pro Douglas (dono da plataforma) a Sala Principal
-  // (mapa-publicado) É a sala de verdade dele (ver fallback em
-  // app/api/room/mine/route.ts) -- então `myRealRoom` ficava sempre
-  // null pra ele, e a logo da PRÓPRIA empresa nunca entrava na aba
-  // "Empresa" do chat daqui do Lobby. Dentro da Sala (GameRoom.tsx)
-  // não tem esse filtro (busca direto pelo roomSlug aberto) -- por
-  // isso só aparecia "diferente" lá dentro, nunca aqui. Troquei pra
-  // `myRoom` puro (a sala de verdade da pessoa, sem a trava de
-  // dedupe do dropdown) -- `myRealRoom` continua existindo só pro que
-  // já usava antes (dropdown/"Criar espaço").
-  const [myRoomLogoUrl, setMyRoomLogoUrl] = useState<string | null>(null);
+  // 2/out, DOIS bugs seguidos aqui, o segundo causado por corrigir só
+  // metade do primeiro (Douglas, certo: "eu nao falei 50 vezes que
+  // nao quero regras diferentes? o chat tem que ser o MESMO"):
+  // 1) "as logos das empresas nao ta aparecendo, somente no lobby" --
+  //    isso usava `myRealRoom` (vira null de PROPÓSITO pra
+  //    sala-reservada, ver comentário dele acima -- regra feita só
+  //    pro dropdown "Meus espaços" não duplicar). Pro Douglas (dono
+  //    da plataforma) a Sala Principal/mapa-publicado É a sala de
+  //    verdade dele (fallback em app/api/room/mine/route.ts) --
+  //    `myRealRoom` ficava sempre null pra ele só por causa dessa
+  //    regra de dropdown, que não tem nada a ver com chat.
+  // 2) Troquei só a busca da LOGO pra `myRoom` mas esqueci que o NOME
+  //    (prop myRoomName no call-site, mais abaixo) continuava vindo
+  //    de `myRealRoom?.name` -- aí nome e logo vinham de fontes
+  //    DIFERENTES (exatamente a raiz do "regras diferentes" que o
+  //    Douglas tá cobrando), e pior: cada busca própria criava um
+  //    objeto NOVO a cada render pro chat.setRoomContext receber, e
+  //    como o retorno do hook inteiro não é memoizado (ver "return"
+  //    em usePlatformChat.ts) isso virou um LOOP de re-render -- foi
+  //    isso que quebrou "minhas conversas sumiram" logo em seguida.
+  //
+  // Fix de verdade agora: só avisa o motor único QUAL slug é "minha
+  // sala" (setRoomContextSlug) -- a busca em si, o cache e o
+  // roomContext {slug,name,logoUrl} completo moraram pra dentro de
+  // usePlatformChat.ts (ver comentário grande lá), UMA implementação
+  // só, e tanto o Lobby quanto a Sala (GameRoom.tsx) leem de volta o
+  // MESMO chat.roomContext (ver myRoomName/myRoomLogoUrl no call-site
+  // do LobbyChatPanel mais abaixo -- não são mais state própria).
   useEffect(() => {
-    if (!myRoom) {
-      setMyRoomLogoUrl(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/room/company-profile?slug=${encodeURIComponent(myRoom.room_slug)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setMyRoomLogoUrl(data?.profile?.logoUrl || null);
-      })
-      .catch(() => {
-        if (!cancelled) setMyRoomLogoUrl(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myRoom?.room_slug]);
-  // avisa o motor único (ver setRoomContext/roomContext em
-  // usePlatformChat.ts) qual é "minha sala" agora, pra "convidar
-  // amigo"/carimbar "Empresa" numa conversa criada daqui usarem a
-  // sala certa -- MESMA informação que esse componente já buscava
-  // sozinho antes (myRoom/myRoomLogoUrl), só agora também alimenta o
-  // hook compartilhado.
-  useEffect(() => {
-    chat.setRoomContext(myRoom ? { slug: myRoom.room_slug, name: myRoom.name, logoUrl: myRoomLogoUrl } : null);
-  }, [chat, myRoom, myRoomLogoUrl]);
+    chat.setRoomContextSlug(myRoom?.room_slug ?? null);
+  }, [chat, myRoom?.room_slug]);
   const dropdownEntries = myRealRoom
     ? [...visibleRoomSlugs, { slug: myRealRoom.room_slug, label: myRealRoom.name, teamOnly: false }]
     : visibleRoomSlugs;
@@ -3755,8 +3737,8 @@ export default function Lobby({
           pinMode={chatPinMode}
           onToggleSidePin={toggleLobbyChatPinSide}
           myUserId={myUserId}
-          myRoomName={myRealRoom?.name ?? null}
-          myRoomLogoUrl={myRoomLogoUrl}
+          myRoomName={chat.roomContext?.name ?? null}
+          myRoomLogoUrl={chat.roomContext?.logoUrl ?? null}
           accountAccessToken={accountAccessToken}
           callVolume={callVolume}
           camOn={camOn}

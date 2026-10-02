@@ -1075,35 +1075,21 @@ export default function GameRoom({
   // conversa ainda. Usado também pra avisar o motor único QUAL é
   // "minha sala agora" (ver useEffect de chat.setRoomContext mais
   // abaixo).
-  const [roomCompanyName, setRoomCompanyName] = useState<string | null>(null);
-  const [roomCompanyLogoUrl, setRoomCompanyLogoUrl] = useState<string | null>(null);
+  // 2/out: isso aqui buscava o profile SOZINHO, em paralelo com uma
+  // cópia quase igual em Lobby.tsx -- duas implementações da mesma
+  // coisa (exatamente o que o Douglas pediu pra nunca mais fazer, ver
+  // comentário grande de roomContext/setRoomContextSlug em
+  // usePlatformChat.ts, onde a busca/estado moraram pra dentro de
+  // vez). Agora só avisa QUAL slug é "minha sala" -- o motor único
+  // busca e guarda o {slug,name,logoUrl}, lido de volta logo abaixo
+  // via chat.roomContext (ver roomCompanyName/roomCompanyLogoUrl no
+  // chatDrawerProps e em sendRoomCard, mais abaixo -- não são mais
+  // state própria daqui).
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/room/company-profile?slug=${encodeURIComponent(roomSlug)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled) return;
-        setRoomCompanyName(data?.profile?.name || null);
-        setRoomCompanyLogoUrl(data?.profile?.logoUrl || null);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRoomCompanyName(null);
-          setRoomCompanyLogoUrl(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [roomSlug]);
-  // avisa o motor único (usePlatformChat.ts) qual é "minha sala agora"
-  // -- precisa ser um useEffect (não um param fixo do hook) porque ele
-  // monta ANTES do roomSlug/roomCompanyName existirem de verdade (ver
-  // comentário grande de roomContext/setRoomContext lá, MESMO padrão
-  // que Lobby.tsx já usa pro myRealRoom dele).
-  useEffect(() => {
-    chat.setRoomContext({ slug: roomSlug, name: roomCompanyName, logoUrl: roomCompanyLogoUrl });
-  }, [chat, roomSlug, roomCompanyName, roomCompanyLogoUrl]);
+    chat.setRoomContextSlug(roomSlug);
+  }, [chat, roomSlug]);
+  const roomCompanyName = chat.roomContext?.slug === roomSlug ? chat.roomContext.name : null;
+  const roomCompanyLogoUrl = chat.roomContext?.slug === roomSlug ? chat.roomContext.logoUrl : null;
 
   // recordingAudio/recordingElapsedSec/recordedPreview/
   // startVoiceRecording/stopVoiceRecording/cancelVoiceRecording/
