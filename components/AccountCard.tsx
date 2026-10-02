@@ -76,9 +76,22 @@ export default function AccountCard({
   const accountStatusLabel = ACCOUNT_STATUS_LABELS[accountStatusId] || ACCOUNT_STATUS_LABELS.online;
 
   function openPanel(p: MenuPanel) {
+    // DEBUG TEMPORÁRIO (2/out) -- Douglas: "o card das opcoes abre, mas
+    // nenhuma delas abre" (dentro do jogo) -- loga aqui (handler
+    // chamado de verdade?) e no render logo abaixo (chegou a tentar
+    // desenhar o painel ancorado?) pra descobrir se é estado/JS que não
+    // dispara ou layout/CSS que esconde o que já renderizou. Remover
+    // depois de achar a causa.
+    console.log("[account-card][DEBUG] openPanel ->", p);
     setPanel(p);
     setCardOpen(false);
   }
+
+  // DEBUG TEMPORÁRIO (2/out, ver comentário em openPanel acima) -- loga
+  // toda renderização com o `panel` atual, pra confirmar se o React
+  // chega a tentar montar o painel ancorado (profile/account/
+  // verification) mesmo quando nada aparece na tela.
+  console.log("[account-card][DEBUG] render panel=", panel, "cardOpen=", cardOpen);
 
   return (
     <div className="lobby-topbar-account-wrap">
