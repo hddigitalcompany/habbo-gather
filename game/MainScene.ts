@@ -91,6 +91,7 @@ import {
   LedSegmentDef,
   wallEntryById,
   wallTextureKey,
+  wallTextureImageKey,
   wallSegmentId,
   ledSegmentId,
   wallWorldAnchor,
@@ -1180,7 +1181,20 @@ export default class MainScene extends Phaser.Scene {
   // draftFloorSprites em floor.ts (SEM precisar do destroy especial que
   // o piso padrão precisa: um Graphics de parede não cria textura
   // própria nenhuma, então .destroy() sozinho já basta, sem vazar nada).
-  private draftWallSprites: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Graphics> = new Map();
+  // Container só entra quando o painel "padrão" tem textura de verdade
+  // (ver WallPatternConfig.textureImageUrl em game/wall.ts) -- embrulha
+  // o MESMO Graphics de sempre (topo/ponta/rodapé, sem mudar nada ali)
+  // junto com a(s) Image(ns) da face texturizada (ver
+  // buildWallTextureFaceImage abaixo). Sem textura nenhuma (caso de
+  // sempre, tijolo ou painel liso/com veio), continua só Graphics puro,
+  // ZERO mudança de comportamento.
+  private draftWallSprites: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | Phaser.GameObjects.Container> = new Map();
+  /** Contador só pra gerar chave ÚNICA de cada canvas de textura de
+   * parede (ver buildWallTextureFaceImage) -- um canvas por Graphics
+   * desenhado, nunca reaproveitado entre segmentos (cada um tem seu
+   * próprio recorte/cisalhamento), então só precisa ser único, não
+   * significar nada. */
+  private wallTextureFaceSeq = 0;
   // "recorte" do boneco atrás da parede -- pedido do Douglas: "quando o
   // avatar fica atras da parede, teria como fazer um recorte na parede?
   // tipo, pra nao tapar o avatar, sem zerar toda ela", esclarecido como
@@ -1888,6 +1902,51 @@ export default class MainScene extends Phaser.Scene {
       this.load.once(Phaser.Loader.Events.COMPLETE, start);
     } else {
       start();
+    }
+  }
+
+  /**
+   * Igual a loadCustomFurnitureTextures acima, mas pra textura de
+   * verdade (imagem) de um painel "padrão" (ver
+   * WallPatternConfig.textureImageUrl em game/wall.ts) -- pedido do
+   * Douglas depois de brigar com veio desenhado por código: "eu nao to
+   * desenhando nao, o chat que ta gerando mas ele e pessimo com angulo
+   * e tamanho... voce consegue colocar a textura visivel apenas na
+   * face da parede?". `entries[].key` vem de wallTextureImageKey(url)
+   * (mesma função usada depois em createWallPatternGraphics pra achar
+   * a textura já carregada -- nunca formata a chave 2 vezes). Chamado
+   * de fetchAndRegisterCustomWall (GameRoom.tsx) ANTES de
+   * registerCustomWallModels/redesenhar -- ou seja, quando
+   * createWallPatternGraphics roda de verdade, a textura JÁ está
+   * carregada sempre (sem corrida, sem precisar de retry/fallback ali,
+   * só o flat color de sempre no raríssimo caso de alguém chamar fora
+   * dessa ordem).
+   */
+  loadCustomWallTextures(entries: { key: string; url: string }[], onDone?: () => void) {
+    const missing = entries.filter((e) => !this.textures.exists(e.key));
+    if (missing.length === 0) {
+      onDone?.();
+      return;
+    }
+    const start = () => {
+      for (const e of missing) this.load.image(e.key, e.url);
+      this.load.once(Phaser.Loader.Events.COMPLETE, () => onDone?.());
+      this.load.start();
+    };
+    if (this.load.isLoading()) {
+      this.load.once(Phaser.Loader.Events.COMPLETE, start);
+    } else {
+      start();
+    }
+  }
+
+  /** Igual a removeFurnitureTextures acima, mas pra textura de parede
+   * (ver loadCustomWallTextures acima) -- mesmo motivo: item editado
+   * com a MESMA URL (troca só o conteúdo do arquivo, não a URL) senão
+   * ficaria com a arte antiga até um F5. */
+  removeWallTextures(keys: string[]) {
+    for (const key of keys) {
+      if (this.textures.exists(key)) this.textures.remove(key);
     }
   }
 
@@ -4933,7 +4992,7 @@ export default class MainScene extends Phaser.Scene {
    * substituída (os vários `.destroy()` de parede espalhados pelo código
    * não precisam saber que essa máscara existe).
    */
-  private applyWallAvatarCutoutMask(target: Phaser.GameObjects.Image | Phaser.GameObjects.Graphics): void {
+  private applyWallAvatarCutoutMask(target: Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | Phaser.GameObjects.Container): void {
     const maskGfx = this.add.graphics();
     maskGfx.setVisible(false); // só serve de fonte pra máscara, não desenha por cima da cena
     const mask = maskGfx.createGeometryMask();
@@ -4993,7 +5052,7 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  private addWallSprite(seg: WallSegmentDef): Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | null {
+  private addWallSprite(seg: WallSegmentDef): Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | Phaser.GameObjects.Container | null {
     const entry = wallEntryById(seg.styleId);
     if (!entry) return null;
     if (entry.pattern) return this.createWallPatternGraphics(seg, entry.pattern);
@@ -5377,7 +5436,72 @@ export default class MainScene extends Phaser.Scene {
     return hit;
   }
 
-  private createWallPatternGraphics(seg: WallSegmentDef, pattern: WallPatternConfig): Phaser.GameObjects.Graphics {
+  /**
+   * Monta a Image da face da frente TEXTURIZADA (ver
+   * WallPatternConfig.textureImageUrl em game/wall.ts) -- ladrilha a
+   * textura já carregada (`textureKey`, ver loadCustomWallTextures
+   * acima) sozinha, no tamanho NATIVO dela (1 pixel de arquivo = 1
+   * pixel de ladrilho, sem esticar/cobrir -- é exatamente isso que
+   * resolve "a IA não acerta ângulo nem tamanho": a imagem nunca
+   * precisa bater com NADA, só repete), já cisalhada/esticada na MESMA
+   * forma que mapPoint(u,v) desenha pro tijolo/painel por código.
+   *
+   * Canvas 2D puro em vez de Mesh/WebGL: mapPoint(u,v) = (farA2.x +
+   * alongX*u, farA2.y + alongY*u - v) é uma transformação AFIM pura
+   * (2 eixos fixos: `u` ao longo da aresta isométrica, `v` reto pra
+   * cima) -- exatamente o que CanvasRenderingContext2D.setTransform já
+   * resolve sozinho, e CanvasPattern com `repeat` já ladrilha sozinho
+   * (sem precisar lidar com wrap mode de textura WebGL, que tem
+   * restrição de potência-de-2 em WebGL1 -- imagem enviada pelo
+   * usuário quase nunca é). O canvas resultante vira uma textura nova
+   * (`this.textures.addCanvas`) só desse Graphics -- descartada junto
+   * com ele (ver DESTROY abaixo), nunca reaproveitada entre segmentos
+   * (cada um tem seu próprio recorte/comprimento/cisalhamento).
+   */
+  private buildWallTextureFaceImage(
+    textureKey: string,
+    mapPoint: (u: number, v: number) => { x: number; y: number },
+    alongX: number,
+    alongY: number,
+    edgeLengthExt: number,
+    heightPx: number
+  ): Phaser.GameObjects.Image {
+    const corners = [mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, heightPx), mapPoint(0, heightPx)];
+    const minX = Math.min(...corners.map((p) => p.x));
+    const minY = Math.min(...corners.map((p) => p.y));
+    const maxX = Math.max(...corners.map((p) => p.x));
+    const maxY = Math.max(...corners.map((p) => p.y));
+    const w = Math.max(1, Math.ceil(maxX - minX));
+    const h = Math.max(1, Math.ceil(maxY - minY));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    const sourceImg = this.textures.get(textureKey).getSourceImage() as CanvasImageSource;
+    const pattern = ctx.createPattern(sourceImg, "repeat");
+    if (pattern) {
+      // origem local (u=0,v=0) relativa ao canto (minX,minY) do canvas
+      // -- mesma conta de mapPoint, só deslocada pro canvas começar em
+      // (0,0) em vez de nas coordenadas de mundo cruas.
+      const originX = corners[0].x - minX;
+      const originY = corners[0].y - minY;
+      ctx.setTransform(alongX, alongY, 0, -1, originX, originY);
+      ctx.fillStyle = pattern;
+      ctx.fillRect(0, 0, edgeLengthExt, heightPx);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    const canvasKey = `wall-tex-face-${this.wallTextureFaceSeq++}`;
+    this.textures.addCanvas(canvasKey, canvas);
+    const image = this.add.image(minX, minY, canvasKey).setOrigin(0, 0);
+    image.once(Phaser.GameObjects.Events.DESTROY, () => {
+      if (this.textures.exists(canvasKey)) this.textures.remove(canvasKey);
+    });
+    return image;
+  }
+
+  private createWallPatternGraphics(seg: WallSegmentDef, pattern: WallPatternConfig): Phaser.GameObjects.Graphics | Phaser.GameObjects.Container {
     const { a: bottomA, b: bottomB } = wallEdgeFloorPoints(seg.col, seg.row, seg.side);
     // "centerRow" segue a MESMA orientação de rowPlus (ver WallSide em
     // game/wall.ts) -- precisa do mesmo tile "vizinho" sintético (só
@@ -5531,52 +5655,79 @@ export default class MainScene extends Phaser.Scene {
     });
 
     const gfx = this.add.graphics();
-    // argamassa como fundo (o paralelogramo inteiro, já esticado),
-    // tijolo desenhado por cima já com a folga -- mesma ideia visual de
-    // FloorPatternConfig (linha de junta = a cor de baixo "vazando" pela
-    // folga entre tábuas). Passa edgeLengthExt (não o bruto) pra
-    // wallBrickRects, então a amarração de tijolo continua natural
-    // dentro do trechinho esticado, sem faixa vazia nas pontas.
-    gfx.fillStyle(pattern.mortarColor, 1);
-    gfx.fillPoints(
-      [
-        mapPoint(0, 0),
-        mapPoint(edgeLengthExt, 0),
-        mapPoint(edgeLengthExt, pattern.heightPx),
-        mapPoint(0, pattern.heightPx),
-      ],
-      true
-    );
+    // Imagem(ns) da face texturizada (ver buildWallTextureFaceImage
+    // acima) -- só ganha conteúdo quando pattern.textureImageUrl tá
+    // setado E já carregado. Vazio (caso de sempre: tijolo, painel liso
+    // ou com veio por código) -> devolve só `gfx` no final, ZERO mudança
+    // de comportamento/performance pra quem não usa textura.
+    const faceImages: Phaser.GameObjects.Image[] = [];
     const faceRects = wallFaceRects(pattern, edgeLengthExt);
-    gfx.fillStyle(pattern.brickColor, 1);
-    for (const rect of faceRects) {
+    if (pattern.textureImageUrl) {
+      // Textura de VERDADE (imagem) -- ver comentário grande de
+      // WallPatternConfig.textureImageUrl em game/wall.ts. Substitui
+      // POR COMPLETO o preenchimento liso/com veio por código abaixo
+      // (a imagem já traz grão/emenda/tom prontos) -- só a face da
+      // frente muda, topo/ponta/rodapé continuam exatamente como
+      // sempre, mais abaixo neste método.
+      const textureKey = wallTextureImageKey(pattern.textureImageUrl);
+      if (this.textures.exists(textureKey)) {
+        faceImages.push(this.buildWallTextureFaceImage(textureKey, mapPoint, alongX, alongY, edgeLengthExt, pattern.heightPx));
+      } else {
+        // defensivo -- não deveria acontecer na prática (GameRoom.tsx
+        // só chama registerCustomWallModels/redesenha DEPOIS que
+        // loadCustomWallTextures termina, ver comentário lá), mas sem
+        // isso um estado de corrida deixaria a parede inteira
+        // transparente em vez de só feia por 1 frame.
+        gfx.fillStyle(pattern.brickColor, 1);
+        gfx.fillPoints([mapPoint(0, 0), mapPoint(edgeLengthExt, 0), mapPoint(edgeLengthExt, pattern.heightPx), mapPoint(0, pattern.heightPx)], true);
+      }
+    } else {
+      // argamassa como fundo (o paralelogramo inteiro, já esticado),
+      // tijolo desenhado por cima já com a folga -- mesma ideia visual de
+      // FloorPatternConfig (linha de junta = a cor de baixo "vazando" pela
+      // folga entre tábuas). Passa edgeLengthExt (não o bruto) pra
+      // wallBrickRects, então a amarração de tijolo continua natural
+      // dentro do trechinho esticado, sem faixa vazia nas pontas.
+      gfx.fillStyle(pattern.mortarColor, 1);
       gfx.fillPoints(
-        [mapPoint(rect.u0, rect.v0), mapPoint(rect.u1, rect.v0), mapPoint(rect.u1, rect.v1), mapPoint(rect.u0, rect.v1)],
+        [
+          mapPoint(0, 0),
+          mapPoint(edgeLengthExt, 0),
+          mapPoint(edgeLengthExt, pattern.heightPx),
+          mapPoint(0, pattern.heightPx),
+        ],
         true
       );
-    }
-    // Veio de madeira -- só textura "panel" com woodGrain ligado (ver
-    // comentário grande de WallPatternConfig.woodGrain em game/wall.ts):
-    // "cade a madeira os veios? kkk" -> "paineis de madeira, paineis
-    // normal liso" (virou toggle, não automático), depois corrigido pra
-    // vertical + mais realista ("os veios e na vertical" + "tem que
-    // ser mais realista essas linha ai ficou uma bosta... olha cmo e
-    // painel de vdd" -- ver comentário grande de wallPanelGrainShapes
-    // em game/wall.ts). Desenhado por CIMA de todo o painel de uma vez
-    // (mesma ordem de sempre: fundo/friso -> painel -> veio -> rodapé,
-    // quando tiver) -- wallPanelGrainShapes recebe TODAS as fileiras
-    // juntas (faceRects inteiro) pra correr o veio pela altura TOTAL
-    // do painel, contínuo por trás dos frisos horizontais, com uma
-    // semente por SEGMENTO (col, row, side) pra painéis de paredes
-    // diferentes nunca sortearem o mesmo veio.
-    if (pattern.textureKind === "panel" && pattern.woodGrain) {
-      const segmentSeed = seg.col * 97 + seg.row * 31 + (seg.side === "colPlus" ? 0 : seg.side === "rowPlus" ? 1 : seg.side === "center" ? 2 : 3);
-      for (const shape of wallPanelGrainShapes(faceRects, segmentSeed, pattern.brickColor)) {
-        gfx.fillStyle(shape.fillColor, shape.opacity);
+      gfx.fillStyle(pattern.brickColor, 1);
+      for (const rect of faceRects) {
         gfx.fillPoints(
-          shape.points.map((pt) => mapPoint(pt.u, pt.v)),
+          [mapPoint(rect.u0, rect.v0), mapPoint(rect.u1, rect.v0), mapPoint(rect.u1, rect.v1), mapPoint(rect.u0, rect.v1)],
           true
         );
+      }
+      // Veio de madeira -- só textura "panel" com woodGrain ligado (ver
+      // comentário grande de WallPatternConfig.woodGrain em game/wall.ts):
+      // "cade a madeira os veios? kkk" -> "paineis de madeira, paineis
+      // normal liso" (virou toggle, não automático), depois corrigido pra
+      // vertical + mais realista ("os veios e na vertical" + "tem que
+      // ser mais realista essas linha ai ficou uma bosta... olha cmo e
+      // painel de vdd" -- ver comentário grande de wallPanelGrainShapes
+      // em game/wall.ts). Desenhado por CIMA de todo o painel de uma vez
+      // (mesma ordem de sempre: fundo/friso -> painel -> veio -> rodapé,
+      // quando tiver) -- wallPanelGrainShapes recebe TODAS as fileiras
+      // juntas (faceRects inteiro) pra correr o veio pela altura TOTAL
+      // do painel, contínuo por trás dos frisos horizontais, com uma
+      // semente por SEGMENTO (col, row, side) pra painéis de paredes
+      // diferentes nunca sortearem o mesmo veio.
+      if (pattern.textureKind === "panel" && pattern.woodGrain) {
+        const segmentSeed = seg.col * 97 + seg.row * 31 + (seg.side === "colPlus" ? 0 : seg.side === "rowPlus" ? 1 : seg.side === "center" ? 2 : 3);
+        for (const shape of wallPanelGrainShapes(faceRects, segmentSeed, pattern.brickColor)) {
+          gfx.fillStyle(shape.fillColor, shape.opacity);
+          gfx.fillPoints(
+            shape.points.map((pt) => mapPoint(pt.u, pt.v)),
+            true
+          );
+        }
       }
     }
     // RODAPÉ -- pedido do Douglas, com foto de referência (rodapé
@@ -5775,9 +5926,23 @@ export default class MainScene extends Phaser.Scene {
         );
       }
     }
-    gfx.setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
-    this.applyWallAvatarCutoutMask(gfx); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
-    return gfx;
+    // Sem textura (caso de sempre) -- devolve só o Graphics, EXATAMENTE
+    // como sempre funcionou (nenhuma mudança de tipo/comportamento pra
+    // quem não usa WallPatternConfig.textureImageUrl).
+    if (faceImages.length === 0) {
+      gfx.setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
+      this.applyWallAvatarCutoutMask(gfx); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
+      return gfx;
+    }
+    // Com textura -- embrulha o MESMO gfx (topo/ponta/rodapé, desenhados
+    // acima sem mudar nada) junto com a(s) Image(ns) da face num
+    // Container só, pra continuar sendo UM objeto só (profundidade/
+    // máscara/destroy) do ponto de vista de quem chama (addWallSprite),
+    // igual sempre foi com Graphics puro.
+    const container = this.add.container(0, 0, [gfx, ...faceImages]);
+    container.setDepth(wallDepthForSegment(seg, furnitureDepthForTile));
+    this.applyWallAvatarCutoutMask(container); // "recorte" do boneco atrás -- ver comentário grande de draftWallSprites
+    return container;
   }
 
   /**

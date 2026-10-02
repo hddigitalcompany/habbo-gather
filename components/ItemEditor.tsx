@@ -3045,6 +3045,10 @@ type CustomWallRow = {
   // WallPatternConfig.woodGrain em game/wall.ts e
   // supabase/migrations/0051_room_wall_items_wood_grain.sql.
   wood_grain: boolean | null;
+  // textura de VERDADE (imagem) pra face da frente -- ver
+  // WallPatternConfig.textureImageUrl em game/wall.ts e
+  // supabase/migrations/0052_room_wall_items_texture_image.sql.
+  texture_image_url: string | null;
 };
 
 // comprimento (px) de UMA aresta da grade, usado só pro PREVIEW ao vivo
@@ -3120,6 +3124,21 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
   // viraram este toggle -- ver WallPatternConfig.woodGrain em
   // game/wall.ts). Só tem efeito/aparece na UI com "panel" selecionado.
   const [wallWoodGrain, setWallWoodGrain] = useState(false);
+  // textura de VERDADE (imagem) -- ver WallPatternConfig.textureImageUrl
+  // em game/wall.ts, pedido do Douglas depois de brigar com veio
+  // desenhado por código: "eu nao to desenhando nao, o chat que ta
+  // gerando mas ele e pessimo com angulo e tamanho... voce consegue
+  // colocar a textura visivel apenas na face da parede?". MESMO
+  // esquema tri-state de nearImageFile/nearImageCleared/existingNearImageUrl
+  // (AvatarCreatorPanel acima, "imagem de perto" do móvel): arquivo
+  // novo escolhido > removida explicitamente > a que já tava salva.
+  // Só aparece na UI com "panel" selecionado (ver JSX abaixo).
+  const [wallTextureFile, setWallTextureFile] = useState<File | null>(null);
+  const [wallTextureCleared, setWallTextureCleared] = useState(false);
+  const [wallTexturePreviewUrl, setWallTexturePreviewUrl] = useState<string | null>(null);
+  const [existingWallTextureUrl, setExistingWallTextureUrl] = useState<string | null>(null);
+  const wallTexturePreviewUrlRef = useRef<string | null>(null);
+  wallTexturePreviewUrlRef.current = wallTexturePreviewUrl;
   const [wallEditingId, setWallEditingId] = useState<string | null>(null);
   const [wallSubmitting, setWallSubmitting] = useState(false);
   const [wallBusyId, setWallBusyId] = useState<string | null>(null);
@@ -3135,6 +3154,29 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     return parseInt(css.replace("#", ""), 16) || 0;
   }
 
+  function handleWallTextureFileChange(file: File | undefined) {
+    setWallTextureFile(file ?? null);
+    setWallTextureCleared(false);
+    setWallTexturePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  function removeWallTexture() {
+    setWallTextureFile(null);
+    setWallTextureCleared(true);
+    setWallTexturePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
+  }
+
+  // mesmo esquema de stageNearImageSrc (AvatarCreatorPanel acima):
+  // prévia do arquivo novo > nada se removida explicitamente > a
+  // textura que já tava salva.
+  const stageWallTextureSrc = wallTexturePreviewUrl ?? (!wallTextureCleared ? existingWallTextureUrl : null);
+
   async function loadWallItems() {
     setWallError(null);
     const supabase = getSupabaseBrowserClient();
@@ -3142,7 +3184,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     const { data, error: fetchError } = await supabase
       .from("room_wall_items")
       .select(
-        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind, wood_grain"
+        "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind, wood_grain, texture_image_url"
       );
     if (fetchError) {
       setWallError(fetchError.message);
@@ -3164,6 +3206,13 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     setWallTopColor("#914025");
     setWallTextureKind("brick");
     setWallWoodGrain(false);
+    setWallTextureFile(null);
+    setWallTextureCleared(false);
+    setWallTexturePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
+    setExistingWallTextureUrl(null);
   }
 
   function startEditWallItem(item: CustomWallRow) {
@@ -3179,6 +3228,13 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
     setWallTopColor(item.top_color);
     setWallTextureKind(item.texture_kind === "panel" ? "panel" : "brick");
     setWallWoodGrain(item.wood_grain ?? false);
+    setExistingWallTextureUrl(item.texture_image_url ?? null);
+    setWallTextureFile(null);
+    setWallTextureCleared(false);
+    setWallTexturePreviewUrl((prevUrl) => {
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+      return null;
+    });
   }
 
   async function handleWallSubmit(e: React.FormEvent) {
@@ -3189,8 +3245,39 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
       return;
     }
     setWallSubmitting(true);
+    // mesma cautela de handleSubmit (mobi)/handleDoorSubmit acima: sobe
+    // pro Storage PRIMEIRO, só depois grava o cadastro -- desfaz upload
+    // órfão no catch se o cadastro final falhar. Parede sem textura
+    // nenhuma (brick, ou panel liso/com veio por código) nunca sobe
+    // nada -- uploadedPaths fica vazio, desfazer vira no-op.
+    const uploadedPaths: string[] = [];
     try {
-      const payload = {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) throw new Error("Supabase não configurado");
+
+      // textura de verdade (ver WallPatternConfig.textureImageUrl em
+      // game/wall.ts) -- mesmo esquema tri-state de "imagem de perto"
+      // do móvel (ver handleSubmit lá): arquivo novo > removida
+      // explicitamente (manda null) > não mexeu (não manda a chave,
+      // PATCH mantém a URL salva).
+      let textureImageUrl: string | null | undefined;
+      if (wallTextureFile) {
+        const slug = slugify(wallLabel);
+        const ext = wallTextureFile.name.split(".").pop() || "png";
+        const path = `parede-textura/${slug}-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("room-items").upload(path, wallTextureFile, {
+          upsert: false,
+          contentType: wallTextureFile.type || "image/png",
+        });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+        const { data: publicUrlData } = supabase.storage.from("room-items").getPublicUrl(path);
+        textureImageUrl = publicUrlData.publicUrl;
+      } else if (wallTextureCleared) {
+        textureImageUrl = null;
+      }
+
+      const payload: Record<string, unknown> = {
         label: wallLabel.trim(),
         height_px: wallHeight,
         thickness_px: wallThickness,
@@ -3203,6 +3290,8 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
         texture_kind: wallTextureKind,
         wood_grain: wallWoodGrain,
       };
+      if (textureImageUrl !== undefined) payload.texture_image_url = textureImageUrl;
+
       const res = await fetch(wallEditingId ? `/api/wall-items/${wallEditingId}` : "/api/wall-items", {
         method: wallEditingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
@@ -3215,6 +3304,10 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
       await loadWallItems();
       onChanged();
     } catch (err) {
+      if (uploadedPaths.length > 0) {
+        const supabase = getSupabaseBrowserClient();
+        if (supabase) await supabase.storage.from("room-items").remove(uploadedPaths).catch(() => null);
+      }
       setWallError(err instanceof Error ? err.message : "erro ao salvar parede");
     } finally {
       setWallSubmitting(false);
@@ -3241,6 +3334,12 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
   useEffect(() => {
     loadWallItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (wallTexturePreviewUrlRef.current) URL.revokeObjectURL(wallTexturePreviewUrlRef.current);
+    };
   }, []);
 
   return (
@@ -3380,6 +3479,35 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
           </label>
         )}
 
+        {/* Textura de verdade (imagem), só pra "Painéis" -- ver
+            WallPatternConfig.textureImageUrl em game/wall.ts. SEM
+            recorte/crop nenhum (diferente do ícone/imagem de perto do
+            móvel acima): a imagem é usada do jeito que é, repetida lado
+            a lado e de cima a baixo no tamanho NATIVO dela, então
+            ângulo/tamanho exatos nunca importam (motivo do pedido:
+            "ele e pessimo com angulo e tamanho"). Com uma textura
+            marcada, ela some com a cor/friso/veio desenhados acima na
+            FACE da parede -- a espessura/rodapé continuam do jeito que
+            estavam. */}
+        {wallTextureKind === "panel" && (
+          <label className="items-panel-upload-field">
+            <span>Textura de imagem (opcional, ladrilha automático na face)</span>
+            {stageWallTextureSrc && (
+              <img className="items-panel-upload-existing" src={stageWallTextureSrc} alt="Textura atual" />
+            )}
+            <input
+              type="file"
+              accept="image/png,image/webp,image/jpeg"
+              onChange={(e) => handleWallTextureFileChange(e.target.files?.[0])}
+            />
+          </label>
+        )}
+        {wallTextureKind === "panel" && stageWallTextureSrc && (
+          <button type="button" className="clear-btn" onClick={removeWallTexture}>
+            Remover textura (volta pra cor lisa/veio por código)
+          </button>
+        )}
+
         {/* preview ao vivo -- os MESMOS retângulos que
             createWallPatternGraphics desenha de verdade no jogo (ver
             wallFaceRects em game/wall.ts, que escolhe tijolo ou painel
@@ -3401,6 +3529,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
                 topColor: parseHexColor(wallTopColor),
                 textureKind: wallTextureKind,
                 woodGrain: wallWoodGrain,
+                textureImageUrl: stageWallTextureSrc ?? undefined,
               }}
               edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
             />
@@ -3445,6 +3574,7 @@ function WallPatternCreatorPanel({ accessToken, onChanged }: { accessToken: stri
                         topColor: parseHexColor(item.top_color),
                         textureKind: item.texture_kind === "panel" ? "panel" : "brick",
                         woodGrain: item.wood_grain ?? false,
+                        textureImageUrl: item.texture_image_url ?? undefined,
                       }}
                       edgeLengthPx={WALL_PREVIEW_EDGE_LENGTH_PX}
                     />

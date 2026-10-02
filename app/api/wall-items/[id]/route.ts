@@ -1,8 +1,11 @@
 // Edita/apaga um PADRÃO de parede de sistema customizado (Editor de
 // Itens, aba "Criar Parede") -- só o admin da plataforma. Mesmo esquema de
-// app/api/floor-items/[id]/route.ts, mais simples: sem Storage envolvido
-// (parede "padrão" não sobe imagem nenhuma), então o DELETE só apaga a
-// linha, sem tentar remover arquivo nenhum.
+// app/api/floor-items/[id]/route.ts. Storage só entra em jogo pro campo
+// opcional texture_image_url (ver WallPatternConfig.textureImageUrl em
+// game/wall.ts e supabase/migrations/0052_room_wall_items_texture_image.sql)
+// -- PATCH apaga (melhor esforço) o arquivo ANTIGO quando troca por uma
+// URL diferente, DELETE apaga o arquivo da linha inteira, mesmo esquema
+// de app/api/floor-items/[id]/route.ts.
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
@@ -10,6 +13,17 @@ import { getVerifiedUserId, isPlatformAdmin } from "@/lib/supabase/roomAuth";
 export const dynamic = "force-dynamic";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+/** Extrai o caminho DENTRO do bucket a partir da URL pública do Storage
+ * (.../object/public/<bucket>/<path>) -- null se não bater com o formato
+ * esperado. Mesma função de app/api/floor-items/[id]/route.ts (não
+ * compartilhada num helper à parte só por isso -- são só 5 linhas). */
+function storagePathFromPublicUrl(url: string, bucket: string): string | null {
+  const marker = `/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const callerId = await getVerifiedUserId(req);
@@ -24,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const { data: existing, error: fetchError } = await admin
     .from("room_wall_items")
-    .select("id")
+    .select("id, texture_image_url")
     .eq("id", params.id)
     .maybeSingle();
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -101,6 +115,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     update.wood_grain = body.wood_grain;
   }
 
+  // textura de verdade (imagem) -- ver WallPatternConfig.textureImageUrl
+  // em game/wall.ts. Checa presença da CHAVE, não truthiness (mesmo
+  // esquema de near_image_url em app/api/items/[id]/route.ts): null
+  // explícito = removeu a textura (botão "Remover textura" no
+  // formulário, ver handleWallSubmit em ItemEditor.tsx), ausente = não
+  // mexeu. String nova DIFERENTE da já gravada (re-upload) apaga
+  // (melhor esforço) o arquivo ANTIGO no Storage.
+  if ("texture_image_url" in body) {
+    const raw = body.texture_image_url;
+    const next = typeof raw === "string" && raw ? raw : null;
+    const existingUrl = ((existing as { texture_image_url?: string | null }).texture_image_url as string | null) ?? null;
+    if (existingUrl && existingUrl !== next) {
+      const oldPath = storagePathFromPublicUrl(existingUrl, "room-items");
+      if (oldPath) await admin.storage.from("room-items").remove([oldPath]).catch(() => null);
+    }
+    update.texture_image_url = next;
+  }
+
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "nada pra atualizar" }, { status: 400 });
   }
@@ -121,6 +153,12 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
   const admin = getSupabaseAdminClient();
   if (!admin) return NextResponse.json({ error: "Supabase não configurado" }, { status: 500 });
+
+  const { data: item } = await admin.from("room_wall_items").select("texture_image_url").eq("id", params.id).maybeSingle();
+  if (item?.texture_image_url) {
+    const path = storagePathFromPublicUrl(item.texture_image_url, "room-items");
+    if (path) await admin.storage.from("room-items").remove([path]).catch(() => null);
+  }
 
   const { error } = await admin.from("room_wall_items").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -93,7 +93,7 @@ import {
   SeatTuningInfo,
 } from "@/game/furniture";
 import { FLOOR_CATALOG, FloorCatalogEntry, FloorTileDef, floorTextureKey, registerCustomFloorModels } from "@/game/floor";
-import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, LedSegmentDef, WallTextureKind, registerCustomWallModels, wallEdgeLengthPx } from "@/game/wall";
+import { WALL_CATALOG, WallCatalogEntry, WallSegmentDef, LedSegmentDef, WallTextureKind, registerCustomWallModels, wallEdgeLengthPx, wallTextureImageKey } from "@/game/wall";
 import { ColorPickerField } from "@/components/ColorPickerField";
 import {
   DOOR_CATALOG,
@@ -1736,7 +1736,7 @@ export default function GameRoom({
       const { data, error } = await supabase
         .from("room_wall_items")
         .select(
-          "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind, wood_grain"
+          "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind, wood_grain, texture_image_url"
         );
       if (error || !data || data.length === 0) return;
       const entries: WallCatalogEntry[] = data.map(
@@ -1753,6 +1753,7 @@ export default function GameRoom({
           top_color: string;
           texture_kind: string;
           wood_grain: boolean | null;
+          texture_image_url: string | null;
         }) => ({
           id: row.id,
           label: row.label,
@@ -1779,9 +1780,40 @@ export default function GameRoom({
             // (linha antiga de antes dessa coluna existir) -> false,
             // mesmo default da coluna no banco.
             woodGrain: row.wood_grain ?? false,
+            // textura de verdade (imagem) -- ver
+            // WallPatternConfig.textureImageUrl em game/wall.ts.
+            // undefined (não "") quando ausente, pro `pattern.textureImageUrl
+            // ? ... : ...` em createWallPatternGraphics/WallPatternSwatch
+            // tratar "sem textura" do mesmo jeito sempre.
+            textureImageUrl: row.texture_image_url || undefined,
           },
         })
       );
+      // textura de verdade (ver WallPatternConfig.textureImageUrl em
+      // game/wall.ts, loadCustomWallTextures em MainScene.ts) -- UMA
+      // chave por URL (wallTextureImageKey), carregada ANTES de
+      // registerCustomWallModels/redesenhar: sem isso,
+      // createWallPatternGraphics rodaria com a textura ainda não
+      // carregada no primeiro desenho (mesma corrida que o esquema de
+      // móvel/avatar já resolve, ver fetchAndRegisterCustomFurniture
+      // acima -- mesmo padrão aqui, só pra parede).
+      const textureEntries: { key: string; url: string }[] = [];
+      for (const entry of entries) {
+        const url = entry.pattern?.textureImageUrl;
+        if (!url) continue;
+        const key = wallTextureImageKey(url);
+        // item editado (ver "Editar" no Editor de Itens) com uma
+        // textura NOVA mas a MESMA URL antiga não existe aqui (re-upload
+        // sempre gera um path novo, ver handleWallSubmit em
+        // ItemEditor.tsx) -- então, diferente de móvel, não precisa de
+        // removeWallTextures numa edição comum. Só entra em jogo se
+        // algum dia a URL for reaproveitada de propósito.
+        textureEntries.push({ key, url });
+      }
+      await new Promise<void>((resolve) => {
+        if (sceneRef.current) sceneRef.current.loadCustomWallTextures(textureEntries, resolve);
+        else resolve();
+      });
       const updatedIds = registerCustomWallModels(entries);
       setCustomWallVersion((v) => v + 1);
       // recria na hora o desenho de todo segmento JÁ PINTADO que usa um

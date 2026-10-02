@@ -206,6 +206,29 @@ export interface WallPatternConfig {
    * do piso). Ignorado pra textura "brick" (tijolo nunca teve veio,
    * não foi pedido). */
   woodGrain?: boolean;
+  /** URL pública (Supabase Storage, bucket "room-items") de uma
+   * TEXTURA de verdade (foto/render) pra usar na face da frente, no
+   * lugar do preenchimento liso/com veio por código acima -- pedido do
+   * Douglas depois de brigar com veio desenhado por código: "eu nao to
+   * desenhando nao, o chat que ta gerando mas ele e pessimo com angulo
+   * e tamanho... eu queria ela de textura direto na parede que ja
+   * tem... voce consegue colocar a textura visivel apenas na face da
+   * parede?" -- ou seja, continuar com O MESMO motor de parede (sem
+   * reimplementar como sprite solto, ver WallCatalogEntry.file pro
+   * outro caminho que isso NÃO é), só trocando como a FACE DA FRENTE é
+   * pintada: em vez de fillStyle(brickColor)/riscos de veio, ladrilha
+   * essa imagem repetindo sozinha (tamanho NATIVO da imagem = 1
+   * ladrilho, sem esticar/cobrir) -- resolve o problema de "a IA não
+   * acerta ângulo nem tamanho" de vez: a imagem nunca precisa bater
+   * nem com a altura da parede nem com o ângulo isométrico, só repete
+   * por cima da forma que o motor já desenha (ver
+   * buildWallTextureFaceImage em MainScene.ts). Quando presente,
+   * IGNORA brickColor/mortarColor/woodGrain por completo na face da
+   * frente (a imagem já traz grão/emenda/tom prontos) -- as outras
+   * faces (topo, ponta, rodapé-quando-tijolo) continuam exatamente
+   * como sempre, lidas de pattern normalmente. Opcional -- liso/com
+   * veio por código continua sendo o default (undefined/""). */
+  textureImageUrl?: string;
 }
 
 /**
@@ -634,6 +657,18 @@ export function registerCustomWallModels(entries: WallCatalogEntry[]): string[] 
 /** Chave da textura no Phaser pra um modelo de parede. */
 export function wallTextureKey(styleId: string): string {
   return `wall-${styleId}`;
+}
+
+/** Chave da textura no Phaser pra uma imagem de WallPatternConfig.textureImageUrl
+ * (ver comentário grande lá) -- namespace PRÓPRIO ("wall-tex-img:"),
+ * nunca colide com wallTextureKey acima (que é por styleId de
+ * CATÁLOGO, não por URL) mesmo que algum dia os 2 coexistam no mesmo
+ * segmento. Usada tanto por quem PEDE o carregamento (fetchAndRegisterCustomWall,
+ * GameRoom.tsx) quanto por quem DESENHA depois de carregado
+ * (createWallPatternGraphics, MainScene.ts) -- mesma garantia de
+ * sempre, uma função só decide o formato da chave. */
+export function wallTextureImageKey(url: string): string {
+  return `wall-tex-img:${url}`;
 }
 
 /** Um segmento de parede pintado numa aresta da grade. */

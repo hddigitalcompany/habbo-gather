@@ -59,6 +59,15 @@ export async function POST(req: NextRequest) {
   // route.ts) -- só booleano, sem validação extra, ausente -> default
   // da coluna (false).
   const woodGrain = typeof body?.wood_grain === "boolean" ? body.wood_grain : undefined;
+  // textura de verdade (imagem) pra face da frente -- ver
+  // WallPatternConfig.textureImageUrl em game/wall.ts e
+  // supabase/migrations/0052_room_wall_items_texture_image.sql. Já
+  // sobe pro Storage ANTES dessa chamada (mesmo padrão de porta/mobi,
+  // ver handleWallSubmit em ItemEditor.tsx) -- aqui só grava a URL.
+  // String vazia ("") é um pedido EXPLÍCITO de limpar o campo (botão
+  // "Remover textura" no formulário) -- diferente de undefined (campo
+  // não mandado, mantém o que já tava gravado).
+  const textureImageUrl = typeof body?.texture_image_url === "string" ? body.texture_image_url : undefined;
 
   if (!Number.isFinite(heightPx) || heightPx < 20 || heightPx > 400) {
     return NextResponse.json({ error: "altura da parede precisa ser entre 20 e 400" }, { status: 400 });
@@ -93,6 +102,7 @@ export async function POST(req: NextRequest) {
     created_by: callerId,
   };
   if (woodGrain !== undefined) insert.wood_grain = woodGrain;
+  if (textureImageUrl !== undefined) insert.texture_image_url = textureImageUrl || null;
 
   const admin = getSupabaseAdminClient();
   if (!admin) return NextResponse.json({ error: "Supabase não configurado" }, { status: 500 });
