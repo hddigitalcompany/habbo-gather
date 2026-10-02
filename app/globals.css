@@ -572,6 +572,27 @@ body {
   width: 412px;
 }
 
+/* 2/out, pedido do Douglas: "nas conversas de ambiente, e sala eu
+   quero a opcao de expandir que ja abra grande, e a pessoa diminua"
+   -- mais um estado do MESMO card de sempre (ver chat-drawer-solo
+   logo acima, não é um tamanho fixo novo por caso, só maior quando
+   esse estado liga, ver drawerExpanded em ChatDrawer.tsx). Vem DEPOIS
+   de chat-drawer-solo (mesma especificidade de 2 classes) pra ganhar
+   dela quando as duas coexistem -- toda conversa aberta sem aba de
+   empresas já é "solo", expandida fica maior ainda em cima disso.
+   top/bottom só valem no flutuante (chat-drawer-sidebar troca pra
+   position:static+margin-top, ver regra dele logo abaixo -- lá a
+   altura já é a tela inteira disponível, não precisa abrir mais). */
+.chat-drawer.chat-drawer-expanded {
+  width: min(820px, calc(100vw - 32px));
+  top: 40px;
+  bottom: 40px;
+}
+
+.chat-drawer-sidebar.chat-drawer-expanded {
+  width: min(680px, 100%);
+}
+
 .chat-drawer-sidebar {
   position: static;
   flex-shrink: 0;
@@ -644,6 +665,16 @@ body {
   align-items: stretch;
   gap: 0;
   max-width: calc(100vw - 32px);
+}
+
+/* mesmo "abre grande" do .chat-drawer-expanded sozinho (ver comentário
+   grande ali), só que pro par coluna de empresas + gaveta -- a largura
+   já cresce sozinha (a gaveta DENTRO do shell também ganha
+   .chat-drawer-expanded, ver JSX em ChatDrawer.tsx), só a altura
+   precisa de regra própria aqui. */
+.chat-drawer-shell.chat-drawer-shell-expanded {
+  top: 40px;
+  bottom: 40px;
 }
 
 /* mesma troca de "flutuante" pra "barra lateral fixa" que

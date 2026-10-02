@@ -386,6 +386,7 @@ export function ChatDrawer({
     !isRoom && activeConversationId ? callParticipantsByConversation[activeConversationId] ?? [] : [];
   const inActiveCall = !isRoom && myCallConversationId === activeConversationId;
   const localCallStream = localStreamRef.current;
+  const [drawerExpanded, setDrawerExpanded] = useState(false);
   // clicar de novo no lateral solta (volta a flutuar).
   const pinBtn = (
     <button
@@ -394,6 +395,28 @@ export function ChatDrawer({
       onClick={onToggleSidePin}
     >
       <PinIcon filled={pinMode === "side"} />
+    </button>
+  );
+
+  // 2/out, pedido do Douglas: "nas conversas de ambiente, e sala eu
+  // quero a opcao de expandir que ja abra grande, e a pessoa diminua"
+  // -- igual o pinBtn acima, um botão SÓ aqui no componente único do
+  // chat (ver comentário grande no topo do arquivo), então cobre as
+  // DUAS coisas que ele pediu de uma vez (Sala e conversa normal são a
+  // MESMA gaveta). Clicar já pula direto pro tamanho grande (não cresce
+  // aos poucos); clicar nele de novo (agora "Reduzir") volta ao
+  // tamanho normal -- local/efêmero, mesmo espírito de callExpanded
+  // (não precisa lembrar entre sessões). Mesmo ExpandIcon que a
+  // chamada de vídeo já usa (ver comentário dele lá em cima), só outro
+  // botão/estado -- ícone igual, significado igual (setas pra fora =
+  // expandir), não é duplicar lógica, é reusar o mesmo símbolo visual.
+  const expandBtn = (
+    <button
+      className={drawerExpanded ? "chat-icon-btn active" : "chat-icon-btn"}
+      title={drawerExpanded ? "Reduzir" : "Expandir"}
+      onClick={() => setDrawerExpanded((v) => !v)}
+    >
+      <ExpandIcon expanded={drawerExpanded} />
     </button>
   );
 
@@ -677,7 +700,8 @@ export function ChatDrawer({
          tamanho FIXO (não quero coisas expansivas/encolhendo). */
       className={
         (pinMode === "side" ? "chat-drawer chat-drawer-sidebar" : "chat-drawer") +
-        (companyRail ? "" : " chat-drawer-solo")
+        (companyRail ? "" : " chat-drawer-solo") +
+        (drawerExpanded ? " chat-drawer-expanded" : "")
       }
     >
       {view === "list" && (
@@ -686,6 +710,7 @@ export function ChatDrawer({
             <h3>Chat</h3>
             <div className="chat-drawer-header-actions">
               {pinBtn}
+              {expandBtn}
               <button className="chat-icon-btn" title="Nova conversa" onClick={() => onChangeView("new")}>
                 <PlusIcon />
               </button>
@@ -870,6 +895,7 @@ export function ChatDrawer({
             <h3>Nova conversa</h3>
             <div className="chat-drawer-header-actions">
               {pinBtn}
+              {expandBtn}
               <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
                 <CloseIcon />
               </button>
@@ -1107,6 +1133,7 @@ export function ChatDrawer({
             )}
             <div className="chat-drawer-header-actions">
               {pinBtn}
+              {expandBtn}
               {!isRoom && activeConversationId && (
                 <button
                   className={inActiveCall ? "chat-icon-btn call-active" : "chat-icon-btn"}
@@ -1682,7 +1709,12 @@ export function ChatDrawer({
 
   return (
     <>
-      <div className={pinMode === "side" ? `chat-drawer-shell ${sidebarClassName ?? "chat-drawer-shell-sidebar"}` : "chat-drawer-shell"}>
+      <div
+        className={
+          (pinMode === "side" ? `chat-drawer-shell ${sidebarClassName ?? "chat-drawer-shell-sidebar"}` : "chat-drawer-shell") +
+          (drawerExpanded ? " chat-drawer-shell-expanded" : "")
+        }
+      >
         {companyRail}
         {drawerBody}
       </div>
