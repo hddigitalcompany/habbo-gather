@@ -7753,7 +7753,11 @@ button.chat-picker-item:disabled {
    nenhum quadrado nela. O balão branco é o BOTÃO mesmo que tem que
    desenhar -- fundo branco sólido, cantos arredondados, com um
    respiro (padding) pro X não encostar na borda, exatamente como o
-   Douglas descreveu desde o início. */
+   Douglas descreveu desde o início. Essa caixa (48x48, respiro de
+   16px da borda) é o que o chat usa pra calcular seu próprio respiro
+   (top:80px = 16+48+16, ver .chat-drawer/.chat-drawer-shell-sidebar) --
+   NÃO mudou (1/out, ver comentário de .room-logo-home-mark abaixo),
+   só o X *dentro* dela. */
 .room-logo-home-btn {
   position: fixed;
   top: 16px;
@@ -7781,11 +7785,29 @@ button.chat-picker-item:disabled {
   transform: scale(0.94);
 }
 
+/* 1/out, Douglas comparando print do Lobby com o de dentro: "quero o
+   botao X de dentro do mesmo tamanho do X de fora" -- conferido com
+   PIL de verdade: logo-x-badge.png (usada aqui antes) e
+   logo-x-dark.png (usada no .lobby-topbar-logo-mark) são o MESMO
+   desenho de X, mesma cor, mesma caixa de pixel ocupada (190x123) --
+   só que logo-x-badge.png tem uma folga bem maior desenhada DENTRO do
+   PNG quadrado (pra ele virar um quadrado perfeito), então o MESMO
+   "30px de altura" acabava renderizando o X uns 15px de altura aqui
+   (a folga do PNG "comia" metade da caixa) contra uns 26px no Lobby.
+   Trocado pra usar logo-x-dark.png (ver <img> em GameRoom.tsx) + a
+   MESMA regra literal do .lobby-topbar-logo-mark (height:30px,
+   width:auto, em vez de esticar 100%/100% da caixa) -- agora é o
+   MESMO arquivo, a MESMA regra, o X sai do mesmo tamanho dos dois
+   lados. Continua centralizado pelo próprio flex do botão (align-
+   items/justify-content:center acima); a imagem fica mais larga que
+   os 30px "oficiais" da área útil (9px de padding de cada lado), mas
+   sem recorte nenhum (sem overflow:hidden no botão), só usa uma
+   fatia um pouco maior do respiro lateral -- mesmo trade-off que o
+   próprio logo-x-dark.png já tem no Lobby (mais largo que alto). */
 .room-logo-home-mark {
-  width: 100%;
-  height: 100%;
+  height: 30px;
+  width: auto;
   display: block;
-  object-fit: contain;
 }
 
 /* Tela de carregamento antes de cair na sala -- pedido do Douglas

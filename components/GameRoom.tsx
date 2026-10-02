@@ -5085,7 +5085,7 @@ export default function GameRoom({
       {onBackToLobby && (
         <button type="button" className="room-logo-home-btn" onClick={onBackToLobby} title="Voltar pro Lobby">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-x-badge.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
+          <img src="/logo-x-dark.png" alt="Voltar pro Lobby" className="room-logo-home-mark" />
         </button>
       )}
       {/* pedido do Douglas, 30/set: "esse card, mantenha ele em toda
