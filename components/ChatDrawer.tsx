@@ -2079,7 +2079,32 @@ function ChatMessageRow({
                 )}
               </span>
               {!own && (
-                <a className="chat-room-card-btn" href={visitRoomLink(msg.roomCard.roomSlug)}>
+                <a
+                  className="chat-room-card-btn"
+                  href={visitRoomLink(msg.roomCard.roomSlug)}
+                  onClick={((roomSlug) => (e: React.MouseEvent<HTMLAnchorElement>) => {
+                    // 2/out, bug achado (Douglas: "enviei convite pelo
+                    // chat e o convite abre o lobby mas nao deixa
+                    // entrar, somente pelo chat, se eu colo o link no
+                    // navegador vai") -- Lobby.tsx lê ?visitar=/?convite=
+                    // da URL num efeito que roda SÓ UMA VEZ ao montar,
+                    // de propósito (ver comentário grande de visitSlug
+                    // lá, pra não precisar de Suspense boundary). O chat
+                    // é um overlay que continua montado por cima do
+                    // Lobby -- se esse link navegar "mole" (sem recarregar
+                    // a página inteira), a URL muda mas aquele efeito
+                    // nunca roda de novo: parece que "abriu" (a pessoa já
+                    // tava bem ali) mas não entra em lugar nenhum. Força
+                    // o MESMO recarregamento de página cheia que colar o
+                    // link manualmente na barra do navegador sempre fez
+                    // (preventDefault só no botão esquerdo sem modificador
+                    // -- Ctrl/Cmd+clique, clique do meio etc. continuam
+                    // abrindo em nova aba normalmente, via href de sempre).
+                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    window.location.href = visitRoomLink(roomSlug);
+                  })(msg.roomCard.roomSlug)}
+                >
                   Entrar
                 </a>
               )}
