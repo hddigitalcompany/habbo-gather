@@ -1152,6 +1152,7 @@ body {
 }
 
 .chat-lane-tab {
+  position: relative;
   flex: 1;
   border: none;
   background: rgba(255, 255, 255, 0.08);
@@ -1161,6 +1162,34 @@ body {
   font-weight: 700;
   cursor: pointer;
   color: #f5f0ff;
+}
+
+/* 2/out, pedido do Douglas: "quero aqueel balaozinho, com numero
+   encima das tag" -- mesmo .lobby-icon-badge de sempre (herda
+   position/cor/forma dele), só reposicionado um pouco mais pra dentro
+   (o botão da aba é bem mais estreito que o ícone de chat fechado, o
+   balão original ficava quase todo pra fora). */
+.lobby-icon-badge.chat-lane-tab-badge {
+  top: -6px;
+  right: -4px;
+}
+
+/* badge de não-lida POR CONVERSA na lista (ver chat-conv-item) --
+   mesma cor/forma do .lobby-icon-badge, mas como item de fluxo normal
+   da linha (a linha já tem vários outros elementos flex ao lado,
+   position:absolute não faz sentido aqui). */
+.chat-conv-unread-badge {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ff4545;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
 }
 
 .chat-lane-tab-active {

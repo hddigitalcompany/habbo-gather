@@ -441,6 +441,22 @@ export function ChatDrawer({
   // perto, sem exigir amizade nenhuma.
   const [laneFilter, setLaneFilter] = useState<"company" | "private">("company");
   const laneConversations = conversations.filter((c) => c.lane === laneFilter);
+  // 2/out, pedido do Douglas: "recebi uma mensage, e nao tem pontuacao
+  // mostrando quantas msg nao lida se é em empresa ou privada, e em
+  // qual conversa / quero aqueel balaozinho, com numero encima das
+  // tag" -- unreadCount por conversa já existe (ver
+  // totalUnreadMessages em usePlatformChat.ts, usado no selo do ÍCONE
+  // de chat fechado); faltava separar por aba aqui DENTRO da gaveta
+  // aberta. Mesmo "balãozinho" de sempre (.lobby-icon-badge), só que
+  // em cima de cada aba em vez de em cima do ícone.
+  const companyUnread = useMemo(
+    () => conversations.reduce((sum, c) => (c.lane === "company" ? sum + (c.unreadCount ?? 0) : sum), 0),
+    [conversations]
+  );
+  const privateUnread = useMemo(
+    () => conversations.reduce((sum, c) => (c.lane === "private" ? sum + (c.unreadCount ?? 0) : sum), 0),
+    [conversations]
+  );
 
   // 29/set (15), pedido do Douglas -- correção do que eu tinha
   // entendido errado antes (selo pequeno em cada linha da lista, ver
@@ -677,6 +693,7 @@ export function ChatDrawer({
               onClick={() => setLaneFilter("company")}
             >
               Empresa
+              {companyUnread > 0 && <span className="lobby-icon-badge chat-lane-tab-badge">{companyUnread}</span>}
             </button>
             <button
               type="button"
@@ -684,6 +701,7 @@ export function ChatDrawer({
               onClick={() => setLaneFilter("private")}
             >
               Conversas privadas
+              {privateUnread > 0 && <span className="lobby-icon-badge chat-lane-tab-badge">{privateUnread}</span>}
             </button>
           </div>
           <div className="chat-conv-list">
@@ -738,6 +756,12 @@ export function ChatDrawer({
                         : "Nenhuma mensagem ainda"}
                     </span>
                   </span>
+                  {/* "e em qual conversa" (Douglas, 2/out) -- mesmo
+                      balãozinho das abas (ver companyUnread/
+                      privateUnread lá em cima), agora por CONVERSA, pra
+                      saber exatamente onde tá a mensagem não lida sem
+                      precisar abrir uma por uma. */}
+                  {(c.unreadCount ?? 0) > 0 && <span className="chat-conv-unread-badge">{c.unreadCount}</span>}
                   {activeCall.length > 0 && (
                     <span
                       className="chat-call-badge"
