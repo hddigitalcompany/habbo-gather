@@ -5784,6 +5784,7 @@ export default function GameRoom({
             accountAccessToken={accountAccessToken}
             onStartConversation={(targetUserId) => startConversationFromContacts(targetUserId)}
             onClose={() => setContactsOpen(false)}
+            friendsChangedAt={chat.friendsChangedAt}
           />
         )}
         {settingsOpen && (

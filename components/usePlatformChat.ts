@@ -309,6 +309,19 @@ export function usePlatformChat(params: PlatformChatParams) {
     { userId: string; name: string; photoUrl: string }[] | null
   >(null);
 
+  // 2/out, pedido do Douglas ("liga um no outro") -- bate de +1 toda
+  // vez que o servidor avisa "friends:changed" (ver handler do "case
+  // 'friends:changed'" mais abaixo e handlePostFriendsChanged/
+  // server/index.js, chamado por app/api/friends/toggle/route.ts
+  // depois de QUALQUER follow/unfollow envolvendo você, seu ou do
+  // outro lado). Só um CONTADOR (nunca guarda o que mudou) -- quem
+  // precisa reagir (esse hook pro newConvFriends abaixo, e
+  // FriendsPanel.tsx de fora, que recebe isso como prop) só usa pra
+  // saber "mudou alguma coisa, busca de novo", mesmo espírito de
+  // `tab`/`chatView` já disparando refetch que reloadFriends/
+  // newConvFriends já tinham.
+  const [friendsChangedAt, setFriendsChangedAt] = useState(0);
+
   useEffect(() => {
     if (chatView === "new") {
       setNewConvMode("direct");
@@ -349,7 +362,7 @@ export function usePlatformChat(params: PlatformChatParams) {
   useEffect(() => {
     if (chatView !== "new" || newConvFilter !== "friends" || !accountAccessToken) return;
     let cancelled = false;
-    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` } })
+    fetch("/api/friends/list", { headers: { Authorization: `Bearer ${accountAccessToken}` }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setNewConvFriends(Array.isArray(data?.friends) ? data.friends : []);
@@ -360,7 +373,12 @@ export function usePlatformChat(params: PlatformChatParams) {
     return () => {
       cancelled = true;
     };
-  }, [chatView, newConvFilter, accountAccessToken]);
+    // friendsChangedAt (ver comentário grande dela acima) entra como
+    // dependência só pra ISSO refazer a busca sozinho quando alguém
+    // seguiu/deixou de seguir -- sem precisar sair e voltar na aba
+    // "Amigos" de novo (gatilho antigo, que continua funcionando
+    // também, ver chatView/newConvFilter acima).
+  }, [chatView, newConvFilter, accountAccessToken, friendsChangedAt]);
 
   function changeNewConvMode(mode: "direct" | "group") {
     setNewConvMode(mode);
@@ -1295,6 +1313,18 @@ export function usePlatformChat(params: PlatformChatParams) {
           }
           break;
         }
+        // 2/out, pedido do Douglas ("liga um no outro") -- servidor
+        // avisa isso pros dois userIds envolvidos sempre que ALGUÉM
+        // segue/deixa de seguir (ver handlePostFriendsChanged/
+        // server/index.js, chamado por app/api/friends/toggle/route.ts).
+        // Só um sinal (nunca vem com dado nenhum) -- quem precisa reagir
+        // já sabe buscar a lista certa de novo sozinho (ver
+        // friendsChangedAt acima, e o mesmo contador exposto como prop
+        // pra FriendsPanel.tsx reagir também).
+        case "friends:changed": {
+          setFriendsChangedAt(Date.now());
+          break;
+        }
         default:
           break;
       }
@@ -1623,6 +1653,12 @@ export function usePlatformChat(params: PlatformChatParams) {
     setNewConvQuery,
     newConvSearchResults,
     newConvFriends,
+    // 2/out, pedido do Douglas ("liga um no outro") -- FriendsPanel.tsx
+    // (fora desse hook) usa isso como prop, numa dependência do próprio
+    // useEffect de busca dela, pra também atualizar sozinha quando
+    // alguém segue/deixa de seguir em tempo real (ver comentário grande
+    // de friendsChangedAt lá em cima).
+    friendsChangedAt,
     startDirectWith,
     // grupo
     renamingGroup,

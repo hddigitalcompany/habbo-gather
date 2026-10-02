@@ -315,6 +315,13 @@ const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const PORT = process.env.PORT || 1999;
+// pra POST /internal/friends-changed (ver handlePostFriendsChanged
+// logo abaixo) -- MESMA chave que roomAuth.js/chatStore.js já leem
+// pra falar com o Supabase como admin, reaproveitada aqui como segredo
+// compartilhado server-a-servidor (em vez de inventar uma variável de
+// ambiente nova que precisaria ser configurada nos dois lados à
+// parte).
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const COLORS = [
   "#ff5c7a",
@@ -1575,6 +1582,50 @@ async function handleGetPresence(req, res, url) {
   res.end(JSON.stringify(payload));
 }
 
+/** POST /internal/friends-changed {userIds: string[]} -- pedido do
+ * Douglas, 2/out ("liga um no outro", depois de reclamar "demora
+ * demais pra aparecer o seguidor e subir contato pra puxar na
+ * conversa"). app/api/friends/toggle/route.ts roda na Vercel
+ * (serverless) -- nunca viu esse processo nem connectionsByUserId,
+ * então gravar um follow/unfollow no Supabase não tinha como avisar
+ * ninguém em tempo real, só na próxima vez que a pessoa trocasse de
+ * aba (ver reloadFriends/FriendsPanel.tsx e newConvFriends/
+ * usePlatformChat.ts, que buscavam /api/friends/list de novo só
+ * nesses gatilhos). Essa rota é chamada de LÁ (nunca do navegador)
+ * logo depois do toggle gravar, com os dois userIds envolvidos (quem
+ * seguiu/deixou de seguir, e quem foi seguido) -- manda
+ * "friends:changed" pra cada um que estiver com conexão viva aqui
+ * (ver sendToUser), e os dois lados (reloadFriends/newConvFriends)
+ * escutam esse tipo e buscam a lista de novo sozinhos, sem precisar
+ * de nenhuma ação manual.
+ *
+ * Autenticação: não é usuário nenhum chamando isso, é outro servidor
+ * de dentro da própria infra -- confere o MESMO SUPABASE_SERVICE_ROLE_KEY
+ * que Vercel e esse processo já têm configurado cada um pro seu lado
+ * (pra falar com o Supabase como admin, ver `admin` em roomAuth.js/
+ * chatStore.js) em vez de inventar um segredo novo que alguém
+ * precisaria configurar nos dois lugares à parte.
+ */
+async function handlePostFriendsChanged(req, res) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!SUPABASE_SERVICE_ROLE_KEY || token !== SUPABASE_SERVICE_ROLE_KEY) {
+    res.writeHead(401, corsHeaders());
+    res.end("não autorizado");
+    return;
+  }
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const userIds = Array.isArray(body.userIds)
+    ? body.userIds.filter((x) => typeof x === "string" && x).slice(0, 10)
+    : [];
+  for (const userId of userIds) {
+    sendToUser(userId, { type: "friends:changed" });
+  }
+  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true }));
+}
+
 /** Lê e faz JSON.parse do corpo de um POST pequeno (chat/agenda daqui
  * pra baixo -- texto curto, nunca upload de arquivo, ver MAX_LOBBY_BODY_BYTES),
  * mesmo padrão chunk-a-chunk de handlePostFloor/handlePostWalls/etc (só
@@ -2617,6 +2668,11 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/room/presence") {
     handleGetPresence(req, res, url);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/internal/friends-changed") {
+    handlePostFriendsChanged(req, res);
     return;
   }
 

@@ -50,10 +50,20 @@ export default function FriendsPanel({
   accountAccessToken,
   onStartConversation,
   onClose,
+  friendsChangedAt,
 }: {
   accountAccessToken?: string | null;
   onStartConversation: (targetUserId: string, targetName: string) => void;
   onClose: () => void;
+  // 2/out, pedido do Douglas ("liga um no outro", depois de "demora
+  // demais pra aparecer o seguidor") -- contador de chat.friendsChangedAt
+  // (ver comentário grande dele em usePlatformChat.ts), só pra entrar
+  // como dependência do efeito de busca abaixo: bate toda vez que o
+  // servidor avisa "friends:changed" (alguém seguiu/deixou de seguir,
+  // envolvendo você ou não), refazendo a busca sozinho, sem precisar
+  // trocar de aba pra forçar. Opcional/undefined não quebra nada (só
+  // não ganha esse gatilho extra, mesmo comportamento de antes).
+  friendsChangedAt?: number;
 }) {
   const [tab, setTab] = useState<"friends" | "search">("friends");
   const [friends, setFriends] = useState<FriendUser[] | null>(null);
@@ -111,7 +121,10 @@ export default function FriendsPanel({
     return () => {
       cancelled = true;
     };
-  }, [accountAccessToken, tab]);
+    // friendsChangedAt (ver comentário grande dela no tipo das props
+    // acima) -- mesmo espírito de `tab` já disparando refetch, só que
+    // automático (sem precisar sair/voltar na aba).
+  }, [accountAccessToken, tab, friendsChangedAt]);
 
   // busca com debounce -- só roda na aba "Buscar pessoas" (sem gastar
   // chamada nenhuma enquanto a pessoa só olha os amigos).

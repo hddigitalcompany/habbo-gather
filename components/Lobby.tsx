@@ -3830,6 +3830,7 @@ export default function Lobby({
           accountAccessToken={accountAccessToken}
           onStartConversation={(targetUserId) => handleStartConversation(targetUserId)}
           onClose={() => setContactsOpen(false)}
+          friendsChangedAt={chat.friendsChangedAt}
         />
       )}
       {/* clique numa foto de founder no card da empresa (ver
