@@ -717,7 +717,12 @@ body {
      de copiar o da sala). Mecanismo por baixo continua diferente
      (position:fixed aqui vs. position:static+stretch na sala, ver
      comentário grande acima), só o RESULTADO visual (onde a borda
-     de cima/baixo cai na tela) precisa ser idêntico. */
+     de cima/baixo cai na tela) precisa ser idêntico. 1/out (de novo):
+     tentei mudar pra 116px depois do Douglas reportar a sobreposição
+     com o .lobby-topbar -- ele rejeitou ("mas nao muda o chat, alinha
+     as logos" / "nao quero chats distintos"): o número FICA 80px,
+     idêntico à Sala pra sempre; quem precisa se ajustar é o
+     .lobby-topbar (ver comentário dele), não o chat. */
   top: 80px;
   bottom: 0;
   left: 0;
@@ -763,18 +768,21 @@ body {
    achando que era essa a classe de verdade. */
 
 /* botão/painel de arquivos -- mesmo motivo de .chat-files-trigger-sidebar/
-   .chat-files-panel-sidebar (ver comentário grande deles acima), mas
-   com os NÚMEROS do .lobby-chat-drawer-shell-sidebar (top:116/
-   bottom:16) em vez dos da sala (top:80/bottom:0) -- reaproveitar as
-   classes da sala aqui desalinharia o botão/painel verticalmente,
-   porque foram calibradas pra outra altura de container. */
+   .chat-files-panel-sidebar (ver comentário grande deles acima). 1/out:
+   esse comentário citava top:116/bottom:16 pro .lobby-chat-drawer-shell-sidebar
+   -- esse valor foi tentado e rejeitado pelo Douglas (ver comentário
+   grande da classe), que FICOU em top:80/bottom:0, idêntico à sala;
+   então se/quando esse botão/painel for implementado, usa os MESMOS
+   números de lá (top:80/bottom:0), não um valor próprio recalculado. */
 
 
 /* empurra pro lado os poucos elementos do Lobby que também vivem
    encostados na borda ESQUERDA (mesmo lado do chat fixo) -- sem isso
    o chat fixo (412px de largura no máximo, rail+gaveta) cobriria por
    cima. .lobby-topbar não precisa entrar aqui: ela fica inteira
-   acima do top:116px do chat fixo, nunca se cruzam. Valor único
+   acima do top:80px do chat fixo (1/out: esse comentário dizia 116px,
+   valor tentado e rejeitado -- ver .lobby-chat-drawer-shell-sidebar),
+   nunca se cruzam. Valor único
    (428px = 412px do chat mais largo possível + 16px de respiro)
    cobre o caso com coluna de empresas; sem ela sobra um respiro
    extra à toa, inofensivo. */
@@ -5191,7 +5199,7 @@ button.chat-picker-item:disabled {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  padding: 128px 16px 16px;
+  padding: 92px 16px 16px;
 }
 
 /* barra de topo do Lobby -- pedido do Douglas (28/set, print de
@@ -5220,7 +5228,33 @@ button.chat-picker-item:disabled {
   left: 16px;
   right: 16px;
   z-index: 10;
-  height: 84px;
+  /* 1/out: era height:84px -- com top:16px, a barra terminava em
+     100px (16+84), 20px além do top:80px que o chat (e o
+     company-card-pin) sempre usaram -- o Douglas viu essa sobra
+     cobrindo o topo do chat/card da empresa numa screenshot e
+     perguntou se o X da logo tava diferente dentro/fora da sala.
+     Depois de ajustar só o tamanho do glyph (ver .room-logo-home-btn)
+     a sobreposição continuou (o problema nunca foi o desenho do X, e
+     sim a altura da barra inteira) -- daí a sugestão de dar um
+     top:116px só pro chat do Lobby, que ele rejeitou de cara: "mas
+     nao muda o chat, alinha as logos" e reforçou "nao quero chats
+     distintos." -- ou seja: o chat FICA com o mesmo top:80px pra
+     sempre, idêntico ao da Sala, e quem se ajusta é essa barra.
+     Resolvido baixando a altura pra 48px -- o MESMO tamanho exato do
+     .room-logo-home-btn da Sala -- fazendo o Lobby usar a cópia
+     IDÊNTICA da fórmula que a Sala já usava: 16px de cima + 48px de
+     altura + 16px de respiro = 80px, batendo o top:80px do chat sem
+     nenhum número novo ou exceção. Logo (30px) e avatar da conta
+     (30px) sobram espaço de sobra num row de 48px (9px de respiro
+     em cima/embaixo, o mesmo padding do botão da Sala); as abas
+     também cabem folgadas (13px de fonte + 8px de padding vertical).
+     Em cascata, tudo que copiava "topbar acaba em 100px, +28px de
+     respiro = 128px" (.lobby-backdrop padding-top,
+     .lobby-company-card-pin/.company-edit-panel top) virou "acaba em
+     64px (16+48), +28px = 92px" -- ver cada um. O que NÃO mexe aqui:
+     .lobby-agenda-home/.lobby-home-welcome/.lobby-company-card-pin
+     bottom -- esses são amarrados na av-bar debaixo, não na topbar. */
+  height: 48px;
   display: grid;
   /* MESMA ideia de "1fr auto 1fr" de antes (coluna vazia à direita
      balanceando a largura do grupo logo+bolinhas à esquerda) pra
@@ -5624,15 +5658,17 @@ button.chat-picker-item:disabled {
    mic/câmera/etc). Agora o wrapper tem `top` E `bottom`, esticando o
    card pra baixo até uma distância da .av-bar igual à distância que
    já tinha da .lobby-topbar em cima:
-   - topo: .lobby-topbar acaba em top:16px + height:84px = 100px: o
-     wrapper começa em top:128px, folga de 28px.
+   - topo: .lobby-topbar acaba em top:16px + height:48px = 64px (1/out:
+     era height:84px/100px -- ver comentário grande em .lobby-topbar
+     sobre o pedido "alinha as logos"): o wrapper começa em top:92px,
+     folga de 28px.
    - baixo: .av-bar começa em bottom:16px + height:56px (42px de
      botão + 7px de padding em cima/embaixo) = 72px do fundo da tela:
      o wrapper termina em bottom:100px (72 + 28), a MESMA folga de
      28px. */
 .lobby-company-card-pin {
   position: fixed;
-  top: 128px;
+  top: 92px;
   bottom: 100px;
   left: 16px;
   z-index: 5;
@@ -5723,7 +5759,9 @@ button.chat-picker-item:disabled {
    print) -- ainda com blur, só que escurecido como pedido. */
 .company-edit-panel {
   position: fixed;
-  top: 128px;
+  /* 1/out: top:92px (era 128px) -- copiado de .lobby-company-card-pin
+     depois do ajuste de altura da .lobby-topbar, ver comentário lá. */
+  top: 92px;
   bottom: 100px;
   left: 292px;
   /* pedido do Douglas: "diminui 1/3 desse card de edicao na largura"
@@ -7756,8 +7794,13 @@ button.chat-picker-item:disabled {
    Douglas descreveu desde o início. Essa caixa (48x48, respiro de
    16px da borda) é o que o chat usa pra calcular seu próprio respiro
    (top:80px = 16+48+16, ver .chat-drawer/.chat-drawer-shell-sidebar) --
-   NÃO mudou (1/out, ver comentário de .room-logo-home-mark abaixo),
-   só o X *dentro* dela. */
+   a ALTURA não mudou (1/out, ver comentário de .room-logo-home-mark
+   abaixo), só o X *dentro* dela -- e a LARGURA, ver comentário dela
+   mesma logo abaixo (Douglas: "distancia da borda do balao ta menor
+   dentro da sala" -- a largura precisou crescer um pouco pro respiro
+   de 9px no logo-x-dark.png, mais largo que o logo-x-badge.png
+   quadrado de antes, não encostar na borda. Largura não entra na
+   conta do chat, só a altura). */
 .room-logo-home-btn {
   position: fixed;
   top: 16px;
@@ -7766,7 +7809,20 @@ button.chat-picker-item:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
+  /* 1/out, Douglas: "distancia da borda do balao ta menor dentro da
+     sala" -- o X de verdade (logo-x-dark.png, trocado no commit
+     anterior pra bater a ALTURA com o Lobby) não é quadrado: medido
+     com PIL, a caixa de pixel dele é 190x123 (mais largo que alto).
+     Com altura:30px (pra bater com o Lobby), a imagem renderiza com
+     uns 44px de largura -- numa caixa de conteúdo de 30x30 (48px -
+     9px de padding de cada lado), isso sobrava só uns 2px de respiro
+     de cada lado, bem menos que o padding:9px pretendido. Alargada a
+     caixa pra 62px (44px da imagem + 9px de padding de cada lado,
+     igual sempre foi verticalmente) -- deixa de ser um quadrado
+     perfeito, mas o respiro ao redor do X volta a ser o mesmo dos
+     quatro lados. Altura continua 48px (o que o chat usa pra se
+     posicionar, ver comentário acima -- não muda). */
+  width: 62px;
   height: 48px;
   padding: 9px;
   border: none;
