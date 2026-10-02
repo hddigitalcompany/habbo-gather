@@ -8259,9 +8259,25 @@ button.chat-picker-item:disabled {
    aplicada só fora da sala) -- soma o padding:0 32px que .lobby-topbar
    tem por dentro, pra o balão ficar recuado DENTRO do card de vidro
    igual os outros itens do menu, em vez de flush/cortando a borda
-   arredondada dela. */
+   arredondada dela.
+
+   2/out (2) -- bug reportado pelo Douglas com print ("ficou fora"): o
+   balão (~44px de altura, sem altura própria fixada) só tinha
+   top:16px herdado da base, sem nada garantindo que ficasse CENTRADO
+   dentro da faixa de 48px da .lobby-topbar (mesma faixa, mesmo
+   top:16px) -- ficava alto/baixo demais e estourava em cima/embaixo
+   do balão branco. Antes (dentro do grid da topbar, align-items:center)
+   isso vinha de graça; virando posição fixa independente, precisa
+   pedir a centralização na mão: height:48px (EXATAMENTE a altura da
+   topbar) + display:flex + align-items:center centraliza o conteúdo
+   (seja lá qual for a altura real dele) dentro dessa mesma faixa, sem
+   precisar acertar um valor de altura/margem no chute. */
 .platform-account-card-pin-lobby {
   right: 48px;
+  top: 16px;
+  height: 48px;
+  display: flex;
+  align-items: center;
 }
 
 /* mesmo bug/mesma causa documentados no comentário grande de
