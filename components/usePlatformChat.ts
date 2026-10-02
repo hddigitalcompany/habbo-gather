@@ -58,11 +58,6 @@ import type {
   AgendaFormState,
   DirectoryUser,
 } from "@/components/GameRoom";
-// 2/out -- formatadores/combinadores de data da Agenda (ver uso em
-// startNewCall/submitCreateCall mais abaixo) -- MESMAS funções que
-// GameRoom.tsx e AgendaDrawer.tsx já usam, exportadas de lá (ver
-// comentário grande deles sobre export pra uso fora do módulo).
-import { localDateStr, localTimeStr, combineLocalDateTime } from "@/components/GameRoom";
 
 // MESMO nome reservado que LOBBY_SOCKET_ROOM_ID em server/index.js --
 // nunca vira jogador fantasma numa sala de verdade (ver
@@ -119,6 +114,39 @@ async function uploadChatFile(file: Blob, filename: string): Promise<ChatAttachm
   });
   if (!res.ok) throw new Error(`upload falhou (${res.status})`);
   return (await res.json()) as ChatAttachment;
+}
+
+// formatadores/combinadores de data da Agenda (ver uso em
+// startNewCall/submitCreateCall mais abaixo) -- 2/out, bug real do
+// Douglas no deploy do Vercel ("ReferenceError: window is not defined"
+// pré-renderizando "/"): essas 3 funções MORAM em GameRoom.tsx
+// (exportadas de lá pro AgendaDrawer.tsx usar, que já roda atrás de um
+// dynamic(ssr:false) -- ver comentário grande dele em app/page.tsx),
+// mas tinham sido IMPORTADAS aqui como valor (`import {...} from
+// "@/components/GameRoom"`) -- isso quebra a mesma regra que
+// pickSupportedAudioMimeType/uploadChatFile acima já seguem ("esse
+// hook não pode importar nada em tempo de execução do módulo gigante
+// do GameRoom, só os TIPOS") -- GameRoom.tsx importa Phaser no topo, e
+// esse hook roda SEM dynamic() nenhum (é um hook, chamado direto em
+// PlatformChatHost/app/page.tsx), então o módulo inteiro (Phaser
+// incluso) ia pro bundle do SERVIDOR da Home e quebrava o build.
+// DUPLICADAS aqui (funções pequenas, nenhuma lógica nova) em vez de
+// importadas -- mesmo espírito das de cima.
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function localTimeStr(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function combineLocalDateTime(dateStr: string, timeStr: string): number {
+  if (!dateStr || !timeStr) return NaN;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh, mm] = timeStr.split(":").map(Number);
+  if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
+  return new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
 }
 
 export type PlatformChatParams = {

@@ -3,13 +3,27 @@
 import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 import AuthGate, { type AccountProfile } from "@/components/AuthGate";
-import { AgendaDrawer } from "@/components/AgendaDrawer";
 import Lobby from "@/components/Lobby";
 import { usePlatformChat } from "@/components/usePlatformChat";
 
 const GameRoom = dynamic(() => import("@/components/GameRoom"), {
   ssr: false,
   loading: () => <div className="loading">Carregando sala...</div>,
+});
+// dynamic (ssr:false) de propósito, NÃO import estático -- 2/out, bug
+// real do Douglas no deploy do Vercel ("ReferenceError: window is not
+// defined" pré-renderizando "/"). MESMO motivo documentado no comentário
+// grande de cima do `const ChatDrawer = dynamic(...)` em Lobby.tsx:
+// AgendaDrawer.tsx importa valores de VERDADE de GameRoom.tsx (ícones/
+// helpers/tipos, ver topo dele), e GameRoom.tsx importa Phaser (`import
+// * as Phaser from "phaser"`) -- um import ESTÁTICO aqui arrasta esse
+// módulo inteiro (motor do jogo, nunca escrito pra rodar no servidor)
+// pro RENDER NO SERVIDOR da Home, já que esse arquivo (app/page.tsx) é
+// quem o Next tenta pré-renderizar. O AgendaDrawer em si não usa Phaser,
+// mas um import estático ainda avalia o MÓDULO GameRoom.tsx inteiro pra
+// resolver as exportações -- só dynamic(ssr:false) corta esse elo.
+const AgendaDrawer = dynamic(() => import("@/components/AgendaDrawer").then((m) => m.AgendaDrawer), {
+  ssr: false,
 });
 
 type AuthResult = {
