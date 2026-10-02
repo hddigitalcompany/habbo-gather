@@ -30,6 +30,7 @@ import {
   previewText,
   type ChatMsg,
   type ChatMessage,
+  type ChatMsgKind,
   type ChatPin,
   type ChatTypingEntry,
   type ChatAttachmentItem,
@@ -45,6 +46,30 @@ function PhoneIcon() {
         d="M6.5 3.5c.6 0 1.1.4 1.3 1l1 2.8c.2.5 0 1.1-.4 1.4L7 10c1 2.3 2.7 4 5 5l1.3-1.4c.4-.4 1-.5 1.4-.3l2.8 1c.6.2 1 .7 1 1.3v2.6c0 1-.9 1.8-1.9 1.6C10.4 18.8 5.2 13.6 4.2 6.4 4 5.4 4.8 4.5 5.8 4.5h.7Z"
         stroke="currentColor"
         strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// seta de responder (2/out, pedido do Douglas: "coloca uma selecao em
+// cada mensagem tipo o slack" -- botão de resposta visível na barra
+// flutuante de ações, ver .chat-message-hover-toolbar/onReply).
+function ReplyIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M10 8 4.5 12.5 10 17"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.5 12.5H14a5.5 5.5 0 0 1 5.5 5.5v1"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
@@ -118,6 +143,11 @@ export function ChatDrawer({
   onDeleteMessage,
   onSendRoomCard,
   onMoveConversationLane,
+  onMuteConversation,
+  onDeleteConversation,
+  replyingTo,
+  onStartReply,
+  onCancelReply,
   callParticipantsByConversation,
   myCallConversationId,
   callRemoteStreams,
@@ -219,6 +249,32 @@ export function ChatDrawer({
   // Privada, ver comentário grande em moveConversationLane/GameRoom.tsx
   // e setConversationLane em server/chatStore.js).
   onMoveConversationLane: (conversationId: string, lane: "company" | "private") => void;
+  // "Silenciar"/"Apagar conversa" (2/out, pedido do Douglas: "nao tem
+  // opcao de Silenciar, e de Apagar conversa") -- mesmo menu de "3
+  // pontinhos" de cima, só que pra direct E grupo (mover de lane
+  // continua só pra direct, ver JSX do menu). Apagar só tira da MINHA
+  // lista (ver setConversationHidden em server/chatStore.js) -- nunca
+  // apaga de verdade, volta sozinho se chegar mensagem nova ou eu
+  // reabrir a conversa.
+  onMuteConversation: (conversationId: string, muted: boolean) => void;
+  onDeleteConversation: (conversationId: string) => void;
+  // "responder mensagem" (2/out, pedido do Douglas: "Dar dois clique
+  // na mensagem ativar a resposta a mensagem") -- replyingTo é o
+  // rascunho ATUAL (null = não tá respondendo nada), onStartReply
+  // dispara no duplo-clique do balão (ver ChatMessageRow), mostrado
+  // como uma barrinha "Respondendo a Fulano: ..." acima do composer
+  // (ver JSX logo antes do composer). Só existe em conversa de
+  // verdade (nunca a Sala, mesma trava de isRoom no resto do arquivo).
+  replyingTo: {
+    messageId: string;
+    senderName: string;
+    kind: ChatMsgKind;
+    text: string;
+    attachmentName: string | null;
+    attachmentUrl: string | null;
+  } | null;
+  onStartReply: (msg: ChatMessage | ChatMsg) => void;
+  onCancelReply: () => void;
   callParticipantsByConversation: Record<string, ChatCallParticipant[]>;
   myCallConversationId: string | null;
   callRemoteStreams: Record<string, MediaStream>;
@@ -395,6 +451,12 @@ export function ChatDrawer({
   // onTogglePinningOpen passados pro ChatMessageRow mais abaixo).
   const [reactingMessageId, setReactingMessageId] = useState<string | null>(null);
   const [pinningMessageId, setPinningMessageId] = useState<string | null>(null);
+  // "abriu ele na galeria, abre o historico de mensagens grudadas
+  // nele" (2/out, pedido do Douglas) -- clicar num item do painel
+  // "Arquivos da conversa" abre esse visualizador (imagem grande/ícone
+  // + toda mensagem que RESPONDEU a mensagem desse anexo, ver
+  // repliesTo logo abaixo do JSX do modal). null = fechado.
+  const [galleryItem, setGalleryItem] = useState<ChatAttachmentItem | null>(null);
   // @menção (pedido do Douglas, 1/out) -- dropdown de candidatos, aberto
   // enquanto a pessoa digita "@algumacoisa" no composer; startIndex é a
   // posição do "@" no texto (pra saber o que substituir quando escolhe
@@ -612,7 +674,14 @@ export function ChatDrawer({
                     {c.kind === "group" ? <GroupIcon /> : conversationDisplayName(c).slice(0, 1).toUpperCase()}
                   </span>
                   <span className="chat-conv-info">
-                    <span className="chat-conv-name">{conversationDisplayName(c)}</span>
+                    <span className="chat-conv-name">
+                      {conversationDisplayName(c)}
+                      {c.muted && (
+                        <span className="chat-conv-muted-dot" title="Silenciada">
+                          🔕
+                        </span>
+                      )}
+                    </span>
                     <span className="chat-conv-preview">
                       {c.lastMessage
                         ? `${c.lastMessage.senderId === myUserId ? "Você: " : ""}${previewText(c.lastMessage)}`
@@ -633,29 +702,32 @@ export function ChatDrawer({
                       {activeCall.length}
                     </span>
                   )}
-                  {/* "3 pontinhos" -- pedido do Douglas (29/set (18)):
-                      "nas conversas tem que ter 3 pontinhos do lado
-                      lá, que ele pode jogar a conversa pra alguma
-                      empresa, e vice versa, apenas com conversas 1x1,
-                      nos grupos nao" -- só conversa DIRETA (kind
-                      "direct"), grupo nunca mostra esse menu. Igual ao
-                      chat-call-badge acima: <span> com stopPropagation
-                      em vez de <button>, porque a linha inteira já É
-                      um <button> (chat-conv-item), e botão dentro de
-                      botão é HTML inválido. */}
-                  {c.kind === "direct" && (
-                    <span className="chat-conv-menu-wrap" onClick={(e) => e.stopPropagation()}>
-                      <span
-                        className="chat-conv-menu-btn"
-                        title="Mais opções"
-                        onClick={() => setConvMenuOpenId((prev) => (prev === c.id ? null : c.id))}
-                      >
-                        ⋮
-                      </span>
-                      {convMenuOpenId === c.id && (
-                        <>
-                          <div className="chat-conv-menu-backdrop" onClick={() => setConvMenuOpenId(null)} />
-                          <div className="chat-conv-menu">
+                  {/* "3 pontinhos" -- nasceu só pra "mover pra
+                      Empresa/Privada" (pedido do Douglas, 29/set (18),
+                      só conversa 1x1), e virou o menu geral de opções
+                      da conversa em 2/out (pedido do Douglas: "nao tem
+                      opcao de Silenciar, e de Apagar conversa") --
+                      Silenciar/Apagar fazem sentido em QUALQUER
+                      conversa (direct OU grupo), só "Mover" continua
+                      exclusivo de direct (grupo não tem lane, ver
+                      comentário de "lane" no tipo Conversation).
+                      Igual ao chat-call-badge acima: <span> com
+                      stopPropagation em vez de <button>, porque a
+                      linha inteira já É um <button> (chat-conv-item),
+                      e botão dentro de botão é HTML inválido. */}
+                  <span className="chat-conv-menu-wrap" onClick={(e) => e.stopPropagation()}>
+                    <span
+                      className="chat-conv-menu-btn"
+                      title="Mais opções"
+                      onClick={() => setConvMenuOpenId((prev) => (prev === c.id ? null : c.id))}
+                    >
+                      ⋮
+                    </span>
+                    {convMenuOpenId === c.id && (
+                      <>
+                        <div className="chat-conv-menu-backdrop" onClick={() => setConvMenuOpenId(null)} />
+                        <div className="chat-conv-menu">
+                          {c.kind === "direct" && (
                             <button
                               type="button"
                               className="chat-conv-menu-item"
@@ -666,11 +738,31 @@ export function ChatDrawer({
                             >
                               {c.lane === "company" ? "Mover para Conversas privadas" : "Mover para Empresa"}
                             </button>
-                          </div>
-                        </>
-                      )}
-                    </span>
-                  )}
+                          )}
+                          <button
+                            type="button"
+                            className="chat-conv-menu-item"
+                            onClick={() => {
+                              onMuteConversation(c.id, !c.muted);
+                              setConvMenuOpenId(null);
+                            }}
+                          >
+                            {c.muted ? "Ativar notificações" : "Silenciar"}
+                          </button>
+                          <button
+                            type="button"
+                            className="chat-conv-menu-item chat-conv-menu-item-danger"
+                            onClick={() => {
+                              onDeleteConversation(c.id);
+                              setConvMenuOpenId(null);
+                            }}
+                          >
+                            Apagar conversa
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </span>
                 </button>
               );
             })}
@@ -1112,6 +1204,7 @@ export function ChatDrawer({
                             : undefined
                         }
                         onAcceptVisit={m.senderId !== myUserId ? () => onSendRoomCard("invite") : undefined}
+                        onReply={!isRoom && !m.deleted ? () => onStartReply(m) : undefined}
                         reactingOpen={reactingMessageId === m.id}
                         onToggleReactingOpen={() => setReactingMessageId((cur) => (cur === m.id ? null : m.id))}
                         onToggleReaction={(emoji) => onToggleReaction(m.id, emoji)}
@@ -1154,6 +1247,42 @@ export function ChatDrawer({
             </div>
           )}
 
+          {/* "Dar dois clique na mensagem ativar a resposta" (2/out,
+              pedido do Douglas) -- barrinha de "respondendo a" acima
+              do composer, igual WhatsApp/Telegram/Slack. X cancela
+              sem perder o que já foi digitado (onCancelReply só limpa
+              replyingTo, nunca mexe em composerText). */}
+          {!isRoom && replyingTo && (
+            <div className="chat-reply-bar">
+              {/* miniatura de verdade (2/out, pedido do Douglas: "na
+                  conversa precisa aparecer a resposta selecionada ao
+                  arquivo, igual no whats") -- só pra imagem, que é o
+                  único anexo com preview visual que faz sentido num
+                  quadradinho desses (áudio/arquivo continuam com
+                  ícone+nome, ver chat-reply-bar-preview abaixo). */}
+              {replyingTo.kind === "image" && replyingTo.attachmentUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="chat-reply-bar-thumb" src={attachmentUrl(replyingTo.attachmentUrl)} alt="" />
+              )}
+              <div className="chat-reply-bar-info">
+                <span className="chat-reply-bar-sender">Respondendo a {replyingTo.senderName}</span>
+                <span className="chat-reply-bar-preview">
+                  {replyingTo.kind === "text"
+                    ? replyingTo.text || "Mensagem"
+                    : replyingTo.kind === "image"
+                      ? `📷 ${replyingTo.attachmentName || "Foto"}`
+                      : replyingTo.kind === "audio"
+                        ? "🎤 Áudio"
+                        : replyingTo.kind === "room_card"
+                          ? "🔑 Convite de sala"
+                          : `📎 ${replyingTo.attachmentName || "Arquivo"}`}
+                </span>
+              </div>
+              <button type="button" className="chat-reply-bar-cancel" title="Cancelar resposta" onClick={onCancelReply}>
+                <CloseIcon />
+              </button>
+            </div>
+          )}
           {recordingAudio ? (
             // gravando AGORA -- mostra o tempo correndo (igual WhatsApp),
             // lixeira cancela sem mandar nada, o botão de parar só PÁRA
@@ -1292,7 +1421,13 @@ export function ChatDrawer({
               );
               if (list.length === 0) return <p className="chat-files-panel-hint">Nenhum arquivo encontrado.</p>;
               return list.map((it) => (
-                <div key={it.messageId} className="chat-files-panel-item">
+                <div
+                  key={it.messageId}
+                  className="chat-files-panel-item"
+                  onClick={() => setGalleryItem(it)}
+                  role="button"
+                  tabIndex={0}
+                >
                   {it.kind === "image" ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img className="chat-files-panel-thumb" src={attachmentUrl(it.attachment.url)} alt="" />
@@ -1314,6 +1449,7 @@ export function ChatDrawer({
                     target="_blank"
                     rel="noreferrer"
                     title="Baixar"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <DownloadIcon />
                   </a>
@@ -1321,7 +1457,10 @@ export function ChatDrawer({
                     type="button"
                     className="chat-files-panel-btn"
                     title="Mencionar na conversa"
-                    onClick={() => onMentionAttachmentInChat(it)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMentionAttachmentInChat(it);
+                    }}
                   >
                     <AtIcon />
                   </button>
@@ -1334,12 +1473,96 @@ export function ChatDrawer({
     </>
   );
 
+  // "abriu ele na galeria, abre o historico de mensagens grudadas
+  // nele, lá no balao dele mesmo" (2/out, pedido do Douglas) --
+  // visualizador do anexo clicado no painel "Arquivos da conversa"
+  // (ver setGalleryItem acima) + toda mensagem que RESPONDEU a esse
+  // anexo (msg.replyTo.messageId === galleryItem.messageId, mesmo
+  // retrato congelado usado no "chat-reply-quote" do balão normal).
+  const galleryThread = galleryItem ? messages.filter((m) => m.replyTo?.messageId === galleryItem.messageId) : [];
+  const galleryModal = galleryItem && (
+    <>
+      <div className="chat-gallery-click-catcher" onClick={() => setGalleryItem(null)} />
+      <div className="chat-gallery-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="chat-gallery-modal-header">
+          <span className="chat-gallery-modal-title">{galleryItem.attachment.name}</span>
+          <button type="button" className="items-panel-close" onClick={() => setGalleryItem(null)} title="Fechar">
+            <CloseIcon />
+          </button>
+        </div>
+        <div className="chat-gallery-modal-body">
+          {galleryItem.kind === "image" ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img className="chat-gallery-modal-media" src={attachmentUrl(galleryItem.attachment.url)} alt="" />
+          ) : galleryItem.kind === "audio" ? (
+            <audio className="chat-gallery-modal-audio" controls src={attachmentUrl(galleryItem.attachment.url)} />
+          ) : (
+            <div className="chat-gallery-modal-file">
+              <FileIcon />
+              <span>{formatFileSize(galleryItem.attachment.size)}</span>
+            </div>
+          )}
+          <div className="chat-gallery-modal-meta">
+            <span>{galleryItem.senderName || "Alguém"}</span>
+            <span>{formatChatTime(galleryItem.ts)}</span>
+          </div>
+          <div className="chat-gallery-modal-actions">
+            <a
+              className="chat-files-panel-btn"
+              href={attachmentUrl(galleryItem.attachment.url)}
+              download={galleryItem.attachment.name}
+              target="_blank"
+              rel="noreferrer"
+              title="Baixar"
+            >
+              <DownloadIcon />
+            </a>
+            <button
+              type="button"
+              className="chat-files-panel-btn"
+              title="Responder"
+              onClick={() => {
+                onStartReply({
+                  id: galleryItem.messageId,
+                  senderId: galleryItem.senderId,
+                  senderName: galleryItem.senderName,
+                  kind: galleryItem.kind,
+                  text: "",
+                  attachment: galleryItem.attachment,
+                } as ChatMessage);
+                setGalleryItem(null);
+                onCloseFilesPanel();
+              }}
+            >
+              Responder
+            </button>
+          </div>
+        </div>
+        {galleryThread.length > 0 && (
+          <div className="chat-gallery-modal-thread">
+            <h4>Mensagens sobre este arquivo</h4>
+            {galleryThread.map((m) => (
+              <div key={m.id} className="chat-gallery-thread-item">
+                <span className="chat-gallery-thread-sender">{m.senderName || "Alguém"}</span>
+                <span className="chat-gallery-thread-text">
+                  {m.deleted ? <em>apagou uma mensagem</em> : m.text || (m.attachment ? m.attachment.name : "")}
+                </span>
+                <span className="chat-gallery-thread-time">{formatChatTime(m.ts)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   if (!companyRail) {
     return (
       <>
         {drawerBody}
         {filesTrigger}
         {filesPanel}
+        {galleryModal}
       </>
     );
   }
@@ -1352,6 +1575,7 @@ export function ChatDrawer({
       </div>
       {filesTrigger}
       {filesPanel}
+      {galleryModal}
     </>
   );
 }
@@ -1362,6 +1586,7 @@ function ChatMessageRow({
   myUserId,
   onDelete,
   onAcceptVisit,
+  onReply,
   reactingOpen,
   onToggleReactingOpen,
   onToggleReaction,
@@ -1389,6 +1614,11 @@ function ChatMessageRow({
   // chama de volta com action "invite" usando a MINHA sala quando eu
   // (quem recebeu o pedido) clico "Convidar" no cardzinho.
   onAcceptVisit?: () => void;
+  // "responder mensagem" (2/out) -- duplo-clique no balão dispara
+  // isso (ver onDoubleClick no .chat-bubble mais abaixo). undefined
+  // em mensagem apagada e na Sala (mesma trava de onDelete/onAcceptVisit
+  // acima -- ver chamador em ChatDrawer).
+  onReply?: () => void;
   // reação com emoji (pedido do Douglas, 1/out) -- popover de "emoji
   // rápido" controlado de fora (um reactingMessageId só, pra lista
   // toda, ver ChatDrawer) -- aqui só lê se é a MINHA mensagem que tá
@@ -1435,10 +1665,23 @@ function ChatMessageRow({
     <div className={own ? "chat-message own" : "chat-message"}>
       {showSenderName && <span className="chat-message-sender">{msg.senderName || "Alguém"}</span>}
       <div className="chat-message-row">
-        {/* reagir + fixar (pedido do Douglas, 1/out) -- sempre visíveis
-            (sem hover-reveal) pra não esconder a função em telas touch;
-            ver QUICK_REACTION_EMOJIS/PIN_DURATION_OPTIONS. */}
-        <div className="chat-message-actions">
+        {/* barra flutuante de ações (2/out, pedido do Douglas: "ta no
+            cantinho ainda, e muito pequeno, e cinza" + "nao recisa
+            clicar no balao, coloca uma selecao em cada mensagem tipo
+            o slack") -- antes os botões ficavam DENTRO do fluxo flex
+            da linha (espremidos coladinhos no canto do balão); agora
+            é um cartãozinho position:absolute que flutua por cima do
+            topo da linha só no hover (sem precisar de duplo-clique
+            pra nada aparecer), igual o hover-toolbar do Slack. Mesmo
+            truque de ancorar pela BORDA da linha (ver comentário
+            grande de .chat-message-row/.chat-quick-react-popover em
+            globals.css) -- cresce pra DENTRO, nunca estoura a gaveta. */}
+        <div className="chat-message-hover-toolbar">
+          {onReply && (
+            <button type="button" className="chat-message-action-btn" title="Responder" onClick={onReply}>
+              <ReplyIcon />
+            </button>
+          )}
           <div className="chat-message-action-wrap">
             <button
               type="button"
@@ -1500,13 +1743,61 @@ function ChatMessageRow({
               </div>
             )}
           </div>
+          {own && onDelete && (
+            <button
+              type="button"
+              className="chat-message-action-btn chat-message-delete-btn"
+              title="Apagar mensagem"
+              onClick={onDelete}
+            >
+              <TrashIcon />
+            </button>
+          )}
         </div>
-        {own && onDelete && (
-          <button className="chat-message-delete-btn" title="Apagar mensagem" onClick={onDelete}>
-            <TrashIcon />
-          </button>
-        )}
-        <div className={iWasMentioned ? "chat-bubble chat-bubble-mentioned" : "chat-bubble"}>
+        <div
+          className={iWasMentioned ? "chat-bubble chat-bubble-mentioned" : "chat-bubble"}
+          // duplo-clique continua funcionando como atalho extra, mas
+          // não é mais NECESSÁRIO pra responder -- o botão "Responder"
+          // na barra flutuante acima já faz isso (pedido do Douglas:
+          // "nao recisa clicar no balao"). onReply vem undefined em
+          // mensagem apagada/Sala (ver comentário no tipo acima).
+          onDoubleClick={onReply}
+        >
+          {msg.replyTo && (
+            // citação da mensagem original (2/out) -- RETRATO
+            // congelado (ver comentário grande do campo replyTo no
+            // tipo ChatMsgBase/GameRoom.tsx), nunca busca a mensagem
+            // de novo. "Arquivos ficam com historico de mensagens
+            // mencionadas a ele" (pedido do Douglas) usa esse MESMO
+            // campo do lado de fora (ver filtro em chat-files-panel-thread
+            // mais abaixo), aqui só mostra a citação dentro do balão.
+            <div className="chat-reply-quote">
+              {/* miniatura de verdade (2/out, pedido do Douglas: "na
+                  conversa precisa aparecer a resposta selecionada ao
+                  arquivo, igual no whats") -- mesma regra da barra do
+                  composer acima: só imagem ganha preview visual. */}
+              {!msg.replyTo.deleted && msg.replyTo.kind === "image" && msg.replyTo.attachmentUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="chat-reply-quote-thumb" src={attachmentUrl(msg.replyTo.attachmentUrl)} alt="" />
+              )}
+              <span className="chat-reply-quote-body">
+                <span className="chat-reply-quote-sender">{msg.replyTo.senderName}</span>
+                <span className="chat-reply-quote-text">
+                  {msg.replyTo.deleted
+                    ? "Mensagem apagada"
+                    : msg.replyTo.kind === "text"
+                      ? msg.replyTo.text || "Mensagem"
+                      : msg.replyTo.kind === "image"
+                        ? `📷 ${msg.replyTo.attachmentName || "Foto"}`
+                        : msg.replyTo.kind === "audio"
+                          ? "🎤 Áudio"
+                          : msg.replyTo.kind === "room_card"
+                            ? "🔑 Convite de sala"
+                            : `📎 ${msg.replyTo.attachmentName || "Arquivo"}`}
+                </span>
+              </span>
+            </div>
+          )}
           {msg.kind === "text" && <span>{renderMentionText(msg.text)}</span>}
           {msg.kind === "image" && msg.attachment && (
             <a href={attachmentUrl(msg.attachment.url)} target="_blank" rel="noreferrer">

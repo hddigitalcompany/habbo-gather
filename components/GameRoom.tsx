@@ -295,6 +295,32 @@ export type ChatMsgBase = {
   // nos lugares que leem).
   reactions?: ChatReactions;
   mentionedUserIds?: string[];
+  // "responder mensagem" (2/out, pedido do Douglas: "Dar dois clique
+  // na mensagem ativar a resposta a mensagem" + "Arquivos ficam com
+  // historico de mensagens mencionadas a ele") -- RETRATO congelado da
+  // mensagem original na hora que essa resposta foi mandada (ver
+  // comentário grande de addMessage em server/chatStore.js), não uma
+  // referência viva -- mesmo espírito de companyName/lane "última
+  // conhecida" que o resto do chat já usa. `deleted` conta se a
+  // original JÁ TINHA sido apagada nessa hora (texto/attachmentName já
+  // vêm vazios nesse caso). Opcional pelo mesmo motivo de
+  // reactions/mentionedUserIds acima.
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    senderName: string;
+    kind: ChatMsgKind;
+    text: string;
+    attachmentName: string | null;
+    // "na conversa precisa aparecer a resposta selecionada ao
+    // arquivo, igual no whats" (2/out, pedido do Douglas) -- caminho
+    // do anexo original (mesmo formato de ChatAttachment.url, passa
+    // por attachmentUrl() pra virar link completo), pra renderizar
+    // miniatura de verdade na citação (ver chat-reply-quote-thumb em
+    // ChatDrawer), não só ícone + nome.
+    attachmentUrl: string | null;
+    deleted: boolean;
+  };
 };
 export type ChatMsg = ChatMsgBase & { conversationId: string };
 // mensagem da SALA -- mesmo formato, sem conversationId (ver comentário acima)
@@ -367,6 +393,11 @@ export type Conversation = {
   // mudança (nenhum lugar faz isso hoje, mas por segurança).
   unreadCount?: number;
   lastMessage: { senderId: string; senderName: string; kind: ChatMsgKind; text: string; ts: number } | null;
+  // "Silenciar" (2/out, pedido do Douglas) -- SÓ pra mim (ver mutedBy
+  // em server/chatStore.js/listConversationsForUser), nunca afeta os
+  // outros participantes nem o unreadCount. Opcional pelo mesmo motivo
+  // de unreadCount acima.
+  muted?: boolean;
 };
 
 // --- chamada de voz/vídeo de uma conversa (chat direto/grupo, "tipo
@@ -381,11 +412,11 @@ export type ChatCallParticipant = { connectionId: string; userId: string; name: 
 // no topo de server/index.js e server/agendaStore.js pro protocolo e a
 // persistência. Mora na MESMA gaveta de chat (ver ChatDrawer), como uma
 // segunda aba (Conversas | Agenda). ---
-type CallNeeds = { camera: boolean; audio: boolean; screen: boolean };
-type CallParticipantStatus = "pending" | "approved" | "declined";
-type CallParticipant = { id: string; name: string; color: string; status: CallParticipantStatus };
-type CallVisibility = "public" | "private";
-type CallEvent = {
+export type CallNeeds = { camera: boolean; audio: boolean; screen: boolean };
+export type CallParticipantStatus = "pending" | "approved" | "declined";
+export type CallParticipant = { id: string; name: string; color: string; status: CallParticipantStatus };
+export type CallVisibility = "public" | "private";
+export type CallEvent = {
   id: string;
   title: string;
   startTs: number;
@@ -416,11 +447,11 @@ type CallEvent = {
 // users:list) -- diferente de RemotePlayer, que só existe pra quem tá
 // CONECTADO agora na sala; isso aqui vem do cadastro persistente do chat
 // (server/chatStore.js), então inclui gente offline também.
-type DirectoryUser = { userId: string; name: string; color: string; photoUrl: string };
+export type DirectoryUser = { userId: string; name: string; color: string; photoUrl: string };
 // rascunho do formulário "Marcar call" -- fica num objeto só (em vez de
 // um useState por campo) pra dar pra passar/atualizar de um jeito só
 // pro ChatDrawer (ver onChangeAgendaForm).
-type AgendaFormState = {
+export type AgendaFormState = {
   title: string;
   date: string; // "AAAA-MM-DD", igual <input type="date">
   time: string; // "HH:MM", igual <input type="time">
@@ -436,24 +467,24 @@ type AgendaFormState = {
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
-function localDateStr(d: Date): string {
+export function localDateStr(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
-function localTimeStr(d: Date): string {
+export function localTimeStr(d: Date): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 /** Junta os campos separados de data/horário do formulário (horário
  * LOCAL do navegador, igual um <input type="datetime-local">) num
  * único epoch ms -- o que o servidor usa pra checar conflito e ordenar
  * (ver server/agendaStore.js). NaN se algum campo ainda tiver vazio. */
-function combineLocalDateTime(dateStr: string, timeStr: string): number {
+export function combineLocalDateTime(dateStr: string, timeStr: string): number {
   if (!dateStr || !timeStr) return NaN;
   const [y, m, d] = dateStr.split("-").map(Number);
   const [hh, mm] = timeStr.split(":").map(Number);
   if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
   return new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
 }
-function formatCallDateTime(ts: number): string {
+export function formatCallDateTime(ts: number): string {
   return new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
@@ -706,7 +737,7 @@ export function formatRecordingTime(totalSec: number): string {
 
 // "25/set", "26/set" -- ver o "strip" de dias da Minha Agenda.
 const MESES_ABREV = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-function dayChipLabel(dateKey: string, todayKey: string, tomorrowKey: string): string {
+export function dayChipLabel(dateKey: string, todayKey: string, tomorrowKey: string): string {
   if (dateKey === todayKey) return "Hoje";
   if (dateKey === tomorrowKey) return "Amanhã";
   const [, m, d] = dateKey.split("-").map(Number);
@@ -746,6 +777,11 @@ export default function GameRoom({
   const {
     startDirectWith,
     moveConversationLane,
+    muteConversation,
+    deleteConversation,
+    replyingTo,
+    startReplyToMessage,
+    cancelReply,
     submitNewConversation,
     toggleNewConvSelection,
     changeNewConvMode,
@@ -766,6 +802,12 @@ export default function GameRoom({
     cancelVoiceRecording,
     discardRecordedAudio,
     sendRecordedAudio,
+    // 2/out (unificação Lobby/GameRoom) -- Agenda também virou 100%
+    // dela (ver comentário grande em usePlatformChat.ts); a gaveta em
+    // si nem renderiza mais daqui (ver PlatformAgendaHost em
+    // app/page.tsx), só o botão que abre/fecha fica aqui.
+    agendaOpen,
+    setAgendaOpen,
   } = chat;
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -1086,68 +1128,18 @@ export default function GameRoom({
   // de criar) agora é interno de usePlatformChat.ts -- não existe mais
   // aqui.
   const chatFileInputRef = useRef<HTMLInputElement>(null);
-  const agendaFileInputRef = useRef<HTMLInputElement>(null);
-  const agendaDetailFileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Agenda (ver tipos CallEvent/AgendaFormState lá em cima e o
-  // comentário grande em server/index.js) -- gaveta PRÓPRIA, separada da
-  // de chat (ver agendaOpen/AgendaDrawer), com seu próprio botão na
-  // av-bar. ---
-  const [agendaOpen, setAgendaOpen] = useState(false);
+  // 2/out -- Agenda migrada pro motor único (usePlatformChat.ts, ver
+  // comentário grande de lá: "quero ela toda isolada tambem, e sistema
+  // unico, assim como o chat, funcionando acima de tudo, acima de
+  // lobby acima de jogo"). Todo o estado/handlers que vivia aqui
+  // (agendaOpen/calls/busyUserIds/agendaView/agendaForm/allUsers/etc)
+  // agora é `chat.*` -- a gaveta em si (AgendaDrawer) nem renderiza
+  // mais daqui, ver PlatformAgendaHost em app/page.tsx.
   // Painel "Contatos" -- pedido do Douglas: "quero agora, mais um
-  // icone de contatos" (28/set). Usa allUsers (mesmo diretório
-  // platform-wide de "users:list", ver mais acima) -- não precisa de
-  // fetch próprio, só abrir/fechar (ver ContactsPanel.tsx).
+  // icone de contatos" (28/set) -- ainda local, fora do escopo dessa
+  // migração (só a Agenda foi pedida).
   const [contactsOpen, setContactsOpen] = useState(false);
-  const [calls, setCalls] = useState<CallEvent[]>([]);
-  // quem, dos candidatos a convidado, já tá ocupado no horário sendo
-  // escolhido AGORA no formulário -- atualizado ao vivo (ver o useEffect
-  // de "agenda:availability" mais abaixo), pra já desabilitar/marcar
-  // "indisponível" na lista de participantes ANTES da pessoa tentar
-  // selecionar (ver getConflictingUserIds em server/agendaStore.js).
-  const [busyUserIds, setBusyUserIds] = useState<string[]>([]);
-  const [agendaView, setAgendaView] = useState<"list" | "new" | "detail" | "colleague">("list");
-  const [agendaDetailId, setAgendaDetailId] = useState<string | null>(null);
-  const [agendaForm, setAgendaForm] = useState<AgendaFormState>({
-    title: "",
-    date: "",
-    time: "",
-    durationMinutes: 30,
-    participantIds: [],
-    needs: { camera: true, audio: true, screen: false },
-    visibility: "public",
-    description: "",
-    attachments: [],
-    blocksAgenda: true,
-  });
-  const [agendaError, setAgendaError] = useState<string | null>(null);
-  const [sendingAgendaAttachment, setSendingAgendaAttachment] = useState(false);
-  const [sendingDetailAttachment, setSendingDetailAttachment] = useState(false);
-  // "hoje | amanhã | 25/set | ..." -- quais dias do strip da Minha
-  // Agenda estão expandidos agora (ver renderAgendaListView). Hoje
-  // começa aberto ("deve aparecer o hoje aberto").
-  const [expandedAgendaDays, setExpandedAgendaDays] = useState<Set<string>>(() => new Set([localDateStr(new Date())]));
-  // todo mundo já cadastrado no ambiente (ver server/chatStore.js
-  // listAllUsers), online ou não -- usado no picker de participantes do
-  // "Marcar compromisso" e na busca "pesquise a agenda de um colega",
-  // que não devem mais depender de quem tá na sala AGORA (ver
-  // users:list/handlePartyMessage).
-  const [allUsers, setAllUsers] = useState<DirectoryUser[]>([]);
-  const agendaCreatingRef = useRef(false);
-  // "pesquise a agenda de um colega" -- campo de busca (filtrado no
-  // ChatDrawer contra quem tá na sala, mesma fonte da lista de
-  // participantes) + a agenda do colega escolhido, já vinda do servidor
-  // (calls privadas em que eu não participo chegam tarjadas, ver
-  // agenda:view_colleague em server/index.js).
-  const [agendaSearchQuery, setAgendaSearchQuery] = useState("");
-  const [agendaColleagueId, setAgendaColleagueId] = useState<string | null>(null);
-  const [agendaColleagueName, setAgendaColleagueName] = useState("");
-  const [colleagueCalls, setColleagueCalls] = useState<CallEvent[]>([]);
-  // espelha agendaColleagueId pro handler de socket (definido dentro do
-  // useEffect de conexão, que só roda uma vez -- ver comentário grande
-  // em myProfileRef) conseguir ler o valor ATUAL sem stale closure.
-  const agendaColleagueIdRef = useRef<string | null>(null);
-  agendaColleagueIdRef.current = agendaColleagueId;
 
   // --- card de perfil: MEUS campos (editáveis) e os dos OUTROS
   // jogadores (sincronizados pelo servidor, ver mensagem "profile" em
@@ -1181,15 +1173,16 @@ export default function GameRoom({
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
   }
 
-  // registra showErrorToast como o aviso visual de "não deu pra
-  // acessar o microfone" da gravação de áudio (ver
-  // setRecordingErrorHandler/recordingErrorHandlerRef em
-  // usePlatformChat.ts) -- só a Sala tem esse toast; o Lobby não
-  // registra nada, continua só logando no console (nunca teve esse
-  // aviso visual).
+  // registra showErrorToast como o aviso visual genérico do motor único
+  // (ver setToastHandler/toastHandlerRef em usePlatformChat.ts --
+  // generalizado de "RecordingError" quando a Agenda migrou pra lá
+  // também: mic falhando, convite/lembrete de compromisso, falha ao
+  // anexar arquivo na agenda, tudo passa por aqui agora) -- só a Sala
+  // tem esse toast; o Lobby não registra nada, continua só logando no
+  // console (nunca teve esse aviso visual).
   useEffect(() => {
-    chat.setRecordingErrorHandler(showErrorToast);
-    return () => chat.setRecordingErrorHandler(null);
+    chat.setToastHandler(showErrorToast);
+    return () => chat.setToastHandler(null);
   }, [chat]);
 
   // manda pelo socket SÓ se ele realmente tiver aberto -- antes um
@@ -2862,8 +2855,6 @@ export default function GameRoom({
         // conectado na hora.
         const messageId = data.messageId as string;
         setChatLog((prev) => prev.map((m) => (m.id === messageId ? { ...m, deleted: true, text: "", attachment: null } : m)));
-      } else if (data.type === "users:list") {
-        setAllUsers(data.users as DirectoryUser[]);
       } else if (data.type === "chat:reaction") {
         // reação com emoji na Sala (pedido do Douglas, 1/out) --
         // "reactions" já vem PRONTO (substitui, não mescla, ver
@@ -2892,62 +2883,6 @@ export default function GameRoom({
         if (conversationId === null && userId !== myUserId) {
           const entry: ChatTypingEntry = { userId, name, ts: Date.now() };
           setRoomTyping((prev) => [...prev.filter((t) => t.userId !== userId), entry]);
-        }
-      } else if (data.type === "agenda:calls") {
-        setCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
-      } else if (data.type === "agenda:call") {
-        const call = data.call as CallEvent;
-        setCalls((prev) => {
-          const rest = prev.filter((c) => c.id !== call.id);
-          return [...rest, call].sort((a, b) => a.startTs - b.startTs);
-        });
-        // se essa call é a que EU acabei de marcar (ver submitCreateCall/
-        // agendaCreatingRef), pula direto pro detalhe dela -- os outros
-        // convidados só recebem pra aparecer na LISTA deles, sem pular
-        // sozinho (mesmo padrão de autoOpenNextConversationRef no chat).
-        if (agendaCreatingRef.current && call.createdBy === myUserId) {
-          agendaCreatingRef.current = false;
-          setAgendaError(null);
-          setAgendaDetailId(call.id);
-          setAgendaView("detail");
-        }
-      } else if (data.type === "agenda:availability") {
-        setBusyUserIds(data.busyUserIds as string[]);
-      } else if (data.type === "agenda:invite") {
-        const call = data.call as CallEvent;
-        const toastId = `${Date.now()}-${Math.random()}`;
-        setToasts((prev) => [
-          ...prev.slice(-3),
-          { id: toastId, text: `${call.createdByName || "Alguém"} marcou "${call.title}" com você` },
-        ]);
-        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 5000);
-        // pedido do Douglas, 30/set (5): "permitir notificacoes de ...
-        // agenda?" -- mesmo toast de sempre, só ganhou a notificação de
-        // verdade do navegador junto (se o toggle tá ligado).
-        if (notificationPrefsRef.current.agenda) {
-          fireNotification("Novo compromisso", `${call.createdByName || "Alguém"} marcou "${call.title}" com você`);
-        }
-      } else if (data.type === "agenda:reminder") {
-        const call = data.call as CallEvent;
-        const toastId = `${Date.now()}-${Math.random()}`;
-        setToasts((prev) => [...prev.slice(-3), { id: toastId, text: `"${call.title}" começa em breve` }]);
-        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== toastId)), 6000);
-        if (notificationPrefsRef.current.agenda) {
-          fireNotification("Compromisso começando", `"${call.title}" começa em breve`);
-        }
-      } else if (data.type === "agenda:error") {
-        agendaCreatingRef.current = false;
-        if (data.reason === "conflict") {
-          setBusyUserIds((data.busyUserIds as string[]) ?? []);
-          setAgendaError("Algum convidado ficou indisponível nesse horário -- escolha outro e tente de novo.");
-        }
-      } else if (data.type === "agenda:colleague_calls") {
-        // resposta de "pesquise a agenda de um colega" (ver
-        // viewColleagueAgenda) -- só aplica se ainda for o colega que a
-        // pessoa tá olhando agora (evita uma resposta atrasada de uma
-        // busca anterior sobrescrever a atual).
-        if (data.userId === agendaColleagueIdRef.current) {
-          setColleagueCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
         }
       }
     }
@@ -3481,8 +3416,15 @@ export default function GameRoom({
         socket.send(
           JSON.stringify({ type: "identify", userId: myUserId, accessToken: accountAccessTokenRef.current })
         );
-        socket.send(JSON.stringify({ type: "chat:list" }));
-        socket.send(JSON.stringify({ type: "agenda:list" }));
+        // "chat:list"/"agenda:list" saíram daqui (2/out) -- essas
+        // listas inteiras (conversas, compromissos) já chegam pela
+        // conexão de PLATAFORMA (usePlatformChat.ts manda a mesma
+        // mensagem assim que ELA conecta, uma vez só, nunca por sala) --
+        // mandar de novo aqui só gerava um round-trip morto: o servidor
+        // responde (ws.send) nesse MESMO socket de sala, que não tem
+        // mais handler nenhum pra "chat:conversations"/"agenda:calls"
+        // (removido junto do resto do estado local, ver comentário
+        // grande logo abaixo sobre chat/agenda virarem `chat.*`).
       });
       socket.addEventListener("close", () => setStatus("Desconectado"));
       socket.addEventListener("error", () => setStatus("Erro de conexão"));
@@ -3860,158 +3802,14 @@ export default function GameRoom({
   // destructure de "chat" lá em cima) -- painel de arquivos e chamada
   // de conversa são 100% dela, nunca existiram pra Sala.
 
-  // --- Agenda (ver tipos/comentário grande lá em cima) ---
-
-  function updateAgendaForm(partial: Partial<AgendaFormState>) {
-    setAgendaForm((prev) => ({ ...prev, ...partial }));
-  }
-
-  function toggleAgendaParticipant(userId: string) {
-    if (busyUserIds.includes(userId)) return; // indisponível nesse horário, não deixa marcar
-    setAgendaForm((prev) => ({
-      ...prev,
-      participantIds: prev.participantIds.includes(userId)
-        ? prev.participantIds.filter((x) => x !== userId)
-        : [...prev.participantIds, userId],
-    }));
-  }
-
-  function startNewCall() {
-    const suggestion = new Date(Date.now() + 30 * 60_000); // meia hora a partir de agora, só de ponto de partida
-    setAgendaForm({
-      title: "",
-      date: localDateStr(suggestion),
-      time: localTimeStr(suggestion),
-      durationMinutes: 30,
-      participantIds: [],
-      needs: { camera: true, audio: true, screen: false },
-      visibility: "public",
-      description: "",
-      attachments: [],
-      blocksAgenda: true,
-    });
-    setAgendaError(null);
-    setBusyUserIds([]);
-    setAgendaView("new");
-  }
-
-  function submitCreateCall() {
-    const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
-    // participantIds vazio é válido (compromisso só da própria pessoa --
-    // ver comentário em agenda:create no servidor). Antes tinha um
-    // "|| agendaForm.participantIds.length === 0" aqui que travava
-    // exatamente esse caso: o clique em "Marcar compromisso" não fazia
-    // NADA (nem mandava a mensagem, nem mostrava erro), por isso o botão
-    // "não funcionava" quando a pessoa tentava marcar um compromisso só
-    // pra ela mesma.
-    if (!Number.isFinite(startTs)) {
-      setAgendaError("Preenche a data e o horário pra marcar o compromisso.");
-      return;
-    }
-    setAgendaError(null);
-    agendaCreatingRef.current = true;
-    const ok = wsSend({
-      type: "agenda:create",
-      title: agendaForm.title.trim() || "Call",
-      startTs,
-      durationMinutes: agendaForm.durationMinutes,
-      needs: agendaForm.needs,
-      participantIds: agendaForm.participantIds,
-      visibility: agendaForm.visibility,
-      description: agendaForm.description.trim(),
-      attachments: agendaForm.attachments,
-      blocksAgenda: agendaForm.blocksAgenda,
-    });
-    if (!ok) agendaCreatingRef.current = false;
-    // fica na tela do formulário até a resposta chegar (sucesso pula pro
-    // detalhe da call criada, erro mostra o motivo aqui mesmo -- ver
-    // handlePartyMessage/agendaCreatingRef).
-  }
-
-  // upload de anexo do "Marcar compromisso" -- mesmo endpoint HTTP do
-  // chat (ver uploadChatFile), só que o resultado fica guardado no
-  // FORMULÁRIO (agendaForm.attachments) em vez de mandar na hora, porque
-  // a call em si só é criada quando a pessoa confirma "Marcar
-  // compromisso".
-  async function handleAgendaFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setSendingAgendaAttachment(true);
-    try {
-      const attachment = await uploadChatFile(file, file.name);
-      setAgendaForm((prev) => ({ ...prev, attachments: [...prev.attachments, attachment] }));
-    } catch (err) {
-      console.warn("Falha ao anexar arquivo no compromisso", err);
-      showErrorToast("Não deu pra anexar o arquivo -- tenta de novo.");
-    } finally {
-      setSendingAgendaAttachment(false);
-    }
-  }
-
-  function removeAgendaFormAttachment(index: number) {
-    setAgendaForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
-  }
-
-  // anexar arquivo numa call JÁ CRIADA (visível pra quem já tá na tela
-  // de detalhe) -- diferente do de cima, esse manda direto pro servidor
-  // (ver agenda:add_attachment), porque a call já existe.
-  async function handleAgendaDetailFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !agendaDetailId) return;
-    setSendingDetailAttachment(true);
-    try {
-      const attachment = await uploadChatFile(file, file.name);
-      wsSend({ type: "agenda:add_attachment", callId: agendaDetailId, attachment });
-    } catch (err) {
-      console.warn("Falha ao anexar arquivo na call", err);
-      showErrorToast("Não deu pra anexar o arquivo -- tenta de novo.");
-    } finally {
-      setSendingDetailAttachment(false);
-    }
-  }
-
-  function toggleAgendaDay(dateKey: string) {
-    setExpandedAgendaDays((prev) => {
-      const next = new Set(prev);
-      if (next.has(dateKey)) next.delete(dateKey);
-      else next.add(dateKey);
-      return next;
-    });
-  }
-
-  function openCallDetail(callId: string) {
-    setAgendaDetailId(callId);
-    setAgendaView("detail");
-  }
-
-  function respondToCall(callId: string, status: "approved" | "declined") {
-    socketRef.current?.send(JSON.stringify({ type: "agenda:respond", callId, status }));
-  }
-
-  // "pesquise a agenda de um colega" -- pede a agenda dele pro servidor
-  // (calls privadas em que eu não participo chegam tarjadas, ver
-  // agenda:view_colleague em server/index.js) e troca a Agenda pra essa
-  // visão. onlinePlayerName é só pra já mostrar o cabeçalho certo sem
-  // esperar a resposta do servidor.
-  function viewColleagueAgenda(userId: string, name: string) {
-    setAgendaColleagueId(userId);
-    agendaColleagueIdRef.current = userId;
-    setAgendaColleagueName(name || "Sem nome");
-    setColleagueCalls([]);
-    setAgendaView("colleague");
-    socketRef.current?.send(JSON.stringify({ type: "agenda:view_colleague", userId }));
-  }
-
-  function backToMyAgenda() {
-    setAgendaColleagueId(null);
-    agendaColleagueIdRef.current = null;
-    setAgendaColleagueName("");
-    setColleagueCalls([]);
-    setAgendaSearchQuery("");
-    setAgendaView("list");
-  }
+  // --- Agenda (ver usePlatformChat.ts, comentário grande dela) --
+  // todas as ações (updateAgendaForm/toggleAgendaParticipant/
+  // startNewCall/submitCreateCall/handleAgendaFileChange/
+  // removeAgendaFormAttachment/handleAgendaDetailFileChange/
+  // toggleAgendaDay/openCallDetail/respondToCall/viewColleagueAgenda/
+  // backToMyAgenda) migraram pro motor único, chamadas como
+  // chat.nomeDaFuncao agora (ver destructure de "chat" no topo do
+  // componente).
 
   function toggleEditMode() {
     // defensivo -- o botão que chama isso já fica escondido pra quem não
@@ -4506,41 +4304,8 @@ export default function GameRoom({
     setChatPinMode((m) => (m === "side" ? "float" : "side"));
   }
 
-  // checagem de disponibilidade AO VIVO enquanto o formulário "Marcar
-  // call" tá aberto -- a cada mudança de data/hora/duração, pergunta pro
-  // servidor quem (de todo mundo na sala) já fica ocupado nesse horário
-  // (ver getConflictingUserIds em server/agendaStore.js), pra já
-  // desabilitar essas pessoas na lista de participantes ANTES da pessoa
-  // tentar selecionar (não só revalidar depois de clicar "Marcar call").
-  // Debounce curto pra não mandar uma mensagem por tecla.
-  useEffect(() => {
-    if (agendaView !== "new") return;
-    const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
-    if (!Number.isFinite(startTs)) {
-      setBusyUserIds([]);
-      return;
-    }
-    const candidateUserIds = Array.from(
-      new Map(Array.from(remotePlayersRef.current.values()).map((p) => [p.userId, p])).values()
-    )
-      .map((p) => p.userId)
-      .filter((uid) => uid !== myUserId);
-    if (candidateUserIds.length === 0) {
-      setBusyUserIds([]);
-      return;
-    }
-    const timer = setTimeout(() => {
-      socketRef.current?.send(
-        JSON.stringify({
-          type: "agenda:availability",
-          candidateUserIds,
-          startTs,
-          durationMinutes: agendaForm.durationMinutes,
-        })
-      );
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [agendaView, agendaForm.date, agendaForm.time, agendaForm.durationMinutes, myUserId]);
+  // checagem de disponibilidade da agenda -- migrada pro usePlatformChat.ts
+  // (sistema único, roda igual dentro da sala e no Lobby).
 
   // enquanto o card de perfil (base OU editando) está aberto, o jogo
   // ignora clique em qualquer boneco -- sem isso, um clique na UI do
@@ -4965,6 +4730,11 @@ export default function GameRoom({
     onDeleteMessage: deleteMessage,
     onSendRoomCard: sendRoomCard,
     onMoveConversationLane: moveConversationLane,
+    onMuteConversation: muteConversation,
+    onDeleteConversation: deleteConversation,
+    replyingTo,
+    onStartReply: startReplyToMessage,
+    onCancelReply: cancelReply,
     callParticipantsByConversation: chat.callParticipantsByConversation,
     myCallConversationId: chat.myCallConversationId,
     callRemoteStreams: chat.callRemoteStreams,
@@ -5026,41 +4796,13 @@ export default function GameRoom({
     },
   };
 
-  // props do AgendaDrawer -- gaveta própria, separada do chat (ver
-  // agendaOpen).
-  const agendaDrawerProps = {
-    myUserId,
-    onlinePlayers: Array.from(remotePlayersRef.current.values()),
-    allUsers,
-    calls,
-    busyUserIds,
-    agendaView,
-    onChangeAgendaView: setAgendaView,
-    agendaDetailId,
-    onOpenCallDetail: openCallDetail,
-    agendaForm,
-    onChangeAgendaForm: updateAgendaForm,
-    onToggleAgendaParticipant: toggleAgendaParticipant,
-    agendaError,
-    onStartNewCall: startNewCall,
-    onSubmitCreateCall: submitCreateCall,
-    onRespondToCall: respondToCall,
-    agendaSearchQuery,
-    onChangeAgendaSearchQuery: setAgendaSearchQuery,
-    agendaColleagueId,
-    agendaColleagueName,
-    colleagueCalls,
-    onViewColleagueAgenda: viewColleagueAgenda,
-    onBackToMyAgenda: backToMyAgenda,
-    onPickAgendaFile: () => agendaFileInputRef.current?.click(),
-    onRemoveAgendaAttachment: removeAgendaFormAttachment,
-    sendingAgendaAttachment,
-    onPickDetailAttachment: () => agendaDetailFileInputRef.current?.click(),
-    sendingDetailAttachment,
-    expandedAgendaDays,
-    onToggleAgendaDay: toggleAgendaDay,
-    onClose: () => setAgendaOpen(false),
-  };
+  // 2/out -- props/render do AgendaDrawer saíram daqui (ver
+  // PlatformAgendaHost em app/page.tsx, "funcionando acima de tudo,
+  // acima de lobby acima de jogo" -- pedido do Douglas): a gaveta
+  // agora é UMA instância só, hospedada fora da troca Lobby<->GameRoom,
+  // não mais renderizada (e portanto não mais duplicada) dentro de
+  // cada tela. O botão abaixo só abre/fecha o estado compartilhado
+  // (chat.agendaOpen).
 
   return (
     <div className="room-and-editor">
@@ -5492,7 +5234,6 @@ export default function GameRoom({
         </div>
 
         {chatOpen && chatPinMode !== "side" && <ChatDrawer {...chatDrawerProps} />}
-        {agendaOpen && <AgendaDrawer {...agendaDrawerProps} />}
         {contactsOpen && (
           <FriendsPanel
             accountAccessToken={accountAccessToken}
@@ -5534,18 +5275,6 @@ export default function GameRoom({
           type="file"
           style={{ display: "none" }}
           onChange={handleChatFileChange}
-        />
-        <input
-          ref={agendaFileInputRef}
-          type="file"
-          style={{ display: "none" }}
-          onChange={handleAgendaFileChange}
-        />
-        <input
-          ref={agendaDetailFileInputRef}
-          type="file"
-          style={{ display: "none" }}
-          onChange={handleAgendaDetailFileChange}
         />
       </div>
 
@@ -8263,7 +7992,7 @@ export function MicIcon({ off }: { off: boolean }) {
   );
 }
 
-function CamIcon({ off }: { off: boolean }) {
+export function CamIcon({ off }: { off: boolean }) {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
       <rect x="3" y="6.5" width="12.5" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
@@ -8280,7 +8009,7 @@ function CamIcon({ off }: { off: boolean }) {
   );
 }
 
-function ScreenIcon({ active }: { active: boolean }) {
+export function ScreenIcon({ active }: { active: boolean }) {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
       <rect x="3" y="4.5" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
@@ -8427,562 +8156,6 @@ export function ChatCallVideoTile({ stream, muted, volume }: { stream: MediaStre
   return <video ref={ref} autoPlay muted={muted} playsInline className="chat-call-video" />;
 }
 
-
-function AgendaDrawer({
-  myUserId,
-  onlinePlayers,
-  allUsers,
-  calls,
-  busyUserIds,
-  agendaView,
-  onChangeAgendaView,
-  agendaDetailId,
-  onOpenCallDetail,
-  agendaForm,
-  onChangeAgendaForm,
-  onToggleAgendaParticipant,
-  agendaError,
-  onStartNewCall,
-  onSubmitCreateCall,
-  onRespondToCall,
-  agendaSearchQuery,
-  onChangeAgendaSearchQuery,
-  agendaColleagueId,
-  agendaColleagueName,
-  colleagueCalls,
-  onViewColleagueAgenda,
-  onBackToMyAgenda,
-  onPickAgendaFile,
-  onRemoveAgendaAttachment,
-  sendingAgendaAttachment,
-  onPickDetailAttachment,
-  sendingDetailAttachment,
-  expandedAgendaDays,
-  onToggleAgendaDay,
-  onClose,
-}: {
-  myUserId: string;
-  onlinePlayers: RemotePlayer[];
-  allUsers: DirectoryUser[];
-  calls: CallEvent[];
-  busyUserIds: string[];
-  agendaView: "list" | "new" | "detail" | "colleague";
-  onChangeAgendaView: (v: "list" | "new" | "detail" | "colleague") => void;
-  agendaDetailId: string | null;
-  onOpenCallDetail: (callId: string) => void;
-  agendaForm: AgendaFormState;
-  onChangeAgendaForm: (partial: Partial<AgendaFormState>) => void;
-  onToggleAgendaParticipant: (userId: string) => void;
-  agendaError: string | null;
-  onStartNewCall: () => void;
-  onSubmitCreateCall: () => void;
-  onRespondToCall: (callId: string, status: "approved" | "declined") => void;
-  agendaSearchQuery: string;
-  onChangeAgendaSearchQuery: (v: string) => void;
-  agendaColleagueId: string | null;
-  agendaColleagueName: string;
-  colleagueCalls: CallEvent[];
-  onViewColleagueAgenda: (userId: string, name: string) => void;
-  onBackToMyAgenda: () => void;
-  onPickAgendaFile: () => void;
-  onRemoveAgendaAttachment: (index: number) => void;
-  sendingAgendaAttachment: boolean;
-  onPickDetailAttachment: () => void;
-  sendingDetailAttachment: boolean;
-  expandedAgendaDays: Set<string>;
-  onToggleAgendaDay: (dateKey: string) => void;
-  onClose: () => void;
-}) {
-  const detailCall = calls.find((c) => c.id === agendaDetailId) ?? colleagueCalls.find((c) => c.id === agendaDetailId) ?? null;
-  const myCallStatus = detailCall?.participants.find((p) => p.id === myUserId)?.status ?? null;
-  const onlineUserIds = new Set(onlinePlayers.map((p) => p.userId));
-  // todo mundo cadastrado no ambiente, menos eu (ver allUsers/users:list
-  // em server/chatStore.js) -- usado tanto no picker de participantes do
-  // "Marcar compromisso" quanto em "pesquise a agenda de um colega",
-  // independente de quem tá online agora (ver comentário no tipo
-  // DirectoryUser).
-  const roster = allUsers.filter((u) => u.userId !== myUserId);
-  const colleagueQuery = agendaSearchQuery.trim().toLowerCase();
-  const colleagueMatches =
-    colleagueQuery.length === 0 ? [] : roster.filter((u) => (u.name || "").toLowerCase().includes(colleagueQuery));
-
-  // "hoje | amanhã | 25/set | 26/set" -- ver comentário grande no
-  // useState de expandedAgendaDays em GameRoom(). Agrupa as calls
-  // futuras (de hoje em diante) por dia local; o strip sempre mostra os
-  // próximos 7 dias corridos, mais qualquer dia além disso que já tenha
-  // algum compromisso (pra não esconder nada).
-  const now = new Date();
-  const todayKey = localDateStr(now);
-  const tomorrowKey = localDateStr(new Date(now.getTime() + 86_400_000));
-  const callsByDay = new Map<string, CallEvent[]>();
-  for (const c of calls) {
-    const key = localDateStr(new Date(c.startTs));
-    if (key < todayKey) continue; // passado não entra no strip -- só o que vem daqui pra frente
-    if (!callsByDay.has(key)) callsByDay.set(key, []);
-    callsByDay.get(key)!.push(c);
-  }
-  const stripDays: string[] = [];
-  for (let i = 0; i < 7; i++) stripDays.push(localDateStr(new Date(now.getTime() + i * 86_400_000)));
-  for (const key of callsByDay.keys()) if (!stripDays.includes(key)) stripDays.push(key);
-  stripDays.sort();
-  function renderCallItem(c: CallEvent) {
-    const mine = c.participants.find((p) => p.id === myUserId);
-    const approvedCount = c.participants.filter((p) => p.status === "approved").length;
-    const soloCall = c.participants.length <= 1;
-    return (
-      <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
-        <span className="agenda-call-item-main">
-          <span className="agenda-call-title">
-            {c.visibility === "private" && "🔒 "}
-            {c.title}
-          </span>
-          <span className="agenda-call-when">
-            {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-            {c.blocksAgenda === false && " · não trava agenda"}
-          </span>
-        </span>
-        {soloCall && <span className="agenda-badge">Pessoal</span>}
-        {!soloCall && mine?.status === "pending" && <span className="agenda-badge pending">Aguardando você</span>}
-        {!soloCall && mine?.status === "declined" && <span className="agenda-badge declined">Recusada</span>}
-        {!soloCall && mine?.status === "approved" && (
-          <span className="agenda-badge approved">
-            {approvedCount}/{c.participants.length} confirmados
-          </span>
-        )}
-      </button>
-    );
-  }
-
-  return (
-    <div className="chat-drawer agenda-drawer">
-      {agendaView === "list" && (
-        <>
-          <div className="chat-drawer-header">
-            <h3>Minha agenda</h3>
-            <div className="chat-drawer-header-actions">
-              <button className="chat-icon-btn" title="Marcar compromisso" onClick={onStartNewCall}>
-                <PlusIcon />
-              </button>
-              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-          <div className="agenda-search-row">
-            <input
-              className="agenda-search-input"
-              value={agendaSearchQuery}
-              onChange={(e) => onChangeAgendaSearchQuery(e.target.value)}
-              placeholder="Pesquise a agenda de um colega..."
-            />
-            {colleagueQuery.length > 0 && (
-              <div className="agenda-search-results">
-                {colleagueMatches.length === 0 && <p className="chat-empty-hint">Ninguém encontrado.</p>}
-                {colleagueMatches.map((p) => (
-                  <button
-                    key={p.userId}
-                    className="agenda-search-result-item"
-                    onClick={() => onViewColleagueAgenda(p.userId, p.name || "Sem nome")}
-                  >
-                    <span className="chat-conv-avatar" style={{ background: p.color }}>
-                      {(p.name || "?").slice(0, 1).toUpperCase()}
-                    </span>
-                    <span>{p.name || "Sem nome"}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="agenda-day-strip">
-            {stripDays.map((key) => {
-              const dayCalls = callsByDay.get(key) ?? [];
-              const expanded = expandedAgendaDays.has(key);
-              return (
-                <button
-                  key={key}
-                  className={expanded ? "agenda-day-chip active" : "agenda-day-chip"}
-                  onClick={() => onToggleAgendaDay(key)}
-                >
-                  {dayChipLabel(key, todayKey, tomorrowKey)}
-                  {dayCalls.length > 0 && <span className="agenda-day-chip-count">{dayCalls.length}</span>}
-                </button>
-              );
-            })}
-          </div>
-          <div className="agenda-call-list">
-            {calls.length === 0 && <p className="chat-empty-hint">Nenhum compromisso marcado ainda.</p>}
-            {stripDays
-              .filter((key) => expandedAgendaDays.has(key))
-              .map((key) => {
-                const dayCalls = (callsByDay.get(key) ?? []).slice().sort((a, b) => a.startTs - b.startTs);
-                return (
-                  <div key={key} className="agenda-day-group">
-                    <p className="agenda-day-group-label">{dayChipLabel(key, todayKey, tomorrowKey)}</p>
-                    {dayCalls.length === 0 ? (
-                      <p className="chat-empty-hint agenda-day-group-empty">Nada marcado.</p>
-                    ) : (
-                      dayCalls.map(renderCallItem)
-                    )}
-                  </div>
-                );
-              })}
-          </div>
-        </>
-      )}
-
-      {agendaView === "colleague" && (
-        <>
-          <div className="chat-drawer-header">
-            <button className="chat-icon-btn" title="Voltar pra minha agenda" onClick={onBackToMyAgenda}>
-              <BackIcon />
-            </button>
-            <h3>Agenda de {agendaColleagueName}</h3>
-            <div className="chat-drawer-header-actions">
-              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-          <div className="agenda-call-list">
-            {colleagueCalls.length === 0 && (
-              <p className="chat-empty-hint">Nenhum compromisso marcado por enquanto.</p>
-            )}
-            {colleagueCalls.map((c) =>
-              c.redacted ? (
-                <div key={c.id} className="agenda-call-item agenda-call-item-private">
-                  <span className="agenda-call-item-main">
-                    <span className="agenda-call-title agenda-call-title-private">🔒 Conteúdo da agenda privado</span>
-                    <span className="agenda-call-when">
-                      {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-                    </span>
-                  </span>
-                </div>
-              ) : (
-                <button key={c.id} className="agenda-call-item" onClick={() => onOpenCallDetail(c.id)}>
-                  <span className="agenda-call-item-main">
-                    <span className="agenda-call-title">{c.title}</span>
-                    <span className="agenda-call-when">
-                      {formatCallDateTime(c.startTs)} · {c.durationMinutes}min
-                    </span>
-                  </span>
-                </button>
-              )
-            )}
-          </div>
-        </>
-      )}
-
-      {agendaView === "new" && (
-        <>
-          <div className="chat-drawer-header">
-            <button className="chat-icon-btn" title="Voltar" onClick={() => onChangeAgendaView("list")}>
-              <BackIcon />
-            </button>
-            <h3>Marcar compromisso</h3>
-            <div className="chat-drawer-header-actions">
-              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-          <div className="agenda-form-body">
-            <label className="chat-field">
-              <span>Título</span>
-              <input
-                value={agendaForm.title}
-                onChange={(e) => onChangeAgendaForm({ title: e.target.value })}
-                placeholder="Ex: Alinhamento do projeto"
-                maxLength={80}
-              />
-            </label>
-            <label className="chat-field">
-              <span>Descrição (opcional)</span>
-              <textarea
-                className="agenda-description-input"
-                value={agendaForm.description}
-                onChange={(e) => onChangeAgendaForm({ description: e.target.value })}
-                placeholder="Detalhes do compromisso..."
-                maxLength={2000}
-                rows={3}
-              />
-            </label>
-            <div className="agenda-datetime-row">
-              <label className="chat-field">
-                <span>Data</span>
-                <input type="date" value={agendaForm.date} onChange={(e) => onChangeAgendaForm({ date: e.target.value })} />
-              </label>
-              <label className="chat-field">
-                <span>Horário</span>
-                <input type="time" value={agendaForm.time} onChange={(e) => onChangeAgendaForm({ time: e.target.value })} />
-              </label>
-              <label className="chat-field">
-                <span>Duração</span>
-                <select
-                  value={agendaForm.durationMinutes}
-                  onChange={(e) => onChangeAgendaForm({ durationMinutes: Number(e.target.value) })}
-                >
-                  <option value={15}>15 min</option>
-                  <option value={30}>30 min</option>
-                  <option value={45}>45 min</option>
-                  <option value={60}>1h</option>
-                  <option value={90}>1h30</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="agenda-needs-row">
-              <span className="agenda-field-label">Necessidades</span>
-              <label className="agenda-need-check">
-                <input
-                  type="checkbox"
-                  checked={agendaForm.needs.camera}
-                  onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, camera: e.target.checked } })}
-                />
-                <CamIcon off={false} /> Câmera
-              </label>
-              <label className="agenda-need-check">
-                <input
-                  type="checkbox"
-                  checked={agendaForm.needs.audio}
-                  onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, audio: e.target.checked } })}
-                />
-                <MicIcon off={false} /> Áudio
-              </label>
-              <label className="agenda-need-check">
-                <input
-                  type="checkbox"
-                  checked={agendaForm.needs.screen}
-                  onChange={(e) => onChangeAgendaForm({ needs: { ...agendaForm.needs, screen: e.target.checked } })}
-                />
-                <ScreenIcon active={false} /> Tela
-              </label>
-            </div>
-
-            <div className="agenda-visibility-row">
-              <span className="agenda-field-label">Visibilidade</span>
-              <div className="agenda-visibility-toggle">
-                <button
-                  type="button"
-                  className={agendaForm.visibility === "public" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
-                  onClick={() => onChangeAgendaForm({ visibility: "public" })}
-                >
-                  Público
-                </button>
-                <button
-                  type="button"
-                  className={agendaForm.visibility === "private" ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
-                  onClick={() => onChangeAgendaForm({ visibility: "private" })}
-                >
-                  Privado
-                </button>
-              </div>
-              <p className="agenda-visibility-hint">
-                {agendaForm.visibility === "public"
-                  ? "Quem pesquisar a agenda de um participante vê o conteúdo desse compromisso."
-                  : 'Quem pesquisar a agenda de um participante só vê o horário ocupado, com "conteúdo da agenda privado".'}
-              </p>
-            </div>
-
-            <div className="agenda-visibility-row">
-              <span className="agenda-field-label">Ocupação na agenda</span>
-              <div className="agenda-visibility-toggle">
-                <button
-                  type="button"
-                  className={agendaForm.blocksAgenda ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
-                  onClick={() => onChangeAgendaForm({ blocksAgenda: true })}
-                >
-                  Travar agenda
-                </button>
-                <button
-                  type="button"
-                  className={!agendaForm.blocksAgenda ? "agenda-visibility-btn active" : "agenda-visibility-btn"}
-                  onClick={() => onChangeAgendaForm({ blocksAgenda: false })}
-                >
-                  Mostrar sem travar
-                </button>
-              </div>
-              <p className="agenda-visibility-hint">
-                {agendaForm.blocksAgenda
-                  ? "Ocupa o horário -- quem for convidado pra outro compromisso no mesmo horário aparece como indisponível."
-                  : "Só aparece na agenda, sem travar o horário -- dá pra marcar outro compromisso em cima desse."}
-              </p>
-            </div>
-
-            <div className="agenda-attachment-field">
-              <span className="agenda-field-label">Anexos (visíveis pra todos da call)</span>
-              {agendaForm.attachments.length > 0 && (
-                <div className="agenda-attachment-list">
-                  {agendaForm.attachments.map((a, i) => (
-                    <div key={`${a.url}-${i}`} className="chat-attachment-file agenda-attachment-pending">
-                      <FileIcon />
-                      <span className="chat-attachment-file-info">
-                        <span className="chat-attachment-file-name">{a.name}</span>
-                        <span className="chat-attachment-file-size">{formatFileSize(a.size)}</span>
-                      </span>
-                      <button
-                        type="button"
-                        className="chat-icon-btn"
-                        title="Remover anexo"
-                        onClick={() => onRemoveAgendaAttachment(i)}
-                      >
-                        <CloseIcon />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <button type="button" className="chat-secondary-btn" onClick={onPickAgendaFile} disabled={sendingAgendaAttachment}>
-                {sendingAgendaAttachment ? "Enviando..." : "+ Anexar arquivo"}
-              </button>
-            </div>
-
-            <span className="agenda-field-label">Participantes (opcional -- deixe vazio pra um compromisso só seu)</span>
-            {roster.length === 0 ? (
-              <p className="chat-empty-hint">Ainda não tem mais ninguém cadastrado no ambiente.</p>
-            ) : (
-              <div className="chat-picker-list">
-                {roster.map((u) => {
-                  const busy = busyUserIds.includes(u.userId);
-                  const online = onlineUserIds.has(u.userId);
-                  return (
-                    <label key={u.userId} className={busy ? "chat-picker-item busy" : "chat-picker-item"}>
-                      <input
-                        type="checkbox"
-                        checked={agendaForm.participantIds.includes(u.userId)}
-                        disabled={busy}
-                        onChange={() => onToggleAgendaParticipant(u.userId)}
-                      />
-                      <span className="chat-conv-avatar" style={{ background: u.color }}>
-                        {(u.name || "?").slice(0, 1).toUpperCase()}
-                      </span>
-                      <span>{u.name || "Sem nome"}</span>
-                      {online && <span className="agenda-online-dot" title="Online agora" />}
-                      {busy && <span className="agenda-badge busy">Indisponível</span>}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-
-            {agendaError && <p className="agenda-error">{agendaError}</p>}
-
-            <button className="chat-primary-btn" disabled={!agendaForm.date || !agendaForm.time} onClick={onSubmitCreateCall}>
-              Marcar compromisso
-            </button>
-          </div>
-        </>
-      )}
-
-      {agendaView === "detail" && detailCall && (
-        <>
-          <div className="chat-drawer-header">
-            <button
-              className="chat-icon-btn"
-              title="Voltar"
-              onClick={() => onChangeAgendaView(agendaColleagueId ? "colleague" : "list")}
-            >
-              <BackIcon />
-            </button>
-            <h3>{detailCall.title}</h3>
-            <div className="chat-drawer-header-actions">
-              <button className="chat-icon-btn" title="Fechar" onClick={onClose}>
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-          <div className="agenda-detail-body">
-            <p className="agenda-detail-when">
-              {formatCallDateTime(detailCall.startTs)} · {detailCall.durationMinutes}min
-            </p>
-            <p className="agenda-detail-creator">
-              Marcado por {detailCall.createdByName || "?"} ·{" "}
-              {detailCall.visibility === "private" ? "🔒 Privado" : "Público"} ·{" "}
-              {detailCall.blocksAgenda === false ? "não trava agenda" : "trava agenda"}
-            </p>
-            {detailCall.description && <p className="agenda-detail-description">{detailCall.description}</p>}
-            <div className="agenda-needs-row">
-              {detailCall.needs.camera && (
-                <span className="agenda-need-pill">
-                  <CamIcon off={false} /> Câmera
-                </span>
-              )}
-              {detailCall.needs.audio && (
-                <span className="agenda-need-pill">
-                  <MicIcon off={false} /> Áudio
-                </span>
-              )}
-              {detailCall.needs.screen && (
-                <span className="agenda-need-pill">
-                  <ScreenIcon active={false} /> Tela
-                </span>
-              )}
-            </div>
-            {(detailCall.attachments.length > 0 || myCallStatus !== null) && (
-              <div className="agenda-attachment-field">
-                <span className="agenda-field-label">Anexos</span>
-                {detailCall.attachments.length > 0 ? (
-                  <div className="agenda-attachment-list">
-                    {detailCall.attachments.map((a, i) => (
-                      <a
-                        key={`${a.url}-${i}`}
-                        className="chat-attachment-file"
-                        href={attachmentUrl(a.url)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <FileIcon />
-                        <span className="chat-attachment-file-info">
-                          <span className="chat-attachment-file-name">{a.name}</span>
-                          <span className="chat-attachment-file-size">{formatFileSize(a.size)}</span>
-                        </span>
-                      </a>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="chat-empty-hint agenda-day-group-empty">Nenhum anexo ainda.</p>
-                )}
-                {myCallStatus !== null && (
-                  <button
-                    type="button"
-                    className="chat-secondary-btn"
-                    onClick={onPickDetailAttachment}
-                    disabled={sendingDetailAttachment}
-                  >
-                    {sendingDetailAttachment ? "Enviando..." : "+ Anexar arquivo"}
-                  </button>
-                )}
-              </div>
-            )}
-            <span className="agenda-field-label">Participantes</span>
-            <div className="agenda-participant-list">
-              {detailCall.participants.map((p) => (
-                <div key={p.id} className="agenda-participant-row">
-                  <span className="chat-conv-avatar" style={{ background: p.color }}>
-                    {(p.name || "?").slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="agenda-participant-name">{p.id === myUserId ? "Você" : p.name || "Sem nome"}</span>
-                  <span className={`agenda-badge ${p.status}`}>
-                    {p.status === "approved" ? "Confirmado" : p.status === "declined" ? "Recusou" : "Aguardando"}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {myCallStatus === "pending" && (
-              <div className="agenda-respond-row">
-                <button className="chat-primary-btn" onClick={() => onRespondToCall(detailCall.id, "approved")}>
-                  Confirmar presença
-                </button>
-                <button className="chat-secondary-btn" onClick={() => onRespondToCall(detailCall.id, "declined")}>
-                  Recusar
-                </button>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 function AgendaIcon() {
   return (

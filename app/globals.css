@@ -1239,6 +1239,15 @@ body {
   color: #f5f0ff;
 }
 
+/* "Silenciar" (2/out) -- selinho pequeno do lado do nome, só um aviso
+   visual discreto de que essa conversa não avisa mais. */
+.chat-conv-muted-dot {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.75;
+  vertical-align: 1px;
+}
+
 .chat-conv-preview {
   font-size: 12px;
   color: #f5f0ff;
@@ -1452,6 +1461,17 @@ button.chat-picker-item:disabled {
 
 .chat-conv-menu-item:hover {
   background: rgba(124, 92, 255, 0.22);
+}
+
+/* "Apagar conversa" (2/out) -- mesma ideia de .account-card-menu-item-danger
+   (texto vermelho, inclusive no hover). */
+.chat-conv-menu-item-danger {
+  color: #d1454f;
+}
+
+.chat-conv-menu-item-danger:hover {
+  background: rgba(209, 69, 79, 0.12);
+  color: #d1454f;
 }
 
 
@@ -1752,6 +1772,130 @@ button.chat-picker-item:disabled {
 
 .chat-room-card-btn:hover {
   background: #6b4be6;
+}
+
+/* "Dar dois clique na mensagem ativar a resposta" (2/out, pedido do
+   Douglas) -- barrinha "Respondendo a Fulano: ..." acima do composer,
+   igual WhatsApp/Telegram. Fica DENTRO do fluxo normal (não
+   position:absolute) -- só empurra o composer um pouco pra cima,
+   nunca sobrepõe nada. */
+.chat-reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(124, 92, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.chat-reply-bar-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 2px solid #7c5cff;
+  padding-left: 8px;
+}
+
+.chat-reply-bar-sender {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #a98cff;
+}
+
+.chat-reply-bar-preview {
+  font-size: 12px;
+  color: #c9c2e0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-reply-bar-cancel {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #a99fc2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-reply-bar-cancel:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+/* miniatura de verdade da imagem respondida (2/out, pedido do
+   Douglas: "na conversa precisa aparecer a resposta selecionada ao
+   arquivo, igual no whats") -- só aparece pra kind "image" (ver
+   condição no JSX), fica entre a faixinha colorida e o botão de X. */
+.chat-reply-bar-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* citação da mensagem original DENTRO do balão de resposta (2/out) --
+   mesma faixinha colorida da esquerda do chat-reply-bar acima, só que
+   mais discreta (fundo translúcido em vez de sólido), pra não competir
+   com o conteúdo da própria mensagem logo abaixo. */
+.chat-reply-quote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-left: 2px solid rgba(255, 255, 255, 0.4);
+  padding: 2px 7px 2px 7px;
+  margin-bottom: 5px;
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+}
+
+/* mesma miniatura de verdade do chat-reply-bar-thumb acima, só que
+   DENTRO do balão já enviado (ver condição kind==="image" no JSX) --
+   um pouco menor pra não competir com o conteúdo da mensagem. */
+.chat-reply-quote-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.chat-reply-quote-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-message.own .chat-reply-quote {
+  border-left-color: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.chat-reply-quote-sender {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.chat-reply-quote-text {
+  font-size: 11.5px;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 190px;
 }
 
 .chat-composer {
@@ -2352,41 +2496,28 @@ button.chat-picker-item:disabled {
   font-size: 12px;
 }
 
-/* botão de apagar (lixeira) que aparece do lado das PRÓPRIAS mensagens
-   ainda não apagadas -- fica escondido até passar o mouse por perto, pra
-   não poluir a conversa toda com uma lixeira do lado de cada balão. */
+/* linha da mensagem (balão + barra flutuante de ações) -- fica o
+   ancestral POSICIONADO de tudo que flutua por cima dela (popovers de
+   reagir/fixar E a barra de ações, ver .chat-message-hover-toolbar/
+   .chat-quick-react-popover/.chat-pin-duration-popover abaixo). 2/out,
+   bug real do Douglas ("os arquivos enviados no chat, fixar ta
+   deslocado sumido" + "quero o emoji na mesma posicao que fica no
+   Whats" + depois "ta no cantinho ainda, e muito pequeno, e cinza"):
+   antes "bottom: 100%" media a altura do BOTÃO (~22px) ancorado nele
+   mesmo, então numa mensagem com imagem/anexo alta o popover abria
+   "colado no meio da imagem"; agora "100%" é a altura da LINHA TODA
+   (só o balão, já que a barra de ações saiu do fluxo flex -- ver
+   position:absolute abaixo), então abre sempre colado no balão
+   inteiro, pouco importa o tamanho dele -- igual WhatsApp/Slack. */
 .chat-message-row {
   display: flex;
   align-items: flex-end;
   gap: 4px;
+  position: relative;
 }
 
 .chat-message.own .chat-message-row {
   flex-direction: row-reverse;
-}
-
-.chat-message-delete-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
-  color: #7c7290;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
-}
-
-.chat-message-row:hover .chat-message-delete-btn {
-  opacity: 1;
-}
-
-.chat-message-delete-btn:hover {
-  color: #ff5c7a;
 }
 
 /* =====================================================================
@@ -2402,38 +2533,78 @@ button.chat-picker-item:disabled {
    components/GameRoom.tsx pro JSX que usa essas classes.
    ===================================================================== */
 
-/* reagir + fixar (dois botõezinhos redondos do lado do balão) -- mesmo
-   espírito do .chat-message-delete-btn logo acima (escondido até
-   passar o mouse por perto), só que em grupo e com popover embutido.
-   O popover em si fica DENTRO do wrap (ver .chat-message-action-wrap),
-   então passar o mouse nele continua contando como hover de
-   .chat-message-row (hover propaga pela árvore do DOM, não pela
-   posição visual) -- é por isso que dá pra abrir o popover, soltar o
-   mouse do botão e ainda clicar numa opção sem ele sumir. */
-.chat-message-actions {
+/* barra flutuante de ações (responder/reagir/fixar/apagar) -- 2/out,
+   pedido do Douglas comparando com a barrinha que aparece ao passar o
+   mouse em cima de uma mensagem no Slack: "ta no cantinho ainda, e
+   muito pequeno, e cinza" + "nao recisa clicar no balao, coloca uma
+   selecao em cada mensagem tipo o slack". Antes os botões viviam
+   DENTRO do fluxo flex da linha, espremidos coladinhos no canto do
+   balão; agora é um cartão position:absolute ancorado na BORDA da
+   linha (mesmo truque dos popovers logo abaixo -- cresce pra DENTRO,
+   nunca estoura a gaveta) que flutua por cima do topo do balão e só
+   aparece no hover (sem precisar de clique pra revelar, nem de
+   duplo-clique pra responder -- o botão "Responder" já fica ali). O
+   cartão fica DENTRO da .chat-message-row no DOM mesmo estando fora
+   da caixa dela visualmente, então passar o mouse nele continua
+   contando como hover da linha (hover propaga pela árvore do DOM, não
+   pela posição visual) -- dá pra abrir um popover, soltar o mouse do
+   botão e clicar numa opção sem a barra sumir. */
+.chat-message-hover-toolbar {
+  position: absolute;
+  /* 2/out, bug real do Douglas ("o balaozinho nao se matem pra clicar
+     encima, ele aparece mas quando voce vai deslizar pra clicar ele
+     some") -- com "bottom: 100% + 6px" sobrava uma faixa de 6px entre
+     a linha e o cartão que não pertence a NENHUM dos dois elementos;
+     o mouse passa por ela pra chegar na barra e o :hover da LINHA
+     desliga no meio do caminho (CSS só conta hover de elemento
+     REALMENTE sob o cursor, não o "espaço entre" -- mesmo se os dois
+     tiverem a linha como ancestral comum). Com "100% - 10px" o cartão
+     passa a SOBREPOR 10px pra dentro do balão (sem gap nenhum no
+     meio), então o cursor nunca sai de cima de um elemento ou outro
+     durante o trajeto -- mesmo espírito visual do hover-toolbar do
+     Slack, que também fica "montado" em cima do topo da mensagem. */
+  bottom: calc(100% - 10px);
+  left: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #221a38;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
   opacity: 0;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
 }
 
-.chat-message-row:hover .chat-message-actions {
+.chat-message.own .chat-message-hover-toolbar {
+  left: auto;
+  right: 0;
+}
+
+.chat-message-row:hover .chat-message-hover-toolbar {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-message-action-wrap {
-  position: relative;
+  /* position:relative saiu daqui (2/out) -- ver comentário grande em
+     .chat-message-row acima: o popover agora ancora na LINHA inteira,
+     não no botão. */
 }
 
+/* 28px (antes 22px) + cor clara #cfc6e8 (antes #7c7290, cinza fosco
+   demais pra enxergar de longe) -- mesma reclamação do Douglas que
+   motivou o cartão flutuante acima. */
 .chat-message-action-btn {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   border: none;
   background: transparent;
-  color: #7c7290;
+  color: #cfc6e8;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2445,6 +2616,13 @@ button.chat-picker-item:disabled {
 .chat-message-action-btn.active {
   color: #fff;
   background: rgba(124, 92, 255, 0.35);
+}
+
+/* lixeira (só nas PRÓPRIAS mensagens) -- mesmo botão redondo de cima,
+   só muda a cor no hover pra avisar que é destrutivo. */
+.chat-message-delete-btn:hover {
+  color: #ff5c7a;
+  background: rgba(255, 92, 122, 0.18);
 }
 
 /* popover de emoji rápido (reagir) e de "tempo de fixação" (fixar) --
@@ -2459,14 +2637,30 @@ button.chat-picker-item:disabled {
 .chat-pin-duration-popover {
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  /* 2/out -- antes centralizava (left:50% + translateX(-50%)) no
+     BOTÃO, que fica perto da borda da gaveta pro lado de fora do
+     balão (ações ficam à DIREITA em mensagem própria, à ESQUERDA nas
+     dos outros, ver .chat-message.own .chat-message-row = row-reverse
+     acima) -- um popover de ~150px centralizado ali estourava a
+     largura da gaveta (320-420px) e "sumia"/"deslocava" pra cima do
+     resto da página (bug real do Douglas, visto com um anexo de
+     imagem, que deixa o botão bem perto da borda). Agora ancora pela
+     BORDA de fora da linha inteira e cresce só PRA DENTRO da gaveta
+     -- nunca estoura mais, não importa a largura do anexo. Mensagem
+     própria (own) inverte pra direita, ver regra logo abaixo. */
+  left: 0;
   z-index: 9;
   padding: 6px;
   border-radius: 12px;
   background: #1c1530;
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.chat-message.own .chat-quick-react-popover,
+.chat-message.own .chat-pin-duration-popover {
+  left: auto;
+  right: 0;
 }
 
 .chat-quick-react-popover {
@@ -2858,6 +3052,11 @@ button.chat-picker-item:disabled {
   padding: 8px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.chat-files-panel-item:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .chat-files-panel-thumb {
@@ -2917,6 +3116,148 @@ button.chat-picker-item:disabled {
 .chat-files-panel-btn:hover {
   color: #fff;
   background: rgba(124, 92, 255, 0.35);
+}
+
+/* "abriu ele na galeria, abre o historico de mensagens grudadas nele"
+   (2/out, pedido do Douglas) -- visualizador do anexo clicado no
+   painel "Arquivos da conversa", mesmo espírito de click-catcher +
+   zindex do .chat-files-panel-click-catcher acima, só que centralizado
+   na tela (modal) em vez de ancorado do lado do painel. */
+.chat-gallery-click-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(10, 6, 20, 0.55);
+}
+
+.chat-gallery-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 11;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background: #16101f;
+  border: 1px solid #2f2245;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.chat-gallery-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-gallery-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-gallery-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-gallery-modal-media {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chat-gallery-modal-audio {
+  width: 100%;
+}
+
+.chat-gallery-modal-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 0;
+  color: #cfc6e8;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.chat-gallery-modal-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #7c7290;
+}
+
+.chat-gallery-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-gallery-modal-actions .chat-files-panel-btn {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 999px;
+  gap: 6px;
+  font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.chat-gallery-modal-thread {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-gallery-modal-thread h4 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #7c7290;
+}
+
+.chat-gallery-thread-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.chat-gallery-thread-sender {
+  font-weight: 600;
+  color: #cfc6e8;
+}
+
+.chat-gallery-thread-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.chat-gallery-thread-time {
+  font-size: 10px;
+  color: #7c7290;
 }
 
 .hint {

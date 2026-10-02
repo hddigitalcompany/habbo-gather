@@ -498,6 +498,38 @@ export function isParticipant(conversationId, userId) {
   return !!conv && conv.participantIds.includes(userId);
 }
 
+/** "Silenciar"/"Apagar conversa" (2/out, pedido do Douglas: "nao tem
+ * opcao de Silenciar, e de Apagar conversa") -- os dois são flags POR
+ * USUÁRIO (mutedBy/hiddenBy, mesmo esquema de lastRead acima: objeto
+ * {userId: true}, nunca mexe na conversa dos outros participantes).
+ * "Silenciar" só impede notificação/toast local (ver toastHandlerRef/
+ * fireNotification em usePlatformChat.ts) -- mensagem continua
+ * chegando e contando unreadCount normal, só não avisa. "Apagar"
+ * tira da LISTA de quem apagou (ver listConversationsForUser abaixo),
+ * sem apagar nada de verdade pro resto -- mensagem nova (addMessage)
+ * ou reabrir essa conversa (markConversationRead) desfaz o oculto
+ * sozinho, igual WhatsApp: "apagar" nunca é destrutivo/permanente,
+ * só limpa a lista até ter motivo de voltar. */
+export function setConversationMuted(conversationId, userId, muted) {
+  const conv = store.conversations[conversationId];
+  if (!conv || !conv.participantIds.includes(userId)) return null;
+  if (!conv.mutedBy) conv.mutedBy = {};
+  if (muted) conv.mutedBy[userId] = true;
+  else delete conv.mutedBy[userId];
+  persist();
+  return conv;
+}
+
+export function setConversationHidden(conversationId, userId, hidden) {
+  const conv = store.conversations[conversationId];
+  if (!conv || !conv.participantIds.includes(userId)) return null;
+  if (!conv.hiddenBy) conv.hiddenBy = {};
+  if (hidden) conv.hiddenBy[userId] = true;
+  else delete conv.hiddenBy[userId];
+  persist();
+  return conv;
+}
+
 /** Marca uma conversa como lida por um usuário (chamado quando abre a
  * conversa -- ver o case "chat:open" no WebSocket e POST /chat/open
  * em server/index.js, esse último pro Lobby que não tem socket).
@@ -513,6 +545,10 @@ export function markConversationRead(conversationId, userId) {
   if (!conv.lastRead) conv.lastRead = {};
   const previous = conv.lastRead[userId] ?? 0;
   conv.lastRead[userId] = Date.now();
+  // abrir de novo uma conversa "apagada" (ver setConversationHidden
+  // acima) desfaz o oculto -- a pessoa já tá olhando ela, não faz
+  // sentido continuar escondida da própria lista.
+  if (conv.hiddenBy && conv.hiddenBy[userId]) delete conv.hiddenBy[userId];
   persist();
   return previous;
 }
@@ -522,7 +558,7 @@ export function markConversationRead(conversationId, userId) {
  * participantes -- pronto pra desenhar a lista sem consulta extra. */
 export function listConversationsForUser(userId) {
   return Object.values(store.conversations)
-    .filter((c) => c.participantIds.includes(userId))
+    .filter((c) => c.participantIds.includes(userId) && !(c.hiddenBy && c.hiddenBy[userId]))
     .map((c) => {
       const msgs = store.messages[c.id] ?? [];
       const last = msgs[msgs.length - 1] ?? null;
@@ -560,6 +596,7 @@ export function listConversationsForUser(userId) {
           .filter((id) => id !== userId)
           .map((id) => ({ id, ...getUser(id) })),
         updatedAt: c.updatedAt,
+        muted: !!(c.mutedBy && c.mutedBy[userId]),
         unreadCount,
         lastMessage: last
           ? { senderId: last.senderId, senderName: last.senderName, kind: last.kind, text: last.text, ts: last.ts }
@@ -569,9 +606,49 @@ export function listConversationsForUser(userId) {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function addMessage(conversationId, { senderId, senderName, kind, text, attachment, roomCard, mentionedUserIds }) {
+export function addMessage(
+  conversationId,
+  { senderId, senderName, kind, text, attachment, roomCard, mentionedUserIds, replyToMessageId }
+) {
   const conv = store.conversations[conversationId];
   if (!conv) return null;
+  // "responder"/"mencionar" uma mensagem (2/out, pedido do Douglas:
+  // "Dar dois clique na mensagem ativar a resposta a mensagem" +
+  // "Arquivos ficam com historico de mensagens mencionadas a ele") --
+  // guarda um RETRATO (congelado na hora, mesmo espírito de
+  // companyName/lane em getOrCreateDirectConversation) da mensagem
+  // original: se ela for apagada DEPOIS, a citação continua mostrando
+  // o conteúdo de antes (não vira uma citação de "mensagem apagada"
+  // com o texto sumido) -- só precisa existir AGORA, na mesma conversa.
+  // É esse campo (replyTo) que dá a "mensagem mencionada" de um
+  // anexo: abrir o arquivo na galeria mostra toda mensagem cujo
+  // replyTo.messageId aponta pra mensagem que mandou esse anexo (ver
+  // filtro client-side em ChatDrawer, não precisou de índice novo
+  // aqui -- é só um campo a mais por mensagem, igual reactions/mentions).
+  let replyTo = null;
+  if (typeof replyToMessageId === "string" && replyToMessageId) {
+    const list = store.messages[conversationId] ?? [];
+    const original = list.find((m) => m.id === replyToMessageId);
+    if (original) {
+      replyTo = {
+        messageId: original.id,
+        senderId: original.senderId,
+        senderName: original.senderName,
+        kind: original.kind,
+        text: original.deleted ? "" : original.text,
+        attachmentName: original.deleted ? null : original.attachment?.name ?? null,
+        // 2/out, pedido do Douglas ("na conversa precisa aparecer a
+        // resposta selecionada ao arquivo, igual no whats") -- URL do
+        // anexo original, pro balão/barra de resposta mostrarem uma
+        // MINIATURA de verdade (imagem pequena) em vez de só um ícone +
+        // nome de arquivo. Mesmo RETRATO congelado de attachmentName
+        // acima -- se o anexo original sumir depois, a miniatura pode
+        // quebrar, mesmo risco que já existia pra qualquer anexo citado.
+        attachmentUrl: original.deleted ? null : original.attachment?.url ?? null,
+        deleted: !!original.deleted,
+      };
+    }
+  }
   const msg = {
     id: randomUUID(),
     conversationId,
@@ -587,6 +664,7 @@ export function addMessage(conversationId, { senderId, senderName, kind, text, a
           mime: String(attachment.mime || "").slice(0, 100),
         }
       : null,
+    replyTo,
     // @menção (pedido do Douglas, 1/out, comparando com Slack) -- o
     // cliente monta a lista ao digitar "@" (ver ChatDrawer); aqui só
     // intersecta com quem É participante de verdade dessa conversa
@@ -624,6 +702,10 @@ export function addMessage(conversationId, { senderId, senderName, kind, text, a
   list.push(msg);
   if (list.length > MAX_MESSAGES_PER_CONVERSATION) list.splice(0, list.length - MAX_MESSAGES_PER_CONVERSATION);
   conv.updatedAt = msg.ts;
+  // mensagem nova "desapaga" a conversa pra quem tinha apagado (ver
+  // setConversationHidden acima) -- tem novidade de verdade, não faz
+  // sentido continuar sumida da lista de ninguém.
+  if (conv.hiddenBy && Object.keys(conv.hiddenBy).length > 0) conv.hiddenBy = {};
   persist();
   return msg;
 }

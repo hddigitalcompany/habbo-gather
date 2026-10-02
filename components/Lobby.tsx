@@ -28,25 +28,23 @@ import PartySocket from "partysocket";
 //
 // Chat/agenda (28/set, pedido do Douglas: "chat, agenda, configuracoes
 // nao ficam presas apenas a sala, acompanha cada pessoa por toda
-// plataforma" -- depois, vendo só o resumo em texto: "cade o botao das
-// conversas e da agenda? mantenha igual de dentro da sala") -- os
-// ícones aqui são os MESMOS ChatIcon/AgendaIcon da av-bar do GameRoom
-// (copiados, ver comentário deles abaixo) e abrem um painel de verdade
-// (ler mensagens, RESPONDER, aceitar/recusar compromisso), não só
-// texto. A diferença de "dentro da sala": aqui NÃO existe WebSocket
-// (entrar no Lobby não pode virar presença fantasma na sala pra quem
-// já tá lá dentro, ver comentário grande em server/index.js sobre
-// broadcast de "join" assim que uma conexão abre) -- então tudo aqui
-// usa REST simples (GET /chat/summary, /chat/messages, POST
-// /chat/send, GET /agenda/summary, POST /agenda/respond, todos novos
-// em server/index.js, reaproveitando as MESMAS funções de
-// chatStore/agendaStore que o WebSocket usa). Quem estiver com a sala
-// aberta em outra aba recebe a mensagem/resposta em tempo real do
-// mesmo jeito (o servidor empurra por sendToUser); só quem só tem o
-// Lobby aberto não recebe push -- teria que reabrir a conversa. Criar
-// conversa nova, anexo e chamada de voz/vídeo continuam só dentro da
-// sala (dependem de WebRTC/WebSocket de verdade, ver ChatDrawer em
-// GameRoom.tsx).
+// plataforma") -- os ícones aqui são os MESMOS ChatIcon/AgendaIcon da
+// av-bar do GameRoom (copiados, ver comentário deles abaixo) e abrem o
+// MESMO painel de verdade que a sala usa (ChatDrawer/AgendaDrawer),
+// alimentado pelo MESMO motor único (usePlatformChat.ts -- UMA conexão
+// de plataforma, mantida desde o login, independente de Lobby/sala, ver
+// comentário grande no topo de usePlatformChat.ts). Virou assim em duas
+// etapas: chat em 1/out (pedido do Douglas: "pega o chat de dentro e
+// transforma ele em CHAT que acompanha toda a plataforma") e agenda em
+// 2/out (pedido do Douglas: "quero ela [a agenda] toda isolada tambem,
+// e sistema unico, assim como o chat, funcionando acima de tudo, acima
+// de lobby acima de jogo") -- antes disso cada um tinha sua própria
+// reimplementação REST só pro Lobby (LobbyChatPanel/LobbyAgendaPanel,
+// ambos removidos), sem WebSocket nenhum aqui. Esse arquivo não abre
+// conexão própria nenhuma mais: conversar, marcar/responder compromisso,
+// anexo -- tudo passa pelo `chat` recebido via prop (platformChat, ver
+// Home() em app/page.tsx). Só entrar numa CHAMADA de voz/vídeo de
+// verdade (WebRTC) continua exigindo estar dentro da sala.
 
 import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import type { AccountProfile } from "@/components/AuthGate";
@@ -101,7 +99,7 @@ const ChatDrawer = dynamic(() => import("@/components/ChatDrawer").then((m) => m
   // PRIMEIRA vez que a pessoa abre o chat na sessão.
   ssr: false,
 });
-import type { Conversation, ChatMsg, ChatMsgKind, ChatCallParticipant, ChatTypingEntry } from "@/components/GameRoom";
+import type { Conversation, ChatMsg, ChatMsgKind, ChatCallParticipant, ChatTypingEntry, CallEvent } from "@/components/GameRoom";
 import {
   getStoredMicOn,
   getStoredCamOn,
@@ -137,21 +135,11 @@ const LOBBY_CHAT_PINNED_STORAGE_KEY = "habbo-gather-lobby-chat-pinned";
 
 type PresenceInfo = { totalOnline: number } | null;
 
-type CallParticipant = { id: string; name: string; status: string };
-type CallSummary = {
-  id: string;
-  title: string;
-  startTs: number;
-  durationMinutes: number;
-  participants: CallParticipant[];
-  // já vinham do servidor (enrich() em server/agendaStore.js) mas o
-  // cliente não usava -- precisa de createdBy pra saber quem pode
-  // editar/apagar o compromisso (só quem criou, ver
-  // agendaStore.updateCall/deleteCall) e description pra reaproveitar
-  // no formulário de edição (ver LobbyAgendaPanel).
-  createdBy: string;
-  description: string;
-};
+// CallParticipant/CallSummary saíram daqui (2/out) -- a "previa da
+// agenda" abaixo agora usa CallEvent direto (type-only import de
+// GameRoom.tsx, mesmo padrão de Conversation/ChatMsg acima), MESMO tipo
+// que o motor único (usePlatformChat.ts) já produz -- sem redefinir um
+// tipo paralelo só pra Lobby.
 
 type FloorTile = { col: number; row: number; styleId: string };
 type FurnitureItem = { col: number; row: number; type: string };
@@ -1024,37 +1012,12 @@ function GearIcon() {
   );
 }
 
-function formatCallWhen(startTs: number): string {
-  return new Date(startTs).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-// mesma ideia de pad2/localDateStr/localTimeStr/combineLocalDateTime
-// em GameRoom.tsx (copiadas, não importadas -- mesmo motivo dos
-// ícones/compressPhotoToDataUrl acima: GameRoom não exporta essas
-// funções) -- usadas no formulário de criar/editar compromisso do
-// LobbyAgendaPanel (inputs separados de data/hora, igual
-// <input type="date">/<input type="time">).
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function localDateStr(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-function localTimeStr(d: Date): string {
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
-function combineLocalDateTime(dateStr: string, timeStr: string): number {
-  if (!dateStr || !timeStr) return NaN;
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const [hh, mm] = timeStr.split(":").map(Number);
-  if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
-  return new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
-}
+// formatCallWhen/pad2/localDateStr/localTimeStr/combineLocalDateTime
+// saíram daqui (2/out) -- só existiam pro formulário REST do
+// LobbyAgendaPanel (removido, ver comentário grande mais abaixo onde
+// ele morava); o formulário de criar/editar compromisso agora é só o
+// AgendaDrawer (components/AgendaDrawer.tsx), que já importa essas
+// mesmas funções de GameRoom.tsx.
 
 // pedido do Douglas: "faca uma previa da agenda conforme a foto
 // enviada" -- print de referência com 3 cards (um por dia com
@@ -1202,6 +1165,11 @@ function LobbyChatPanel({
       onDeleteMessage={chat.deleteMessage}
       onSendRoomCard={chat.sendRoomCard}
       onMoveConversationLane={chat.moveConversationLane}
+      onMuteConversation={chat.muteConversation}
+      onDeleteConversation={chat.deleteConversation}
+      replyingTo={chat.replyingTo}
+      onStartReply={chat.startReplyToMessage}
+      onCancelReply={chat.cancelReply}
       callParticipantsByConversation={chat.callParticipantsByConversation}
       myCallConversationId={chat.myCallConversationId}
       callRemoteStreams={chat.callRemoteStreams}
@@ -1262,419 +1230,19 @@ function LobbyChatPanel({
   );
 }
 
-/** Painel de agenda do Lobby -- lista de compromissos, com Aceitar/
- * Recusar pra quem ainda tá pendente (mesma trava de participante do
- * agendaStore, ver POST /agenda/respond em server/index.js). */
-type AgendaFormState = {
-  title: string;
-  date: string;
-  time: string;
-  durationMinutes: number;
-  participantIds: string[];
-  description: string;
-};
+// LobbyAgendaPanel saiu daqui inteiro (2/out) -- era a reimplementação
+// REST (POST /agenda/respond,create,update,delete em server/index.js)
+// que existia só porque o Lobby não tinha como reusar o AgendaDrawer
+// de dentro da sala (função local, não-exportada, ver GameRoom.tsx
+// antes dessa mudança). Pedido do Douglas: "quero ela [a agenda] toda
+// isolada tambem, e sistema unico, assim como o chat, funcionando
+// acima de tudo, acima de lobby acima de jogo" -- agora é o MESMO
+// AgendaDrawer (components/AgendaDrawer.tsx), alimentado pelo MESMO
+// estado do motor único (chat.calls/chat.agendaOpen/etc, ver
+// usePlatformChat.ts), renderizado uma única vez acima de Lobby E
+// GameRoom (ver PlatformAgendaHost em app/page.tsx) -- sem gaveta
+// paralela nenhuma aqui.
 
-const AGENDA_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120];
-
-/** Painel de agenda do Lobby -- lista de compromissos (Aceitar/Recusar
- * pra quem ainda tá pendente, mesma trava de participante do
- * agendaStore, ver POST /agenda/respond em server/index.js) + CRIAR e
- * EDITAR compromisso (29/set: Douglas reportou "nao me da a agenda
- * mesmo, editavel e criavel" -- antes só tinha leitura/resposta,
- * igual a versão de dentro da sala (av-bar "Marcar compromisso"), mas
- * essa daqui roda via REST (POST /agenda/create,update,delete em
- * server/index.js), sem abrir WebSocket -- MESMO motivo do resto do
- * Lobby ficar em REST (ver comentário grande no topo do arquivo: não
- * virar presença fantasma na sala). Só quem CRIOU o compromisso pode
- * editar/apagar (call.createdBy, ver agendaStore.updateCall/
- * deleteCall) -- participantes continuam só podendo aceitar/recusar.
- * Editar não mexe em quem foi convidado (participantes só se define
- * na criação -- isso também não existe na versão de dentro da sala,
- * não é regressão daqui). */
-function LobbyAgendaPanel({
-  myUserId,
-  calls,
-  directory,
-  onClose,
-  setCalls,
-}: {
-  myUserId: string;
-  calls: CallSummary[] | null;
-  directory: ContactUser[] | null;
-  onClose: () => void;
-  setCalls: (updater: (prev: CallSummary[] | null) => CallSummary[] | null) => void;
-}) {
-  const [respondingId, setRespondingId] = useState<string | null>(null);
-  const [view, setView] = useState<"list" | "form">("list");
-  const [editingCallId, setEditingCallId] = useState<string | null>(null);
-  const [form, setForm] = useState<AgendaFormState>({
-    title: "",
-    date: "",
-    time: "",
-    durationMinutes: 30,
-    participantIds: [],
-    description: "",
-  });
-  const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  async function respond(callId: string, status: "approved" | "declined") {
-    if (respondingId) return;
-    setRespondingId(callId);
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callId, userId: myUserId, status }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.call) setCalls((prev) => (prev ? prev.map((c) => (c.id === data.call.id ? data.call : c)) : prev));
-      }
-    } catch {
-      // rede caiu -- pessoa tenta de novo, botão volta a ficar clicável
-    } finally {
-      setRespondingId(null);
-    }
-  }
-
-  function openNewForm() {
-    const suggestion = new Date(Date.now() + 30 * 60_000); // meia hora a partir de agora, só ponto de partida
-    setForm({
-      title: "",
-      date: localDateStr(suggestion),
-      time: localTimeStr(suggestion),
-      durationMinutes: 30,
-      participantIds: [],
-      description: "",
-    });
-    setEditingCallId(null);
-    setFormError(null);
-    setParticipantPickerOpen(false);
-    setView("form");
-  }
-
-  function openEditForm(call: CallSummary) {
-    const d = new Date(call.startTs);
-    setForm({
-      title: call.title,
-      date: localDateStr(d),
-      time: localTimeStr(d),
-      durationMinutes: call.durationMinutes,
-      participantIds: call.participants.filter((p) => p.id !== myUserId).map((p) => p.id),
-      description: call.description || "",
-    });
-    setEditingCallId(call.id);
-    setFormError(null);
-    setParticipantPickerOpen(false);
-    setView("form");
-  }
-
-  function toggleFormParticipant(userId: string) {
-    setForm((prev) => ({
-      ...prev,
-      participantIds: prev.participantIds.includes(userId)
-        ? prev.participantIds.filter((x) => x !== userId)
-        : [...prev.participantIds, userId],
-    }));
-  }
-
-  async function submitForm() {
-    const startTs = combineLocalDateTime(form.date, form.time);
-    if (!Number.isFinite(startTs)) {
-      setFormError("Preenche a data e o horário pra marcar o compromisso.");
-      return;
-    }
-    setSaving(true);
-    setFormError(null);
-    try {
-      if (editingCallId) {
-        const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/update`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            callId: editingCallId,
-            userId: myUserId,
-            title: form.title.trim() || "Call",
-            startTs,
-            durationMinutes: form.durationMinutes,
-            description: form.description.trim(),
-          }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.call) {
-          setFormError("Não deu pra salvar -- tenta de novo.");
-          return;
-        }
-        setCalls((prev) => (prev ? prev.map((c) => (c.id === data.call.id ? data.call : c)) : prev));
-      } else {
-        const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/create`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: myUserId,
-            title: form.title.trim() || "Call",
-            startTs,
-            durationMinutes: form.durationMinutes,
-            participantIds: form.participantIds,
-            description: form.description.trim(),
-          }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.call) {
-          setFormError("Não deu pra criar -- tenta de novo.");
-          return;
-        }
-        setCalls((prev) => [...(prev ?? []), data.call]);
-      }
-      setView("list");
-    } catch {
-      setFormError("Rede caiu -- tenta de novo.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteCall(callId: string) {
-    if (deletingId) return;
-    if (!window.confirm("Apagar esse compromisso?")) return;
-    setDeletingId(callId);
-    try {
-      const res = await fetch(`${REALTIME_HTTP_BASE}/agenda/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callId, userId: myUserId }),
-      });
-      if (res.ok) {
-        setCalls((prev) => (prev ? prev.filter((c) => c.id !== callId) : prev));
-      }
-    } catch {
-      // rede caiu -- pessoa tenta de novo
-    } finally {
-      setDeletingId(null);
-    }
-  }
-
-  const sorted = calls ? [...calls].sort((a, b) => a.startTs - b.startTs) : null;
-
-  return (
-    <div className="lobby-panel-backdrop" onClick={onClose}>
-      <div className={view === "form" ? "lobby-panel lobby-panel-wide" : "lobby-panel"} onClick={(e) => e.stopPropagation()}>
-        <div className="lobby-panel-header">
-          {view === "form" && (
-            <button type="button" className="lobby-panel-back" onClick={() => setView("list")} title="Voltar">
-              ←
-            </button>
-          )}
-          <h3>{view === "list" ? "Agenda" : editingCallId ? "Editar compromisso" : "Novo compromisso"}</h3>
-          {view === "list" && (
-            <button type="button" className="lobby-panel-add" onClick={openNewForm} title="Novo compromisso">
-              +
-            </button>
-          )}
-          <button type="button" className="lobby-panel-close" onClick={onClose} title="Fechar">
-            ✕
-          </button>
-        </div>
-
-        {view === "list" ? (
-          !sorted || sorted.length === 0 ? (
-            <div className="lobby-panel-empty-wrap">
-              <p className="lobby-panel-empty">Nenhum compromisso agendado.</p>
-              <button type="button" className="lobby-agenda-new-btn" onClick={openNewForm}>
-                + Marcar compromisso
-              </button>
-            </div>
-          ) : (
-            <ul className="lobby-call-list">
-              {sorted.map((call) => {
-                const mine = call.participants.find((p) => p.id === myUserId);
-                const isOwner = call.createdBy === myUserId;
-                return (
-                  <li key={call.id} className="lobby-call-item">
-                    <p className="lobby-call-title">{call.title}</p>
-                    <p className="lobby-call-when">
-                      {formatCallWhen(call.startTs)} · {call.durationMinutes} min
-                    </p>
-                    {mine?.status === "pending" ? (
-                      <div className="lobby-call-actions">
-                        <button
-                          type="button"
-                          className="lobby-call-accept"
-                          disabled={respondingId === call.id}
-                          onClick={() => respond(call.id, "approved")}
-                        >
-                          Aceitar
-                        </button>
-                        <button
-                          type="button"
-                          className="lobby-call-decline"
-                          disabled={respondingId === call.id}
-                          onClick={() => respond(call.id, "declined")}
-                        >
-                          Recusar
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="lobby-call-status">
-                        {mine?.status === "declined" ? "Você recusou" : mine?.status === "approved" ? "Confirmado" : ""}
-                      </p>
-                    )}
-                    {isOwner && (
-                      <div className="lobby-call-owner-actions">
-                        <button type="button" className="lobby-call-edit" onClick={() => openEditForm(call)}>
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          className="lobby-call-delete"
-                          disabled={deletingId === call.id}
-                          onClick={() => deleteCall(call.id)}
-                        >
-                          Apagar
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )
-        ) : (
-          <div className="lobby-agenda-form">
-            <label className="lobby-agenda-form-field">
-              <span>Título</span>
-              <input
-                type="text"
-                value={form.title}
-                maxLength={80}
-                placeholder="Reunião, call, compromisso…"
-                onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
-              />
-            </label>
-
-            <div className="lobby-agenda-form-row">
-              <label className="lobby-agenda-form-field">
-                <span>Data</span>
-                <input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))}
-                />
-              </label>
-              <label className="lobby-agenda-form-field">
-                <span>Horário</span>
-                <input
-                  type="time"
-                  value={form.time}
-                  onChange={(e) => setForm((prev) => ({ ...prev, time: e.target.value }))}
-                />
-              </label>
-            </div>
-
-            <label className="lobby-agenda-form-field">
-              <span>Duração</span>
-              <select
-                value={form.durationMinutes}
-                onChange={(e) => setForm((prev) => ({ ...prev, durationMinutes: Number(e.target.value) }))}
-              >
-                {AGENDA_DURATION_OPTIONS.map((min) => (
-                  <option key={min} value={min}>
-                    {min} min
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {/* participantes só dá pra escolher na CRIAÇÃO -- editar
-                não mexe em quem foi convidado (ver comentário grande
-                no topo do componente). Ao editar, só mostra quem já
-                tá convidado, sem dropdown. */}
-            {editingCallId ? (
-              <div className="lobby-agenda-form-field">
-                <span>Convidados</span>
-                <p className="lobby-agenda-invited-readonly">
-                  {form.participantIds.length === 0
-                    ? "Só você"
-                    : form.participantIds
-                        .map((id) => directory?.find((u) => u.userId === id)?.name || "Alguém")
-                        .join(", ")}
-                </p>
-              </div>
-            ) : (
-              <label className="lobby-agenda-form-field">
-                <span>Convidar pessoas</span>
-                <div className="company-edit-category-select">
-                  <button
-                    type="button"
-                    className="company-edit-input company-edit-category-trigger"
-                    onClick={() => setParticipantPickerOpen((v) => !v)}
-                    aria-expanded={participantPickerOpen}
-                    disabled={!directory}
-                  >
-                    <span className="company-edit-category-trigger-text">
-                      {!directory
-                        ? "Carregando pessoas…"
-                        : form.participantIds.length > 0
-                          ? form.participantIds
-                              .map((id) => directory.find((u) => u.userId === id)?.name || "Alguém")
-                              .join(", ")
-                          : "Só você (opcional)"}
-                    </span>
-                    <ChevronIcon />
-                  </button>
-                  {participantPickerOpen && directory && (
-                    <>
-                      <div className="company-edit-category-catcher" onClick={() => setParticipantPickerOpen(false)} />
-                      <div className="company-edit-category-list" onClick={(e) => e.stopPropagation()}>
-                        {directory.filter((u) => u.userId !== myUserId).length === 0 ? (
-                          <p className="lobby-agenda-invited-readonly">Ninguém mais cadastrado ainda.</p>
-                        ) : (
-                          directory
-                            .filter((u) => u.userId !== myUserId)
-                            .map((u) => (
-                              <label key={u.userId} className="company-edit-category-option">
-                                <input
-                                  type="checkbox"
-                                  checked={form.participantIds.includes(u.userId)}
-                                  onChange={() => toggleFormParticipant(u.userId)}
-                                />
-                                <span>{u.name}</span>
-                              </label>
-                            ))
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </label>
-            )}
-
-            <label className="lobby-agenda-form-field">
-              <span>Descrição (opcional)</span>
-              <textarea
-                className="company-edit-textarea"
-                value={form.description}
-                maxLength={2000}
-                rows={3}
-                placeholder="Detalhes do compromisso"
-                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-              />
-            </label>
-
-            {formError && <p className="lobby-agenda-form-error">{formError}</p>}
-
-            <button type="button" className="lobby-agenda-form-submit" disabled={saving} onClick={submitForm}>
-              {saving ? "Salvando…" : editingCallId ? "Salvar alterações" : "Marcar compromisso"}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default function Lobby({
   accountUserId,
@@ -1811,7 +1379,6 @@ export default function Lobby({
   const userPickedRoomRef = useRef(false);
   const [room, setRoom] = useState<RoomShape>(null);
   const [roomLoading, setRoomLoading] = useState(true);
-  const [calls, setCalls] = useState<CallSummary[] | null>(null);
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   // "fixar" o chat de fora da sala também na lateral (pedido do
   // Douglas, 1/out: "fixar fora da sala também") -- mesma ideia do
@@ -2187,8 +1754,6 @@ export default function Lobby({
       setFounderBusyUserId(null);
     }
   }
-
-  const [agendaPanelOpen, setAgendaPanelOpen] = useState(false);
 
   // --- mic/câmera do Lobby (28/set, pedido do Douglas vendo a av-bar
   // de dentro da sala: "cade o restante, configuracoes, audio, video,
@@ -2751,31 +2316,12 @@ export default function Lobby({
     setLobbyView("spaces");
   }
 
-  // conversas (ver chat.conversations/usePlatformChat.ts) não
-  // precisam mais de polling nenhum -- chegam ao vivo pela conexão
-  // única de plataforma, igual a sala sempre teve (pedido do Douglas,
-  // 1/out). Agenda continua REST (o Lobby genuinamente não abre
-  // WebSocket nenhum fora desse motor de chat).
-  useEffect(() => {
-    let cancelled = false;
-    if (!myUserId) {
-      setCalls([]);
-      return;
-    }
-
-    fetch(`${REALTIME_HTTP_BASE}/agenda/summary?userId=${encodeURIComponent(myUserId)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setCalls(Array.isArray(data?.calls) ? data.calls : []);
-      })
-      .catch(() => {
-        if (!cancelled) setCalls([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [myUserId]);
+  // conversas (ver chat.conversations/usePlatformChat.ts) E agenda
+  // (ver chat.calls/usePlatformChat.ts, "agenda (ver comentário grande
+  // dela acima)") não precisam de nenhum fetch/polling próprio aqui --
+  // chegam ao vivo pela conexão única de plataforma, MESMA fonte que a
+  // sala usa (pedido do Douglas, 1/out pro chat, 2/out pra agenda:
+  // "sistema unico, assim como o chat").
 
   // Diretório de Contatos -- não depende de myUserId pra listar (todo
   // mundo cadastrado), só pra filtrar "eu mesmo" (ver ContactsPanel.tsx).
@@ -2818,8 +2364,8 @@ export default function Lobby({
           : `${presence.totalOnline} pessoas na sala agora.`;
 
   const pendingCallCount = useMemo(
-    () => (calls ?? []).filter((c) => c.participants.find((p) => p.id === myUserId)?.status === "pending").length,
-    [calls, myUserId]
+    () => chat.calls.filter((c) => c.participants.find((p) => p.id === myUserId)?.status === "pending").length,
+    [chat.calls, myUserId]
   );
 
   // badge de "tem mensagem não vista" -- vem pronto do motor único
@@ -2841,8 +2387,8 @@ export default function Lobby({
   // .lobby-agenda-preview, overflow-x), só precisava parar de cortar
   // em 3.
   const agendaPreviewDays = useMemo(() => {
-    const byDay = new Map<string, CallSummary[]>();
-    for (const call of calls ?? []) {
+    const byDay = new Map<string, CallEvent[]>();
+    for (const call of chat.calls) {
       const d = new Date(call.startTs);
       const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
       const list = byDay.get(key);
@@ -2851,7 +2397,7 @@ export default function Lobby({
     }
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const days: { key: string; ts: number; isToday: boolean; items: CallSummary[] }[] = [];
+    const days: { key: string; ts: number; isToday: boolean; items: CallEvent[] }[] = [];
     for (let i = 0; i < 30; i++) {
       const d = new Date(todayStart);
       d.setDate(d.getDate() + i);
@@ -2860,7 +2406,7 @@ export default function Lobby({
       days.push({ key, ts: d.getTime(), isToday: i === 0, items });
     }
     return days;
-  }, [calls]);
+  }, [chat.calls]);
 
   // 30/set, pedido do Douglas ("estou falando desse card" + "deixa
   // ele aberto ja") -- assim que showCreateRoomFlow liga, zera
@@ -3843,8 +3389,8 @@ export default function Lobby({
           passa de 3, e os 30 cards rolam de lado (overflow-x, ver
           .lobby-agenda-preview). Visual do card copiado de
           .company-edit-panel (fundo escuro + blur mais forte), em vez
-          do degradê roxo claro de antes. Dados reais, mesmo `calls`
-          de sempre. */}
+          do degradê roxo claro de antes. Dados reais, mesmo `chat.calls`
+          de sempre (motor único, ver comentário grande acima). */}
       {/* pedido do Douglas, 30/set (20): "la vai ter a agenda dele
           tambem mas por enquanto somente isso" -- essa é a página
           "home" inteira, por enquanto (ver lobbyView lá em cima). Saiu
@@ -3896,7 +3442,7 @@ export default function Lobby({
                   <button
                     type="button"
                     className="lobby-agenda-day-count"
-                    onClick={() => setAgendaPanelOpen(true)}
+                    onClick={() => chat.setAgendaOpen(true)}
                   >
                     {day.items.length} {day.items.length === 1 ? "evento" : "eventos"}
                     <ChevronRightIcon />
@@ -4128,10 +3674,10 @@ export default function Lobby({
         </button>
         <button
           type="button"
-          className={agendaPanelOpen ? "av-btn on" : "av-btn"}
-          onClick={() => setAgendaPanelOpen((v) => !v)}
-          aria-label={agendaPanelOpen ? "Fechar agenda" : "Abrir agenda"}
-          data-tooltip={agendaPanelOpen ? "Fechar agenda" : "Agenda"}
+          className={chat.agendaOpen ? "av-btn on" : "av-btn"}
+          onClick={() => chat.setAgendaOpen((v) => !v)}
+          aria-label={chat.agendaOpen ? "Fechar agenda" : "Abrir agenda"}
+          data-tooltip={chat.agendaOpen ? "Fechar agenda" : "Agenda"}
         >
           <span className="lobby-badge-wrap">
             <AgendaIcon />
@@ -4214,15 +3760,6 @@ export default function Lobby({
             setViewingFounderUserId(null);
             handleStartConversation(targetUserId);
           }}
-        />
-      )}
-      {agendaPanelOpen && (
-        <LobbyAgendaPanel
-          myUserId={myUserId}
-          calls={calls}
-          directory={directory}
-          onClose={() => setAgendaPanelOpen(false)}
-          setCalls={setCalls}
         />
       )}
     </div>

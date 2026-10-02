@@ -620,6 +620,28 @@ async function handleChatSetLane(player, data, roomSlugForCompany) {
   return { conversation, removedConversationId };
 }
 
+// "Silenciar"/"Apagar conversa" (2/out, pedido do Douglas: "nao tem
+// opcao de Silenciar, e de Apagar conversa") -- ver comentário grande
+// de setConversationMuted/setConversationHidden em chatStore.js. Os
+// dois são flags SÓ do próprio usuário (nunca manda nada pros outros
+// participantes -- diferente de chat:set_lane acima, que avisa todo
+// mundo porque mexe na conversa de verdade), então só reusa os
+// mesmos sendConversationTo/sendConversationRemovedTo que já existem,
+// só que pra UM userId só (o de quem pediu).
+function handleChatMute(player, data) {
+  if (typeof data.conversationId !== "string" || !data.conversationId) return;
+  const conv = chatStore.setConversationMuted(data.conversationId, player.userId, !!data.muted);
+  if (!conv) return;
+  sendConversationTo(player.userId, conv.id);
+}
+
+function handleChatHide(player, data) {
+  if (typeof data.conversationId !== "string" || !data.conversationId) return;
+  const conv = chatStore.setConversationHidden(data.conversationId, player.userId, true);
+  if (!conv) return;
+  sendConversationRemovedTo(player.userId, conv.id);
+}
+
 async function handleChatCreateGroup(player, data, roomSlugForCompany) {
   if (!Array.isArray(data.participantIds)) return;
   const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
@@ -683,6 +705,9 @@ function handleChatSend(player, data) {
     attachment,
     roomCard,
     mentionedUserIds: data.mentionedUserIds,
+    // "responder"/"mencionar" mensagem (2/out) -- ver comentário
+    // grande de addMessage em chatStore.js.
+    replyToMessageId: typeof data.replyToMessageId === "string" ? data.replyToMessageId : null,
   });
   if (!msg) return;
   const conv = chatStore.getConversation(data.conversationId);
@@ -849,6 +874,147 @@ function scheduleReminder(call) {
       if (p.status !== "declined") sendToUser(p.id, { type: "agenda:reminder", call: fresh });
     }
   }, delay);
+}
+
+// 1/out -- pedido do Douglas, mesmo espírito da migração do chat pra
+// "motor único" (ver comentário grande de handleChatTyping/scheduleReminder
+// etc. acima, e o pedido direto: "quero ela [a agenda] toda isolada
+// tambem, e sistema unico, assim como o chat, funcionando acima de
+// tudo, acima de lobby acima de jogo"). Esses 6 handlers eram só os
+// corpos inline do case "agenda:*" do switch da sala (ver comentário
+// grande deles lá embaixo) -- extraídos pra poderem ser chamados
+// TAMBÉM do socket do Lobby (handleLobbySocketConnection/
+// LOBBY_SOCKET_ROOM_ID mais abaixo), a MESMA função rodando pros dois
+// casos. Nenhuma lógica nova, só reuso -- e já eram 100%
+// room-independentes mesmo antes de mover (só usam player.userId/
+// agendaStore/sendToUser/ws, nunca room/roomId), exatamente como
+// handleCallJoin/scheduleReminder acima.
+function handleAgendaList(player, ws) {
+  const calls = agendaStore.listCallsForUser(player.userId);
+  ws.send(JSON.stringify({ type: "agenda:calls", calls }));
+}
+
+function handleAgendaAvailability(player, ws, data) {
+  if (!Array.isArray(data.candidateUserIds)) return;
+  const candidateUserIds = data.candidateUserIds.filter((x) => typeof x === "string").slice(0, 100);
+  const startTs = Number(data.startTs);
+  const durationMinutes = Number(data.durationMinutes) || 30;
+  if (!Number.isFinite(startTs)) return;
+  const busyUserIds = agendaStore.getConflictingUserIds(candidateUserIds, startTs, durationMinutes);
+  ws.send(JSON.stringify({ type: "agenda:availability", busyUserIds }));
+}
+
+function handleAgendaCreate(player, ws, data) {
+  if (!Array.isArray(data.participantIds)) return;
+  // participantIds pode vir vazio -- "a pessoa pode subir compromisso
+  // pra ela sozinha" (sem convidar ninguém, só ocupa a própria agenda).
+  // createCall sempre inclui quem criou, então um array vazio ainda
+  // vira uma call válida com 1 participante.
+  const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
+  const startTs = Number(data.startTs);
+  const durationMinutes = Number(data.durationMinutes) || 30;
+  if (!Number.isFinite(startTs)) return;
+
+  // revalida no servidor (defesa contra corrida: alguém marcou ENQUANTO
+  // essa pessoa preenchia o formulário) -- se algum convidado ficou
+  // ocupado nesse meio-tempo, recusa a criação inteira em vez de criar
+  // silenciosamente sem essa pessoa.
+  const busyUserIds = agendaStore.getConflictingUserIds(participantIds, startTs, durationMinutes);
+  if (busyUserIds.length > 0) {
+    ws.send(JSON.stringify({ type: "agenda:error", reason: "conflict", busyUserIds }));
+    return;
+  }
+
+  const call = agendaStore.createCall({
+    title: data.title,
+    startTs,
+    durationMinutes,
+    needs: data.needs,
+    participantIds,
+    createdBy: player.userId,
+    visibility: data.visibility === "private" ? "private" : "public",
+    description: data.description,
+    attachments: data.attachments,
+    blocksAgenda: data.blocksAgenda,
+  });
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+    if (p.id !== player.userId) sendToUser(p.id, { type: "agenda:invite", call });
+  }
+  scheduleReminder(call);
+}
+
+function handleAgendaAddAttachment(player, data) {
+  // anexar arquivo numa call já existente (ver comentário em
+  // addAttachmentToCall em server/agendaStore.js) -- o upload em si já
+  // rolou por HTTP (POST /upload, ver comentário grande no topo), aqui
+  // só chega a URL resultante.
+  if (typeof data.callId !== "string" || !data.callId) return;
+  const call = agendaStore.addAttachmentToCall(data.callId, data.attachment, player.userId);
+  if (!call) return;
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+  }
+}
+
+function handleAgendaRespond(player, data) {
+  if (typeof data.callId !== "string" || typeof data.status !== "string") return;
+  const call = agendaStore.respondToCall(data.callId, player.userId, data.status);
+  if (!call) return;
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+  }
+}
+
+function handleAgendaViewColleague(player, ws, data) {
+  // "pesquise a agenda de um colega" -- devolve as calls dele (privadas
+  // vêm tarjadas se quem pediu não for participante, ver
+  // listCallsForColleague em server/agendaStore.js). Não precisa ser
+  // participante de nada em comum, qualquer um pode pesquisar qualquer um.
+  if (typeof data.userId !== "string" || !data.userId) return;
+  const targetUserId = data.userId.trim().slice(0, 80);
+  const calls = agendaStore.listCallsForColleague(player.userId, targetUserId);
+  ws.send(JSON.stringify({ type: "agenda:colleague_calls", userId: targetUserId, calls }));
+}
+
+// editar/apagar compromisso (2/out) -- antes só existia via REST
+// (POST /agenda/update,delete, pedido do Douglas 29/set: "nao me da a
+// agenda mesmo, editavel e criavel"), um bolt-on que só o Lobby tinha
+// (LobbyAgendaPanel, removido -- ver comentário grande dele). Migrado
+// pro protocolo único da agenda (mesmo motivo/mesmo formato do resto
+// desse bloco) -- os dois lados (dentro da sala E no Lobby/AgendaDrawer
+// global, ver app/page.tsx) ganham editar/apagar de graça agora, nunca
+// só um dos dois. Só quem CRIOU o compromisso pode editar/apagar (ver
+// agendaStore.updateCall/deleteCall) -- participantes continuam só
+// podendo aceitar/recusar. Editar não mexe em quem foi convidado
+// (mesma trava de sempre, participantes só se define na criação).
+function handleAgendaUpdate(player, ws, data) {
+  if (typeof data.callId !== "string" || !data.callId) return;
+  const call = agendaStore.updateCall(data.callId, player.userId, {
+    title: data.title,
+    startTs: Number(data.startTs),
+    durationMinutes: Number(data.durationMinutes) || 30,
+    description: data.description,
+  });
+  if (!call) {
+    ws.send(JSON.stringify({ type: "agenda:error", reason: "update_failed" }));
+    return;
+  }
+  for (const p of call.participants) {
+    sendToUser(p.id, { type: "agenda:call", call });
+  }
+}
+
+function handleAgendaDelete(player, ws, data) {
+  if (typeof data.callId !== "string" || !data.callId) return;
+  const removed = agendaStore.deleteCall(data.callId, player.userId);
+  if (!removed) {
+    ws.send(JSON.stringify({ type: "agenda:error", reason: "delete_failed" }));
+    return;
+  }
+  for (const p of removed.participants) {
+    sendToUser(p.id, { type: "agenda:call_deleted", callId: removed.id });
+  }
 }
 
 // campos do card de perfil que o PRÓPRIO jogador manda (ver mensagem
@@ -2484,9 +2650,13 @@ const LOBBY_SOCKET_ROOM_ID = "__lobby__";
  * o SUBCONJUNTO do protocolo que não depende de posição/mobília/porta/
  * área: identify (versão enxuta, sem broadcast de sala nenhum -- o
  * Lobby já tem o próprio nome/foto via conta, só precisa registrar
- * essa conexão com o userId certo), chat:typing e call:join/call:leave/
- * signal (handleChatTyping/handleCallJoin/handleCallLeave/connectionsById
- * já eram 100% independentes de sala, ver comentário grande deles). */
+ * essa conexão com o userId certo), call:join/call:leave/signal
+ * (handleCallJoin/handleCallLeave/connectionsById já eram 100%
+ * independentes de sala, ver comentário grande deles), o protocolo de
+ * chat INTEIRO (chat:*, ver comentário grande em "chat:open" logo
+ * abaixo) e o de agenda INTEIRO (agenda:*, ver comentário grande dos
+ * handleAgenda*, logo depois de scheduleReminder) -- nenhum dos dois
+ * nunca dependeu de sala pra nada. */
 async function handleLobbySocketConnection(ws) {
   const id = randomUUID();
   const player = { id, userId: id, name: "", color: "", photoUrl: "", accountVerified: false };
@@ -2556,6 +2726,14 @@ async function handleLobbySocketConnection(ws) {
         handleChatSetLane(player, data, typeof data.roomSlug === "string" ? data.roomSlug : "");
         break;
       }
+      case "chat:mute": {
+        handleChatMute(player, data);
+        break;
+      }
+      case "chat:hide": {
+        handleChatHide(player, data);
+        break;
+      }
       case "chat:create_group": {
         handleChatCreateGroup(player, data, typeof data.roomSlug === "string" ? data.roomSlug : "");
         break;
@@ -2620,6 +2798,46 @@ async function handleLobbySocketConnection(ws) {
         if (target && target.ws.readyState === target.ws.OPEN) {
           target.ws.send(JSON.stringify({ type: "signal", from: id, data: data.data }));
         }
+        break;
+      }
+      // 1/out, pedido do Douglas: "quero ela [a agenda] toda isolada
+      // tambem, e sistema unico, assim como o chat, funcionando acima
+      // de tudo, acima de lobby acima de jogo" -- mesmo motivo/mesmo
+      // formato do bloco "chat:*" acima (handleAgenda* extraídos logo
+      // depois de scheduleReminder, ver comentário grande deles): a
+      // agenda nunca dependeu de roomId pra nada (só userId/agendaStore),
+      // então os MESMOS 6 handlers do switch da sala rodam aqui sem
+      // nenhuma lógica nova.
+      case "agenda:list": {
+        handleAgendaList(player, ws);
+        break;
+      }
+      case "agenda:availability": {
+        handleAgendaAvailability(player, ws, data);
+        break;
+      }
+      case "agenda:create": {
+        handleAgendaCreate(player, ws, data);
+        break;
+      }
+      case "agenda:add_attachment": {
+        handleAgendaAddAttachment(player, data);
+        break;
+      }
+      case "agenda:respond": {
+        handleAgendaRespond(player, data);
+        break;
+      }
+      case "agenda:update": {
+        handleAgendaUpdate(player, ws, data);
+        break;
+      }
+      case "agenda:delete": {
+        handleAgendaDelete(player, ws, data);
+        break;
+      }
+      case "agenda:view_colleague": {
+        handleAgendaViewColleague(player, ws, data);
         break;
       }
       default:
@@ -3123,6 +3341,14 @@ wss.on("connection", async (ws, req) => {
         handleChatSetLane(player, data, roomId);
         break;
       }
+      case "chat:mute": {
+        handleChatMute(player, data);
+        break;
+      }
+      case "chat:hide": {
+        handleChatHide(player, data);
+        break;
+      }
       case "chat:create_group": {
         handleChatCreateGroup(player, data, roomId);
         break;
@@ -3248,93 +3474,39 @@ wss.on("connection", async (ws, req) => {
       // --- agenda: marcar call (data/horário/participantes, necessidades
       // de câmera/áudio/tela), aprovação dos convidados, checagem de
       // conflito de horário (ver server/agendaStore.js) ---
+      // 1/out: corpos extraídos pra handleAgenda* (ver comentário grande
+      // deles, logo depois de scheduleReminder acima) -- reusados
+      // também pelo socket do Lobby, ver handleLobbySocketConnection.
       case "agenda:list": {
-        const calls = agendaStore.listCallsForUser(player.userId);
-        ws.send(JSON.stringify({ type: "agenda:calls", calls }));
+        handleAgendaList(player, ws);
         break;
       }
       case "agenda:availability": {
-        if (!Array.isArray(data.candidateUserIds)) break;
-        const candidateUserIds = data.candidateUserIds.filter((x) => typeof x === "string").slice(0, 100);
-        const startTs = Number(data.startTs);
-        const durationMinutes = Number(data.durationMinutes) || 30;
-        if (!Number.isFinite(startTs)) break;
-        const busyUserIds = agendaStore.getConflictingUserIds(candidateUserIds, startTs, durationMinutes);
-        ws.send(JSON.stringify({ type: "agenda:availability", busyUserIds }));
+        handleAgendaAvailability(player, ws, data);
         break;
       }
       case "agenda:create": {
-        if (!Array.isArray(data.participantIds)) break;
-        // participantIds pode vir vazio -- "a pessoa pode subir
-        // compromisso pra ela sozinha" (sem convidar ninguém, só ocupa
-        // a própria agenda). createCall sempre inclui quem criou, então
-        // um array vazio ainda vira uma call válida com 1 participante.
-        const participantIds = data.participantIds.filter((x) => typeof x === "string" && x).slice(0, 50);
-        const startTs = Number(data.startTs);
-        const durationMinutes = Number(data.durationMinutes) || 30;
-        if (!Number.isFinite(startTs)) break;
-
-        // revalida no servidor (defesa contra corrida: alguém marcou
-        // ENQUANTO essa pessoa preenchia o formulário) -- se algum
-        // convidado ficou ocupado nesse meio-tempo, recusa a criação
-        // inteira em vez de criar silenciosamente sem essa pessoa.
-        const busyUserIds = agendaStore.getConflictingUserIds(participantIds, startTs, durationMinutes);
-        if (busyUserIds.length > 0) {
-          ws.send(JSON.stringify({ type: "agenda:error", reason: "conflict", busyUserIds }));
-          break;
-        }
-
-        const call = agendaStore.createCall({
-          title: data.title,
-          startTs,
-          durationMinutes,
-          needs: data.needs,
-          participantIds,
-          createdBy: player.userId,
-          visibility: data.visibility === "private" ? "private" : "public",
-          description: data.description,
-          attachments: data.attachments,
-          blocksAgenda: data.blocksAgenda,
-        });
-        for (const p of call.participants) {
-          sendToUser(p.id, { type: "agenda:call", call });
-          if (p.id !== player.userId) sendToUser(p.id, { type: "agenda:invite", call });
-        }
-        scheduleReminder(call);
+        handleAgendaCreate(player, ws, data);
         break;
       }
       case "agenda:add_attachment": {
-        // anexar arquivo numa call já existente (ver comentário em
-        // addAttachmentToCall em server/agendaStore.js) -- o upload em si
-        // já rolou por HTTP (POST /upload, ver comentário grande no
-        // topo), aqui só chega a URL resultante.
-        if (typeof data.callId !== "string" || !data.callId) break;
-        const call = agendaStore.addAttachmentToCall(data.callId, data.attachment, player.userId);
-        if (!call) break;
-        for (const p of call.participants) {
-          sendToUser(p.id, { type: "agenda:call", call });
-        }
+        handleAgendaAddAttachment(player, data);
         break;
       }
       case "agenda:respond": {
-        if (typeof data.callId !== "string" || typeof data.status !== "string") break;
-        const call = agendaStore.respondToCall(data.callId, player.userId, data.status);
-        if (!call) break;
-        for (const p of call.participants) {
-          sendToUser(p.id, { type: "agenda:call", call });
-        }
+        handleAgendaRespond(player, data);
+        break;
+      }
+      case "agenda:update": {
+        handleAgendaUpdate(player, ws, data);
+        break;
+      }
+      case "agenda:delete": {
+        handleAgendaDelete(player, ws, data);
         break;
       }
       case "agenda:view_colleague": {
-        // "pesquise a agenda de um colega" -- devolve as calls dele
-        // (privadas vêm tarjadas se quem pediu não for participante, ver
-        // listCallsForColleague em server/agendaStore.js). Não precisa
-        // ser participante de nada em comum, qualquer um da sala pode
-        // pesquisar qualquer um.
-        if (typeof data.userId !== "string" || !data.userId) break;
-        const targetUserId = data.userId.trim().slice(0, 80);
-        const calls = agendaStore.listCallsForColleague(player.userId, targetUserId);
-        ws.send(JSON.stringify({ type: "agenda:colleague_calls", userId: targetUserId, calls }));
+        handleAgendaViewColleague(player, ws, data);
         break;
       }
     }

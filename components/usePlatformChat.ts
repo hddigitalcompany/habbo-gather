@@ -29,7 +29,7 @@
 // anexo/áudio/room-card), apagar, reagir, fixar/desfixar, "visto por",
 // painel de arquivos, "digitando..." e chamada de voz/vídeo.
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import PartySocket from "partysocket";
 import { resolveUserId } from "@/lib/identity";
 // 1/out -- notificação de mensagem nova (som/toast do navegador) era só
@@ -51,7 +51,18 @@ import type {
   ChatAttachmentItem,
   ChatAttachmentKind,
   RoomCard,
+  // 2/out -- tipos da Agenda (ver comentário grande dela mais abaixo),
+  // mesmo padrão dos de chat acima: só tipos, nunca valor em tempo de
+  // execução importado desse módulo gigante.
+  CallEvent,
+  AgendaFormState,
+  DirectoryUser,
 } from "@/components/GameRoom";
+// 2/out -- formatadores/combinadores de data da Agenda (ver uso em
+// startNewCall/submitCreateCall mais abaixo) -- MESMAS funções que
+// GameRoom.tsx e AgendaDrawer.tsx já usam, exportadas de lá (ver
+// comentário grande deles sobre export pra uso fora do módulo).
+import { localDateStr, localTimeStr, combineLocalDateTime } from "@/components/GameRoom";
 
 // MESMO nome reservado que LOBBY_SOCKET_ROOM_ID em server/index.js --
 // nunca vira jogador fantasma numa sala de verdade (ver
@@ -60,8 +71,23 @@ import type {
 // posição nenhuma).
 const PLATFORM_SOCKET_ROOM = "__lobby__";
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
+// 2/out -- bug real do Douglas: "tentei anexar um arquivo na conversa e
+// deu erro" / "audio tbm" (ERR_SSL_PROTOCOL_ERROR no console, upload
+// tentando HTTPS num servidor que só fala HTTP). A lógica antiga aqui
+// ("REALTIME_HOST.startsWith('127.0.0.1') ? http : https") só acertava
+// localhost -- testando pelo celular/outro aparelho na mesma rede
+// (NEXT_PUBLIC_REALTIME_HOST = IP da rede local, tipo 192.168.1.156,
+// não começa com "127.0.0.1") caía no "https" por padrão, só que o
+// server/index.js local é HTTP simples, sem certificado -- daí o
+// ERR_SSL_PROTOCOL_ERROR. Lobby.tsx e GameRoom.tsx já tinham essa
+// mesma constante corrigida (espelha window.location.protocol da
+// própria página -- se a página carregou em HTTP, o realtime tá no
+// mesmo servidor/rede, também HTTP; só muda em produção de verdade,
+// onde a própria página já é HTTPS), só esse hook (criado depois,
+// 1/out) ficou com a versão velha -- agora as 3 cópias usam a MESMA
+// lógica.
 const REALTIME_HTTP_BASE =
-  (process.env.NEXT_PUBLIC_REALTIME_HTTP_BASE || (REALTIME_HOST.startsWith("127.0.0.1") ? "http" : "https")) +
+  (typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http") +
   `://${REALTIME_HOST}`;
 
 const TYPING_THROTTLE_MS = 2500;
@@ -174,6 +200,41 @@ export function usePlatformChat(params: PlatformChatParams) {
   const [lastReadByConv, setLastReadByConv] = useState<Record<string, Record<string, number>>>({});
   const [composerText, setComposerText] = useState("");
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
+  // "responder mensagem" (2/out, pedido do Douglas: "Dar dois clique na
+  // mensagem ativar a resposta a mensagem") -- rascunho local de "to
+  // que tô respondendo agora" (mesmo espírito de groupNameDraft acima:
+  // efêmero, só do composer ATIVO, nunca sincronizado/persistido até
+  // a mensagem sair de verdade -- ver onSendComposer abaixo). Guarda
+  // só o que o balão de resposta precisa mostrar (nome/preview), não
+  // a mensagem inteira.
+  const [replyingTo, setReplyingTo] = useState<{
+    messageId: string;
+    senderName: string;
+    kind: ChatMsgKind;
+    text: string;
+    attachmentName: string | null;
+    // "na conversa precisa aparecer a resposta selecionada ao
+    // arquivo, igual no whats" (2/out) -- mesma miniatura de verdade
+    // do replyTo congelado no servidor (ver comentário grande em
+    // addMessage/chatStore.js), só que pro RASCUNHO ainda não enviado
+    // (barra "Respondendo a..." acima do composer).
+    attachmentUrl: string | null;
+  } | null>(null);
+
+  function startReplyToMessage(msg: { id: string; senderId: string; senderName: string; kind: ChatMsgKind; text: string; attachment: ChatAttachment | null }) {
+    setReplyingTo({
+      messageId: msg.id,
+      senderName: msg.senderName || "Alguém",
+      kind: msg.kind,
+      text: msg.text,
+      attachmentName: msg.attachment?.name ?? null,
+      attachmentUrl: msg.attachment?.url ?? null,
+    });
+  }
+
+  function cancelReply() {
+    setReplyingTo(null);
+  }
   const autoOpenNextConversationRef = useRef(false);
 
   // --- "Nova conversa" / "Criar grupo" ---
@@ -288,6 +349,19 @@ export function usePlatformChat(params: PlatformChatParams) {
     send({ type: "chat:set_lane", conversationId, lane, roomSlug: roomContext?.slug ?? undefined });
   }
 
+  // "Silenciar"/"Apagar conversa" (2/out, pedido do Douglas) -- ver
+  // comentário grande de handleChatMute/handleChatHide em
+  // server/index.js. Os dois só respondem pra mim mesmo (chat:conversation/
+  // chat:conversation_removed, já tratados nos cases logo acima --
+  // nenhum handler NOVO precisou entrar no switch desse hook).
+  function muteConversation(conversationId: string, muted: boolean) {
+    send({ type: "chat:mute", conversationId, muted });
+  }
+
+  function deleteConversation(conversationId: string) {
+    send({ type: "chat:hide", conversationId });
+  }
+
   const [renamingGroup, setRenamingGroup] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
 
@@ -302,6 +376,11 @@ export function usePlatformChat(params: PlatformChatParams) {
     setActiveConversationId(id);
     setChatView(id === null ? "list" : "thread");
     setFilesPanelOpen(false);
+    // trocar de conversa cancela a resposta em andamento -- responder
+    // só faz sentido dentro da MESMA conversa de quem foi respondido
+    // (replyToMessageId só casa com mensagem da mesma conversa, ver
+    // addMessage em server/chatStore.js).
+    setReplyingTo(null);
     if (id !== null && !messagesByConv[id]) {
       send({ type: "chat:open", conversationId: id });
     }
@@ -312,11 +391,20 @@ export function usePlatformChat(params: PlatformChatParams) {
   function onSendComposer() {
     const text = composerText.trim();
     if (!text || activeConversationId === null) return;
-    if (!send({ type: "chat:send", conversationId: activeConversationId, text, mentionedUserIds: pendingMentionIds })) {
+    if (
+      !send({
+        type: "chat:send",
+        conversationId: activeConversationId,
+        text,
+        mentionedUserIds: pendingMentionIds,
+        replyToMessageId: replyingTo?.messageId ?? null,
+      })
+    ) {
       return;
     }
     setComposerText("");
     setPendingMentionIds([]);
+    setReplyingTo(null);
   }
 
   async function sendChatAttachment(file: Blob, filename: string, kind: ChatAttachmentKind) {
@@ -324,7 +412,14 @@ export function usePlatformChat(params: PlatformChatParams) {
     setSendingAttachment(true);
     try {
       const attachment = await uploadChatFile(file, filename);
-      send({ type: "chat:send", conversationId: activeConversationId, attachment, kind });
+      send({
+        type: "chat:send",
+        conversationId: activeConversationId,
+        attachment,
+        kind,
+        replyToMessageId: replyingTo?.messageId ?? null,
+      });
+      setReplyingTo(null);
     } finally {
       setSendingAttachment(false);
     }
@@ -439,16 +534,22 @@ export function usePlatformChat(params: PlatformChatParams) {
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartRef = useRef(0);
   const discardRecordingRef = useRef(false);
-  // quem usa o hook pode querer mostrar um aviso visual (toast) se o
-  // microfone falhar (ver catch de startVoiceRecording) -- o hook em
-  // si não tem UI nenhuma pra isso, então só guarda um callback
-  // opcional que o chamador registra (ver setRecordingErrorHandler no
-  // retorno e o useEffect em GameRoom.tsx que registra showErrorToast;
-  // o Lobby não registra nada, continua só logando no console como
-  // sempre foi).
-  const recordingErrorHandlerRef = useRef<((message: string) => void) | null>(null);
-  function setRecordingErrorHandler(fn: ((message: string) => void) | null) {
-    recordingErrorHandlerRef.current = fn;
+  // 2/out: generalizado de "recordingErrorHandler" pra "toastHandler" --
+  // mesma ideia (o hook não tem UI nenhuma pra avisos visuais, só guarda
+  // um callback opcional que o chamador registra, ver setToastHandler no
+  // retorno e o useEffect em GameRoom.tsx que registra showErrorToast),
+  // só que agora reusado pra QUALQUER aviso que o motor único precisa
+  // mostrar -- começou só com "microfone falhou" (catch de
+  // startVoiceRecording), ganhou "convite/lembrete de compromisso" e
+  // "falha ao anexar arquivo na agenda" junto da migração da Agenda pro
+  // mesmo motor (ver comentário grande dela mais abaixo). Mesmo
+  // princípio de sempre: UM mecanismo de toast, não um por feature. O
+  // Lobby não registra nada ainda, continua só logando no console /
+  // sem notificação visual (mesma lacuna que já existia só pro
+  // microfone, agora também vale pra agenda -- não é regressão nova).
+  const toastHandlerRef = useRef<((message: string) => void) | null>(null);
+  function setToastHandler(fn: ((message: string) => void) | null) {
+    toastHandlerRef.current = fn;
   }
 
   async function startVoiceRecording() {
@@ -505,7 +606,7 @@ export function usePlatformChat(params: PlatformChatParams) {
       setRecordingAudio(true);
     } catch (e) {
       console.warn("Sem acesso ao microfone pra gravar áudio", e);
-      recordingErrorHandlerRef.current?.("Não deu pra acessar o microfone -- verifique a permissão do navegador.");
+      toastHandlerRef.current?.("Não deu pra acessar o microfone -- verifique a permissão do navegador.");
     }
   }
 
@@ -705,6 +806,98 @@ export function usePlatformChat(params: PlatformChatParams) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camOn]);
 
+  // ---------------------------------------------------------------
+  // 2/out -- pedido direto do Douglas, mesmo espírito da migração do
+  // chat pra "motor único" (ver comentário grande no topo do arquivo):
+  // "quero ela [a agenda] toda isolada tambem, e sistema unico, assim
+  // como o chat, funcionando acima de tudo, acima de lobby acima de
+  // jogo". Até aqui a Agenda vivia em dois donos de estado diferentes
+  // -- GameRoom.tsx com socket de verdade (tempo real, lembrete,
+  // convite) e Lobby.tsx com REST (sem tempo real nenhum, "Agenda
+  // continua REST" era o comentário antigo) -- a MESMA "unificação só
+  // de aparência" que o chat tinha antes do commit e5c060c. Esse bloco
+  // é a MESMA conexão PLATFORM_SOCKET_ROOM de sempre (ver topo do
+  // arquivo), falando agenda:* (handleAgenda* em server/index.js,
+  // chamados agora também de handleLobbySocketConnection -- ver
+  // comentário grande deles) em vez de reabrir uma segunda conexão só
+  // pra isso. Tipos/estado migrados de GameRoom.tsx 1:1, nenhuma
+  // lógica nova.
+  // ---------------------------------------------------------------
+  const [calls, setCalls] = useState<CallEvent[]>([]);
+  // quem, dos candidatos a convidado, já tá ocupado no horário sendo
+  // escolhido AGORA no formulário -- ver getConflictingUserIds em
+  // server/agendaStore.js.
+  const [busyUserIds, setBusyUserIds] = useState<string[]>([]);
+  // aberta/fechada -- estado único (não um por tela) de propósito: é
+  // isso que faz a gaveta "funcionar acima de tudo, acima de lobby
+  // acima de jogo" (pedido do Douglas) em vez de precisar abrir de
+  // novo ao trocar de tela.
+  const [agendaOpen, setAgendaOpen] = useState(false);
+  const [agendaView, setAgendaView] = useState<"list" | "new" | "detail" | "colleague">("list");
+  const [agendaDetailId, setAgendaDetailId] = useState<string | null>(null);
+  // espelha agendaDetailId pro handler de socket (fechado dentro do
+  // useEffect de conexão, que só roda uma vez) ler o valor ATUAL sem
+  // stale closure -- mesmo padrão de agendaColleagueIdRef logo abaixo,
+  // usado pelo push de "agenda:call_deleted" (ver handleAgendaDelete em
+  // server/index.js).
+  const agendaDetailIdRef = useRef<string | null>(null);
+  agendaDetailIdRef.current = agendaDetailId;
+  const [agendaForm, setAgendaForm] = useState<AgendaFormState>({
+    title: "",
+    date: "",
+    time: "",
+    durationMinutes: 30,
+    participantIds: [],
+    needs: { camera: true, audio: true, screen: false },
+    visibility: "public",
+    description: "",
+    attachments: [],
+    blocksAgenda: true,
+  });
+  const [agendaError, setAgendaError] = useState<string | null>(null);
+  const [sendingAgendaAttachment, setSendingAgendaAttachment] = useState(false);
+  const [sendingDetailAttachment, setSendingDetailAttachment] = useState(false);
+  // "hoje | amanhã | 25/set | ..." -- quais dias do strip da Minha
+  // Agenda estão expandidos agora. Hoje começa aberto.
+  const [expandedAgendaDays, setExpandedAgendaDays] = useState<Set<string>>(() => new Set([localDateStr(new Date())]));
+  // todo mundo já cadastrado no ambiente (GET /users/directory, MESMA
+  // lista que chatStore.listAllUsers() devolve) -- usado no picker de
+  // participantes do "Marcar compromisso" e em "pesquise a agenda de
+  // um colega". REST (não socket) de propósito: é o mesmo diretório
+  // platform-wide que o Lobby já buscava assim pro Contatos (ver
+  // handleGetUsersDirectory em server/index.js) -- não depende de sala
+  // nem precisa viajar em tempo real.
+  const [allUsers, setAllUsers] = useState<DirectoryUser[]>([]);
+  useEffect(() => {
+    fetch(`${REALTIME_HTTP_BASE}/users/directory`)
+      .then((res) => res.json())
+      .then((data) => setAllUsers((data.users as DirectoryUser[]) ?? []))
+      .catch(() => {});
+  }, []);
+  const agendaCreatingRef = useRef(false);
+  // id do compromisso sendo EDITADO agora (null = formulário "new" é
+  // de criação de verdade) -- 2/out, junto de editar/apagar virarem
+  // parte do protocolo único (agenda:update/agenda:delete, ver
+  // handleAgendaUpdate/handleAgendaDelete em server/index.js). Editar
+  // reaproveita a MESMA tela "new" (startEditCall pré-popula
+  // agendaForm a partir da call existente) -- só NÃO mexe em quem foi
+  // convidado (mesma trava de sempre: participantes só se define na
+  // criação, nem o servidor aceita participantIds no update).
+  const [editingCallId, setEditingCallId] = useState<string | null>(null);
+  // "pesquise a agenda de um colega" -- campo de busca + a agenda do
+  // colega escolhido (calls privadas em que eu não participo chegam
+  // tarjadas, ver agenda:view_colleague em server/index.js).
+  const [agendaSearchQuery, setAgendaSearchQuery] = useState("");
+  const [agendaColleagueId, setAgendaColleagueId] = useState<string | null>(null);
+  const [agendaColleagueName, setAgendaColleagueName] = useState("");
+  const [colleagueCalls, setColleagueCalls] = useState<CallEvent[]>([]);
+  // espelha agendaColleagueId pro handler de socket (fechado dentro do
+  // useEffect de conexão, que só roda uma vez) conseguir ler o valor
+  // ATUAL sem stale closure -- mesmo padrão de sempre (ver
+  // conversationsRef/activeConversationIdRef acima).
+  const agendaColleagueIdRef = useRef<string | null>(null);
+  agendaColleagueIdRef.current = agendaColleagueId;
+
   // --- conexão: abre uma vez por (userId, token), vive até o
   // componente que montou esse hook (Home(), ver comentário grande no
   // topo) desmontar -- o que só acontece fechando a aba de verdade. ---
@@ -814,9 +1007,16 @@ export function usePlatformChat(params: PlatformChatParams) {
           // companyChats, conforme a lane da conversa) tá ligado -- MESMA
           // regra que já existia só em GameRoom.tsx.
           if (!isMine) {
-            const lane = conversationsRef.current.find((c) => c.id === data.conversationId)?.lane;
+            const sourceConv = conversationsRef.current.find((c) => c.id === data.conversationId);
+            const lane = sourceConv?.lane;
             const prefs = getStoredNotificationPrefs();
-            const allowed = lane === "private" ? prefs.privateChats : lane === "company" ? prefs.companyChats : false;
+            // "Silenciar" (2/out, pedido do Douglas) -- trava POR CIMA
+            // do toggle geral privateChats/companyChats (prefs acima):
+            // mensagem continua contando unreadCount normal (ver
+            // bumpUnread logo abaixo), só não dispara toast/notificação.
+            const allowed =
+              !sourceConv?.muted &&
+              (lane === "private" ? prefs.privateChats : lane === "company" ? prefs.companyChats : false);
             if (allowed) {
               const preview =
                 msg.kind === "text"
@@ -919,6 +1119,85 @@ export function usePlatformChat(params: PlatformChatParams) {
           }
           break;
         }
+        // 2/out -- Agenda migrada pro motor único (ver comentário grande
+        // no bloco de estado dela acima) -- MESMO corpo que vivia em
+        // handlePartyMessage de GameRoom.tsx, só trocando setToasts
+        // (UI que esse hook não tem) por toastHandlerRef (ver
+        // comentário grande dele lá em cima, mesmo mecanismo que já
+        // existia pra "microfone falhou").
+        case "agenda:calls": {
+          setCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
+          break;
+        }
+        case "agenda:call": {
+          const call = data.call as CallEvent;
+          setCalls((prev) => {
+            const rest = prev.filter((c) => c.id !== call.id);
+            return [...rest, call].sort((a, b) => a.startTs - b.startTs);
+          });
+          // se essa call é a que EU acabei de marcar (ver
+          // submitCreateCall/agendaCreatingRef), pula direto pro
+          // detalhe dela -- os outros convidados só recebem pra
+          // aparecer na LISTA deles, sem pular sozinho (mesmo padrão
+          // de autoOpenNextConversationRef no chat).
+          if (agendaCreatingRef.current && call.createdBy === myUserId) {
+            agendaCreatingRef.current = false;
+            setAgendaError(null);
+            setAgendaDetailId(call.id);
+            setAgendaView("detail");
+          }
+          break;
+        }
+        // 2/out -- push de "agenda:delete" (ver handleAgendaDelete em
+        // server/index.js): tira da lista local e, se era justo a call
+        // que essa aba tava vendo no detalhe, volta pra lista (senão
+        // ficaria olhando o detalhe de um compromisso que não existe
+        // mais).
+        case "agenda:call_deleted": {
+          const deletedId = data.callId as string;
+          setCalls((prev) => prev.filter((c) => c.id !== deletedId));
+          if (agendaDetailIdRef.current === deletedId) {
+            setAgendaDetailId(null);
+            setAgendaView("list");
+          }
+          break;
+        }
+        case "agenda:availability": {
+          setBusyUserIds(data.busyUserIds as string[]);
+          break;
+        }
+        case "agenda:invite": {
+          const call = data.call as CallEvent;
+          const text = `${call.createdByName || "Alguém"} marcou "${call.title}" com você`;
+          toastHandlerRef.current?.(text);
+          if (getStoredNotificationPrefs().agenda) fireNotification("Novo compromisso", text);
+          break;
+        }
+        case "agenda:reminder": {
+          const call = data.call as CallEvent;
+          const text = `"${call.title}" começa em breve`;
+          toastHandlerRef.current?.(text);
+          if (getStoredNotificationPrefs().agenda) fireNotification("Compromisso começando", text);
+          break;
+        }
+        case "agenda:error": {
+          agendaCreatingRef.current = false;
+          if (data.reason === "conflict") {
+            setBusyUserIds((data.busyUserIds as string[]) ?? []);
+            setAgendaError("Algum convidado ficou indisponível nesse horário -- escolha outro e tente de novo.");
+          }
+          break;
+        }
+        case "agenda:colleague_calls": {
+          // resposta de "pesquise a agenda de um colega" -- só aplica
+          // se ainda for o colega que a pessoa tá olhando agora (evita
+          // uma resposta atrasada de uma busca anterior sobrescrever a
+          // atual).
+          if (data.userId === agendaColleagueIdRef.current) {
+            setColleagueCalls((data.calls as CallEvent[]).slice().sort((a, b) => a.startTs - b.startTs));
+          }
+          break;
+        }
         case "error": {
           console.warn("Erro do servidor de chat (plataforma)", data.message);
           break;
@@ -940,6 +1219,230 @@ export function usePlatformChat(params: PlatformChatParams) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myUserId, accountAccessToken]);
+
+  // --- Agenda: ações (ver tipos/estado/socket acima) -- MESMO corpo
+  // que vivia em GameRoom.tsx, só trocando wsSend/socketRef.current?.send
+  // pelo `send` genérico desse hook (mesma conexão única) e
+  // showErrorToast por toastHandlerRef (ver comentário grande dele). ---
+  function updateAgendaForm(partial: Partial<AgendaFormState>) {
+    setAgendaForm((prev) => ({ ...prev, ...partial }));
+  }
+
+  function toggleAgendaParticipant(userId: string) {
+    if (busyUserIds.includes(userId)) return; // indisponível nesse horário, não deixa marcar
+    setAgendaForm((prev) => ({
+      ...prev,
+      participantIds: prev.participantIds.includes(userId)
+        ? prev.participantIds.filter((x) => x !== userId)
+        : [...prev.participantIds, userId],
+    }));
+  }
+
+  function startNewCall() {
+    const suggestion = new Date(Date.now() + 30 * 60_000); // meia hora a partir de agora, só de ponto de partida
+    setAgendaForm({
+      title: "",
+      date: localDateStr(suggestion),
+      time: localTimeStr(suggestion),
+      durationMinutes: 30,
+      participantIds: [],
+      needs: { camera: true, audio: true, screen: false },
+      visibility: "public",
+      description: "",
+      attachments: [],
+      blocksAgenda: true,
+    });
+    setEditingCallId(null);
+    setAgendaError(null);
+    setBusyUserIds([]);
+    setAgendaView("new");
+  }
+
+  // "Editar" num compromisso que EU criei (ver botão só-dono em
+  // AgendaDrawer, detailCall.createdBy === myUserId) -- pré-popula o
+  // MESMO formulário "new" a partir da call existente (mesma ideia do
+  // openEditForm que vivia só em LobbyAgendaPanel, migrada pro motor
+  // único). participantIds entra no form só pra exibição (AgendaDrawer
+  // mostra como lista somente-leitura quando editingCallId existe,
+  // nunca dropdown) -- editar nunca manda participantIds pro servidor
+  // (ver submitCreateCall abaixo e handleAgendaUpdate em
+  // server/index.js, que nem aceita esse campo).
+  function startEditCall(call: CallEvent) {
+    const d = new Date(call.startTs);
+    setAgendaForm({
+      title: call.title,
+      date: localDateStr(d),
+      time: localTimeStr(d),
+      durationMinutes: call.durationMinutes,
+      participantIds: call.participants.filter((p) => p.id !== myUserId).map((p) => p.id),
+      needs: call.needs,
+      visibility: call.visibility,
+      description: call.description || "",
+      attachments: [],
+      blocksAgenda: call.blocksAgenda !== false,
+    });
+    setEditingCallId(call.id);
+    setAgendaError(null);
+    setBusyUserIds([]);
+    setAgendaView("new");
+  }
+
+  function submitCreateCall() {
+    const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
+    // participantIds vazio é válido (compromisso só da própria pessoa).
+    if (!Number.isFinite(startTs)) {
+      setAgendaError("Preenche a data e o horário pra marcar o compromisso.");
+      return;
+    }
+    setAgendaError(null);
+    agendaCreatingRef.current = true;
+    const ok = editingCallId
+      ? send({
+          type: "agenda:update",
+          callId: editingCallId,
+          title: agendaForm.title.trim() || "Call",
+          startTs,
+          durationMinutes: agendaForm.durationMinutes,
+          description: agendaForm.description.trim(),
+        })
+      : send({
+          type: "agenda:create",
+          title: agendaForm.title.trim() || "Call",
+          startTs,
+          durationMinutes: agendaForm.durationMinutes,
+          needs: agendaForm.needs,
+          participantIds: agendaForm.participantIds,
+          visibility: agendaForm.visibility,
+          description: agendaForm.description.trim(),
+          attachments: agendaForm.attachments,
+          blocksAgenda: agendaForm.blocksAgenda,
+        });
+    if (!ok) agendaCreatingRef.current = false;
+    // fica na tela do formulário até a resposta chegar (sucesso pula pro
+    // detalhe da call criada/editada, erro mostra o motivo aqui mesmo).
+  }
+
+  // "Apagar" num compromisso que EU criei -- confirmação ("tem certeza?")
+  // é responsabilidade de quem chama (AgendaDrawer), igual o
+  // window.confirm que o LobbyAgendaPanel antigo já fazia.
+  function deleteCall(callId: string) {
+    send({ type: "agenda:delete", callId });
+  }
+
+  // upload de anexo do "Marcar compromisso" -- mesmo endpoint HTTP do
+  // chat (uploadChatFile), só que o resultado fica guardado no
+  // FORMULÁRIO (agendaForm.attachments) em vez de mandar na hora.
+  async function handleAgendaFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setSendingAgendaAttachment(true);
+    try {
+      const attachment = await uploadChatFile(file, file.name);
+      setAgendaForm((prev) => ({ ...prev, attachments: [...prev.attachments, attachment] }));
+    } catch (err) {
+      console.warn("Falha ao anexar arquivo no compromisso", err);
+      toastHandlerRef.current?.("Não deu pra anexar o arquivo -- tenta de novo.");
+    } finally {
+      setSendingAgendaAttachment(false);
+    }
+  }
+
+  function removeAgendaFormAttachment(index: number) {
+    setAgendaForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
+  }
+
+  // anexar arquivo numa call JÁ CRIADA -- manda direto pro servidor
+  // (agenda:add_attachment), porque a call já existe.
+  async function handleAgendaDetailFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !agendaDetailId) return;
+    setSendingDetailAttachment(true);
+    try {
+      const attachment = await uploadChatFile(file, file.name);
+      send({ type: "agenda:add_attachment", callId: agendaDetailId, attachment });
+    } catch (err) {
+      console.warn("Falha ao anexar arquivo na call", err);
+      toastHandlerRef.current?.("Não deu pra anexar o arquivo -- tenta de novo.");
+    } finally {
+      setSendingDetailAttachment(false);
+    }
+  }
+
+  function toggleAgendaDay(dateKey: string) {
+    setExpandedAgendaDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
+  }
+
+  function openCallDetail(callId: string) {
+    setAgendaDetailId(callId);
+    setAgendaView("detail");
+  }
+
+  function respondToCall(callId: string, status: "approved" | "declined") {
+    send({ type: "agenda:respond", callId, status });
+  }
+
+  // "pesquise a agenda de um colega" -- pede a agenda dele pro servidor
+  // (calls privadas em que eu não participo chegam tarjadas) e troca a
+  // Agenda pra essa visão.
+  function viewColleagueAgenda(userId: string, name: string) {
+    setAgendaColleagueId(userId);
+    agendaColleagueIdRef.current = userId;
+    setAgendaColleagueName(name || "Sem nome");
+    setColleagueCalls([]);
+    setAgendaView("colleague");
+    send({ type: "agenda:view_colleague", userId });
+  }
+
+  function backToMyAgenda() {
+    setAgendaColleagueId(null);
+    agendaColleagueIdRef.current = null;
+    setAgendaColleagueName("");
+    setColleagueCalls([]);
+    setAgendaSearchQuery("");
+    setAgendaView("list");
+  }
+
+  // checagem de disponibilidade AO VIVO enquanto o formulário "Marcar
+  // call" tá aberto -- a cada mudança de data/hora/duração/participante,
+  // pergunta pro servidor quem dos JÁ SELECIONADOS fica ocupado nesse
+  // horário (ver getConflictingUserIds em server/agendaStore.js), pra
+  // já desabilitar/marcar "indisponível" antes de confirmar.
+  //
+  // 2/out: migrado de GameRoom.tsx junto do resto da Agenda, mas com UM
+  // ajuste -- a versão de lá só checava quem tava ONLINE NA SALA agora
+  // (remotePlayersRef), não os participantes de verdade selecionados no
+  // formulário (que sempre vieram do roster inteiro, allUsers, mesmo
+  // offline -- ver comentário de DirectoryUser em GameRoom.tsx). Isso
+  // nunca fez sentido fora de uma sala (não existe "quem tá por perto"
+  // no Lobby) nem dentro, de verdade (convidar alguém offline era
+  // sempre possível, só não teria o aviso prévio) -- trocado pra checar
+  // agendaForm.participantIds direto, que é tanto mais correto quanto
+  // 100% independente de sala.
+  useEffect(() => {
+    if (agendaView !== "new") return;
+    const startTs = combineLocalDateTime(agendaForm.date, agendaForm.time);
+    if (!Number.isFinite(startTs) || agendaForm.participantIds.length === 0) {
+      setBusyUserIds([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      send({
+        type: "agenda:availability",
+        candidateUserIds: agendaForm.participantIds,
+        startTs,
+        durationMinutes: agendaForm.durationMinutes,
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agendaView, agendaForm.date, agendaForm.time, agendaForm.durationMinutes, agendaForm.participantIds]);
 
   // espelha "tô literalmente vendo essa conversa agora" pro handler de
   // "chat:message" (fechado dentro do efeito acima) -- mesmo padrão de
@@ -983,8 +1486,13 @@ export function usePlatformChat(params: PlatformChatParams) {
     unpinMessage,
     sendTypingNotification,
     pendingMentionIds,
+    replyingTo,
+    startReplyToMessage,
+    cancelReply,
     setPendingMentionIds,
     moveConversationLane,
+    muteConversation,
+    deleteConversation,
     // nova conversa / criar grupo
     newConvMode,
     changeNewConvMode,
@@ -1015,7 +1523,7 @@ export function usePlatformChat(params: PlatformChatParams) {
     stopVoiceRecording,
     cancelVoiceRecording,
     discardRecordedAudio,
-    setRecordingErrorHandler,
+    setToastHandler,
     sendRecordedAudio,
     // painel de arquivos
     filesPanelOpen,
@@ -1035,5 +1543,39 @@ export function usePlatformChat(params: PlatformChatParams) {
     leaveCall,
     callLocalStreamRef,
     replaceCallTrack,
+    // agenda (ver comentário grande dela acima)
+    calls,
+    busyUserIds,
+    agendaOpen,
+    setAgendaOpen,
+    agendaView,
+    setAgendaView,
+    agendaDetailId,
+    openCallDetail,
+    agendaForm,
+    updateAgendaForm,
+    toggleAgendaParticipant,
+    agendaError,
+    startNewCall,
+    editingCallId,
+    startEditCall,
+    deleteCall,
+    submitCreateCall,
+    respondToCall,
+    agendaSearchQuery,
+    setAgendaSearchQuery,
+    agendaColleagueId,
+    agendaColleagueName,
+    colleagueCalls,
+    viewColleagueAgenda,
+    backToMyAgenda,
+    handleAgendaFileChange,
+    removeAgendaFormAttachment,
+    sendingAgendaAttachment,
+    handleAgendaDetailFileChange,
+    sendingDetailAttachment,
+    expandedAgendaDays,
+    toggleAgendaDay,
+    allUsers,
   };
 }
