@@ -948,6 +948,31 @@ export default function GameRoom({
   const [camOn, setCamOn] = useState(() => getStoredCamOn());
   const [screenOn, setScreenOn] = useState(false);
 
+  // 2/out, pedido do Douglas: "porque a camera fica ali preta?" --
+  // o <video className="local-video"> (ver JSX mais abaixo) sempre
+  // ficava montado, com o stream sempre anexado (ver requestMedia
+  // acima/toggleScreenShare abaixo), MESMO com a câmera desligada.
+  // toggleCam só desativa a TRACK (t.enabled = false, ver mais
+  // abaixo) -- e uma track de vídeo desativada, por padrão do
+  // navegador (WebRTC/MediaStream), renderiza quadro PRETO sólido,
+  // não "nada"/transparente. Resultado: um retângulo preto flutuando
+  // no canto mesmo sem câmera nenhuma ligada.
+  // Fix: só MOSTRA o quadradinho quando tem algo de verdade pra
+  // exibir (câmera ligada OU tela compartilhada -- o mesmo <video>
+  // é reaproveitado pra tela, ver toggleScreenShare). Como o React
+  // desmonta o <video> quando os dois ficam false, o ref zera junto
+  // -- esse efeito reconecta o srcObject sempre que ele reaparece
+  // (camOn ou screenOn voltam a true), já que o <video> é um
+  // elemento NOVO nesse remount e não herda o srcObject de antes.
+  useEffect(() => {
+    if (!localVideoRef.current) return;
+    if (screenOn) {
+      localVideoRef.current.srcObject = screenStreamRef.current;
+    } else if (camOn) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, [camOn, screenOn]);
+
   // --- Configurações (ver SettingsPanel/botão de engrenagem na av-bar)
   // -- deviceId ESCOLHIDO de cada aparelho ("" = padrão do navegador,
   // não mexeu ainda, ou escolha vinda do Lobby, ver acima), e o
@@ -4986,7 +5011,9 @@ export default function GameRoom({
           ))}
         </div>
 
-        <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
+        {(camOn || screenOn) && (
+          <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
+        )}
 
         <RemoteVideosLayer
           remoteStreams={remoteStreams}
