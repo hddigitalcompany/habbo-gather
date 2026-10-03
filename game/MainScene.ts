@@ -420,8 +420,9 @@ const DEPTH_STACK_ON_TOP = 4;
 /**
  * Vidro (divisória, FurnitureType "vidro") -- pedido do Douglas:
  * "coloque a vidraca acima dos mobis tambem" (depois de já ter pedido
- * pra vidraça da fachada ficar acima do piso, ver
- * DEPTH_FACADE_CORNER2_GLASS). A arte do vidro tem 2 tiles de altura
+ * pra vidraça da fachada ficar acima do piso, antigo pedido numa peça
+ * de fachada que já foi removida -- ver "apaga a fachada 2"). A arte
+ * do vidro tem 2 tiles de altura
  * (ver FURNITURE_ART.vidro), mas usava a MESMA profundidade-por-fileira
  * de um móvel comum de 1 tile -- então um móvel ancorado na fileira
  * logo "na frente" dele (col+row maior) desenhava por cima da METADE DE
@@ -514,8 +515,8 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 // nova (zigue-zague de VÁRIOS "V"s, não só 1 -- um prédio de verdade
 // com várias quinas na mesma fachada, não um desenho simples) tem o
 // MESMO papel de sempre: só UM ponto dela (o "V" mais FUNDO, mesmo
-// critério já usado pra vidraça 2 quando a arte dela também tinha mais
-// de um "V", ver FACADE_CORNER2_APEX_*) cola na quina de baixo da
+// critério já usado antes na peça de quina 2, removida -- ver "apaga
+// a fachada 2") cola na quina de baixo da
 // sala -- o resto da imagem só decora ao redor, sem precisar encaixar
 // em mais nada. Apagado o "fachada-predio.avif" antigo (não sobra
 // referência -- ver git log se precisar dele de volta).
@@ -532,38 +533,17 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 // não antes).
 const FACADE_TEXTURE_KEY = "fachada-predio";
 const DEPTH_FACADE = -2_500_000;
-/** Profundidade SÓ da vidraça 2 (quina2, fachada-predio-quina-2) --
- * pedido do Douglas (1): "coloque o vidro acima do piso em questao de
- * camada, sem mudar a posicao dele" -- primeira versão, só "+ 1" acima
- * de DEPTH_FLOOR. Pedido (2), com print mostrando o painel de parede
- * (MDF) tampando a vidraça: "a vidraça, da fachada, coloque ela acima
- * de tudo nas camadas, mobis, paredes, piso" -- "+ 1" só vencia o
- * PISO; móvel/parede/boneco usam a profundidade dinâmica por fileira
- * (furnitureDepthForTile/wallDepthForSegment/avatarDepthForY, perto de
- * 0 ou até bem maior em sala grande), então qualquer um desses sempre
- * desenhava NA FRENTE da vidraça 2 (DEPTH_FLOOR+1, um número bem mais
- * negativo). Troca pra uma profundidade fixa BEM maior que qualquer
- * fileira de sala real consegue alcançar -- mas ainda bem abaixo de
- * EDIT_UI_DEPTH (10_000_000, a MESMA barreira que a UI do editor usa
- * pra garantir que fica acima de TUDO do jogo), pra não competir com
- * contorno de hover/seleção do modo de edição. Diferente da fachada
- * principal (DEPTH_FACADE, que continua ATRÁS do piso de propósito,
- * "pendurada" pra fora/baixo da sala) -- só essa peça é tratada como
- * vidro visível DENTRO da sala. x/y continuam exatamente iguais
- * (tileToWorld + offset), só a ordem de desenho muda. */
-const DEPTH_FACADE_CORNER2_GLASS = 5_000_000;
 /** vértice do "V" de cima da fachada DENTRO da arte (px) -- é esse
  * ponto que cola no vértice de baixo do piso. Arte nova (2/out, foto
  * única com VÁRIOS "V"s, ver comentário grande de FACADE_TEXTURE_KEY)
- * -- igual já tinha sido feito pra vidraça 2 quando a arte dela também
- * tinha mais de um "V" (ver FACADE_CORNER2_APEX_*), usa o MAIS FUNDO
- * dos 3 (perfil de alpha coluna a coluna, ponto mais fundo de cada "V",
- * o maior Y venceu) -- nesse caso o 3º "V" (o mais à direita, antes da
- * faixa de pedra reta que fecha a arte). Coordenadas já relativas ao
- * canvas CORTADO (1529x737, ver comentário grande de FACADE_TEXTURE_KEY
- * sobre o corte pra reduzir o tamanho do arquivo) -- medido em
- * x≈1233,y≈1008 no PNG ORIGINAL (1750x1500, bbox do conteúdo começando
- * em 218,751), then x≈1015,y≈257 depois de subtrair a origem do corte. */
+ * -- usa o MAIS FUNDO dos 3 (perfil de alpha coluna a coluna, ponto
+ * mais fundo de cada "V", o maior Y venceu) -- nesse caso o 3º "V" (o
+ * mais à direita, antes da faixa de pedra reta que fecha a arte).
+ * Coordenadas já relativas ao canvas CORTADO (1529x737, ver comentário
+ * grande de FACADE_TEXTURE_KEY sobre o corte pra reduzir o tamanho do
+ * arquivo) -- medido em x≈1233,y≈1008 no PNG ORIGINAL (1750x1500, bbox
+ * do conteúdo começando em 218,751), depois x≈1015,y≈257 depois de
+ * subtrair a origem do corte. */
 const FACADE_APEX_X_PX = 1015;
 const FACADE_APEX_Y_PX = 257;
 /** escala da arte -- base histórica: cada vão de janela da fachada
@@ -575,80 +555,29 @@ const FACADE_APEX_Y_PX = 257;
  * janela com a mesma técnica de detecção de borda -- mantida essa
  * MESMA base como ponto de partida (único jeito objetivo de não
  * inventar um número sem medição nenhuma), com ajuste manual por cima
- * depois de ver renderizado, igual já foi feito várias vezes com a
- * vidraça 2 (ver FACADE_CORNER2_SCALE): Douglas, já vendo a arte nova
- * na sala, "aumenta a proporcao 10%", depois "mais 10%" -- acumulado
- * (mesmo esquema de multiplicar em cadeia da vidraça 2, nunca
- * substituindo o ajuste anterior). */
+ * depois de ver renderizado: Douglas, já vendo a arte nova na sala,
+ * "aumenta a proporcao 10%", depois "mais 10%" -- acumulado (mesmo
+ * esquema de multiplicar em cadeia já usado antes na peça de quina 2,
+ * removida -- ver "apaga a fachada 2"). */
 const FACADE_SCALE = (128 / 53.6) * 1.1 * 1.1;
-
-// QUINA ADICIONAL (pedido do Douglas, sala em L/escada: "essa parte vai
-// encaixar no predio do lado esquerdo" / "isso quina") -- peça MENOR,
-// só o "V" de vidro sem as paredes laterais da peça principal, pra
-// cobrir toda quina externa extra que a sala tiver além da principal
-// (ver roomFrontCorners/positionFacade).
-//
-// ARTE TROCADA (pedido do Douglas: "vamos precisar mudar a vidraca 2 de
-// lugar, e trocar a imagem tambem") -- PNG 1750x1000, zigue-zague com
-// 2 "V"s + faixa diagonal dourada. Teve 3 versões do arquivo até
-// agora: (1) original, conteúdo opaco até x≈1190, ápice (V mais
-// FUNDO) em x≈911->y≈286; (2) Douglas reportou "lado direito nao
-// encaixou" e reposicionou o desenho dentro do canvas (conteúdo só
-// até x≈1020), ápice foi pra x≈740->y≈285; (3) a versão ATUAL (depois
-// de "de novo" + nova imagem) voltou a bater com a geometria da
-// versão (1) -- conteúdo de novo até x≈1190, ápice medido de novo em
-// x≈910->y≈285 (conferido coluna a coluna no PNG recebido, não assumido
-// -- bate com a v1 dentro de 1px). Se um dia "não encaixar" de novo
-// depois de reabrir esse arquivo, é sinal de que ele trocou de versão
-// outra vez -- remedir o ápice (perfil de alpha coluna a coluna, pico
-// mais fundo dos dois "V"s) antes de mexer em qualquer outra coisa.
-// Vão entre janelas sempre ~53-54px nas 3 versões (mesma arte-base,
-// só a posição dentro do canvas muda), por isso FACADE_CORNER2_SCALE
-// abaixo não mudou entre as versões.
-const FACADE_CORNER2_TEXTURE_KEY = "fachada-predio-quina-2";
-const FACADE_CORNER2_APEX_X_PX = 910;
-const FACADE_CORNER2_APEX_Y_PX = 285;
-/** Escala PRÓPRIA dessa peça -- base é a MESMA fórmula de sempre
- * (FACADE_SCALE): vão de janela medido em 54px por detecção de borda
- * vertical, então 128/54 cobre os 2 tiles certinho em teoria. Depois
- * de ver renderizado, Douglas pediu uma sequência de ajustes finos
- * (tapa-olho sobre o anterior, não remedição do PNG): "diminui um
- * pouquinho" (-5%), "aumenta 2%", "diminui 1% dimensao" (-1%),
- * "diminui mais 1%" (-1% de novo), "aumenta 1%" (+1%) -- acumulado:
- * 0.95 * 1.02 * 0.99 * 0.99 * 1.01 = 0.9592 do valor medido original.
- * Ainda sujeito a mais ajuste se não bater exato -- ver print. */
-const FACADE_CORNER2_SCALE = (128 / 54) * 0.95 * 1.02 * 0.99 * 0.99 * 1.01;
-/** Offset manual em cima da posição calculada por tile (ver
- * tileToWorld) -- recalibrado do zero com prints depois da troca de
- * arte/posição. Douglas: "mova 2px pra esquerda" (-2), depois "mova
- * 2 px pra direita" (+2, volta pro 0) "e 3 pra cima" (-3 em Y -- Y
- * negativo move pra cima na tela). */
-const FACADE_CORNER2_OFFSET_X_PX = 0;
-const FACADE_CORNER2_OFFSET_Y_PX = -3;
 
 /** TRAVA DEFINITIVA (pedido do Douglas: "trava elas de alguma outra
  * forma, preciso mexer em toda sacada encima delas") -- em vez de
  * escolher a quina pelo formato da sala (roomFrontCorners, que muda
  * toda vez que ele adiciona/remove tile e já escolheu errado 2x nesta
- * sessão de ajustes), as duas peças ficam fixas nestes tiles exatos,
- * conferidos direto no banco (Supabase, sala "mapa-publicado") no
- * momento em que o encaixe estava visualmente correto: principal no
- * tile de maior col+row (quina externa de baixo), quina2 no outro
- * tile de quina que sobrou mais à esquerda na tela. Daqui pra frente
- * NENHUM calculo de sala entra na escolha -- só mudam se alterados
- * aqui manualmente. */
+ * sessão de ajustes), a peça fica fixa neste tile exato, conferido
+ * direto no banco (Supabase, sala "mapa-publicado") no momento em que
+ * o encaixe estava visualmente correto: o tile de maior col+row
+ * (quina externa de baixo). Daqui pra frente NENHUM calculo de sala
+ * entra na escolha -- só muda se alterado aqui manualmente.
+ *
+ * Existia uma 2ª peça (FACADE_CORNER2_TILE, pra sala em L/escada com
+ * mais de uma quina externa) -- removida (pedido do Douglas, 2/out:
+ * "apaga a fachada 2", depois que a fachada principal virou uma foto
+ * única cobrindo bem mais da sala -- ver fachada-01.webp). Se precisar
+ * dela de volta, ver git log/histórico desse arquivo antes dessa
+ * remoção. */
 const FACADE_MAIN_TILE = { col: 21, row: 16 };
-/** Movida (pedido do Douglas: "vamos precisar mudar a vidraca 2 de
- * lugar") pra tile 9,26 -- a quina "que tem uma cadeira gamer
- * vermelha": conferido direto no banco (Supabase, sala
- * "mapa-publicado") que esse tile é hoje uma quina externa de verdade
- * (roomFrontCorners) E tem uma poltrona modelo "Gamer" ancorada nele
- * -- bate exatamente com a descrição, mesmo a cor salva no momento da
- * checagem não sendo "Vermelho" (pode ter mudado depois/ainda não
- * sincronizado). Tile antigo (1,27) NÃO fica mais protegido contra
- * apagar (ver eraseRoomShapeAt) nem com peça nenhuma -- só muda se o
- * Douglas pedir de novo. */
-const FACADE_CORNER2_TILE = { col: 9, row: 26 };
 
 /** Fronteira de profundidade de um móvel a partir do TILE lógico dele (col/row, não da posição visual) -- ver comentário acima. */
 function furnitureDepthForTile(col: number, row: number): number {
@@ -1057,15 +986,8 @@ export default class MainScene extends Phaser.Scene {
   /** tile onde facadeImage foi ancorada da PRIMEIRA vez (ver
    * positionFacade) -- guardado separado do cálculo de "main" de cada
    * chamada porque agora congela pra sempre assim que criado (pedido
-   * do Douglas, "trava ela nessa posição"); serve só pra excluir esse
-   * tile de virar também uma quina2 (perto do fim de positionFacade). */
+   * do Douglas, "trava ela nessa posição"). */
   private facadeMainTile?: { col: number; row: number };
-  /** quinas EXTRAS da fachada, 1 sprite por quina (sala em L/escada com
-   * mais de 1 quina externa -- ver roomFrontCorners/positionFacade),
-   * indexado por "col,row" do tile-quina (mesmo padrão de
-   * draftFloor/draftWall no resto do arquivo), pra sobreviver entre
-   * chamadas e sumir sozinho se a quina deixar de existir. */
-  private facadeCornerSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private hoverGraphics?: Phaser.GameObjects.Graphics;
   // "fantasma" (ver refreshCatalogGhost) do item selecionado na paleta,
   // seguindo o cursor -- null quando nenhum item de móvel está selecionado.
@@ -1759,7 +1681,6 @@ export default class MainScene extends Phaser.Scene {
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
     }
     this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-01.webp");
-    this.load.image(FACADE_CORNER2_TEXTURE_KEY, "/assets/fachada-predio-quina-2.png");
   }
 
   create() {
@@ -4499,47 +4420,21 @@ export default class MainScene extends Phaser.Scene {
     ].filter((t) => this.isTileInRoom(t.col, t.row));
   }
 
-  /** Toda quina EXTERNA da fachada -- tile da sala sem vizinho em
-   * NENHUMA das 2 direções "pra frente" (col+1,row e col,row+1, mesmo
-   * critério de roomBackNeighbors/isTileInRoom). Numa sala
-   * retangular/losango simples só existe 1 (o tile mais "pra frente"
-   * da tela, o único candidato de sempre). Numa sala em L ou escada
-   * (ver teste do Douglas com a sala em escada) o contorno pode ter
-   * vários "dentes" pra frente, cada um sua própria quina -- cada uma
-   * precisa da própria peça de fachada (ver positionFacade). */
-  private roomFrontCorners(): { col: number; row: number }[] {
-    const corners: { col: number; row: number }[] = [];
-    for (const key of this.roomShape) {
-      const [col, row] = key.split(",").map(Number);
-      if (!this.isTileInRoom(col + 1, row) && !this.isTileInRoom(col, row + 1)) {
-        corners.push({ col, row });
-      }
-    }
-    return corners;
-  }
-
-  /** Cola o vértice do "V" da fachada PRINCIPAL (FACADE_APEX_*) na
-   * quina de baixo da sala -- o tile com maior col+row (o mais "pra
-   * frente" na tela, ver furnitureDepthForTile), canto de baixo do
-   * losango dele. Empate (sala irregular com mais de 1 tile na frente)
-   * fica com o mais central (menor |col-row|) -- mesmo critério de
-   * sempre. As DEMAIS quinas externas da sala (ver roomFrontCorners --
-   * sala em L/escada tem mais de uma) ganham cada uma sua própria peça
-   * MENOR (FACADE_CORNER2_TEXTURE_KEY, só o "V" de vidro, sem as
-   * paredes laterais da peça principal -- pedido do Douglas: "essa
-   * parte vai encaixar no predio do lado esquerdo" / "isso quina". A
-   * aba que sobra no topo esquerdo dessa arte é o respiro que cobre o
-   * trecho reto até a peça vizinha, escondendo a costura -- já vem
-   * assim na arte, nada calculado aqui pra isso). Chamado sempre que o
-   * formato da sala muda. */
+  /** Cola o vértice do "V" da fachada (FACADE_APEX_*) na quina de
+   * baixo da sala -- o tile com maior col+row (o mais "pra frente" na
+   * tela, ver furnitureDepthForTile), canto de baixo do losango dele.
+   * Tile fixo (FACADE_MAIN_TILE, ver comentário ali) -- não depende do
+   * formato da sala, então nenhuma edição de piso/sacada dali pra
+   * frente pode mudar ou duplicar a peça. Só criada 1 vez (gate por
+   * this.facadeImage) -- só volta a criar se a cena inteira for
+   * recriada do zero (recarregar a página). Chamado sempre que o
+   * formato da sala muda (mesmo sem precisar mais dele pra escolher a
+   * quina -- ver loadSavedRoomShape).
+   *
+   * Existia uma 2ª peça menor pras quinas externas EXTRAS de sala em
+   * L/escada (roomFrontCorners), removida -- ver "apaga a fachada 2"
+   * no comentário grande de FACADE_MAIN_TILE. */
   private positionFacade() {
-    // TRAVA DEFINITIVA: tiles fixos (FACADE_MAIN_TILE/FACADE_CORNER2_TILE,
-    // ver comentário ali) -- não depende mais do formato da sala
-    // (roomFrontCorners) de jeito nenhum, então nenhuma edição de piso/
-    // sacada dali pra frente pode mudar, duplicar ou apagar as peças.
-    // Cada peça ainda só é criada 1 vez (gate por this.facadeImage /
-    // this.facadeCornerSprites.size) -- só volta a criar se a cena
-    // inteira for recriada do zero (recarregar a página).
     if (!this.facadeMainTile) {
       this.facadeMainTile = FACADE_MAIN_TILE;
     }
@@ -4553,20 +4448,6 @@ export default class MainScene extends Phaser.Scene {
         .setOrigin(FACADE_APEX_X_PX / tex.width, FACADE_APEX_Y_PX / tex.height)
         .setScale(FACADE_SCALE)
         .setDepth(DEPTH_FACADE);
-    }
-
-    if (this.facadeCornerSprites.size === 0 && this.textures.exists(FACADE_CORNER2_TEXTURE_KEY)) {
-      const secondary = FACADE_CORNER2_TILE;
-      const tex = this.textures.get(FACADE_CORNER2_TEXTURE_KEY).getSourceImage() as HTMLImageElement;
-      const w = tileToWorld(secondary.col, secondary.row);
-      const x = w.x + FACADE_CORNER2_OFFSET_X_PX;
-      const y = w.y + ISO_TILE_HEIGHT / 2 + FACADE_CORNER2_OFFSET_Y_PX;
-      const sprite = this.add
-        .image(x, y, FACADE_CORNER2_TEXTURE_KEY)
-        .setOrigin(FACADE_CORNER2_APEX_X_PX / tex.width, FACADE_CORNER2_APEX_Y_PX / tex.height)
-        .setScale(FACADE_CORNER2_SCALE)
-        .setDepth(DEPTH_FACADE_CORNER2_GLASS);
-      this.facadeCornerSprites.set(this.roomTileKey(secondary.col, secondary.row), sprite);
     }
   }
 
@@ -4705,17 +4586,14 @@ export default class MainScene extends Phaser.Scene {
   private eraseRoomShapeAt(col: number, row: number): string | null {
     const key = this.roomTileKey(col, row);
     if (!this.roomShape.has(key)) return null; // clique num tile que já não é da sala -- nada a fazer, sem aviso
-    // tile-âncora da fachada (ver FACADE_MAIN_TILE/FACADE_CORNER2_TILE) --
-    // pedido do Douglas: "trave elas para que NINGUEM apague-as". A
-    // fachada já não se MOVE mais apagando/adicionando tile em outro
-    // lugar (ver positionFacade), mas apagar o próprio tile-âncora
-    // deixaria a peça "pendurada" sem piso embaixo dela -- bloqueado
-    // igual aos outros motivos de bloqueio abaixo (piso/móvel, alguém
-    // em pé, desconectaria a sala).
-    if (
-      (col === FACADE_MAIN_TILE.col && row === FACADE_MAIN_TILE.row) ||
-      (col === FACADE_CORNER2_TILE.col && row === FACADE_CORNER2_TILE.row)
-    ) {
+    // tile-âncora da fachada (ver FACADE_MAIN_TILE) -- pedido do
+    // Douglas: "trave elas para que NINGUEM apague-as". A fachada já
+    // não se MOVE mais apagando/adicionando tile em outro lugar (ver
+    // positionFacade), mas apagar o próprio tile-âncora deixaria a
+    // peça "pendurada" sem piso embaixo dela -- bloqueado igual aos
+    // outros motivos de bloqueio abaixo (piso/móvel, alguém em pé,
+    // desconectaria a sala).
+    if (col === FACADE_MAIN_TILE.col && row === FACADE_MAIN_TILE.row) {
       return "Esse tile é a base da fachada do prédio -- não pode ser apagado.";
     }
     if (this.roomShape.size <= 1) return "A sala não pode ficar sem nenhum quadrado.";
