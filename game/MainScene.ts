@@ -507,8 +507,6 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 // FACHADA DO PRÉDIO (pedido do Douglas: "coloca, faça a quina ali
 // coladinha no piso") -- a quina do prédio vista de fora, com o "V" de
 // cima da fachada encaixado nas 2 bordas da FRENTE do losango da sala.
-// Fica entre o fundo sólido e o piso: o piso sempre por cima, a
-// fachada "pendurada" pra baixo a partir da quina de baixo da sala.
 //
 // ARTE TROCADA DE NOVO (2/out) -- Douglas: "mudei a fachada pra uma
 // imagem só, coloca ela posicionada na quina da fachada 01". Essa foto
@@ -532,7 +530,19 @@ const DEPTH_ROOM_BACKGROUND = -3_000_000;
 // muda a origem, então o apex teve que ser remedido depois de cortar,
 // não antes).
 const FACADE_TEXTURE_KEY = "fachada-predio";
-const DEPTH_FACADE = -2_500_000;
+/** Profundidade de desenho da fachada. ERA -2_500_000 (ficava ATRÁS do
+ * piso de propósito, "pendurada" pra fora/baixo da sala, só a quina do
+ * prédio vista "através" de onde a parede faria fronteira). Pedido do
+ * Douglas (2/out, já vendo a arte nova bem maior cobrindo a sala):
+ * "fachada acima de tudo agora camadas" -- mesma ideia/mesmo valor já
+ * usado antes na peça de quina 2 (removida) quando ela também virou
+ * "vidro visível DENTRO da sala" por pedido parecido ("acima de tudo
+ * nas camadas, mobis, paredes, piso"): fixo BEM maior que qualquer
+ * fileira de sala real alcança (furnitureDepthForTile/
+ * wallDepthForSegment/avatarDepthForY, perto de 0 ou até bem maior em
+ * sala grande), mas ainda abaixo de EDIT_UI_DEPTH (10_000_000) pra não
+ * competir com contorno de hover/seleção do modo de edição. */
+const DEPTH_FACADE = 5_000_000;
 /** vértice do "V" de cima da fachada DENTRO da arte (px) -- é esse
  * ponto que cola no vértice de baixo do piso. Arte nova (2/out, foto
  * única com VÁRIOS "V"s, ver comentário grande de FACADE_TEXTURE_KEY)
