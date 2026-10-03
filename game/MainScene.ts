@@ -577,8 +577,10 @@ const FACADE_APEX_Y_PX = 257;
  * inventar um número sem medição nenhuma), com ajuste manual por cima
  * depois de ver renderizado, igual já foi feito várias vezes com a
  * vidraça 2 (ver FACADE_CORNER2_SCALE): Douglas, já vendo a arte nova
- * na sala, "aumenta a proporcao 10%". */
-const FACADE_SCALE = (128 / 53.6) * 1.1;
+ * na sala, "aumenta a proporcao 10%", depois "mais 10%" -- acumulado
+ * (mesmo esquema de multiplicar em cadeia da vidraça 2, nunca
+ * substituindo o ajuste anterior). */
+const FACADE_SCALE = (128 / 53.6) * 1.1 * 1.1;
 
 // QUINA ADICIONAL (pedido do Douglas, sala em L/escada: "essa parte vai
 // encaixar no predio do lado esquerdo" / "isso quina") -- peça MENOR,
