@@ -117,6 +117,7 @@ import {
 // ela também migrar, ver comentário em app/page.tsx).
 import { usePlatformChat } from "@/components/usePlatformChat";
 import { useRoomCompanyProfile } from "@/components/useRoomCompanyProfile";
+import { prefetchCustomCatalogs } from "@/lib/customCatalogCache";
 type PlatformChat = ReturnType<typeof usePlatformChat>;
 
 const REALTIME_HOST = process.env.NEXT_PUBLIC_REALTIME_HOST || "127.0.0.1:1999";
@@ -1273,6 +1274,21 @@ export default function Lobby({
   platformChat: PlatformChat;
 }) {
   const chat = platformChat;
+  // "preupload" pedido pelo Douglas (2/out: "o carregamento na pagina
+  // que aparece minha logo, faca o preupload do que precisa ali, porque
+  // quando eu entro na sala, 1/2s fica lento") -- dispara BEM CEDO (já
+  // no Lobby, antes de qualquer clique em "Entrar") a busca dos
+  // catálogos custom (mobília/piso/parede/porta/tom de pele/avatar) que
+  // GameRoom.tsx precisa assim que a sala monta (ver comentário grande
+  // em lib/customCatalogCache.ts pro root-cause completo: são 7
+  // consultas ao Supabase, todas da CONTA/globais, não da sala, e antes
+  // dessa mudança eram refeitas do zero toda vez que QUALQUER sala
+  // montava). Só dispara -- não usa o resultado aqui, GameRoom.tsx que
+  // consome de verdade (getCustomCatalogRows()), reaproveitando essa
+  // MESMA busca já em voo/resolvida.
+  useEffect(() => {
+    prefetchCustomCatalogs();
+  }, []);
   const [presence, setPresence] = useState<PresenceInfo>(null);
   // papel na sala do Douglas (ver comentário grande "teamOnly" em
   // ROOM_SLUGS acima) -- MESMA fonte que GameRoom.tsx já usa pra

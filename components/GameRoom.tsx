@@ -37,6 +37,7 @@ import MainScene, {
 } from "@/game/MainScene";
 import { createGameConfig } from "@/game/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { getCustomCatalogRows, invalidateCustomCatalogCache } from "@/lib/customCatalogCache";
 import { resolveUserId } from "@/lib/identity";
 import {
   SPACE_VOLUME_STORAGE_KEY,
@@ -1444,15 +1445,23 @@ export default function GameRoom({
    * só pros ids que vieram como "atualizados".
    */
   async function fetchAndRegisterCustomFurniture(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    // Perf (pedido do Douglas, 2/out: "faca o preupload do que precisa
+    // ali... quando eu entro na sala, 1/2s fica lento") -- essa consulta
+    // (como as outras 6 fetchAndRegisterCustom*/fetchDefaultReferences
+    // aqui embaixo) é CATÁLOGO DA CONTA, não da sala (sem .eq("room_id"))
+    // -- agora vem de um cache compartilhado entre toda montagem de sala
+    // (ver comentário grande em lib/customCatalogCache.ts) em vez de
+    // bater no Supabase do zero toda vez. Resto da função (mapear cada
+    // linha pro FurnitureModelDef certo) continua idêntico.
     try {
-      const { data, error } = await supabase
-        .from("room_items")
-        .select(
-          "id, label, category, art, display_width, icon_url, near_image_url, offset_x, offset_y, direction_offsets, direction_display_width, sittable, seat_offset_x, seat_offset_y, seat_direction_offsets, colors, footprint_cols, footprint_rows, footprint_by_direction, stackable, stack_surface_offset_y, extra_seats"
-        );
-      if (error || !data || data.length === 0) return;
+      // cast solto (igual ao "any[] | null" que supabase-js já devolvia
+      // aqui antes) -- a anotação de tipo de verdade pra cada campo
+      // continua logo abaixo, no parâmetro do .map() (não duplicada
+      // aqui em cima).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação do .map() logo abaixo)
+      const data = catalogRows.roomItems as any[] | null;
+      if (!data || data.length === 0) return;
       const models: FurnitureModelDef[] = data.map(
         (row: {
           id: string;
@@ -1612,15 +1621,13 @@ export default function GameRoom({
    * ready + onItemsChanged do ItemEditor).
    */
   async function fetchAndRegisterCustomFloor(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("room_floor_items")
-        .select(
-          "id, label, category, kind, file_url, plank_width_px, color_a, color_b, plank_length_px, line_color, colors, wood_grain, marble, tile_aligned"
-        );
-      if (error || !data || data.length === 0) return;
+      // Perf -- ver comentário grande em fetchAndRegisterCustomFurniture
+      // (mesmo cache compartilhado, lib/customCatalogCache.ts).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação do .map() logo abaixo)
+      const data = catalogRows.roomFloorItems as any[] | null;
+      if (!data || data.length === 0) return;
       const entries: FloorCatalogEntry[] = data.map(
         (row: {
           id: string;
@@ -1725,15 +1732,13 @@ export default function GameRoom({
    * ready + onItemsChanged do ItemEditor).
    */
   async function fetchAndRegisterCustomWall(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("room_wall_items")
-        .select(
-          "id, label, height_px, thickness_px, brick_width_px, brick_height_px, brick_color, mortar_color, mortar_width_px, top_color, texture_kind, wood_grain, texture_image_url"
-        );
-      if (error || !data || data.length === 0) return;
+      // Perf -- ver comentário grande em fetchAndRegisterCustomFurniture
+      // (mesmo cache compartilhado, lib/customCatalogCache.ts).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação do .map() logo abaixo)
+      const data = catalogRows.roomWallItems as any[] | null;
+      if (!data || data.length === 0) return;
       const entries: WallCatalogEntry[] = data.map(
         (row: {
           id: string;
@@ -1838,13 +1843,13 @@ export default function GameRoom({
    * ItemEditor).
    */
   async function fetchAndRegisterCustomDoor(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("room_door_items")
-        .select("id, label, kind, art_left_closed, art_left_open, art_right_closed, art_right_open, display_width_px");
-      if (error || !data || data.length === 0) return;
+      // Perf -- ver comentário grande em fetchAndRegisterCustomFurniture
+      // (mesmo cache compartilhado, lib/customCatalogCache.ts).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação do .map() logo abaixo)
+      const data = catalogRows.roomDoorItems as any[] | null;
+      if (!data || data.length === 0) return;
       const entries: DoorCatalogEntry[] = data.map(
         (row: {
           id: string;
@@ -1926,13 +1931,13 @@ export default function GameRoom({
    * refreshFurnitureModel-equivalente aqui.
    */
   async function fetchAndRegisterCustomSkins(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("avatar_skins")
-        .select("id, label, gender, sheet_url, hex, colors");
-      if (error || !data || data.length === 0) return;
+      // Perf -- ver comentário grande em fetchAndRegisterCustomFurniture
+      // (mesmo cache compartilhado, lib/customCatalogCache.ts).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação logo abaixo)
+      const data = catalogRows.avatarSkins as any[] | null;
+      if (!data || data.length === 0) return;
       type SkinRow = {
         id: string;
         label: string;
@@ -2004,13 +2009,13 @@ export default function GameRoom({
    * fetchAndRegisterCustomSkins/fetchAndRegisterCustomAvatarItems.
    */
   async function fetchDefaultReferences(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("avatar_default_reference")
-        .select("gender, head_sheet_url, body_sheet_url");
-      if (error || !data) return;
+      // Perf -- ver comentário grande em fetchAndRegisterCustomFurniture
+      // (mesmo cache compartilhado, lib/customCatalogCache.ts).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação logo abaixo)
+      const data = catalogRows.avatarDefaultReference as any[] | null;
+      if (!data) return;
       const next: Record<AvatarGender, { headUrl: string; bodyUrl: string } | null> = {
         masculino: null,
         feminino: null,
@@ -2040,13 +2045,13 @@ export default function GameRoom({
    * ItemEditor).
    */
   async function fetchAndRegisterCustomAvatarItems(): Promise<void> {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("avatar_items")
-        .select("id, category, gender, label, skin_ids, sheet_url, colors");
-      if (error || !data || data.length === 0) return;
+      // Perf -- ver comentário grande em fetchAndRegisterCustomFurniture
+      // (mesmo cache compartilhado, lib/customCatalogCache.ts).
+      const catalogRows = await getCustomCatalogRows();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesmo "any[] | null" solto que supabase-js já devolvia aqui antes (tipo de verdade é a anotação logo abaixo)
+      const data = catalogRows.avatarItems as any[] | null;
+      if (!data || data.length === 0) return;
 
       type AvatarItemRow = {
         id: string;
@@ -5585,6 +5590,15 @@ export default function GameRoom({
               const selectedModelId = selectedBefore?.modelId;
               const selectedFacing = selectedBefore?.facing;
 
+              // o item acabou de ser editado/criado no Editor de Itens --
+              // invalida o cache compartilhado (ver lib/customCatalogCache.ts)
+              // ANTES de disparar as 6 fetchAndRegisterCustom*() abaixo, senão
+              // elas reaproveitariam o cache ANTIGO (sem a mudança de agora).
+              // As 6 chamadas continuam SEM await entre si (igual sempre
+              // foi) -- mesmo sem await, acontecem na mesma tick síncrona,
+              // então todas caem na MESMA busca nova (só uma vai pro
+              // Supabase, não 6).
+              invalidateCustomCatalogCache();
               const furnitureRefreshed = fetchAndRegisterCustomFurniture();
               fetchAndRegisterCustomFloor();
               fetchAndRegisterCustomWall();
