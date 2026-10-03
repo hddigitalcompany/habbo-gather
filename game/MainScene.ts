@@ -7421,17 +7421,18 @@ export default class MainScene extends Phaser.Scene {
     return false;
   }
 
-  /** Esse tile trava a passagem por causa de algum móvel (fixo OU colocado pelo editor, ver FURNITURE_BLOCKS_MOVEMENT em furniture.ts) OU de uma parede "Centro do tile" (ver WallSide em game/wall.ts) OU de uma porta FECHADA na aresta entre `fromCol,fromRow` e `col,row` -- usado em startStep()/computeWalkPath(). blockingFurnitureAt (furniture.ts) só sabe de ROOM_FURNITURE; aqui completa com draftFurniture, pra um item colocado pelo editor (ex: nova divisória de vidro) travar passagem na hora, sem precisar de restart.
+  /** Esse tile trava a passagem por causa de algum móvel (fixo OU colocado pelo editor, ver FURNITURE_BLOCKS_MOVEMENT em furniture.ts) OU de uma parede "Centro do tile" (ver WallSide em game/wall.ts) OU de uma parede de BORDA/porta FECHADA na aresta entre `fromCol,fromRow` e `col,row` -- usado em startStep()/computeWalkPath(). blockingFurnitureAt (furniture.ts) só sabe de ROOM_FURNITURE; aqui completa com draftFurniture, pra um item colocado pelo editor (ex: nova divisória de vidro) travar passagem na hora, sem precisar de restart.
    *
    * `fromCol`/`fromRow` são OPCIONAIS -- diferente da parede "Centro do
    * tile" (bloqueia o TILE em si, não importa de que lado alguém vem), uma
-   * porta bloqueia uma TRAVESSIA específica (ver doorEdgeBetween em
-   * game/door.ts): só faz sentido checar quando sabemos de qual tile
-   * vizinho o passo estaria vindo. Os 2 únicos chamadores que têm essa
-   * intenção de verdade (startStep, computeWalkPath) sempre passam os
-   * dois; handleRoomPointerDown chama sem eles só pra saber se o TILE
-   * clicado é válido (sem travessia nenhuma em mente ainda, o caminho de
-   * verdade quem calcula é computeWalkPath logo depois). */
+   * parede de BORDA ou uma porta bloqueiam uma TRAVESSIA específica (ver
+   * doorEdgeBetween em game/door.ts, reaproveitada pros dois casos): só
+   * faz sentido checar quando sabemos de qual tile vizinho o passo
+   * estaria vindo. Os 2 únicos chamadores que têm essa intenção de
+   * verdade (startStep, computeWalkPath) sempre passam os dois;
+   * handleRoomPointerDown chama sem eles só pra saber se o TILE clicado é
+   * válido (sem travessia nenhuma em mente ainda, o caminho de verdade
+   * quem calcula é computeWalkPath logo depois). */
   private isMovementBlockedAt(col: number, row: number, fromCol?: number, fromRow?: number): boolean {
     if (blockingFurnitureAt(col, row)) return true;
     // mesma regra de blockingFurnitureAt (furniture.ts) pro item RASCUNHO
@@ -7458,11 +7459,25 @@ export default class MainScene extends Phaser.Scene {
     // casos, sem precisar de restart.
     if (this.draftWall.has(wallSegmentId(col, row, "center"))) return true;
     if (this.draftWall.has(wallSegmentId(col, row, "centerRow"))) return true;
-    // porta FECHADA na aresta cruzada -- ver comentário grande acima
-    // sobre fromCol/fromRow serem opcionais.
+    // porta FECHADA na aresta cruzada, E parede de BORDA na mesma
+    // aresta -- ver comentário grande acima sobre fromCol/fromRow serem
+    // opcionais. Pedido do Douglas (2/out): "a parede de BORDA continuar
+    // sendo andável, porém que ela bloqueasse a transição do tile dela
+    // pro tile que também divide com ela" -- ou seja, ao contrário da
+    // parede "center"/"centerRow" (trava o TILE inteiro, de qualquer
+    // direção, ver bloco acima), a parede de borda (colPlus/rowPlus, ver
+    // WallSide em game/wall.ts) trava só a TRAVESSIA daquela aresta
+    // específica -- os dois tiles continuam andáveis normalmente por
+    // qualquer outra aresta/direção. doorEdgeBetween (game/door.ts) é
+    // geometria pura de aresta-entre-dois-tiles-vizinhos (não é
+    // específica de porta apesar do nome/arquivo -- DoorSide é só um
+    // Extract<WallSide, "colPlus"|"rowPlus">), por isso reaproveitada
+    // aqui como está, sem duplicar a conta de qual aresta fica entre
+    // (fromCol,fromRow) e (col,row).
     if (fromCol !== undefined && fromRow !== undefined) {
       const edge = doorEdgeBetween(fromCol, fromRow, col, row);
       if (edge) {
+        if (this.draftWall.has(wallSegmentId(edge.col, edge.row, edge.side))) return true;
         const doorKey = doorSegmentId(edge.col, edge.row, edge.side);
         if (this.draftDoor.has(doorKey) && this.doorOpenState.get(doorKey) !== true) return true;
       }
