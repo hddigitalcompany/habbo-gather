@@ -982,6 +982,20 @@ export default class MainScene extends Phaser.Scene {
    * pra esse uso e corta a maior parte do trabalho repetido. */
   private lastFurnitureProximityCheck = 0;
 
+  /** Cache de "esse tile (col,row) já foi escaneado e NÃO tem cadeira
+   * nenhuma nele" -- ver findChairAtCurrentTile logo abaixo: parado
+   * (idle) numa sala, update() chama essa função TODO FRAME (60x/s), e
+   * sem esse cache ela reescaneia TODA a mobília (ROOM_FURNITURE +
+   * draftFurniture) a cada frame mesmo o jogador não tendo se mexido um
+   * pixel sequer -- trabalho 100% repetido, já que o resultado só pode
+   * mudar quando o tile muda (andou) ou quando a mobília em si muda
+   * (ver invalidação em loadSavedFurniture/removeDraftFurniture/
+   * clearDraftFurniture/registerCustomFurniture, e nos 3 outros lugares
+   * que chamam draftFurniture.set/delete/clear). null = cache
+   * inválido/nunca escaneado ainda, string = chave "col,row" da última
+   * vez que escaneamos e não achamos cadeira. */
+  private noChairAtTileKey: string | null = null;
+
   private localActivity: Activity = "idle";
   private sitCooldownUntil = 0;
   private seatedAt: FurnitureDef | null = null;
@@ -3795,6 +3809,15 @@ export default class MainScene extends Phaser.Scene {
   private findChairAtCurrentTile(): { furniture: FurnitureDef; dCol: number; dRow: number } | null {
     if (this.time.now < this.sitCooldownUntil) return null;
     const { col, row } = worldToTile(this.localContainer.x, this.localContainer.y);
+    const tileKey = `${col},${row}`;
+    // já escaneamos ESSE tile nesse mesmo lugar (parado) e não tinha
+    // cadeira -- idle não muda de tile sozinho, então reescanear de novo
+    // ia dar exatamente o mesmo resultado (ver comentário grande de
+    // noChairAtTileKey acima). Só esse early-return já elimina quase
+    // todo o custo: na prática o jogador fica parado/conversando a
+    // maior parte do tempo, então sem isso essa função reescaneava TODA
+    // a mobília a 60fps à toa.
+    if (this.noChairAtTileKey === tileKey) return null;
     // procura tanto na mobília FIXA (ROOM_FURNITURE) quanto na colocada
     // pelo editor (draftFurniture -- desde que ganhou persistência de
     // verdade, ver POST /room/furniture, esses itens também precisam
@@ -3807,6 +3830,7 @@ export default class MainScene extends Phaser.Scene {
       const spot = this.chairSpotAt(f, col, row);
       if (spot) return spot;
     }
+    this.noChairAtTileKey = tileKey;
     return null;
   }
 
@@ -4432,6 +4456,10 @@ export default class MainScene extends Phaser.Scene {
       this.draftFurniture.set(f.id, f);
       this.draftSprites.set(f.id, sprite);
     }
+    // mobília mudou -- invalida o cache de "não tem cadeira aqui" (ver
+    // comentário grande de noChairAtTileKey): um item recém-carregado
+    // pode ser justo uma cadeira no tile onde o jogador já está parado.
+    this.noChairAtTileKey = null;
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
@@ -4439,6 +4467,7 @@ export default class MainScene extends Phaser.Scene {
     this.draftSprites.get(id)?.destroy();
     this.draftSprites.delete(id);
     this.draftFurniture.delete(id);
+    this.noChairAtTileKey = null;
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
@@ -4447,6 +4476,7 @@ export default class MainScene extends Phaser.Scene {
     this.draftSprites.clear();
     this.draftFurniture.clear();
     this.movingFurnitureId = null; // o item em mãos (se houver) acabou de ser destruído junto
+    this.noChairAtTileKey = null;
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 
@@ -8508,6 +8538,7 @@ export default class MainScene extends Phaser.Scene {
     const sprite = this.addFurnitureSprite(def);
     this.draftFurniture.set(id, def);
     this.draftSprites.set(id, sprite);
+    this.noChairAtTileKey = null;
     this.onDraftChange?.(this.getDraftFurnitureList());
   }
 }
