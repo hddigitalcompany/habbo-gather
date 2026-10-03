@@ -448,53 +448,6 @@ function furnitureDepthBoost(type: FurnitureType, stackOffsetY: number): number 
   return boost;
 }
 
-/**
- * Profundidade de desenho COMPLETA de um móvel -- fileira lógica
- * (furnitureDepthForTile) + o empurrão de furnitureDepthBoost, com UMA
- * exceção: vidro (divisória) ENCOSTADO numa parede de borda bem na
- * aresta de TRÁS do próprio tile dele não pode "vencer" essa parede.
- * Antes vencia sempre (empurrão fixo, sem olhar pra vizinhança -- e
- * mesmo SEM o empurrão, a profundidade base de um móvel já fica um
- * pouco à frente da própria parede de trás por construção, ver
- * wallDepthForSegment), o que fazia o vidro desenhar por cima da
- * própria parede em que está encostado -- Douglas com print: "a parede
- * ta errada nas camadas de sobreposicao com divisorias" (quina de
- * parede com estilo escuro, vidro logo depois dela). Só as 2 arestas
- * que ficam de fato atrás do tile do vidro contam (colPlus do vizinho
- * col-1 e rowPlus do vizinho row-1 -- as únicas em que esse tile é o
- * da FRENTE na conta de wallDepthForSegment, ver tileToWorld/
- * furnitureDepthForTile: col/row maior = mais pra frente); encontrando
- * uma parede ali, a profundidade do vidro fica PRESA um passo atrás
- * dela (não pode passar), reaproveitando a mesma wallDepthForSegment
- * de sempre em vez de duplicar a conta.
- *
- * Centraliza aqui o que antes eram 3 cópias do mesmo
- * `furnitureDepthForTile(...) + furnitureDepthBoost(...)` espalhadas
- * (addFurnitureSprite, fantasma do catálogo, preview ao arrastar/
- * mover) -- um caso novo (esse) só precisa entrar numa vez.
- */
-function furnitureDepthFor(
-  type: FurnitureType,
-  col: number,
-  row: number,
-  stackOffsetY: number,
-  draftWall: Map<string, WallSegmentDef>
-): number {
-  const boosted = furnitureDepthForTile(col, row) + furnitureDepthBoost(type, stackOffsetY);
-  if (type !== "vidro") return boosted;
-  const backEdges: { col: number; row: number; side: WallSide }[] = [
-    { col: col - 1, row, side: "colPlus" },
-    { col, row: row - 1, side: "rowPlus" },
-  ];
-  let depth = boosted;
-  for (const edge of backEdges) {
-    const seg = draftWall.get(wallSegmentId(edge.col, edge.row, edge.side));
-    if (!seg) continue;
-    depth = Math.min(depth, wallDepthForSegment(seg, furnitureDepthForTile) - 1);
-  }
-  return depth;
-}
-
 // exceção: móveis "flat" (tapete, por exemplo -- sem altura de verdade,
 // não faz sentido o boneco passar "por trás" deles) ficam sempre atrás
 // de tudo, feito decoração colada no chão, fora desse jogo de
@@ -2165,15 +2118,12 @@ export default class MainScene extends Phaser.Scene {
       );
     }
     const depthTile = this.depthReferenceTile(f);
+    const baseDepth = furnitureDepthForTile(depthTile.col, depthTile.row);
     // empurrão pequeno (ver DEPTH_STACK_ON_TOP) só quando tem base de
     // verdade embaixo (stackOffsetY !== 0) -- item "Sobrepor" sem base
     // configurada nesse tile ainda não ganha nenhum tratamento especial
-    // de profundidade, continua na fileira lógica normal. furnitureDepthFor
-    // já cobre base+boost (e, pro vidro, o travamento contra parede de
-    // trás encostada, ver comentário grande dela).
-    const depth = f.flat
-      ? DEPTH_FLAT_FURNITURE
-      : furnitureDepthFor(f.type, depthTile.col, depthTile.row, stackOffsetY, this.draftWall);
+    // de profundidade, continua na fileira lógica normal.
+    const depth = f.flat ? DEPTH_FLAT_FURNITURE : baseDepth + furnitureDepthBoost(f.type, stackOffsetY);
     const image = this.add
       .image(pos.x, pos.y + stackOffsetY, key)
       .setOrigin(0.5, 1)
@@ -7924,13 +7874,8 @@ export default class MainScene extends Phaser.Scene {
       const ghostDepthTile = ghostBase ? furnitureDepthTile(ghostBase) : { col, row };
       this.catalogGhostSprite.setPosition(x, y + ghostStackOffsetY);
       this.catalogGhostSprite.setDepth(
-        furnitureDepthFor(
-          hoverEntry?.type ?? "poltrona",
-          ghostDepthTile.col,
-          ghostDepthTile.row,
-          ghostStackOffsetY,
-          this.draftWall
-        )
+        furnitureDepthForTile(ghostDepthTile.col, ghostDepthTile.row) +
+          furnitureDepthBoost(hoverEntry?.type ?? "poltrona", ghostStackOffsetY)
       );
       this.catalogGhostSprite.setVisible(!occupied);
     }
@@ -8058,7 +8003,7 @@ export default class MainScene extends Phaser.Scene {
           sprite.setDepth(
             moving.flat
               ? DEPTH_FLAT_FURNITURE
-              : furnitureDepthFor(moving.type, movingDepthTile.col, movingDepthTile.row, stackOffsetY, this.draftWall)
+              : furnitureDepthForTile(movingDepthTile.col, movingDepthTile.row) + furnitureDepthBoost(moving.type, stackOffsetY)
           );
           sprite.clearTint();
         }
