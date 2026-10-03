@@ -504,15 +504,32 @@ const AREA_DIM_ALPHA = 0.45;
 const DEPTH_ROOM_BACKGROUND = -3_000_000;
 
 // FACHADA DO PRÉDIO (pedido do Douglas: "coloca, faça a quina ali
-// coladinha no piso") -- 1 imagem só (public/assets/fachada-predio.avif),
-// a quina do prédio vista de fora, com o "V" de cima da fachada
-// encaixado nas 2 bordas da FRENTE do losango da sala. Fica entre o
-// fundo sólido e o piso: o piso sempre por cima, a fachada "pendurada"
-// pra baixo a partir da quina de baixo da sala. Douglas trocou a arte
-// de novo ("troque o vidro da frente agora") -- mesmo arquivo
-// (fachada-predio.avif), reencodado em qualidade alta (libavif,
-// quality=90, ~143KB -- bem menor que o arquivo antigo de 469KB, sem
-// quantizar cor dessa vez, lição da vidraça 2 que manchou o gradiente).
+// coladinha no piso") -- a quina do prédio vista de fora, com o "V" de
+// cima da fachada encaixado nas 2 bordas da FRENTE do losango da sala.
+// Fica entre o fundo sólido e o piso: o piso sempre por cima, a
+// fachada "pendurada" pra baixo a partir da quina de baixo da sala.
+//
+// ARTE TROCADA DE NOVO (2/out) -- Douglas: "mudei a fachada pra uma
+// imagem só, coloca ela posicionada na quina da fachada 01". Essa foto
+// nova (zigue-zague de VÁRIOS "V"s, não só 1 -- um prédio de verdade
+// com várias quinas na mesma fachada, não um desenho simples) tem o
+// MESMO papel de sempre: só UM ponto dela (o "V" mais FUNDO, mesmo
+// critério já usado pra vidraça 2 quando a arte dela também tinha mais
+// de um "V", ver FACADE_CORNER2_APEX_*) cola na quina de baixo da
+// sala -- o resto da imagem só decora ao redor, sem precisar encaixar
+// em mais nada. Apagado o "fachada-predio.avif" antigo (não sobra
+// referência -- ver git log se precisar dele de volta).
+//
+// Arquivo veio um PNG de ~2,4MB (Douglas: "a imagem ta grande em MB")
+// com uma faixa enorme de transparência em cima (sobrava bem mais da
+// metade do canvas vazio, sala tiver bem mais baixa que o canvas
+// original) -- cortado pro bbox de verdade do conteúdo (alpha.getbbox(),
+// +1px de margem) ANTES de comprimir, depois reencodado WebP qualidade
+// 90 (mesmo nível da vidraça/fachada anteriores, mesma lição de não
+// quantizar cor) -- 1529x737px, ~172KB (contra os ~2,4MB originais).
+// FACADE_APEX_X_PX/Y_PX já são relativos a esse canvas CORTADO (recorte
+// muda a origem, então o apex teve que ser remedido depois de cortar,
+// não antes).
 const FACADE_TEXTURE_KEY = "fachada-predio";
 const DEPTH_FACADE = -2_500_000;
 /** Profundidade SÓ da vidraça 2 (quina2, fachada-predio-quina-2) --
@@ -536,13 +553,19 @@ const DEPTH_FACADE = -2_500_000;
  * (tileToWorld + offset), só a ordem de desenho muda. */
 const DEPTH_FACADE_CORNER2_GLASS = 5_000_000;
 /** vértice do "V" de cima da fachada DENTRO da arte (px) -- é esse
- * ponto que cola no vértice de baixo do piso. NÃO está mais
- * centralizado na largura (era x=806.4=metade de 1613px na arte
- * antiga) -- a arte nova (1750x1000) tem o V assimétrico, medido
- * coluna a coluna (perfil de alpha, ponto mais fundo) em x≈706,
- * y≈306. */
-const FACADE_APEX_X_PX = 706;
-const FACADE_APEX_Y_PX = 306;
+ * ponto que cola no vértice de baixo do piso. Arte nova (2/out, foto
+ * única com VÁRIOS "V"s, ver comentário grande de FACADE_TEXTURE_KEY)
+ * -- igual já tinha sido feito pra vidraça 2 quando a arte dela também
+ * tinha mais de um "V" (ver FACADE_CORNER2_APEX_*), usa o MAIS FUNDO
+ * dos 3 (perfil de alpha coluna a coluna, ponto mais fundo de cada "V",
+ * o maior Y venceu) -- nesse caso o 3º "V" (o mais à direita, antes da
+ * faixa de pedra reta que fecha a arte). Coordenadas já relativas ao
+ * canvas CORTADO (1529x737, ver comentário grande de FACADE_TEXTURE_KEY
+ * sobre o corte pra reduzir o tamanho do arquivo) -- medido em
+ * x≈1233,y≈1008 no PNG ORIGINAL (1750x1500, bbox do conteúdo começando
+ * em 218,751), then x≈1015,y≈257 depois de subtrair a origem do corte. */
+const FACADE_APEX_X_PX = 1015;
+const FACADE_APEX_Y_PX = 257;
 /** escala da arte: cada vão de janela da fachada mede ~53,6px no PNG --
  * pedido do Douglas: "quero cada vidraça abraçando 2 tiles" -- então
  * escalado pra 128px (= 2 x 64px, o comprimento horizontal de 2 arestas
@@ -1729,7 +1752,7 @@ export default class MainScene extends Phaser.Scene {
     for (const entry of WALL_CATALOG) {
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
     }
-    this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-predio.avif");
+    this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-01.webp");
     this.load.image(FACADE_CORNER2_TEXTURE_KEY, "/assets/fachada-predio-quina-2.png");
   }
 
