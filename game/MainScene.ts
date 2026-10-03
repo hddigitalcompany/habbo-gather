@@ -84,11 +84,13 @@ import {
 import {
   WALL_CATALOG,
   WallCatalogEntry,
+  WallImageVariant,
   WallPatternConfig,
   WallSegmentDef,
   WallSide,
   wallEntryById,
   wallTextureKey,
+  wallTextureVariantKey,
   wallTextureImageKey,
   wallSegmentId,
   wallWorldAnchor,
@@ -1734,8 +1736,15 @@ export default class MainScene extends Phaser.Scene {
     // mesma ideia acima, pra parede de sistema (ver WALL_CATALOG,
     // game/wall.ts) -- também uma imagem PLANA só (sem poses/direção),
     // um painel já desenhado na inclinação certa da aresta do tile.
+    // Variantes OPCIONAIS (fileMiddle/fileLeftEnd/fileRightEnd, ver
+    // wallImageKeyFor abaixo) carregam numa chave PRÓPRIA
+    // (wallTextureVariantKey) -- só quando o estilo realmente tem o
+    // arquivo (a maioria não tem nenhuma, ver scripts/syncWallAssets.mjs).
     for (const entry of WALL_CATALOG) {
       this.load.image(wallTextureKey(entry.id), `/assets/${entry.file}`);
+      if (entry.fileMiddle) this.load.image(wallTextureVariantKey(entry.id, "middle"), `/assets/${entry.fileMiddle}`);
+      if (entry.fileLeftEnd) this.load.image(wallTextureVariantKey(entry.id, "left"), `/assets/${entry.fileLeftEnd}`);
+      if (entry.fileRightEnd) this.load.image(wallTextureVariantKey(entry.id, "right"), `/assets/${entry.fileRightEnd}`);
     }
     this.load.image(FACADE_TEXTURE_KEY, "/assets/fachada-01.webp");
   }
@@ -4902,11 +4911,75 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
+  /** Escolhe a textura certa pra um segmento de parede de IMAGEM (ver
+   * WallCatalogEntry.file/fileMiddle/fileLeftEnd/fileRightEnd em
+   * game/wall.ts) -- pedido do Douglas (3 prints, depois +2 prints de
+   * "liso"/"quadriculado"): "vidros que e pra dar seguimentacao, para
+   * vidracas longas, onde so tera perfil nos cantos" / "esses vidros
+   * sao pra ficar na borda do tile como divisorias mesmo". Reaproveita
+   * wallJunctionAt (MESMA checagem de reta/quina já usada pro miter de
+   * parede "padrão", ver comentário grande lá) pra saber se cada ponta
+   * (A/B) é uma emenda reta com o MESMO estilo (sem poste, textura
+   * "aberta" daquele lado) ou uma ponta de verdade (com poste) --
+   * "corner" conta como ponta de verdade também (parede de imagem não
+   * tem miter, só a de padrão/tijolo tem).
+   *
+   * Esquerda/direita da ARTE (fileLeftEnd/fileRightEnd) correspondem às
+   * pontas A/B ao CONTRÁRIO entre colPlus e rowPlus -- rowPlus desenha
+   * a MESMA arte espelhada (setFlipX, ver abaixo), então o lado que é
+   * "esquerda" no arquivo cru vira "direita" na tela (e vice-versa)
+   * depois do espelhamento. Conferido com a geometria de verdade
+   * (wallEdgeFloorPoints/wallJunctionAt): ponta A fica sempre do lado
+   * de MAIOR x da aresta (colPlus: canto direita/alto; rowPlus: canto
+   * baixo, que tem x maior que o canto esquerda/alto do lado B) -- sem
+   * espelhar (colPlus), ponta A aberta = poste no lado DIREITO da arte
+   * crua (fileRightEnd); com espelhamento (rowPlus), o mesmo poste
+   * desenhado no lado ESQUERDO da arte crua (fileLeftEnd) é que acaba
+   * caindo do lado de x maior depois de virar -- exatamente o inverso
+   * de colPlus.
+   *
+   * "center"/"centerRow" (pilar solto dentro do tile, nunca faz emenda
+   * de 2 pontas tipo parede de aresta, ver wallJunctionAt) sempre usa a
+   * base `file`, nunca variante -- esse recurso é só pra vidraça/parede
+   * de ARESTA comprida. */
+  private wallImageKeyFor(seg: WallSegmentDef): string {
+    const baseKey = wallTextureKey(seg.styleId);
+    const entry = wallEntryById(seg.styleId);
+    if (!entry) return baseKey;
+    if (seg.side !== "colPlus" && seg.side !== "rowPlus") return baseKey;
+    if (!entry.fileMiddle && !entry.fileLeftEnd && !entry.fileRightEnd) return baseKey;
+
+    const endAOpen = this.wallJunctionAt(seg.col, seg.row, seg.side, "A", seg.styleId).kind !== "straight";
+    const endBOpen = this.wallJunctionAt(seg.col, seg.row, seg.side, "B", seg.styleId).kind !== "straight";
+
+    let variant: WallImageVariant | undefined;
+    let variantFile: string | undefined;
+    if (endAOpen && endBOpen) {
+      // poste nos 2 lados -- é a própria base `file`, sem variante.
+    } else if (!endAOpen && !endBOpen) {
+      variant = "middle";
+      variantFile = entry.fileMiddle;
+    } else if (endAOpen) {
+      // só A aberta (precisa de poste ali) -- rowPlus espelha, inverte
+      // qual arquivo cru tem o poste no lado certo depois de virar.
+      variant = seg.side === "rowPlus" ? "left" : "right";
+      variantFile = seg.side === "rowPlus" ? entry.fileLeftEnd : entry.fileRightEnd;
+    } else {
+      // só B aberta
+      variant = seg.side === "rowPlus" ? "right" : "left";
+      variantFile = seg.side === "rowPlus" ? entry.fileRightEnd : entry.fileLeftEnd;
+    }
+
+    if (!variant || !variantFile) return baseKey;
+    const key = wallTextureVariantKey(seg.styleId, variant);
+    return this.textures.exists(key) ? key : baseKey;
+  }
+
   private addWallSprite(seg: WallSegmentDef): Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | Phaser.GameObjects.Container | null {
     const entry = wallEntryById(seg.styleId);
     if (!entry) return null;
     if (entry.pattern) return this.createWallPatternGraphics(seg, entry.pattern);
-    const key = wallTextureKey(seg.styleId);
+    const key = this.wallImageKeyFor(seg);
     if (!this.textures.exists(key)) {
       console.warn(`[parede] textura "${key}" (estilo "${seg.styleId}") não estava carregada ainda -- segmento ${seg.col},${seg.row},${seg.side} não desenhado.`);
       return null;

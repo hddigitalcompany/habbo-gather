@@ -609,11 +609,39 @@ export interface WallCatalogEntry {
    * prefixo "/assets/", ver preload() em MainScene.ts). Custom (com
    * arte): URL pública completa do Storage, já pronta pra usar direto.
    * Vazio ("") quando `pattern` está preenchido (tipo "padrão", sem
-   * imagem nenhuma, ver abaixo) -- nunca os dois ao mesmo tempo. */
+   * imagem nenhuma, ver abaixo) -- nunca os dois ao mesmo tempo. Esse
+   * é o arquivo BASE -- poste/moldura nos 2 lados, usado sempre que o
+   * segmento não tem nenhuma das variantes abaixo, e também quando TEM
+   * variante mas as 2 pontas estão soltas (ver wallImageKeyFor em
+   * MainScene.ts). */
   file: string;
+  /** Variantes OPCIONAIS pra fileira comprida sem poste em toda emenda
+   * de tile, poste só nas pontas de verdade -- pedido do Douglas (com
+   * prints de 3 peças): "sao feitos pra fazer vidros longos sem
+   * divisorias, apenas nas extremidades". Mesmo esquema de arquivo que
+   * `file` (nome em public/assets/ de fábrica, URL completa se custom),
+   * geradas a partir dos sufixos " - meio"/" - ponta esquerda"/" -
+   * ponta direita" no nome do arquivo de origem (ver
+   * scripts/syncWallAssets.mjs). Ausente (caso de TODO estilo que não
+   * desenhou variante nenhuma -- a maioria) = sempre usa `file`,
+   * comportamento idêntico a antes dessas variantes existirem.
+   *
+   * fileMiddle: as 2 pontas (A e B) continuam retas com outro segmento
+   * do MESMO estilo -- sem poste nenhum, só vidro contínuo com as
+   * réguas de cima/baixo passando direto.
+   *
+   * fileLeftEnd/fileRightEnd: só UMA ponta termina (precisa de poste),
+   * a outra continua reta -- "esquerda"/"direita" é o lado da ARTE
+   * como o Douglas desenhou (ponta A de colPlus/rowPlus = lado
+   * DIREITO/alto da arte, ponta B = ESQUERDO/baixo, mesma referência
+   * de wallEdgeFloorPoints/wallWorldAnchor -- ver wallImageKeyFor em
+   * MainScene.ts pra conferência exata antes de usar isso de verdade). */
+  fileMiddle?: string;
+  fileLeftEnd?: string;
+  fileRightEnd?: string;
   /** Presente = esse modelo é "padrão" (sem imagem, ver
    * WallPatternConfig acima) -- ausente/undefined = modelo de IMAGEM,
-   * comportamento de sempre (`file` é o que manda). */
+   * comportamento de sempre (`file`/variantes é o que manda). */
   pattern?: WallPatternConfig;
   /** true só pros modelos CUSTOM (ver registerCustomWallModels abaixo)
    * -- mesma ideia de FloorCatalogEntry.custom. */
@@ -654,6 +682,15 @@ export function registerCustomWallModels(entries: WallCatalogEntry[]): string[] 
 /** Chave da textura no Phaser pra um modelo de parede. */
 export function wallTextureKey(styleId: string): string {
   return `wall-${styleId}`;
+}
+
+/** Chave da textura de uma VARIANTE (ver WallCatalogEntry.fileMiddle/
+ * fileLeftEnd/fileRightEnd acima) -- mesma ideia de wallTextureKey,
+ * uma chave Phaser própria por variante carregada (ver preload() em
+ * MainScene.ts), nunca confundida com a chave do arquivo BASE. */
+export type WallImageVariant = "middle" | "left" | "right";
+export function wallTextureVariantKey(styleId: string, variant: WallImageVariant): string {
+  return `wall-${styleId}-${variant}`;
 }
 
 /** Chave da textura no Phaser pra uma imagem de WallPatternConfig.textureImageUrl
