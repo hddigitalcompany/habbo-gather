@@ -15,14 +15,16 @@
 // já cadastrados, não algo específico da sala que o jogador tá entrando
 // agora. Mesmo assim, antes dessa mudança, TODAS as 7 eram refeitas do
 // ZERO toda vez que QUALQUER sala montava (inclusive reentrar na MESMA
-// sala) -- a parede em especial tem uma segunda busca encadeada
-// (room/walls) que só começa DEPOIS dela responder (mesmo esquema do
-// piso/mobília, ver comentário grande em GameRoom.tsx), e o LED só
-// começa depois da parede + room/walls, então o caminho mais longo da
-// fila é 3 idas-e-voltas em série -- exatamente a lentidão de "1 a 2
-// segundos" que o Douglas sentiu ao entrar numa sala, mesmo sozinho
-// (não tem nada a ver com outros jogadores, bate com o "mac ficou
-// lento, apenas um usuario" investigado antes).
+// sala) -- a parede/piso/mobília em especial têm uma segunda busca
+// encadeada (room/walls, room/floor, room/furniture) que só começa
+// DEPOIS do catálogo responder (mesmo esquema documentado em
+// GameRoom.tsx), então o caminho mais longo da fila é 2 idas-e-voltas
+// em série -- exatamente a lentidão de "1 a 2 segundos" que o Douglas
+// sentiu ao entrar numa sala, mesmo sozinho (não tem nada a ver com
+// outros jogadores, bate com o "mac ficou lento, apenas um usuario"
+// investigado antes). (LED de parede, uma 3ª busca encadeada depois da
+// parede, foi removido inteiro depois a pedido do Douglas -- encurtou
+// esse caminho ainda mais.)
 //
 // Esse módulo é a correção de raiz: UM cache compartilhado (módulo =
 // singleton, sobrevive entre montagens de sala -- só é perdido com F5

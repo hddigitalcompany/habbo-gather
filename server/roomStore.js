@@ -178,18 +178,6 @@ const MAX_WALL_ITEMS = 2000;
 // entra aqui já de cara, pra não repetir o mesmo bug de novo.
 const WALL_SIDES = new Set(["colPlus", "rowPlus", "center", "centerRow"]);
 
-// LED de parede (ver LedSegmentDef em game/wall.ts) -- pedido do
-// Douglas: "efeito de led... led de parede", fita colorida numa EMENDA
-// entre 2 painéis de parede do mesmo estilo. Mora na MESMA grade de
-// aresta que parede, com `end` a mais (A/B, qual ponta da aresta é a
-// emenda) e `color` (hex #rrggbb escolhido no editor, ver
-// ColorPickerField). MAX_LED_ITEMS folgado igual MAX_WALL_ITEMS (no
-// máximo 2 LEDs por aresta -- um em cada ponta -- então nunca passaria
-// o dobro de paredes na mesma sala).
-const MAX_LED_ITEMS = 2000;
-const LED_ENDS = new Set(["A", "B"]);
-const LED_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-
 // porta (ver game/door.ts) -- mesma grade/aresta de parede, MAS só as 2
 // variantes de fronteira (uma porta sempre separa 2 tiles, nunca faz
 // sentido "no centro do tile" -- ver comentário grande de DoorSide em
@@ -241,11 +229,6 @@ function emptyStore() {
     roomTiles: defaultRoomTiles(),
     floor: [],
     walls: [],
-    // LED de parede (ver sanitizeLedItem/getLeds/setLeds abaixo) --
-    // CAMPO NOVO, mesmo espírito de roomTiles acima: sala salva ANTES
-    // dessa feature (sem esse campo) simplesmente não tinha LED nenhum
-    // ainda, [] é o valor certo pra ela (ver normalizeStore abaixo).
-    leds: [],
     doors: [],
     areaDefs: [],
     areaTiles: [],
@@ -304,7 +287,6 @@ function normalizeStore(parsed) {
     roomTiles: roomTiles.length > 0 ? roomTiles : defaultRoomTiles(),
     floor: Array.isArray(parsed.floor) ? parsed.floor : [],
     walls: Array.isArray(parsed.walls) ? parsed.walls : [],
-    leds: Array.isArray(parsed.leds) ? parsed.leds : [],
     doors: Array.isArray(parsed.doors) ? parsed.doors : [],
     areaDefs: Array.isArray(parsed.areaDefs) ? parsed.areaDefs : [],
     areaTiles: Array.isArray(parsed.areaTiles) ? parsed.areaTiles : [],
@@ -526,47 +508,6 @@ export async function setWalls(roomSlug, items) {
   const clean = items.slice(0, MAX_WALL_ITEMS).map(sanitizeWallItem).filter(Boolean);
   const store = await ensureStore(roomSlug);
   store.walls = clean;
-  persist(normalizeSlug(roomSlug), store);
-  return clean;
-}
-
-/** Valida/saneia um LED vindo do cliente -- mesma ideia de
- * sanitizeWallItem, com `end` (A/B, ver LED_ENDS) no lugar de styleId e
- * `color` (hex #rrggbb, ver LED_COLOR_RE) a mais. Não confere se a
- * ponta é mesmo uma emenda "straight" de verdade (isso é geometria do
- * CLIENTE, ver wallJunctionAt em MainScene.ts, que já só deixa colocar
- * numa emenda válida) -- aqui só garante que o FORMATO do dado é são;
- * um LED "órfão" (emenda que deixou de existir porque um dos 2
- * segmentos foi apagado) simplesmente não é desenhado no próximo load
- * (ver ledJunctionPoint em MainScene.ts), sem precisar o servidor saber
- * de parede nenhuma. */
-function sanitizeLedItem(item) {
-  if (!item || typeof item !== "object") return null;
-  const col = Math.trunc(Number(item.col));
-  const row = Math.trunc(Number(item.row));
-  const side = String(item.side ?? "");
-  const end = String(item.end ?? "");
-  const color = String(item.color ?? "");
-  if (!Number.isFinite(col) || !Number.isFinite(row)) return null;
-  if (Math.abs(col) > MAX_COORD || Math.abs(row) > MAX_COORD) return null;
-  if (!WALL_SIDES.has(side)) return null;
-  if (!LED_ENDS.has(end)) return null;
-  if (!LED_COLOR_RE.test(color)) return null;
-  return { col, row, side, end, color };
-}
-
-export async function getLeds(roomSlug) {
-  const store = await ensureStore(roomSlug);
-  return store.leds;
-}
-
-/** Substitui os LEDs inteiros pela lista mandada -- mesma ideia de
- * setWalls acima (sempre o estado completo, não um diff). */
-export async function setLeds(roomSlug, items) {
-  if (!Array.isArray(items)) return null;
-  const clean = items.slice(0, MAX_LED_ITEMS).map(sanitizeLedItem).filter(Boolean);
-  const store = await ensureStore(roomSlug);
-  store.leds = clean;
   persist(normalizeSlug(roomSlug), store);
   return clean;
 }

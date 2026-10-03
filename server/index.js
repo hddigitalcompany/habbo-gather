@@ -181,15 +181,6 @@
 //     -> 200 { ok: true, items }
 //     -> 403, mesma trava de produção do /room/floor acima.
 //
-// LED de parede ("Editar espaço" -> aba "LED", ver LedSegmentDef em
-// game/wall.ts) -- MESMO esquema/travas acima, item é uma PONTA de
-// aresta (col/row/side/end) + cor:
-//   GET  /room/leds     -> 200 { items: LedSegmentDef[] }
-//   POST /room/leds     (corpo JSON: { items: LedSegmentDef[] }, sempre
-//                        a lista INTEIRA, não um diff)
-//     -> 200 { ok: true, items }
-//     -> 403, mesma trava de produção do /room/floor acima.
-//
 // Porta ("Editar espaço" -> aba "Porta", ver game/door.ts) -- MESMO
 // esquema/travas da parede acima (também é aresta, col/row/side, com
 // `facing` a mais -- ver DoorFacing em game/door.ts):
@@ -1397,74 +1388,6 @@ async function handlePostWalls(req, res, url) {
   });
 }
 
-/** GET /room/leds -- mesma ideia de handleGetWalls acima, ver
- * game/wall.ts (LedSegmentDef) e loadSavedLed em MainScene.ts. */
-async function handleGetLeds(req, res, url) {
-  const roomSlug = roomSlugFromUrl(url);
-  res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-  res.end(JSON.stringify({ items: await roomStore.getLeds(roomSlug) }));
-}
-
-/** POST /room/leds -- mesma ideia/travas de handlePostWalls acima, só
- * troca roomStore.setWalls por roomStore.setLeds. */
-async function handlePostLeds(req, res, url) {
-  const roomSlug = roomSlugFromUrl(url);
-  if (process.env.NODE_ENV === "production" && !(await callerIsOwner(req, roomSlug))) {
-    res.writeHead(403, corsHeaders());
-    res.end("Editor de espaço desativado em produção.");
-    return;
-  }
-
-  const contentLength = Number(req.headers["content-length"] || 0);
-  if (contentLength > MAX_ROOM_BODY_BYTES) {
-    res.writeHead(413, corsHeaders());
-    res.end("Corpo grande demais");
-    return;
-  }
-
-  const chunks = [];
-  let received = 0;
-  let aborted = false;
-
-  req.on("data", (chunk) => {
-    received += chunk.length;
-    if (received > MAX_ROOM_BODY_BYTES && !aborted) {
-      aborted = true;
-      if (!res.headersSent) {
-        res.writeHead(413, corsHeaders());
-        res.end("Corpo grande demais");
-      }
-      req.destroy();
-      return;
-    }
-    chunks.push(chunk);
-  });
-
-  req.on("end", async () => {
-    if (aborted) return;
-    let data;
-    try {
-      data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    } catch {
-      res.writeHead(400, corsHeaders());
-      res.end("JSON inválido");
-      return;
-    }
-    const saved = await roomStore.setLeds(roomSlug, data?.items);
-    if (saved === null) {
-      res.writeHead(400, corsHeaders());
-      res.end('Corpo precisa ter "items" (array)');
-      return;
-    }
-    res.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, items: saved }));
-  });
-
-  req.on("error", () => {
-    aborted = true;
-  });
-}
-
 /** GET /room/doors -- mesma ideia de handleGetWalls acima, ver
  * game/door.ts (DoorSegmentDef) e loadSavedDoors em MainScene.ts. */
 async function handleGetDoors(req, res, url) {
@@ -2623,16 +2546,6 @@ const httpServer = createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/room/walls") {
     handlePostWalls(req, res, url);
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/room/leds") {
-    handleGetLeds(req, res, url);
-    return;
-  }
-
-  if (req.method === "POST" && url.pathname === "/room/leds") {
-    handlePostLeds(req, res, url);
     return;
   }
 
