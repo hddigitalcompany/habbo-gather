@@ -566,15 +566,19 @@ const DEPTH_FACADE_CORNER2_GLASS = 5_000_000;
  * em 218,751), then x≈1015,y≈257 depois de subtrair a origem do corte. */
 const FACADE_APEX_X_PX = 1015;
 const FACADE_APEX_Y_PX = 257;
-/** escala da arte: cada vão de janela da fachada mede ~53,6px no PNG --
- * pedido do Douglas: "quero cada vidraça abraçando 2 tiles" -- então
- * escalado pra 128px (= 2 x 64px, o comprimento horizontal de 2 arestas
- * do losango), cada janela cobre exatamente 2 tiles do piso. Arte nova
- * ("troque o vidro da frente agora") remedida por detecção de borda
- * vertical (mesma técnica da vidraça 2): ~53-53.5px em 5 faixas
- * diferentes, praticamente idêntico ao valor antigo (53.6px) -- dentro
- * da margem de erro da medição, então a fórmula/constante não muda. */
-const FACADE_SCALE = 128 / 53.6;
+/** escala da arte -- base histórica: cada vão de janela da fachada
+ * antiga media ~53,6px no PNG, escalado pra 128px (= 2 x 64px, 2
+ * arestas do losango) pra cobrir 2 tiles por janela (pedido do
+ * Douglas: "quero cada vidraça abraçando 2 tiles"). Arte NOVA (2/out,
+ * foto de verdade, ver comentário grande de FACADE_TEXTURE_KEY) é
+ * fotográfica/ruidosa demais (reflexos, nuvens) pra remedir o vão de
+ * janela com a mesma técnica de detecção de borda -- mantida essa
+ * MESMA base como ponto de partida (único jeito objetivo de não
+ * inventar um número sem medição nenhuma), com ajuste manual por cima
+ * depois de ver renderizado, igual já foi feito várias vezes com a
+ * vidraça 2 (ver FACADE_CORNER2_SCALE): Douglas, já vendo a arte nova
+ * na sala, "aumenta a proporcao 10%". */
+const FACADE_SCALE = (128 / 53.6) * 1.1;
 
 // QUINA ADICIONAL (pedido do Douglas, sala em L/escada: "essa parte vai
 // encaixar no predio do lado esquerdo" / "isso quina") -- peça MENOR,
